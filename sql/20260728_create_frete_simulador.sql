@@ -150,6 +150,17 @@ VALUES (
 )
 ON CONFLICT (chave) DO NOTHING;
 
+CREATE TABLE IF NOT EXISTS frete.municipio (
+  codigo_ibge BIGINT PRIMARY KEY,
+  uf CHAR(2) NOT NULL,
+  nome TEXT NOT NULL,
+  nome_normalizado TEXT NOT NULL,
+  atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS frete_municipio_uf_nome_idx
+  ON frete.municipio (uf, nome_normalizado);
+
 CREATE TABLE IF NOT EXISTS frete.cotacao (
   id BIGSERIAL PRIMARY KEY,
   usuario_id BIGINT REFERENCES public.auth_user(id),

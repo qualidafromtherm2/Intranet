@@ -213,15 +213,33 @@ router.get('/localidades', async (req, res) => {
     const limite = Math.min(1000, Math.max(10, Number(req.query.limit) || 500));
     if (!/^[A-Z]{2}$/.test(uf)) return res.status(400).json({ ok: false, error: 'Informe uma UF válida.' });
     const { rows } = await pool.query(`
-      SELECT cidade, cidade_normalizada, uf, MIN(codigo_ibge) AS codigo_ibge,
-             MIN(cep_inicio) AS cep_inicio, MAX(cep_fim) AS cep_fim,
-             COUNT(DISTINCT tabela_preco_id)::int AS transportadoras
-      FROM frete.cobertura
-      WHERE atendida = TRUE
-        AND uf = $1
-        AND ($2 = '' OR cidade_normalizada LIKE $2 || '%')
-        AND cidade IS NOT NULL
-      GROUP BY cidade, cidade_normalizada, uf
+      WITH cobertura_agrupada AS (
+        SELECT cidade_normalizada, MIN(cidade) AS cidade_cobertura,
+               MIN(codigo_ibge) AS codigo_ibge, MIN(cep_inicio) AS cep_inicio,
+               MAX(cep_fim) AS cep_fim, COUNT(DISTINCT tabela_preco_id)::int AS transportadoras
+        FROM frete.cobertura
+        WHERE atendida = TRUE AND uf = $1 AND cidade IS NOT NULL
+        GROUP BY cidade_normalizada
+      ), oficiais AS (
+        SELECT m.nome AS cidade, m.nome_normalizado AS cidade_normalizada, m.uf,
+               m.codigo_ibge, c.cep_inicio, c.cep_fim,
+               COALESCE(c.transportadoras, 0)::int AS transportadoras
+        FROM frete.municipio m
+        LEFT JOIN cobertura_agrupada c ON c.cidade_normalizada = m.nome_normalizado
+        WHERE m.uf = $1 AND ($2 = '' OR m.nome_normalizado LIKE $2 || '%')
+      ), extras_cobertura AS (
+        SELECT c.cidade_cobertura AS cidade, c.cidade_normalizada, $1::char(2) AS uf,
+               c.codigo_ibge, c.cep_inicio, c.cep_fim, c.transportadoras
+        FROM cobertura_agrupada c
+        WHERE ($2 = '' OR c.cidade_normalizada LIKE $2 || '%')
+          AND NOT EXISTS (
+            SELECT 1 FROM frete.municipio m
+            WHERE m.uf = $1 AND m.nome_normalizado = c.cidade_normalizada
+          )
+      )
+      SELECT * FROM oficiais
+      UNION ALL
+      SELECT * FROM extras_cobertura
       ORDER BY cidade
       LIMIT $3
     `, [uf, busca, limite]);

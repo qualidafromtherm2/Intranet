@@ -14,13 +14,14 @@ Somente produtos ativos de `public.produtos_omie` com tipo fiscal `00` ou `04` p
 4. Comparar apenas tabelas homologadas e ativas que tenham cobertura compatível.
 5. Registrar a cotação, os itens e a memória de cálculo no schema `frete`.
 
-A UF possui pesquisa por sigla e a cidade é sugerida a partir das coberturas cadastradas daquela UF. A cidade continua aceitando digitação manual quando ainda não houver cobertura importada. O valor da mercadoria aceita formatos como `12.000,00`, `12000` e `12000,00` e é normalizado antes do cálculo.
+A UF possui pesquisa por sigla e a cidade é sugerida pelo catálogo oficial de municípios do IBGE. Cada sugestão informa se já existe cobertura de transportadora, sem impedir a seleção de um município ainda não atendido. A cidade continua aceitando digitação manual. O valor da mercadoria aceita formatos como `12.000,00`, `12000` e `12000,00` e é normalizado antes do cálculo.
 
 ## Modelo SQL
 
 O arquivo `sql/20260728_create_frete_simulador.sql` cria o schema `frete` e as estruturas abaixo:
 
 - `configuracao`: origem padrão e futuras configurações versionáveis;
+- `municipio`: catálogo oficial de municípios e códigos IBGE usado no destino;
 - `transportadora`: cadastro permanente da transportadora;
 - `tabela_preco`: versão, vigência, status e fator de cubagem;
 - `importacao` e `importacao_linha`: rastreabilidade do arquivo e preservação das linhas de origem;
