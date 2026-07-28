@@ -99,6 +99,10 @@ Somente depois dessa conferência a versão correta deve mudar de `em_revisao` p
 4. **Expresso EJL**: tabela simples, mas precisa confirmar a fórmula comercial e as chaves geográficas.
 5. **Rodonaves**: o PDF confirma cubagem, frete valor, TAS, GRIS, pedágio e várias taxas; permanecem pendentes a exceção de Camboriú, listas completas de CEP e prazos.
 
+O importador da Bristot também audita automaticamente classificações de cobertura sem tarifa, tarifas sem cobertura, cidades com classificações conflitantes e linhas sem classificação. O diagnóstico fica salvo em `frete.importacao.resumo`, mantendo a tabela em revisão mesmo quando todas as chaves estruturais fecham.
+
+Na carga atual, as 13 classificações de cobertura encontram as 13 classificações tarifárias. Seis aliases explícitos de interior (`MS`, `MT` e `RO`, níveis 1/2) são normalizados porque as abas escrevem a mesma região em ordens diferentes; os textos originais permanecem nos metadados. Não há cobertura sem classificação, tarifa órfã ou cidade com classificação conflitante.
+
 ## Acesso e navegação
 
 A navegação `side:log:simulador-frete` é liberada para usuários ativos dos setores Logística (`sector_id = 4`), Comercial (`sector_id = 10`) e administradores. Toda rota `/api/frete/*` repete a autorização no servidor.

@@ -103,6 +103,20 @@ function celula(linha, coluna) {
   return linha?.dados?.[coluna];
 }
 
+const ALIASES_CLASSIFICACAO_BRISTOT = new Map([
+  ['INTERIOR 1 MS', 'INTERIOR MS 1 R'],
+  ['INTERIOR 2 MS', 'INTERIOR MS 2 I'],
+  ['INTERIOR 1 MT', 'INTERIOR MT 1 R'],
+  ['INTERIOR 2 MT', 'INTERIOR MT 2 I'],
+  ['INTERIOR 1 RO', 'INTERIOR RO 1 R'],
+  ['INTERIOR 2 RO', 'INTERIOR RO 2 I']
+]);
+
+function normalizarClassificacaoBristot(valor) {
+  const normalizada = normalizarTexto(valor);
+  return ALIASES_CLASSIFICACAO_BRISTOT.get(normalizada) || normalizada;
+}
+
 async function normalizarBristot(client, tabelaId, grupos) {
   const coberturaGrupo = grupos.find((grupo) => grupo.aba === 'Cidades Prazos x Classificação');
   const tarifaGrupo = grupos.find((grupo) => grupo.aba === 'Tarifas');
@@ -111,6 +125,9 @@ async function normalizarBristot(client, tabelaId, grupos) {
   let cidadeOrigem = null;
   let ibgeOrigem = null;
   const coberturaDados = [];
+  const classificacoesCobertura = new Set();
+  const classificacoesPorCidade = new Map();
+  let coberturasSemClassificacao = 0;
   for (const linha of coberturaGrupo.linhas.filter((item) => item.numero_linha >= 2)) {
     ufOrigem = celula(linha, 'A') || ufOrigem;
     cidadeOrigem = celula(linha, 'B') || cidadeOrigem;
@@ -118,11 +135,21 @@ async function normalizarBristot(client, tabelaId, grupos) {
     const uf = String(celula(linha, 'D') || '').trim().toUpperCase();
     const cidade = String(celula(linha, 'E') || '').trim();
     if (!/^[A-Z]{2}$/.test(uf) || !cidade) continue;
+    const classificacaoOriginal = celula(linha, 'J');
+    const codigoRegiao = normalizarClassificacaoBristot(classificacaoOriginal);
+    if (!codigoRegiao) {
+      coberturasSemClassificacao += 1;
+      continue;
+    }
+    classificacoesCobertura.add(codigoRegiao);
+    const chaveCidade = `${uf}|${normalizarTexto(cidade)}`;
+    if (!classificacoesPorCidade.has(chaveCidade)) classificacoesPorCidade.set(chaveCidade, new Set());
+    classificacoesPorCidade.get(chaveCidade).add(codigoRegiao);
     coberturaDados.push({
-      codigo_regiao: normalizarTexto(celula(linha, 'J')), uf, cidade, cidade_normalizada: normalizarTexto(cidade),
+      codigo_regiao: codigoRegiao, uf, cidade, cidade_normalizada: normalizarTexto(cidade),
       codigo_ibge: Number(celula(linha, 'F')) || null, prazo: Number(celula(linha, 'H')) || null,
       tde: Number(celula(linha, 'I')) || null,
-      metadados: { uf_origem: ufOrigem, cidade_origem: cidadeOrigem, codigo_ibge_origem: ibgeOrigem, distancia_km: celula(linha, 'G') }
+      metadados: { uf_origem: ufOrigem, cidade_origem: cidadeOrigem, codigo_ibge_origem: ibgeOrigem, distancia_km: celula(linha, 'G'), classificacao_original: classificacaoOriginal }
     });
   }
   if (coberturaDados.length) await client.query(`
@@ -141,27 +168,33 @@ async function normalizarBristot(client, tabelaId, grupos) {
   const limites = [10, 20, 30, 40, 50, 75, 100];
   const colunas = ['D', 'E', 'F', 'G', 'H', 'I', 'J'];
   const faixaDados = [];
+  const classificacoesTarifa = new Set();
   for (const linha of tarifaGrupo.linhas.filter((item) => item.numero_linha >= 9)) {
-    const codigoRegiao = normalizarTexto(celula(linha, 'C') || celula(linha, 'B'));
+    const classificacaoOriginal = celula(linha, 'C') || celula(linha, 'B');
+    const codigoRegiao = normalizarClassificacaoBristot(classificacaoOriginal);
     if (!codigoRegiao) continue;
     const adValorem = Number(celula(linha, 'L')) || null;
     const despacho = Number(celula(linha, 'M')) || null;
     let anterior = 0;
+    let possuiFaixa = false;
     for (let i = 0; i < colunas.length; i += 1) {
       const valor = Number(celula(linha, colunas[i]));
       if (!(valor >= 0)) continue;
+      possuiFaixa = true;
       faixaDados.push({ codigo_regiao: codigoRegiao, peso_de: anterior, peso_ate: limites[i], valor_base: valor,
         valor_excedente: null, peso_referencia: null, ad_valorem: adValorem, despacho,
-        metadados: { arquivo_linha: linha.numero_linha } });
+        metadados: { arquivo_linha: linha.numero_linha, classificacao_original: classificacaoOriginal } });
       anterior = limites[i];
     }
     const excedente = Number(celula(linha, 'K'));
     const valor100 = Number(celula(linha, 'J'));
     if (excedente > 0 && valor100 >= 0) {
+      possuiFaixa = true;
       faixaDados.push({ codigo_regiao: codigoRegiao, peso_de: 100, peso_ate: null, valor_base: valor100,
         valor_excedente: excedente, peso_referencia: 100, ad_valorem: adValorem, despacho,
-        metadados: { arquivo_linha: linha.numero_linha, excedente: true } });
+        metadados: { arquivo_linha: linha.numero_linha, classificacao_original: classificacaoOriginal, excedente: true } });
     }
+    if (possuiFaixa) classificacoesTarifa.add(codigoRegiao);
   }
   if (faixaDados.length) await client.query(`
     INSERT INTO frete.tarifa_faixa (
@@ -177,7 +210,29 @@ async function normalizarBristot(client, tabelaId, grupos) {
       despacho NUMERIC, metadados JSONB
     )
   `, [tabelaId, JSON.stringify(faixaDados)]);
-  return { coberturas: coberturaDados.length, faixas: faixaDados.length, alertas: ['Tabela mantida em revisão até validar generalidades, incidência de TDA e arredondamento.'] };
+  const classificacoesSemTarifa = [...classificacoesCobertura].filter((item) => !classificacoesTarifa.has(item)).sort();
+  const tarifasSemCobertura = [...classificacoesTarifa].filter((item) => !classificacoesCobertura.has(item)).sort();
+  const cidadesComConflito = [...classificacoesPorCidade.entries()]
+    .filter(([, classificacoes]) => classificacoes.size > 1)
+    .map(([cidade, classificacoes]) => ({ cidade, classificacoes: [...classificacoes].sort() }));
+  const alertas = ['Tabela mantida em revisão até validar generalidades, incidência de TDA e arredondamento.'];
+  if (coberturasSemClassificacao) alertas.push(`${coberturasSemClassificacao} cobertura(s) sem classificação foram ignoradas.`);
+  if (classificacoesSemTarifa.length) alertas.push(`${classificacoesSemTarifa.length} classificação(ões) de cobertura não possuem tarifa.`);
+  if (tarifasSemCobertura.length) alertas.push(`${tarifasSemCobertura.length} classificação(ões) tarifárias não possuem cobertura.`);
+  if (cidadesComConflito.length) alertas.push(`${cidadesComConflito.length} cidade(s) possuem mais de uma classificação.`);
+  return {
+    coberturas: coberturaDados.length,
+    faixas: faixaDados.length,
+    diagnostico_chaves: {
+      classificacoes_cobertura: classificacoesCobertura.size,
+      classificacoes_tarifa: classificacoesTarifa.size,
+      coberturas_sem_classificacao: coberturasSemClassificacao,
+      classificacoes_sem_tarifa: classificacoesSemTarifa,
+      tarifas_sem_cobertura: tarifasSemCobertura,
+      cidades_com_conflito: cidadesComConflito
+    },
+    alertas
+  };
 }
 
 async function normalizarMengueCobertura(client, tabelaId, grupos) {
