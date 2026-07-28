@@ -20,6 +20,7 @@
 />
   <!-- Seu CSS principal -->
   <link rel="stylesheet" href="menu_produto.css?v=20260728-guardar-lote"/>
+  <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260728a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -496,6 +497,18 @@
        data-nav-selector="#menu-envio-mercadoria">
       <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
       Envio de mercadoria
+    </a>
+
+    <a href="#"
+       id="menu-simulador-frete"
+       class="menu-link"
+       data-nav-key="side:log:simulador-frete"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Simulador de frete"
+       data-nav-selector="#menu-simulador-frete">
+      <i class="fa-solid fa-calculator" style="margin-right:8px;"></i>
+      Simulador de frete
     </a>
 
     <a href="#"
@@ -6874,6 +6887,10 @@
         </div>
       </div>
         <!-- Painel Logística: Relatório Gerencial -->
+        <div id="freteSimuladorPane" class="tab-pane" style="display:none;">
+          <div id="freteSimuladorRoot" class="frete-app" aria-live="polite"></div>
+        </div>
+
         <div id="logisticaRelatorioPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-section" style="margin-top:0;">
@@ -12955,7 +12972,8 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260728-guardar-lote"></script>
+  <script type="module" src="menu_produto.js?v=20260728-simulador-frete"></script>
+  <script type="module" src="/public/js/frete-simulador.js?v=20260728a"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

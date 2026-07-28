@@ -11207,6 +11207,7 @@ const produtosAnexosRouter = require('./routes/produtosAnexos');
 const transferenciasRouter = require('./routes/transferencias');
 const ajustesRouter = require('./routes/ajustes');
 const monitoramentoRouter = require('./routes/monitoramento');
+const freteRouter = require('./routes/frete').router;
 const { registrarEventoReq: monEventoReq } = require('./utils/monitoramento');
 
 //app.use(require('express').json({ limit: '5mb' }));
@@ -11219,6 +11220,7 @@ app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/ajustes', ajustesRouter);
 app.use('/api/monitoramento', monitoramentoRouter);
+app.use('/api/frete', freteRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
 app.use('/api/suporte', require('./routes/suporteChamados'));
 app.use('/api/engenharia', engenhariaRouter);
