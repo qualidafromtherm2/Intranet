@@ -4,6 +4,7 @@ const freteState = {
   itens: [],
   resultadosBusca: [],
   cotacao: null,
+  cotacoesRecentes: [],
   status: null,
   buscaTimer: null,
   buscaController: null,
@@ -44,6 +45,7 @@ function parseValorMercadoria(valor) {
 }
 
 const formatarValorMercadoria = (valor) => parseValorMercadoria(valor).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const dataHora = (valor) => valor ? new Date(valor).toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' }) : '';
 
 async function fetchJson(url, options = {}) {
   const response = await fetch(url, { credentials: 'include', ...options });
@@ -183,14 +185,74 @@ function renderResultados(cotacao) {
   painel.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+function renderCotacoesRecentes() {
+  const container = document.getElementById('freteCotacoesRecentes');
+  if (!container) return;
+  if (!freteState.cotacoesRecentes.length) {
+    container.innerHTML = '<div class="frete-empty"><i class="fa-solid fa-clock-rotate-left"></i><strong>Nenhuma cotação recente</strong><span>As próximas simulações ficarão disponíveis aqui para reutilização.</span></div>';
+    return;
+  }
+  container.innerHTML = freteState.cotacoesRecentes.map((item) => `
+    <button type="button" class="frete-recent" data-frete-reopen="${esc(item.id)}">
+      <span class="frete-recent-main"><strong>#${esc(item.id)} · ${esc(item.destino_cidade)}/${esc(item.destino_uf)}</strong><small>${esc(dataHora(item.criado_em))} · ${numero(item.itens)} produto(s)</small></span>
+      <span class="frete-recent-meta"><strong>${item.melhor_valor == null ? 'Sem preço validado' : moeda(item.melhor_valor)}</strong><small>${decimal(item.peso_real_kg, 1)} kg · ${decimal(item.volume_m3, 3)} m³</small></span>
+      <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
+    </button>
+  `).join('');
+}
+
+async function carregarCotacoesRecentes() {
+  const painel = document.getElementById('freteRecentesPanel');
+  const container = document.getElementById('freteCotacoesRecentes');
+  if (!painel || !container) return;
+  const abrir = painel.hidden;
+  painel.hidden = !abrir;
+  if (!abrir) return;
+  container.innerHTML = '<div class="frete-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Carregando cotações...</span></div>';
+  try {
+    const data = await fetchJson('/api/frete/cotacoes?limit=8');
+    freteState.cotacoesRecentes = data.itens || [];
+    renderCotacoesRecentes();
+  } catch (erro) {
+    container.innerHTML = `<div class="frete-alert is-error"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(erro.message)}</span></div>`;
+  }
+}
+
+async function reabrirCotacao(id) {
+  const container = document.getElementById('freteCotacoesRecentes');
+  if (container) container.innerHTML = '<div class="frete-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Reabrindo cotação...</span></div>';
+  try {
+    const data = await fetchJson(`/api/frete/cotacoes/${encodeURIComponent(id)}`);
+    const cotacao = data.cotacao || {};
+    freteState.itens = (data.itens || []).map((item) => ({ ...item, quantidade: Math.max(1, Math.floor(numero(item.quantidade) || 1)) }));
+    const cep = document.getElementById('freteCep');
+    const uf = document.getElementById('freteUf');
+    const cidade = document.getElementById('freteCidade');
+    const valor = document.getElementById('freteValorMercadoria');
+    if (cep) cep.value = formatarCep(cotacao.destino_cep == null ? '' : String(cotacao.destino_cep).padStart(8, '0'));
+    if (uf) uf.value = cotacao.destino_uf || '';
+    if (cidade) cidade.value = cotacao.destino_cidade || '';
+    if (valor) valor.value = formatarValorMercadoria(cotacao.valor_mercadoria);
+    atualizarUf({ preservarCidade: true, buscaCidade: cotacao.destino_cidade || '' });
+    renderItens();
+    freteState.cotacao = null;
+    document.getElementById('freteResultadosPanel').hidden = true;
+    document.getElementById('freteRecentesPanel').hidden = true;
+    document.getElementById('freteSimuladorRoot')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  } catch (erro) {
+    if (container) container.innerHTML = `<div class="frete-alert is-error"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(erro.message)}</span></div>`;
+  }
+}
+
 function template() {
   return `
     <div class="frete-shell">
       <header class="frete-header">
         <div class="frete-title"><span class="frete-title-icon"><i class="fa-solid fa-calculator"></i></span><div><h1>Simulador de frete</h1><p>Monte a carga e compare apenas transportadoras que atendem ao destino.</p></div></div>
-        <span class="frete-status-pill" id="freteStatus"><i class="fa-solid fa-circle"></i>Preparando tabelas...</span>
+        <div class="frete-header-actions"><button id="freteRecentesBtn" class="frete-btn frete-btn-secondary" type="button"><i class="fa-solid fa-clock-rotate-left"></i>Cotações recentes</button><span class="frete-status-pill" id="freteStatus"><i class="fa-solid fa-circle"></i>Preparando tabelas...</span></div>
       </header>
       <main class="frete-workspace">
+        <section id="freteRecentesPanel" class="frete-panel frete-recents" hidden><div class="frete-panel-head"><div><h2>Últimas cotações</h2><p>Reabra uma simulação para ajustar destino, valor ou quantidades.</p></div><span class="frete-step"><i class="fa-solid fa-clock-rotate-left"></i></span></div><div class="frete-panel-body"><div id="freteCotacoesRecentes" class="frete-recents-list"></div></div></section>
         <section class="frete-panel">
           <div class="frete-panel-head"><div><h2>Destino</h2><p id="freteOrigem">A origem Fromtherm é fixa.</p></div><span class="frete-step">1</span></div>
           <div class="frete-panel-body">
@@ -415,6 +477,11 @@ function bind() {
   });
   document.getElementById('freteValorMercadoria')?.addEventListener('blur', (event) => {
     if (event.target.value.trim()) event.target.value = formatarValorMercadoria(event.target.value);
+  });
+  document.getElementById('freteRecentesBtn')?.addEventListener('click', carregarCotacoesRecentes);
+  document.getElementById('freteCotacoesRecentes')?.addEventListener('click', (event) => {
+    const botao = event.target.closest('[data-frete-reopen]');
+    if (botao) reabrirCotacao(botao.dataset.freteReopen);
   });
   document.getElementById('freteSimularBtn')?.addEventListener('click', simular);
 }

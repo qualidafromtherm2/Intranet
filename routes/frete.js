@@ -250,6 +250,86 @@ router.get('/localidades', async (req, res) => {
   }
 });
 
+router.get('/cotacoes', async (req, res) => {
+  try {
+    const usuarioId = req.session?.user?.id;
+    const limite = Math.min(20, Math.max(1, Number(req.query.limit) || 8));
+    if (!usuarioId) return res.json({ ok: true, itens: [] });
+    const { rows } = await pool.query(`
+      SELECT c.id, c.criado_em, c.destino_cep, c.destino_cidade, c.destino_uf,
+             c.valor_mercadoria, c.peso_real_kg, c.volume_m3,
+             COUNT(DISTINCT i.id)::int AS itens,
+             COUNT(DISTINCT r.id)::int AS resultados,
+             MIN(r.valor_total) AS melhor_valor
+      FROM frete.cotacao c
+      LEFT JOIN frete.cotacao_item i ON i.cotacao_id = c.id
+      LEFT JOIN frete.cotacao_resultado r ON r.cotacao_id = c.id
+      WHERE c.usuario_id = $1
+      GROUP BY c.id
+      ORDER BY c.criado_em DESC, c.id DESC
+      LIMIT $2
+    `, [usuarioId, limite]);
+    res.json({ ok: true, itens: rows });
+  } catch (erro) {
+    console.error('[frete/cotacoes]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao carregar as cotações recentes.' });
+  }
+});
+
+router.get('/cotacoes/:id', async (req, res) => {
+  try {
+    const usuarioId = req.session?.user?.id;
+    const cotacaoId = Number(req.params.id);
+    if (!usuarioId || !Number.isInteger(cotacaoId) || cotacaoId <= 0) {
+      return res.status(404).json({ ok: false, error: 'Cotação não encontrada.' });
+    }
+    const cotacao = await pool.query(`
+      SELECT id, criado_em, destino_cep, destino_cidade, destino_uf,
+             valor_mercadoria, peso_real_kg, volume_m3
+      FROM frete.cotacao
+      WHERE id = $1 AND usuario_id = $2
+    `, [cotacaoId, usuarioId]);
+    if (!cotacao.rows[0]) return res.status(404).json({ ok: false, error: 'Cotação não encontrada.' });
+
+    const itens = await pool.query(`
+      SELECT ci.codigo_produto, ci.codigo,
+             COALESCE(p.descricao, ci.descricao) AS descricao,
+             ci.quantidade, COALESCE(p.tipoitem, ci.produto_snapshot->>'tipoitem') AS tipoitem,
+             COALESCE(p.unidade, ci.produto_snapshot->>'unidade') AS unidade,
+             COALESCE(p.altura, ci.altura_cm) AS altura,
+             COALESCE(p.largura, ci.largura_cm) AS largura,
+             COALESCE(p.profundidade, ci.profundidade_cm) AS profundidade,
+             COALESCE(p.peso_bruto, ci.peso_unitario_kg) AS peso_bruto,
+             COALESCE(p.peso_liq, ci.peso_unitario_kg) AS peso_liq,
+             img.url_imagem,
+             (
+               p.codigo_produto IS NOT NULL
+               AND LPAD(REGEXP_REPLACE(COALESCE(p.tipoitem, ''), '\\D', '', 'g'), 2, '0') IN ('00', '04')
+               AND COALESCE(p.inativo, 'N') <> 'S'
+               AND COALESCE(p.altura, 0) > 0 AND COALESCE(p.largura, 0) > 0
+               AND COALESCE(p.profundidade, 0) > 0
+               AND GREATEST(COALESCE(p.peso_bruto, 0), COALESCE(p.peso_liq, 0)) > 0
+               AND GREATEST(p.altura, p.largura, p.profundidade) <= 500
+             ) AS apto_simulacao
+      FROM frete.cotacao_item ci
+      LEFT JOIN public.produtos_omie p ON p.codigo = ci.codigo
+      LEFT JOIN LATERAL (
+        SELECT pi.url_imagem
+        FROM public.produtos_omie_imagens pi
+        WHERE pi.codigo_produto = p.codigo_produto AND COALESCE(pi.ativo, TRUE) = TRUE
+        ORDER BY COALESCE(pi.pos, 999999), pi.id
+        LIMIT 1
+      ) img ON TRUE
+      WHERE ci.cotacao_id = $1
+      ORDER BY ci.id
+    `, [cotacaoId]);
+    res.json({ ok: true, cotacao: cotacao.rows[0], itens: itens.rows });
+  } catch (erro) {
+    console.error('[frete/cotacoes/detalhe]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao reabrir a cotação.' });
+  }
+});
+
 router.post('/simular', async (req, res) => {
   try {
     const destino = {

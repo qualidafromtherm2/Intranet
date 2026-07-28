@@ -13,6 +13,7 @@ Somente produtos ativos de `public.produtos_omie` com tipo fiscal `00` ou `04` p
 3. Informar quantidades e revisar peso, volumes e cubagem.
 4. Comparar apenas tabelas homologadas e ativas que tenham cobertura compatível.
 5. Registrar a cotação, os itens e a memória de cálculo no schema `frete`.
+6. Reabrir uma das últimas cotações do próprio usuário para ajustar destino, valor ou quantidades e simular novamente.
 
 A UF possui pesquisa por sigla e a cidade é sugerida pelo catálogo oficial de municípios do IBGE. Cada sugestão informa se já existe cobertura de transportadora, sem impedir a seleção de um município ainda não atendido. A cidade continua aceitando digitação manual. O valor da mercadoria aceita formatos como `12.000,00`, `12000` e `12000,00` e é normalizado antes do cálculo.
 
@@ -101,6 +102,8 @@ Somente depois dessa conferência a versão correta deve mudar de `em_revisao` p
 ## Acesso e navegação
 
 A navegação `side:log:simulador-frete` é liberada para usuários ativos dos setores Logística (`sector_id = 4`), Comercial (`sector_id = 10`) e administradores. Toda rota `/api/frete/*` repete a autorização no servidor.
+
+O histórico recente é individual: a API lista e reabre apenas cotações vinculadas ao usuário autenticado. Os dados cadastrais dos produtos são relidos da base atual ao reabrir, preservando a quantidade da cotação original.
 
 ## Validação executada
 
