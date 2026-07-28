@@ -34762,16 +34762,33 @@ window.preloadLocaisEstoqueCache = async function preloadLocaisEstoqueCache(forc
     if (!unidade || !tipoItem) return status('Selecione unidade e tipo de item.', 'error');
     const btn = el('cadProdLoteCadastrar'); btn.disabled = true;
     let sucessos = 0;
+    let bloqueadoPorConsumo = false;
     for (const row of state.lote) {
       row.status = 'Enviando'; renderLote(); status(`Cadastrando ${row.index} de ${state.lote.length}...`);
       try {
         const resp = await fetch('/api/produtos/incluir-omie', { method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ codigo_produto_integracao: row.codigo, codigo: row.codigo, descricao: row.descricao, unidade, tipoItem }) });
-        const json = await resp.json(); if (!resp.ok || json?.faultstring) throw new Error(json?.faultstring || json?.error || 'Erro Omie');
+        const json = await resp.json();
+        if (!resp.ok || json?.faultstring) {
+          const erroOmie = new Error(json?.faultstring || json?.error || 'Erro Omie');
+          erroOmie.code = json?.code || '';
+          throw erroOmie;
+        }
         row.status = 'Criado'; sucessos++;
-      } catch (err) { row.status = `Erro: ${err.message}`; }
+      } catch (err) {
+        row.status = `Erro: ${err.message}`;
+        if (err.code === 'OMIE_CONSUMPTION_BLOCKED') {
+          bloqueadoPorConsumo = true;
+          state.lote.slice(state.lote.indexOf(row) + 1).forEach(item => { item.status = 'Aguardando liberação da Omie'; });
+          renderLote();
+          status(err.message, 'error');
+          break;
+        }
+      }
       renderLote();
     }
-    status(`Lote concluido: ${sucessos} criado(s), ${state.lote.length - sucessos} falha(s).`, sucessos === state.lote.length ? 'ok' : 'error');
+    if (!bloqueadoPorConsumo) {
+      status(`Lote concluido: ${sucessos} criado(s), ${state.lote.length - sucessos} falha(s).`, sucessos === state.lote.length ? 'ok' : 'error');
+    }
     btn.disabled = false;
   }
 
@@ -74402,9 +74419,12 @@ function renderAgendaCalendarioMensal() {
         const clsMobile = reservaJaPassou(reserva)
           ? `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack is-past-chip${!reserva.realizada ? ' is-nao-realizada' : ''}`
           : `agenda-cal-reserva-item ${cls} is-mobile-min is-mobile-stack`;
+        const horaFim = String(reserva?.fim || '').slice(0, 5);
+        const assunto = String(reserva?.tema || title || 'Reserva').trim();
         return `<div class="${clsMobile}" ${idAttr} title="${tituloChip}">
-          ${horaInicio ? `<span class="agenda-chip-hora">${escapeHtml(horaInicio)}</span>` : ''}
-          ${convocadoHtml}
+          <span class="agenda-mobile-reserva-hora">${escapeHtml(horaInicio || '--:--')}${horaFim ? `–${escapeHtml(horaFim)}` : ''}</span>
+          <span class="agenda-mobile-reserva-assunto">${escapeHtml(assunto)}</span>
+          <span class="agenda-mobile-reserva-icones">${reserva?.cafe ? '<i class="fa-solid fa-mug-hot" title="Com café"></i>' : ''}${convocadoHtml}<i class="fa-solid fa-chevron-right" aria-hidden="true"></i></span>
         </div>`;
       }
 
@@ -74461,20 +74481,23 @@ function renderAgendaCalendarioMensal() {
           ${chipsPassados.length > 0 ? `<div class="agenda-cal-past-row">${chipsPassados.join('')}</div>` : ''}
         </div>
       `
-      : (isMobileView ? '' : '<div class="agenda-cal-meta">Clique para reservar</div>');
+      : (isMobileView ? '<div class="agenda-cal-meta agenda-mobile-empty">Toque para reservar</div>' : '<div class="agenda-cal-meta">Clique para reservar</div>');
 
     const lembretesHtml = '';
 
     htmlDias += `
       <button type="button" class="${classes.join(' ')}" data-agenda-date="${dataIso}">
-        <div class="agenda-cal-num">${diaExibicao}</div>
+        <div class="agenda-cal-num">${isMobileView
+          ? `<span>${escapeHtml(nomesDia[dataCelula.getDay()])}</span><strong>${diaExibicao}</strong><small>${escapeHtml(dataCelula.toLocaleDateString('pt-BR', { month: 'short' }).replace('.', ''))}</small>`
+          : diaExibicao}</div>
         ${reservasHtml}
         ${lembretesHtml}
       </button>
     `;
   }
 
-  grid.innerHTML = `${htmlCabecalho}${htmlDias}`;
+  grid.classList.toggle('is-mobile-agenda', isMobileView);
+  grid.innerHTML = `${isMobileView ? '' : htmlCabecalho}${htmlDias}`;
 }
 
 async function carregarUsuariosAtivosAgenda() {

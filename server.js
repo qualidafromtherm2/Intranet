@@ -2561,12 +2561,13 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
           ? (itensNaFaixaPadrao.length ? Math.max(...itensNaFaixaPadrao.map(item => item.sequencial)) + 1 : faixaPadraoSemFiltro.inicio)
           : (prefixados.length ? Math.max(...prefixados.map(item => item.sequencial)) + 1 : 10000));
       while (usados.has(sequencial)) sequencial++;
-      usados.add(sequencial);
       const codigo = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
+      usados.add(sequencial);
       itens.push({ sequencial, descricao: descricoes[index], codigo });
       rows.push({ index: index + 1, codigo, code: codigo, sequencial, sequence: sequencial, descricao: descricoes[index], origem });
     }
     await client.query('COMMIT');
+    console.info(`[produtos/cadastro/preview] external_calls=0 total=${rows.length}`);
     res.json({ ok: true, prefixo, origem, total: rows.length, rows, code: rows[0].codigo, sequence: rows[0].sequencial });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -2579,6 +2580,21 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
 
 app.post('/api/produtos/incluir-omie', async (req, res) => {
   let codigoReservadoAgora = '';
+  let omieExternalCalls = 0;
+  const liberarReservaLocal = async () => {
+    if (!codigoReservadoAgora) return;
+    const codigoParaLiberar = codigoReservadoAgora;
+    codigoReservadoAgora = '';
+    try {
+      const liberacao = await pool.query(
+        `DELETE FROM public.produto_codigo_reserva WHERE codigo = $1 AND confirmada = TRUE`,
+        [codigoParaLiberar]
+      );
+      console.info(`[produtos/incluir-omie] reserva_liberada codigo=${codigoParaLiberar} removidas=${liberacao.rowCount}`);
+    } catch (liberacaoErr) {
+      console.error(`[produtos/incluir-omie] falha_ao_liberar_reserva codigo=${codigoParaLiberar}`, liberacaoErr);
+    }
+  };
   try {
     const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
     const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
@@ -2646,6 +2662,8 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
       unidade
     });
 
+    omieExternalCalls += 1;
+    console.info(`[produtos/incluir-omie] external_call=${omieExternalCalls} call=IncluirProduto codigo=${codigoNormalizado}`);
     const omieResp = await fetch('https://app.omie.com.br/api/v1/geral/produtos/', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -2664,24 +2682,43 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
       })
     });
 
-    if (!omieResp.ok) {
-      const errText = await omieResp.text();
+    const omieText = await omieResp.text();
+    let omieData = {};
+    try {
+      omieData = omieText ? JSON.parse(omieText) : {};
+    } catch (_) {
+      omieData = {};
+    }
+    const mensagemOmie = String(omieData?.faultstring || omieData?.error || omieData?.message || '').trim();
+
+    if (!omieResp.ok || mensagemOmie) {
+      const errText = mensagemOmie || String(omieText || '').trim() || `Erro HTTP ${omieResp.status} retornado pela Omie.`;
       console.error('[API] /api/produtos/incluir-omie erro Omie:', omieResp.status, errText);
-      await pool.query(
-        `DELETE FROM public.produto_codigo_reserva WHERE codigo = $1 AND confirmada = TRUE`,
-        [codigoReservadoAgora]
-      ).catch(() => {});
-      codigoReservadoAgora = '';
-      return res.status(omieResp.status).json({ error: 'Erro ao incluir produto na Omie' });
+      await liberarReservaLocal();
+      const consumoBloqueado = /REDUNDANT|consumo\s+(?:indevido|redundante)|API\s+bloqueada|tente novamente em/i.test(errText);
+      const orientacao = consumoBloqueado
+        ? ' Aguarde o período informado pela Omie antes de tentar novamente. O sistema não realizará nova tentativa automática.'
+        : '';
+      console.info(`[produtos/incluir-omie] external_calls=${omieExternalCalls} result=error codigo=${codigoNormalizado}`);
+      return res.status(omieResp.ok ? 429 : omieResp.status).json({
+        error: `${errText}${orientacao}`,
+        code: consumoBloqueado ? 'OMIE_CONSUMPTION_BLOCKED' : 'OMIE_INCLUDE_FAILED',
+        retry: false
+      });
     }
 
-    const omieData = await omieResp.json();
-
     console.log('[API] /api/produtos/incluir-omie → sucesso:', omieData);
+    console.info(`[produtos/incluir-omie] external_calls=${omieExternalCalls} result=success codigo=${codigoNormalizado}`);
     res.json(omieData);
   } catch (err) {
+    await liberarReservaLocal();
     console.error('[API] /api/produtos/incluir-omie erro:', err);
-    res.status(500).json({ error: 'Falha ao incluir produto' });
+    console.info(`[produtos/incluir-omie] external_calls=${omieExternalCalls} result=exception`);
+    res.status(500).json({
+      error: err?.message || 'Falha ao incluir produto',
+      code: 'OMIE_INCLUDE_FAILED',
+      retry: false
+    });
   }
 });
 
