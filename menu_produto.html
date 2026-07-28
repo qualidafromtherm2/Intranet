@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260727-pir-v3"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260728-guardar-lote"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -12865,6 +12865,21 @@
     </div>
     <!-- Status do passo atual -->
     <div id="etqArmazenarStatus" style="padding:12px 18px;font-size:.88rem;color:#94a3b8;min-height:44px;text-align:center;line-height:1.4;"></div>
+    <section id="etqArmazenarLote" class="etq-batch-store" style="display:none;" aria-live="polite">
+      <div class="etq-batch-store__summary">
+        <span><i class="fa-solid fa-layer-group"></i> Lote para guardar</span>
+        <strong id="etqArmazenarLoteResumo">0 IDs · 0 itens</strong>
+      </div>
+      <div id="etqArmazenarLoteLista" class="etq-batch-store__list"></div>
+      <div class="etq-batch-store__actions">
+        <button id="etqArmazenarLoteLimpar" type="button" class="etq-batch-store__clear" disabled>
+          <i class="fa-solid fa-trash-can"></i> Limpar
+        </button>
+        <button id="etqArmazenarLoteFinalizar" type="button" class="etq-batch-store__finish" disabled>
+          Finalizar e ler endereço <i class="fa-solid fa-arrow-right"></i>
+        </button>
+      </div>
+    </section>
     <button id="etqArmazenarVerLocais" class="etq-scan-locations-trigger" type="button" style="display:none;">
       <i class="fa-solid fa-location-dot"></i>
       Ver onde este produto já está guardado
@@ -12940,7 +12955,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260727-pir-v3"></script>
+  <script type="module" src="menu_produto.js?v=20260728-guardar-lote"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>
