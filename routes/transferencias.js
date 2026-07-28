@@ -5,6 +5,15 @@ const { dbQuery, dbGetClient } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
+const { exigirPermissaoNav } = require('../utils/navPermissions');
+
+const EXPEDICAO_LOCAL = '10440426539';
+
+function chavePermissaoTransferencia(origem, destino) {
+  return [origem, destino].map(String).includes(EXPEDICAO_LOCAL)
+    ? 'side:log:envio-mercadoria'
+    : 'side:log:solicitacao-ajuste';
+}
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_TRANSFERIDO = 'Transferido';
@@ -451,6 +460,13 @@ router.post('/', express.json(), async (req, res) => {
     const solicitante = String(req.body?.solicitante || '').trim() || null;
     const itens = Array.isArray(req.body?.itens) ? req.body.itens : [];
 
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      chavePermissaoTransferencia(origem, destino),
+      'Seu usuário não possui permissão para realizar esta movimentação.'
+    )) return;
+
     if (!origem || !destino) {
       return res.status(400).json({ error: 'Informe origem e destino da transferência.' });
     }
@@ -604,6 +620,12 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     }
 
     const registroAtual = encontrados[0];
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      chavePermissaoTransferencia(registroAtual.origem, registroAtual.destino),
+      'Seu usuário não possui permissão para aprovar esta movimentação.'
+    )) return;
     if (String(registroAtual.status || '').toLowerCase() === STATUS_TRANSFERIDO.toLowerCase()) {
       return res.status(409).json({ error: 'Esta solicitação já foi marcada como transferida.' });
     }
@@ -695,6 +717,16 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
       return res.status(404).json({ error: 'Transferência não encontrada.' });
     }
     const original = rows[0];
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      chavePermissaoTransferencia(original.origem, original.destino),
+      'Seu usuário não possui permissão para reverter esta movimentação.',
+      client
+    )) {
+      await client.query('ROLLBACK');
+      return;
+    }
     if (String(original.status || '').toLowerCase() !== STATUS_TRANSFERIDO.toLowerCase()) {
       await client.query('ROLLBACK');
       return res.status(409).json({ error: 'Somente transferências concluídas podem ser revertidas.' });

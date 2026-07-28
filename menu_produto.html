@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260727-merge-prs-v2"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260727-pir-v3"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -1804,7 +1804,7 @@
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já autorizada</span>
                   </label>
 
-                  <label style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
+                  <label id="carrinhoCompraRealizadaWrapper" style="display:flex;align-items:center;gap:8px;cursor:pointer;padding:10px;background:#0f172a;border:1px solid #334155;border-radius:6px;">
                     <input type="checkbox" id="carrinhoCompraRealizada" style="width:18px;height:18px;cursor:pointer;">
                     <span style="font-weight:700;color:#e5e7eb;font-size:12px;">Compra já realizada</span>
                   </label>
@@ -2623,6 +2623,15 @@
 
         <!-- Modal Lightbox para Ampliar Imagem -->
         <div id="modalImagemAmpliada" class="modal" style="display:none;z-index:10050;" onclick="fecharImagemAmpliada()">
+          <button
+            type="button"
+            class="imagem-ampliada-fechar"
+            aria-label="Fechar foto ampliada"
+            title="Fechar foto"
+            onclick="event.stopPropagation();fecharImagemAmpliada();"
+          >
+            <i class="fa-solid fa-xmark" aria-hidden="true"></i>
+          </button>
           <div style="
             width:100%;
             height:100%;
@@ -2892,13 +2901,13 @@
           <div id="qualidadeFabricaPane" class="tab-pane" style="display:none;">
             <div class="content-wrapper">
               <div class="content-section" style="margin-top:0;">
-                <div class="title-wrapper" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div class="title-wrapper pir-page-heading" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
                   <div>
                     <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
                       <i class="fa-solid fa-clipboard-check" style="color:#14b8a6;"></i>
                       PIR — Inspeção de recebimento
                     </div>
-                    <div style="color:var(--inactive-color);font-size:13px;margin-top:4px;">
+                    <div class="pir-page-subtitle" style="color:var(--inactive-color);font-size:13px;margin-top:4px;">
                       Itens de etiqueta aguardando registro de inspeção. Após registrar, liberam em Etiquetas disponíveis.
                     </div>
                   </div>
@@ -2906,7 +2915,8 @@
                 </div>
 
                 <!-- Botões principais da Qualidade -->
-                <div id="qualidadeAcoesRapidas" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
+                <div id="qualidadeAcoesRapidas" class="pir-action-toolbar" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:12px;">
+                  <div class="pir-action-primary">
                   <button id="qualidadeNovoRegistroBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:white;">
                     <i class="fa-solid fa-clipboard-list"></i>
                     <span>Registro de inspeção</span>
@@ -2915,6 +2925,18 @@
                     <input id="qualidadePirVerificacaoCheckbox" type="checkbox" style="width:16px;height:16px;cursor:pointer;">
                     <span>Verificação PIR</span>
                   </label>
+                  <button id="qualidadePirSemMpBtn" class="content-button" type="button" title="Exibir itens que não são família MP" style="display:flex;align-items:center;gap:8px;background:#64748b;color:#fff;">
+                    <i class="fa-solid fa-filter"></i>
+                    <span>Ver sem MP</span>
+                  </button>
+                  <button id="qualidadePirRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:#334155;color:#fff;">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>Atualizar</span>
+                  </button>
+                  </div>
+                  <details class="pir-action-more" open>
+                    <summary><i class="fa-solid fa-ellipsis"></i><span>Mais ações</span></summary>
+                    <div class="pir-action-secondary">
                   <button id="qualidadeCriarBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:linear-gradient(135deg,#3b82f6 0%,#2563eb 100%);color:white;">
                     <i class="fa-solid fa-plus"></i>
                     <span>Criar</span>
@@ -2935,20 +2957,14 @@
                     <i class="fa-solid fa-arrow-left"></i>
                     <span>Voltar à lista</span>
                   </button>
-                  <button id="qualidadePirSemMpBtn" class="content-button" type="button" title="Exibir itens que não são família MP" style="display:flex;align-items:center;gap:8px;background:#64748b;color:#fff;">
-                    <i class="fa-solid fa-filter"></i>
-                    <span>Ver sem MP</span>
-                  </button>
-                  <button id="qualidadePirRefreshBtn" class="content-button" type="button" style="display:flex;align-items:center;gap:8px;background:#334155;color:#fff;margin-left:auto;">
-                    <i class="fa-solid fa-rotate"></i>
-                    <span>Atualizar</span>
-                  </button>
+                    </div>
+                  </details>
                 </div>
 
                 <!-- Lista de etiquetas aguardando PIR -->
                 <div id="qualidadePirPendentesWrap" style="display:block;margin-top:16px;">
-                  <div style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
-                    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+                  <div class="pir-pending-panel" style="background:var(--content-bg);border:1px solid var(--border-color);border-radius:12px;padding:16px;">
+                    <div class="pir-pending-header" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
                       <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:220px;">
                         <i class="fa-solid fa-tags" style="color:#14b8a6;"></i>
                         <div style="font-weight:600;">Pendentes de inspeção (ETQ_recebimento)</div>
@@ -2956,16 +2972,17 @@
                       <input id="qualidadePirPendentesBusca" type="text" placeholder="Pesquisar lote, código, NFe ou descrição..." autocomplete="off"
                         style="flex:1;min-width:220px;max-width:420px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-color);" />
                     </div>
-                    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--inactive-color);">
+                    <div class="pir-alert-legend" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px;font-size:12px;color:var(--inactive-color);">
                       <span style="display:inline-flex;align-items:center;gap:6px;"><span style="display:inline-flex;width:22px;height:22px;border-radius:6px;background:#dbeafe;color:#1d4ed8;align-items:center;justify-content:center;"><i class="fa-solid fa-seedling"></i></span> Produto novo</span>
                       <span style="display:inline-flex;align-items:center;gap:6px;"><span style="display:inline-flex;width:22px;height:22px;border-radius:6px;background:#ffedd5;color:#c2410c;align-items:center;justify-content:center;"><i class="fa-solid fa-truck-arrow-right"></i></span> Fornecedor mudou</span>
                       <span style="display:inline-flex;align-items:center;gap:6px;"><span style="display:inline-flex;width:22px;height:22px;border-radius:6px;background:#f3e8ff;color:#7e22ce;align-items:center;justify-content:center;"><i class="fa-solid fa-puzzle-piece"></i></span> Produto customizado</span>
                       <span style="display:inline-flex;align-items:center;gap:6px;"><span style="display:inline-flex;width:22px;height:22px;border-radius:6px;background:#fee2e2;color:#b91c1c;align-items:center;justify-content:center;"><i class="fa-solid fa-screwdriver-wrench"></i></span> Alteração (clique para ver)</span>
                     </div>
-                    <div style="overflow:auto;max-height:calc(100vh - 320px);border:1px solid var(--border-color);border-radius:10px;">
-                      <table style="width:100%;border-collapse:collapse;min-width:720px;font-size:14px;">
+                    <div class="pir-pending-list" style="overflow:auto;max-height:calc(100vh - 320px);border:1px solid var(--border-color);border-radius:10px;">
+                      <table class="pir-pending-table" style="width:100%;border-collapse:collapse;min-width:720px;font-size:14px;">
                         <thead>
                           <tr style="background:linear-gradient(135deg,#1e293b 0%,#334155 100%);color:white;">
+                            <th class="pir-head-photo" style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:78px;">Foto</th>
                             <th style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:110px;">Alertas</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Lote</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">NFe</th>
@@ -2973,11 +2990,12 @@
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Descrição</th>
                             <th style="padding:12px 14px;text-align:right;position:sticky;top:0;background:#1e293b;">Qtd</th>
                             <th style="padding:12px 14px;text-align:left;position:sticky;top:0;background:#1e293b;">Criado em</th>
+                            <th style="padding:12px 14px;text-align:center;position:sticky;top:0;background:#1e293b;width:118px;">Ação</th>
                           </tr>
                         </thead>
                         <tbody id="qualidadePirPendentesBody">
                           <tr>
-                            <td colspan="7" style="text-align:center;padding:40px;color:#94a3b8;">
+                            <td colspan="9" style="text-align:center;padding:40px;color:#94a3b8;">
                               <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;margin-bottom:8px;"></i>
                               <div>Carregando pendentes...</div>
                             </td>
@@ -7911,11 +7929,11 @@
               <!-- Modal Filtro de Produtos -->
               <div id="filterPanelOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;">
                 <div id="filterPanel" style="background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;">
-                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
+                  <div class="product-filter-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
                     <span style="font-weight:700;font-size:16px;color:#111;">Filtrar Produtos</span>
                     <button id="filterPanelCloseBtn" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:2px 6px;" title="Fechar">&#x2715;</button>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:8px;padding:12px 0 14px;border-bottom:1px solid #e5e7eb;margin-bottom:4px;">
+                  <div class="product-filter-quick" style="display:flex;flex-direction:column;gap:8px;padding:12px 0 14px;border-bottom:1px solid #e5e7eb;margin-bottom:4px;">
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
                       <input type="checkbox" id="filterShowInactive" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Mostrar inativos
                     </label>
@@ -7948,7 +7966,7 @@
                       <input type="checkbox" id="filterHideEngineering" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Ocultar engenharia
                     </label>
                   </div>
-                  <div style="display:flex;flex-direction:column;gap:14px;">
+                  <div class="product-filter-fields" style="display:flex;flex-direction:column;gap:14px;">
                     <div>
                       <label for="familySelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Família:</label>
                       <select id="familySelect" multiple size="5" aria-describedby="familySelectHint" style="width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;font-size:14px;color:#374151;background:#f9fafb;"></select>
@@ -7981,7 +7999,7 @@
                       <small id="filterLocalSelectHint" style="display:block;margin-top:5px;color:#6b7280;font-size:11px;line-height:1.35;">Selecione um ou mais locais. O produto será exibido se tiver saldo positivo em qualquer um deles.</small>
                     </div>
                   </div>
-                  <div style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
+                  <div class="product-filter-actions" style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
                     <button id="filterPanelLimparBtn" style="padding:9px 18px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:14px;cursor:pointer;">Limpar</button>
                     <button id="filterPanelAplicarBtn" style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Aplicar</button>
                   </div>
@@ -12922,7 +12940,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260727-merge-prs-v2"></script>
+  <script type="module" src="menu_produto.js?v=20260727-pir-v3"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260718-faixa-minimo"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260718-faixa-minimo"></script>

@@ -29,10 +29,22 @@ window.storagePublicUrl = function storagePublicUrl(relativePath) {
 // ============================================================================
 // SISTEMA CENTRAL DE NAVEGAÇÃO - Garante que só 1 página seja visível por vez
 // ============================================================================
+window.hideLogisticsOperationalPages = function(exceptId = '') {
+  ['etiquetasModal', 'etqImpressoModal'].forEach((id) => {
+    if (id === exceptId) return;
+    const page = document.getElementById(id);
+    if (page) page.style.display = 'none';
+  });
+};
+
 window.clearMainContainer = function() {
   try {
     const main = document.querySelector('.main-container');
     if (!main) return;
+
+    // As páginas operacionais nasceram como modais e são movidas para este
+    // container. Elas não podem permanecer abertas ao trocar de módulo.
+    window.hideLogisticsOperationalPages?.();
 
     // Força TODOS os filhos a ficarem invisíveis
     Array.from(main.children).forEach(el => {
@@ -10419,12 +10431,27 @@ const qualidadeProdutoCustomizadoCheck = document.getElementById('qualidadeProdu
 const qualidadeVaiDiretoIdentificacaoCheck = document.getElementById('qualidadeVaiDiretoIdentificacaoCheck');
 const qualidadeAbrirDadosProdutoBtn = document.getElementById('qualidadeAbrirDadosProdutoBtn');
 const qualidadePirVerificacaoCheckbox = document.getElementById('qualidadePirVerificacaoCheckbox');
+const qualidadePirMaisAcoes = document.querySelector('#qualidadeFabricaPane .pir-action-more');
 const qualidadeManuaisPrincipaisBtn = document.getElementById('qualidadeManuaisPrincipaisBtn');
 const qualidadeManuaisRecarregarBtn = document.getElementById('qualidadeManuaisRecarregarBtn');
 const qualidadeManuaisListaWrap = document.getElementById('qualidadeManuaisListaWrap');
 const qualidadeManuaisLista = document.getElementById('qualidadeManuaisLista');
 const qualidadeManuaisMeta = document.getElementById('qualidadeManuaisMeta');
 let qualidadePirVerificacaoSalvando = false;
+
+if (qualidadePirMaisAcoes) {
+  const pirAcoesMobileMedia = window.matchMedia('(max-width: 900px)');
+  const sincronizarMaisAcoesPir = (mobile) => {
+    if (mobile) qualidadePirMaisAcoes.removeAttribute('open');
+    else qualidadePirMaisAcoes.setAttribute('open', '');
+  };
+  sincronizarMaisAcoesPir(pirAcoesMobileMedia.matches);
+  if (typeof pirAcoesMobileMedia.addEventListener === 'function') {
+    pirAcoesMobileMedia.addEventListener('change', (event) => sincronizarMaisAcoesPir(event.matches));
+  } else if (typeof pirAcoesMobileMedia.addListener === 'function') {
+    pirAcoesMobileMedia.addListener((event) => sincronizarMaisAcoesPir(event.matches));
+  }
+}
 let qualidadeListaPirOrigem = 'pir';
 let qualidadeManuaisCarregando = false;
 let qualidadePirPendentesDebounce = null;
@@ -11556,7 +11583,7 @@ function renderQualidadePirPendentes(itens = []) {
   if (!lista.length) {
     qualidadePirPendentesBody.innerHTML = `
       <tr>
-        <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+        <td colspan="9" style="text-align:center;padding:36px;color:#94a3b8;">
           Nenhum item aguardando inspeção PIR.
         </td>
       </tr>`;
@@ -11573,6 +11600,8 @@ function renderQualidadePirPendentes(itens = []) {
       : '-';
     const un = item?.unidade ? ` ${qualidadePirEscapeHtml(item.unidade)}` : '';
     const criado = qualidadePirEscapeHtml(formatarDataPirPendente(item?.criado_em));
+    const fotoRaw = String(item?.produto_url_imagem || '').trim();
+    const fotoUrl = qualidadePirEscapeHtml(fotoRaw || `/imagens_produtos/${encodeURIComponent(String(item?.codigo_produto || '').trim())}.jpg`);
 
     const icons = [];
     if (item?.primeira_vez) {
@@ -11604,13 +11633,20 @@ function renderQualidadePirPendentes(itens = []) {
       <tr class="qualidade-pir-pendente-row" data-id="${id}"
           style="cursor:pointer;border-bottom:1px solid var(--border-color);"
           title="Abrir registro de inspeção">
-        <td style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
-        <td style="padding:12px 14px;white-space:nowrap;">${lote}</td>
-        <td style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
-        <td style="padding:12px 14px;white-space:nowrap;color:#93c5fd;font-weight:600;">${codigo}</td>
-        <td style="padding:12px 14px;">${desc}</td>
-        <td style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
-        <td style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
+        <td class="pir-cell-photo" data-label="Foto">
+          <button type="button" class="pir-product-photo" data-url="${fotoUrl}" data-title="${codigo} — ${desc}" aria-label="Ampliar foto de ${codigo}">
+            <img src="${fotoUrl}" alt="Foto do produto ${codigo}" loading="lazy" />
+            <span aria-hidden="true"><i class="fa-regular fa-image"></i></span>
+          </button>
+        </td>
+        <td class="pir-cell-alerts" data-label="Alertas" style="padding:10px 12px;text-align:center;vertical-align:middle;">${alertasHtml}</td>
+        <td class="pir-cell-lot" data-label="Lote" style="padding:12px 14px;white-space:nowrap;">${lote}</td>
+        <td class="pir-cell-nfe" data-label="NFe" style="padding:12px 14px;white-space:nowrap;">${nfe}</td>
+        <td class="pir-cell-code" data-label="Código" style="padding:12px 14px;white-space:nowrap;color:#93c5fd;font-weight:600;">${codigo}</td>
+        <td class="pir-cell-description" data-label="Descrição" style="padding:12px 14px;">${desc}</td>
+        <td class="pir-cell-quantity" data-label="Quantidade" style="padding:12px 14px;text-align:right;white-space:nowrap;">${qtd}${un}</td>
+        <td class="pir-cell-created" data-label="Criado em" style="padding:12px 14px;white-space:nowrap;color:var(--inactive-color);font-size:12px;">${criado}</td>
+        <td class="pir-cell-action" data-label="Ação"><button type="button" class="pir-inspect-btn"><i class="fa-solid fa-clipboard-check"></i><span>Inspecionar</span></button></td>
       </tr>`;
   }).join('');
 
@@ -11633,13 +11669,24 @@ function renderQualidadePirPendentes(itens = []) {
       abrirModalAlteracoesProdutoPir(codigo, desc);
     });
   });
+
+  qualidadePirPendentesBody.querySelectorAll('.pir-product-photo').forEach((btn) => {
+    const img = btn.querySelector('img');
+    img?.addEventListener('error', () => btn.classList.add('is-missing'));
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (btn.classList.contains('is-missing')) return;
+      abrirImagemPirFullscreen(btn.dataset.url || '', btn.dataset.title || 'Foto do produto');
+    });
+  });
 }
 
 async function carregarQualidadePirPendentes(q = '') {
   if (!qualidadePirPendentesBody) return;
   qualidadePirPendentesBody.innerHTML = `
     <tr>
-      <td colspan="7" style="text-align:center;padding:36px;color:#94a3b8;">
+      <td colspan="9" style="text-align:center;padding:36px;color:#94a3b8;">
         <i class="fa-solid fa-spinner fa-spin" style="font-size:22px;margin-bottom:8px;"></i>
         <div>Carregando pendentes...</div>
       </td>
@@ -11657,7 +11704,7 @@ async function carregarQualidadePirPendentes(q = '') {
     console.error('[QUALIDADE] erro ao carregar pendentes PIR', err);
     qualidadePirPendentesBody.innerHTML = `
       <tr>
-        <td colspan="7" style="text-align:center;padding:36px;color:#f87171;">
+        <td colspan="9" style="text-align:center;padding:36px;color:#f87171;">
           Erro ao carregar: ${qualidadePirEscapeHtml(err?.message || 'falha')}
         </td>
       </tr>`;
@@ -11867,6 +11914,8 @@ function abrirModalInspecaoQualidade(item = null) {
     const desc = String(item.descricao_produto || '').trim();
     const nfe = String(item.numero_nfe || '').trim();
     const qtd = item.qtd != null ? formatarQuantidadeExibicao(item.qtd) : '';
+    const fotoProduto = String(item.produto_url_imagem || '').trim();
+    if (fotoProduto) renderQualidadeImagemProduto(fotoProduto);
     const pareceIdOmie = /^\d{8,}$/.test(codigo);
     if (qualidadeCodProduto) qualidadeCodProduto.value = pareceIdOmie ? '' : codigo;
     if (qualidadeCodigoProdutoReal) qualidadeCodigoProdutoReal.value = pareceIdOmie ? codigo : '';
@@ -11921,6 +11970,9 @@ function abrirModalInspecaoQualidade(item = null) {
   }
 
   if (qualidadeInspecaoModal) qualidadeInspecaoModal.style.display = 'flex';
+  if (qualidadeInspecaoForm) qualidadeInspecaoForm.scrollTop = 0;
+  const qualidadeInspecaoContainer = qualidadeInspecaoModal?.querySelector('.modal-container');
+  if (qualidadeInspecaoContainer) qualidadeInspecaoContainer.scrollTop = 0;
 }
 
 function fecharModalInspecaoQualidade() {
@@ -32441,6 +32493,7 @@ function onAlmoxRowClick(ev) {
 if (btnCache) {
 btnCache.addEventListener('click', async e => {
   e.preventDefault();
+  window.hideLogisticsOperationalPages?.();
   hideKanban();
   if (typeof hideArmazem === 'function') hideArmazem();
   const armTabsEl = document.getElementById('armazemTabs');
@@ -36867,6 +36920,15 @@ window.openRegistros = async function() {
       const qtd     = escapeHtml(String(e.qtd  != null ? e.qtd : ''));
       const unid    = escapeHtml(String(e.unidade || ''));
       const data    = escapeHtml(String(e.data_emissao || ''));
+      const recebidoEm = (() => {
+        if (!e.criado_em) return '';
+        const valor = new Date(e.criado_em);
+        if (Number.isNaN(valor.getTime())) return escapeHtml(String(e.criado_em));
+        return escapeHtml(valor.toLocaleString('pt-BR', {
+          day: '2-digit', month: '2-digit', year: 'numeric',
+          hour: '2-digit', minute: '2-digit'
+        }));
+      })();
       const id      = Number(e.id);
       const qtdRaw  = e.qtd != null ? Number(e.qtd) || 0 : 0;
       const impressa    = !!e.impressa;
@@ -36911,6 +36973,10 @@ window.openRegistros = async function() {
           <strong>${documento}</strong>
           ${data ? `<span>Emissão: ${data}</span>` : ''}
         </div>
+        <div class="etq-table-received">
+          <strong>${recebidoEm || '—'}</strong>
+          <span>Entrada no recebimento</span>
+        </div>
         <div class="etq-table-qty">
           <strong>${qtd}${unid ? ' '+unid : ''}</strong>
           ${impressa ? '<span class="etq-badge-impressa"><i class="fa-solid fa-check"></i> Impresso</span>' : ''}
@@ -36927,6 +36993,7 @@ window.openRegistros = async function() {
         <span>Produto</span>
         <span>Lote</span>
         <span>Origem</span>
+        <span>Recebido em</span>
         <span>Quantidade</span>
         <span>Ações</span>
       </div>
@@ -38061,7 +38128,10 @@ window.openRegistros = async function() {
             ${impresso ? `<span><i class="fa-solid fa-print"></i> ${impresso}${usuario ? ' · '+usuario : ''}</span>` : ''}
             ${endereco ? `<span class="is-address"><i class="fa-solid fa-location-dot"></i> ${endereco}</span>` : '<span>Aguardando endereço</span>'}
           </div>
-          <div class="etq-table-actions"><button type="button" class="etq-btn-guardar" data-id="${idEtq}"><i class="fa-solid fa-dolly"></i> Guardar material</button></div>
+          <div class="etq-table-actions">
+            <button type="button" class="etq-btn-reimprimir" data-id="${idEtq}" aria-label="Reimprimir etiqueta ETQ ${idEtq}" title="Reimprimir sem criar outro ID"><i class="fa-solid fa-print"></i> Reimprimir</button>
+            <button type="button" class="etq-btn-guardar" data-id="${idEtq}"><i class="fa-solid fa-dolly"></i> Guardar material</button>
+          </div>
         </div>`;
     }).join('');
 
@@ -38090,6 +38160,7 @@ window.openRegistros = async function() {
 
   function _abrirGuardarMateriais() {
     if (!etqImpressoModal) return;
+    _etqCarregarPref();
     const mainContainer = document.querySelector('.main-container');
     if (mainContainer && etqImpressoModal.parentElement !== mainContainer) mainContainer.appendChild(etqImpressoModal);
     showMainTab('etqImpressoModal');
@@ -38502,7 +38573,74 @@ window.openRegistros = async function() {
   etqRetornarCancelar?.addEventListener('click', () => { _armEscolhaRetornar(false); });
 
   // Clique em card da lista → abre modal já no passo 2 (pula leitura de QR)
+  async function _etqReimprimirExistente(id, btn, printer = _etqPrinterPref) {
+    if (!id) return;
+    if (!printer || printer === '__PDF__') {
+      _etqMostrarSeletorImpressora(
+        printer === '__PDF__' ? 'Para reimprimir uma ETQ existente, escolha uma impressora.' : 'Escolha a impressora para reimprimir.',
+        (selecionada) => {
+          _etqSalvarPref(selecionada);
+          _etqReimprimirExistente(id, btn, selecionada);
+        },
+        etqImpressoStatus
+      );
+      return;
+    }
+    if (!_etqConfirmarImpressao(printer, `a etiqueta ETQ ${id}`)) return;
+
+    const original = btn?.innerHTML || '';
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Enviando';
+    }
+    try {
+      const body = {
+        ids: [id],
+        usuario: (document.getElementById('userNameDisplay')?.textContent || '').trim(),
+        via_fila: true
+      };
+      const agente = _etqParseAgentPref(printer);
+      if (agente) {
+        body.destino_agente = agente.pcName;
+        body.impressora = agente.impressora;
+      } else if (printer !== '__BP__') {
+        body.printer = printer;
+        body.via_fila = false;
+      }
+
+      const resp = await fetch('/api/etiquetas/rec-impresso/imprimir-ids', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify(body)
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data?.ok) throw new Error(data?.error || `Erro ${resp.status}`);
+      if (etqImpressoStatus) {
+        etqImpressoStatus.textContent = `ETQ ${id} enviada para reimpressão. O ID foi preservado.`;
+        etqImpressoStatus.style.color = '#08775a';
+      }
+    } catch (err) {
+      if (etqImpressoStatus) {
+        etqImpressoStatus.textContent = `Falha ao reimprimir ETQ ${id}: ${err.message || err}`;
+        etqImpressoStatus.style.color = '#b42318';
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      }
+    }
+  }
+
   etqImpressoGrid?.addEventListener('click', e => {
+    const reimprimir = e.target.closest('.etq-btn-reimprimir[data-id]');
+    if (reimprimir) {
+      e.preventDefault();
+      e.stopPropagation();
+      _etqReimprimirExistente(Number(reimprimir.dataset.id), reimprimir);
+      return;
+    }
     const card = e.target.closest('.etq-card[data-id]');
     if (card) {
       const id = Number(card.dataset.id);
@@ -38513,7 +38651,7 @@ window.openRegistros = async function() {
   etqImpressoGrid?.addEventListener('keydown', e => {
     if (e.key !== 'Enter' && e.key !== ' ') return;
     const card = e.target.closest('.etq-card[data-id]');
-    if (!card || e.target.closest('.cp-product-thumb')) return;
+    if (!card || e.target.closest('.cp-product-thumb, .etq-btn-reimprimir')) return;
     e.preventDefault();
     const id = Number(card.dataset.id);
     if (id) _armAbrirComId(id);
@@ -40772,7 +40910,9 @@ function configurarCompraRealizadaGlobalCarrinho() {
       inputNfe.value = '';
 
       if (wrapperCompraAutorizada) wrapperCompraAutorizada.style.display = 'flex';
-      if (checkboxCompraAutorizada) checkboxCompraAutorizada.checked = true;
+      if (checkboxCompraAutorizada) {
+        checkboxCompraAutorizada.checked = window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta);
+      }
       if (wrapperRetornoCotacao) wrapperRetornoCotacao.style.display = 'flex';
       if (wrapperPrazoSolicitado) wrapperPrazoSolicitado.style.display = 'flex';
     }
@@ -40791,7 +40931,9 @@ function prepararPadroesAberturaCarrinhoCompras() {
   const compraAutorizada = document.getElementById('carrinhoCompraAutorizada');
 
   if (compraRealizada) compraRealizada.checked = false;
-  if (compraAutorizada) compraAutorizada.checked = true;
+  if (compraAutorizada) {
+    compraAutorizada.checked = window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta);
+  }
 }
 
 // Abre o modal do carrinho e sincroniza com os dados atuais
@@ -40909,6 +41051,10 @@ async function abrirModalCarrinhoComprasLegado() {
 }
 
 window.abrirModalCarrinhoCompras = async function() {
+  if (!exigirPermissaoSistema(
+    SYSTEM_PERMISSION_KEYS.compras,
+    'Seu usuário não possui permissão para solicitar compras.'
+  )) return;
   const modal = document.getElementById('modalCarrinhoCompras');
   if (!modal) return;
 
@@ -41923,6 +42069,11 @@ async function enviarPedidoModal() {
     || null;
   const compraRealizada = document.getElementById('carrinhoCompraRealizada')?.checked === true;
   const compraAutorizada = (document.getElementById('carrinhoCompraAutorizada')?.checked === true) && !compraRealizada;
+  if ((compraAutorizada || compraRealizada)
+      && !window.usuarioTemPermissaoSistema(SYSTEM_PERMISSION_KEYS.compraDireta)) {
+    alert('Seu usuário pode solicitar compras, mas elas precisam passar pela aprovação no Kanban de Compras.');
+    return;
+  }
   const prazoSolicitadoGlobal = compraRealizada ? null : prazoSolicitadoGlobalBruto;
   const retornoCotacaoGlobal = compraRealizada ? 'Não' : retornoCotacaoGlobalBruto;
   const notaFiscalGlobal = document.getElementById('carrinhoNfeGlobal')?.value?.trim() || '';
@@ -55543,6 +55694,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   });
 
   window.abrirModalSeparacaoQtd = function(codigo, descricao, unidade) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.'
+    )) return;
     _sepCtx = { codigo, descricao, unidade: (unidade || 'UN').toUpperCase() };
     const el = id => document.getElementById(id);
     el('sepQtyTitle').textContent = 'Quantidade para separação';
@@ -55815,6 +55970,10 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   }
 
   async function mostrarEditarRapido() {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.editarProduto,
+      'Seu usuário não possui permissão para editar produtos.'
+    )) return;
     document.getElementById('modalAcoesBotoes').style.display = 'none';
     document.getElementById('modalAcoesManuais').style.display = 'none';
     document.getElementById('modalAcoesEditarRapido').style.display = 'block';
@@ -56188,6 +56347,13 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
   }
 
   function abrirQuantidade(tipo) {
+    const navKey = tipo === 'carrinho'
+      ? SYSTEM_PERMISSION_KEYS.compras
+      : SYSTEM_PERMISSION_KEYS.separacao;
+    const mensagem = tipo === 'carrinho'
+      ? 'Seu usuário não possui permissão para solicitar compras.'
+      : 'Seu usuário não possui permissão para solicitar separação.';
+    if (!exigirPermissaoSistema(navKey, mensagem)) return;
     _qtyCtx = { tipo, ..._ctx, multiplo: null };
     document.getElementById('modalAcoesQtdTitulo').textContent = tipo === 'carrinho'
       ? 'Quantidade para compra'
@@ -56417,10 +56583,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     document.getElementById('modalAcoesDescricao').textContent = descricao;
     resetBotaoSeparacao();
     document.getElementById('modalManualStatus').textContent = '';
+    atualizarAcoesSistemaPorPermissao();
     mostrarBotoes();
     ov.style.display = 'flex';
     document.body.classList.add('mobile-modal-open');
-    document.getElementById('modalAcoesBtnCarrinho')?.focus({ preventScroll: true });
+    document.querySelector('#modalAcoesBotoes button:not(.perm-hidden)')?.focus({ preventScroll: true });
   };
 })();
 
@@ -71330,13 +71497,55 @@ async function markEstruturaButtons(containerEl) {
 })();
 
 // Deslogado: esconde tudo e mostra só Início + Login
+const SYSTEM_PERMISSION_KEYS = Object.freeze({
+  compras: 'system-shortcut:compras-carrinho',
+  separacao: 'system-shortcut:separacao-carrinho',
+  compraDireta: 'system-action:compras-direta',
+  movimentacao: 'side:log:solicitacao-ajuste',
+  expedicao: 'side:log:envio-mercadoria',
+  editarProduto: 'top:produto'
+});
+
+window.__navPermissionsByKey = Object.create(null);
+window.usuarioTemPermissaoSistema = function usuarioTemPermissaoSistema(navKey) {
+  return window.__navPermissionsByKey?.[navKey] === true;
+};
+
+function atualizarAcoesSistemaPorPermissao() {
+  const regras = [
+    ['#listaProdutosAbrirCarrinhoBtn', SYSTEM_PERMISSION_KEYS.compras],
+    ['#listaProdutosAbrirSeparacaoBtn', SYSTEM_PERMISSION_KEYS.separacao],
+    ['#modalAcoesBtnCarrinho', SYSTEM_PERMISSION_KEYS.compras],
+    ['#modalAcoesBtnSeparacao', SYSTEM_PERMISSION_KEYS.separacao],
+    ['#modalAcoesBtnMovimentar', SYSTEM_PERMISSION_KEYS.movimentacao],
+    ['#modalAcoesBtnExpedicao', SYSTEM_PERMISSION_KEYS.expedicao],
+    ['#modalAcoesBtnEditarRapido', SYSTEM_PERMISSION_KEYS.editarProduto],
+    ['#carrinhoCompraAutorizadaWrapper', SYSTEM_PERMISSION_KEYS.compraDireta],
+    ['#carrinhoCompraRealizadaWrapper', SYSTEM_PERMISSION_KEYS.compraDireta]
+  ];
+  regras.forEach(([selector, navKey]) => {
+    document.querySelectorAll(selector).forEach((el) => {
+      el.classList.toggle('perm-hidden', !window.usuarioTemPermissaoSistema(navKey));
+    });
+  });
+  document.dispatchEvent(new CustomEvent('permissions:system-actions-changed'));
+}
+
+function exigirPermissaoSistema(navKey, mensagem) {
+  if (window.usuarioTemPermissaoSistema(navKey)) return true;
+  alert(mensagem || 'Seu usuário não possui permissão para realizar esta ação.');
+  return false;
+}
+
 function applyLoggedOutUI(){
+  window.__navPermissionsByKey = Object.create(null);
   const gated = findGatedCandidates();
   gated.forEach(el => el.classList.add('perm-hidden'));
   PUBLIC_WHEN_LOGGED_OUT.forEach(sel => {
     document.querySelectorAll(sel).forEach(el => el.classList.remove('perm-hidden'));
   });
   aplicarVisibilidadeMenuChatbotAdmin();
+  atualizarAcoesSistemaPorPermissao();
 }
 
 function aplicarVisibilidadeMenuChatbotAdmin() {
@@ -71366,6 +71575,10 @@ function aplicarVisibilidadeMenuChatbotAdmin() {
 
 // Aplica uma árvore de permissões (já carregada) à UI
 function _applyPermissionTreeToUI(data){
+  window.__navPermissionsByKey = Object.create(null);
+  for (const n of (data && data.nodes) || []) {
+    if (n?.key) window.__navPermissionsByKey[n.key] = n.allowed === true;
+  }
   // começa escondendo tudo
   const gated = findGatedCandidates();
   gated.forEach(el => el.classList.add('perm-hidden'));
@@ -71388,6 +71601,7 @@ function _applyPermissionTreeToUI(data){
   });
 
   aplicarVisibilidadeMenuChatbotAdmin();
+  atualizarAcoesSistemaPorPermissao();
 
   // Se a guia ativa do produto ficou escondida, ativa a primeira guia visível
   const prodTabs = document.querySelector('#produtoTabs .main-header');
@@ -81197,6 +81411,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   window.abrirModalExpedicaoRapida = function(codigo, descricao, codigoProduto) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.expedicao,
+      'Seu usuário não possui permissão para realizar expedições.'
+    )) return;
     _expRapidaCtx = { codigo, descricao: descricao || codigo, codigoProduto: codigoProduto || null, saldo: null, saldoDestino: null, unidade: 'UN' };
     _expRapidaTransferenciaId = null;
     document.getElementById('expRapidaDescricao').textContent = _expRapidaCtx.descricao;
@@ -81331,6 +81549,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Abre o modal completo de movimentações.
   // Abre o modal
   window.abrirModalMovimentacao = async function(codigo, descricao, codigoProduto, opcoes = {}) {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.movimentacao,
+      'Seu usuário não possui permissão para movimentar produtos.'
+    )) return;
     _codigoProdutoAtual = codigo;
     _descricaoProdutoAtual = descricao || codigo;
     _codigoProdutoOmieAtual = codigoProduto || null;
@@ -81393,30 +81615,35 @@ document.addEventListener('DOMContentLoaded', () => {
   ov.style.cssText = 'display:none;position:fixed;inset:0;background:rgba(2,6,23,.58);backdrop-filter:blur(6px);z-index:10300;align-items:center;justify-content:center;padding:24px;';
 
   ov.innerHTML = `
-    <div id="modalCarrinhoSepPanel" style="width:min(840px,86vw);background:linear-gradient(180deg,rgba(15,23,42,.98) 0%,rgba(15,23,42,.94) 100%);border:1px solid rgba(148,163,184,.22);border-radius:22px;padding:0;max-height:82vh;display:flex;flex-direction:column;transform:translateY(16px) scale(.985);opacity:0;transition:transform .22s ease,opacity .22s ease;overflow:hidden;box-shadow:0 26px 80px rgba(2,6,23,.42);">
+    <div id="modalCarrinhoSepPanel" role="dialog" aria-modal="true" aria-label="Solicitação de separação">
       <!-- Header -->
       <div style="display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid rgba(148,163,184,.16);flex-shrink:0;background:rgba(15,23,42,.72);">
         <div style="display:flex;align-items:center;gap:10px;min-width:0;">
           <h2 style="margin:0;font-size:1.05rem;color:#f0f0f0;font-weight:700;white-space:nowrap;">Sol. de separação</h2>
           <span id="modalCarrinhoSepCount" style="background:rgba(30,41,59,.92);color:#cbd5e1;border:1px solid rgba(71,85,105,.85);border-radius:999px;padding:4px 10px;font-size:.74rem;font-weight:800;white-space:nowrap;">0 itens</span>
         </div>
-        <button id="modalCarrinhoSepClose" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:22px;line-height:1;padding:6px 8px;border-radius:10px;">&#x2715;</button>
+        <button id="modalCarrinhoSepClose" type="button" aria-label="Fechar solicitação">&#x2715;</button>
       </div>
       <!-- Itens do carrinho -->
       <div id="modalCarrinhoSepItems" style="flex:1;min-height:150px;overflow-y:auto;padding:14px 18px 10px;display:flex;flex-direction:column;gap:10px;background:rgba(15,23,42,.28);"></div>
       <div id="modalCarrinhoSepEmpty" style="display:none;color:#94a3b8;font-size:.94rem;padding:38px 24px;text-align:center;">Nenhum produto adicionado.</div>
       <!-- Formulário de envio -->
       <div id="modalCarrinhoSepForm" style="border-top:1px solid #2a2a2a;padding:10px 18px 12px;display:flex;flex-direction:column;gap:9px;flex-shrink:0;">
+        <button id="modalCarrinhoSepContinue" type="button">
+          <span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span>
+          <small>Responsável, destino e prazo</small>
+        </button>
         <div id="modalCarrinhoSepFields" style="display:grid;grid-template-columns:1.1fr 1fr 1.1fr;gap:9px;align-items:end;">
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Resp. retirada</label>
+          <label>Responsável pela retirada</label>
           <select id="modalCarrinhoSepRequester" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;"></select>
         </div>
         <div style="display:flex;flex-direction:column;gap:5px;min-width:0;">
-          <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Local de estoque</label>
+          <label>Destino do material</label>
           <select id="modalCarrinhoSepMotivo" style="background:#2a2a2a;color:#f0f0f0;border:1px solid #3a3a3a;border-radius:10px;padding:8px 12px;font-size:.9rem;width:100%;">
             <option value="">— carregando... —</option>
           </select>
+          <small class="sep-request-helper">Local para onde o material será enviado.</small>
         </div>
         <div style="display:flex;flex-direction:column;gap:6px;">
           <label style="color:#d1d5db;font-size:.85rem;font-weight:600;">Data prevista</label>
@@ -81444,7 +81671,23 @@ document.addEventListener('DOMContentLoaded', () => {
   `;
   document.body.appendChild(ov);
 
+  const headingSep = ov.querySelector('h2');
+  if (headingSep) {
+    headingSep.textContent = 'Solicitação de separação';
+    headingSep.parentElement?.classList.add('sep-request-heading');
+  }
+
   const panel = document.getElementById('modalCarrinhoSepPanel');
+  const continueBtn = document.getElementById('modalCarrinhoSepContinue');
+  continueBtn?.addEventListener('click', () => {
+    const form = document.getElementById('modalCarrinhoSepForm');
+    if (!form) return;
+    const vaiAbrir = form.classList.contains('sep-mobile-collapsed');
+    form.classList.toggle('sep-mobile-collapsed', !vaiAbrir);
+    continueBtn.innerHTML = vaiAbrir
+      ? '<span><i class="fa-solid fa-arrow-left"></i> Voltar aos produtos</span><small>Revise ou altere os dados da retirada</small>'
+      : '<span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span><small>Responsável, destino e prazo</small>';
+  });
   const responsiveStyle = document.createElement('style');
   responsiveStyle.textContent = `
     #modalCarrinhoSepOverlay {
@@ -81561,16 +81804,183 @@ document.addEventListener('DOMContentLoaded', () => {
     .sep-cart-comment-status {
       color: #94a3b8 !important;
     }
+    #modalCarrinhoSepOverlay {
+      padding: 20px !important;
+      background: rgba(15, 23, 42, .56) !important;
+    }
+    #modalCarrinhoSepPanel {
+      display: flex;
+      flex-direction: column;
+      width: min(820px, calc(100vw - 40px)) !important;
+      max-height: min(88dvh, 820px) !important;
+      overflow: hidden;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      background: #f8fafc;
+      box-shadow: 0 24px 64px rgba(15, 23, 42, .3);
+      transform: translateY(16px) scale(.985);
+      opacity: 0;
+      transition: transform .22s ease, opacity .22s ease;
+    }
+    #modalCarrinhoSepPanel > div:first-child {
+      padding: 14px 18px !important;
+      background: #0f2747 !important;
+      border-bottom: 3px solid #f5a800 !important;
+    }
+    #modalCarrinhoSepPanel > div:first-child h2 {
+      color: #fff !important;
+      font-size: 1.05rem !important;
+      letter-spacing: 0 !important;
+    }
+    .sep-request-heading::after {
+      content: 'Revise os itens e defina o destino da retirada.';
+      display: block;
+      margin-top: 2px;
+      color: #cbd5e1;
+      font-size: .76rem;
+      font-weight: 500;
+    }
+    #modalCarrinhoSepCount {
+      background: #fff7d6 !important;
+      color: #854d0e !important;
+      border: 1px solid #f5c451 !important;
+      border-radius: 6px !important;
+    }
+    #modalCarrinhoSepClose {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      padding: 0 !important;
+      border: 1px solid rgba(255,255,255,.28) !important;
+      border-radius: 6px !important;
+      background: rgba(255,255,255,.08) !important;
+      color: #fff !important;
+      cursor: pointer;
+    }
+    #modalCarrinhoSepItems {
+      min-height: 150px !important;
+      padding: 14px 18px !important;
+      gap: 8px !important;
+      background: #eef2f6 !important;
+    }
+    #modalCarrinhoSepEmpty {
+      color: #64748b !important;
+      background: #fff;
+    }
+    #modalCarrinhoSepForm {
+      border-top: 1px solid #cbd5e1 !important;
+      padding: 14px 18px 16px !important;
+      gap: 12px !important;
+      background: #fff !important;
+    }
+    #modalCarrinhoSepContinue {
+      display: none;
+      width: 100%;
+      min-height: 48px;
+      padding: 8px 12px;
+      border: 0;
+      border-radius: 6px;
+      background: #0f2747;
+      color: #fff;
+      cursor: pointer;
+      text-align: left;
+    }
+    #modalCarrinhoSepContinue span,
+    #modalCarrinhoSepContinue small { display: block; color: inherit !important; }
+    #modalCarrinhoSepContinue span { font-weight: 800; }
+    #modalCarrinhoSepContinue small { margin-top: 2px; color: #cbd5e1 !important; }
+    #modalCarrinhoSepFields label,
+    #modalCarrinhoSepObsWrap summary {
+      color: #334155 !important;
+      font-weight: 700 !important;
+    }
+    .sep-request-helper {
+      display: block;
+      color: #64748b;
+      font-size: .72rem;
+      line-height: 1.25;
+    }
+    #modalCarrinhoSepRequester,
+    #modalCarrinhoSepMotivo,
+    #modalCarrinhoSepDate,
+    #modalCarrinhoSepHorario,
+    #modalCarrinhoSepObs,
+    .sep-cart-qty-input,
+    .sep-cart-comment {
+      min-height: 42px;
+      background: #fff !important;
+      color: #0f172a !important;
+      border: 1px solid #94a3b8 !important;
+      border-radius: 6px !important;
+      box-shadow: none !important;
+    }
+    #modalCarrinhoSepObsWrap {
+      border: 1px solid #cbd5e1 !important;
+      border-radius: 6px !important;
+      background: #f8fafc !important;
+    }
+    .sep-cart-row {
+      border: 1px solid #d7dee8 !important;
+      border-left: 4px solid #f5a800 !important;
+      border-radius: 6px !important;
+      background: #fff !important;
+      box-shadow: 0 2px 8px rgba(15, 23, 42, .06) !important;
+    }
+    .sep-cart-row span { color: #475569 !important; }
+    .sep-cart-row span:first-child { color: #9a5b00 !important; }
+    .sep-cart-row textarea { color: #0f172a !important; }
+    .sep-cart-thumb {
+      border-radius: 6px !important;
+      border-color: #cbd5e1 !important;
+      background: #f8fafc !important;
+    }
+    .sep-cart-qty-dec,
+    .sep-cart-qty-inc {
+      min-width: 36px;
+      min-height: 36px;
+      background: #e8eef6 !important;
+      color: #0f2747 !important;
+      border: 1px solid #b8c5d6 !important;
+    }
+    .sep-cart-comment-status { color: #64748b !important; }
+    #modalCarrinhoSepClear {
+      min-height: 44px;
+      border-radius: 6px !important;
+      background: #fff !important;
+      color: #b42318 !important;
+      border-color: #f0aaa4 !important;
+    }
+    #modalCarrinhoSepSend {
+      min-height: 44px;
+      border-radius: 6px !important;
+      background: #f5a800 !important;
+      color: #251800 !important;
+      box-shadow: none !important;
+    }
     @media (max-width: 760px) {
+      .sep-request-heading::after { display: none; }
+      #modalCarrinhoSepPanel > div:first-child h2 { font-size: .98rem !important; }
       #modalCarrinhoSepFields { grid-template-columns: 1fr !important; }
-      #modalCarrinhoSepPanel { width: 100% !important; max-height: 90vh !important; }
-      .sep-cart-row { grid-template-columns: minmax(0,1fr) auto !important; }
-      .sep-cart-thumb { display: none !important; }
+      #modalCarrinhoSepOverlay { padding: 0 !important; align-items: flex-end !important; }
+      #modalCarrinhoSepPanel { width: 100% !important; height: 96dvh !important; max-height: 96dvh !important; border-radius: 8px 8px 0 0 !important; }
+      #modalCarrinhoSepItems { flex: 1 1 auto !important; min-height: 0 !important; }
+      #modalCarrinhoSepForm { flex: 0 0 auto !important; max-height: 48dvh; overflow-y: auto; }
+      #modalCarrinhoSepContinue { display: block; }
+      #modalCarrinhoSepForm.sep-mobile-collapsed { padding: 10px 14px max(10px, env(safe-area-inset-bottom)) !important; }
+      #modalCarrinhoSepForm.sep-mobile-collapsed > :not(#modalCarrinhoSepContinue) { display: none !important; }
+      .sep-cart-row { grid-template-columns: 56px minmax(0,1fr) auto !important; }
+      .sep-cart-thumb { display: grid !important; }
       .sep-cart-info-grid { grid-template-columns: 1fr !important; }
       .sep-cart-actions-row { flex-wrap: wrap !important; }
+      #modalCarrinhoSepPanel > div:first-child { padding-top: max(12px, env(safe-area-inset-top)) !important; }
+      #modalCarrinhoSepForm { padding-bottom: max(16px, env(safe-area-inset-bottom)) !important; }
     }
     @media (max-width: 520px) {
       #modalCarrinhoSepActions { grid-template-columns: 1fr !important; }
+      #modalCarrinhoSepItems { padding: 10px !important; }
+      .sep-cart-row { grid-template-columns: 48px minmax(0,1fr) auto !important; padding: 9px !important; gap: 8px !important; }
+      .sep-cart-thumb { width: 48px !important; height: 48px !important; }
     }
   `;
   document.head.appendChild(responsiveStyle);
@@ -81845,13 +82255,26 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!sel || sel.options.length <= 1) return;
 
     let me = window.__authStatusCache;
-    if (!me?.user?.sector_id) {
+    if (!me?.user?.id) {
       try {
         const r = await fetch('/api/auth/status', { credentials: 'include' });
         me = await r.json();
         window.__authStatusCache = me;
       } catch { return; }
     }
+    const userId = me?.user?.id;
+    if (userId) {
+      try {
+        const r = await fetch(`/api/colaboradores/${encodeURIComponent(userId)}/separacao-permissao`, { credentials: 'include' });
+        const regra = r.ok ? await r.json() : null;
+        const destinoIndividual = String(regra?.destino_padrao_codigo || '').trim();
+        if (destinoIndividual && Array.from(sel.options).some(o => o.value === destinoIndividual)) {
+          sel.value = destinoIndividual;
+          return;
+        }
+      } catch (_) {}
+    }
+
     const sectorId = me?.user?.sector_id;
     if (!sectorId) return;
 
@@ -81973,6 +82396,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const dateEl = document.getElementById('modalCarrinhoSepDate');
     if (dateEl && !dateEl.value) dateEl.value = new Date().toISOString().slice(0, 10);
 
+    const formEl = document.getElementById('modalCarrinhoSepForm');
+    if (window.matchMedia('(max-width: 760px)').matches) {
+      formEl?.classList.add('sep-mobile-collapsed');
+      if (continueBtn) continueBtn.innerHTML = '<span><i class="fa-solid fa-arrow-right"></i> Continuar para retirada</span><small>Responsável, destino e prazo</small>';
+    } else {
+      formEl?.classList.remove('sep-mobile-collapsed');
+    }
+
     if (Array.isArray(window.__carrinhoSepCache)) {
       _renderItens(window.__carrinhoSepCache);
     } else {
@@ -82085,7 +82516,13 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   ov.addEventListener('click', e => { if (e.target === ov) fechar(); });
 
-  window.abrirModalCarrinhoSeparacao = abrir;
+  window.abrirModalCarrinhoSeparacao = function abrirCarrinhoSeparacaoComPermissao() {
+    if (!exigirPermissaoSistema(
+      SYSTEM_PERMISSION_KEYS.separacao,
+      'Seu usuário não possui permissão para solicitar separação.'
+    )) return;
+    return abrir();
+  };
 
   function _precarregarCarrinhoSeparacao() {
     if (window.__carrinhoSepPreloading) return;
@@ -90950,7 +91387,8 @@ window.initOscilacaoEstoque = (function () {
     });
 
     _systemShortcuts
-      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key))
+      .filter((atalho) => _isSystemShortcutEnabled(atalho.nav_key)
+        && window.usuarioTemPermissaoSistema?.(atalho.nav_key))
       .forEach((atalho) => {
         container.appendChild(criarBotaoAtalho({
           ...atalho,
@@ -90959,6 +91397,8 @@ window.initOscilacaoEstoque = (function () {
         }));
       });
   }
+
+  document.addEventListener('permissions:system-actions-changed', renderizarAtalhosDoSistema);
 
   function renderizarAtalhosFlutuantes() {
     container.querySelectorAll('.shortcut-btn:not([data-system-shortcut="1"])').forEach((btn) => {
