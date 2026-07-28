@@ -55774,6 +55774,11 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
             <span style="font-size:14px;font-weight:700;line-height:1.2;">Últimas compras</span>
             <span style="font-size:11px;color:#7c3aed;line-height:1.35;">Consultar histórico recente de compra</span>
           </button>
+          <button id="modalAcoesBtnEnderecos" type="button" class="produto-enderecos-action" style="background:linear-gradient(135deg,#ecfeff,#cffafe);color:#155e75;border:1px solid #67e8f9;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;flex-direction:column;align-items:flex-start;gap:8px;text-align:left;">
+            <span style="width:42px;height:42px;border-radius:12px;background:#0891b2;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;"><i class="fa-solid fa-location-dot"></i></span>
+            <span style="font-size:14px;font-weight:700;line-height:1.2;">Endereços</span>
+            <span style="font-size:11px;color:#0e7490;line-height:1.35;">Consultar, transferir ou remover locais sem saldo</span>
+          </button>
           <button id="modalAcoesBtnManual" type="button" style="grid-column:1 / -1;background:linear-gradient(135deg,#eff6ff,#dbeafe);color:#075985;border:1px solid #93c5fd;padding:14px 12px;border-radius:12px;cursor:pointer;display:flex;align-items:center;gap:12px;text-align:left;">
             <span style="width:42px;height:42px;border-radius:12px;background:#0ea5e9;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto;"><i class="fa-solid fa-book"></i></span>
             <span style="display:flex;flex-direction:column;gap:4px;min-width:0;">
@@ -56563,6 +56568,15 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
 
   document.getElementById('modalAcoesBtnInformacoes').addEventListener('click', () => { const { codigo } = _ctx; fechar(); abrirModalEditarProduto(codigo); });
   document.getElementById('modalAcoesBtnCompras').addEventListener('click', () => { const {codigo_produto, codigo, descricao} = _ctx; fechar(); abrirModalUltimasCompras(codigo_produto, codigo, descricao); });
+  document.getElementById('modalAcoesBtnEnderecos').addEventListener('click', () => {
+    if (!usuarioPodeGerenciarEnderecosProduto()) {
+      alert('Seu usuário não possui permissão para gerenciar endereços de produtos.');
+      return;
+    }
+    const contexto = { ..._ctx };
+    fechar();
+    window.abrirModalEnderecosProduto?.(contexto);
+  });
   document.getElementById('modalAcoesBtnSeparacao').addEventListener('click', () => abrirQuantidade('separacao'));
   document.getElementById('modalAcoesBtnMovimentar').addEventListener('click', () => {
     const {codigo, descricao, codigo_produto} = _ctx;
@@ -56588,6 +56602,260 @@ window.renderizarCatalogoOmie = renderizarCatalogoOmie;
     ov.style.display = 'flex';
     document.body.classList.add('mobile-modal-open');
     document.querySelector('#modalAcoesBotoes button:not(.perm-hidden)')?.focus({ preventScroll: true });
+  };
+})();
+
+// Gestão de endereços do produto (acesso nominal e proteção equivalente no servidor)
+(function initGestaoEnderecosProduto() {
+  const overlay = document.createElement('div');
+  overlay.id = 'produtoEnderecosOverlay';
+  overlay.className = 'produto-enderecos-overlay';
+  overlay.innerHTML = `
+    <section class="produto-enderecos-panel" role="dialog" aria-modal="true" aria-labelledby="produtoEnderecosTitulo">
+      <header class="produto-enderecos-header">
+        <div class="produto-enderecos-heading">
+          <span class="produto-enderecos-icon"><i class="fa-solid fa-location-dot"></i></span>
+          <div><h2 id="produtoEnderecosTitulo">Endereços do produto</h2><p id="produtoEnderecosSubtitulo"></p></div>
+        </div>
+        <button type="button" class="produto-enderecos-close" aria-label="Fechar gerenciamento de endereços"><i class="fa-solid fa-xmark"></i></button>
+      </header>
+      <div class="produto-enderecos-body">
+        <div class="produto-enderecos-summary" aria-live="polite">
+          <div><span>Saldo endereçado</span><strong id="produtoEnderecosSaldo">—</strong></div>
+          <div><span>Locais encontrados</span><strong id="produtoEnderecosTotal">—</strong></div>
+        </div>
+        <div id="produtoEnderecosAviso" class="produto-enderecos-aviso" role="status"></div>
+        <div id="produtoEnderecosLista" class="produto-enderecos-lista"></div>
+      </div>
+    </section>
+    <div class="produto-enderecos-scanner" hidden>
+      <section class="produto-enderecos-scanner-panel" role="dialog" aria-modal="true" aria-labelledby="produtoEnderecosScannerTitulo">
+        <header><div><strong id="produtoEnderecosScannerTitulo">Bipar endereço de destino</strong><span>Leia o código fixado no novo local.</span></div><button type="button" data-scanner-close aria-label="Fechar leitor"><i class="fa-solid fa-xmark"></i></button></header>
+        <div class="produto-enderecos-camera"><video playsinline muted></video><span class="produto-enderecos-mira"></span></div>
+        <p class="produto-enderecos-scanner-status">Solicitando acesso à câmera…</p>
+        <label>Ou digite o endereço
+          <div><input type="text" autocomplete="off" placeholder="Ex.: 02-01-01-001"><button type="button" data-scanner-use>Usar</button></div>
+        </label>
+      </section>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const panel = overlay.querySelector('.produto-enderecos-panel');
+  const lista = overlay.querySelector('#produtoEnderecosLista');
+  const aviso = overlay.querySelector('#produtoEnderecosAviso');
+  const scanner = overlay.querySelector('.produto-enderecos-scanner');
+  const scannerVideo = scanner.querySelector('video');
+  const scannerInput = scanner.querySelector('input');
+  const scannerStatus = scanner.querySelector('.produto-enderecos-scanner-status');
+  let contexto = null;
+  let dadosAtuais = null;
+  let returnFocus = null;
+  let inputDestinoAtivo = null;
+  let stream = null;
+  let scanTimer = null;
+
+  const esc = (valor) => String(valor ?? '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+  const formatarQtd = (valor, unidade = 'UN') => `${Number(valor || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 })} ${String(unidade || 'UN').toUpperCase()}`;
+
+  function mostrarAviso(texto = '', tipo = '') {
+    aviso.textContent = texto;
+    aviso.className = `produto-enderecos-aviso${tipo ? ` is-${tipo}` : ''}`;
+    aviso.hidden = !texto;
+  }
+
+  function pararScanner() {
+    clearInterval(scanTimer);
+    scanTimer = null;
+    if (stream) stream.getTracks().forEach((track) => track.stop());
+    stream = null;
+    scannerVideo.srcObject = null;
+  }
+
+  function fecharScanner() {
+    pararScanner();
+    scanner.hidden = true;
+    scannerInput.value = '';
+    inputDestinoAtivo?.focus({ preventScroll: true });
+  }
+
+  function aplicarEnderecoLido(valor) {
+    let endereco;
+    try {
+      endereco = _etqAssertEndereco(String(valor || '').trim());
+    } catch (err) {
+      scannerStatus.textContent = err?.message || ETQ_ENDERECO_MSG;
+      scannerStatus.className = 'produto-enderecos-scanner-status is-error';
+      return;
+    }
+    if (inputDestinoAtivo) {
+      inputDestinoAtivo.value = endereco;
+      inputDestinoAtivo.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    fecharScanner();
+  }
+
+  async function abrirScanner(input) {
+    inputDestinoAtivo = input;
+    scanner.hidden = false;
+    scannerStatus.textContent = 'Solicitando acesso à câmera…';
+    scannerStatus.className = 'produto-enderecos-scanner-status';
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      scannerVideo.srcObject = stream;
+      await scannerVideo.play();
+      if (!('BarcodeDetector' in window)) throw new Error('Leitura automática indisponível neste navegador. Digite o endereço abaixo.');
+      const detector = new BarcodeDetector({ formats: ['code_128', 'code_39', 'qr_code', 'data_matrix', 'itf'] });
+      scannerStatus.textContent = 'Aponte para o código do endereço.';
+      scanTimer = setInterval(async () => {
+        if (scannerVideo.readyState < 2) return;
+        try {
+          const codigos = await detector.detect(scannerVideo);
+          if (codigos[0]?.rawValue) aplicarEnderecoLido(codigos[0].rawValue);
+        } catch (_) {}
+      }, 220);
+    } catch (err) {
+      pararScanner();
+      scannerStatus.textContent = err?.message || 'Câmera indisponível. Digite o endereço abaixo.';
+      scannerStatus.className = 'produto-enderecos-scanner-status is-warning';
+      scannerInput.focus({ preventScroll: true });
+    }
+  }
+
+  function fechar() {
+    fecharScanner();
+    overlay.classList.remove('is-open');
+    document.body.classList.remove('mobile-modal-open');
+    contexto = null;
+    dadosAtuais = null;
+    returnFocus?.focus?.({ preventScroll: true });
+  }
+
+  function renderizar() {
+    const enderecos = Array.isArray(dadosAtuais?.enderecos) ? dadosAtuais.enderecos : [];
+    const unidade = dadosAtuais?.produto?.unidade || contexto?.unidade || 'UN';
+    overlay.querySelector('#produtoEnderecosSaldo').textContent = formatarQtd(dadosAtuais?.saldo_total, unidade);
+    overlay.querySelector('#produtoEnderecosTotal').textContent = String(enderecos.length);
+    if (!enderecos.length) {
+      lista.innerHTML = `<div class="produto-enderecos-empty"><i class="fa-solid fa-location-crosshairs"></i><strong>Nenhum endereço cadastrado</strong><span>Este produto ainda não possui saldo ou histórico em um endereço interno.</span></div>`;
+      return;
+    }
+    lista.innerHTML = enderecos.map((item) => {
+      const saldo = Number(item.saldo || 0);
+      const semSaldo = Math.abs(saldo) < 0.000001;
+      return `<article class="produto-endereco-card${semSaldo ? ' is-empty' : ''}" data-endereco="${esc(item.endereco)}">
+        <div class="produto-endereco-main">
+          <span class="produto-endereco-pin"><i class="fa-solid fa-location-dot"></i></span>
+          <div class="produto-endereco-info"><span>Endereço</span><strong>${esc(item.endereco)}</strong><small>${Number(item.registros || 0)} registro(s)</small></div>
+          <div class="produto-endereco-saldo"><span>Saldo</span><strong>${esc(formatarQtd(saldo, item.unidade || unidade))}</strong><small>${semSaldo ? 'Disponível para exclusão' : 'Saldo será movido integralmente'}</small></div>
+        </div>
+        <div class="produto-endereco-actions">
+          <button type="button" data-action="transferir" ${semSaldo ? 'disabled' : ''}><i class="fa-solid fa-right-left"></i><span>Trocar endereço</span></button>
+          <button type="button" data-action="excluir" class="is-danger" ${semSaldo ? '' : 'disabled'} title="${semSaldo ? 'Excluir endereço sem saldo' : 'A exclusão só é permitida sem saldo'}"><i class="fa-solid fa-trash-can"></i><span>Excluir</span></button>
+        </div>
+        <div class="produto-endereco-transfer" hidden>
+          <label>Novo endereço de destino</label>
+          <div class="produto-endereco-transfer-input"><input type="text" autocomplete="off" placeholder="Bipe ou digite o destino"><button type="button" data-action="scan" aria-label="Bipar endereço de destino"><i class="fa-solid fa-barcode"></i><span>Bipar</span></button></div>
+          <p>Todo o saldo de <strong>${esc(item.endereco)}</strong> será levado ao novo endereço.</p>
+          <div class="produto-endereco-transfer-actions"><button type="button" data-action="cancelar">Cancelar</button><button type="button" data-action="confirmar" class="is-primary">Confirmar transferência</button></div>
+        </div>
+      </article>`;
+    }).join('');
+  }
+
+  async function carregar() {
+    lista.innerHTML = `<div class="produto-enderecos-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Carregando endereços…</span></div>`;
+    mostrarAviso('');
+    try {
+      const resp = await fetch(`/api/logistica/produtos/${encodeURIComponent(contexto.codigo)}/enderecos`, { credentials: 'include', cache: 'no-store' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Não foi possível carregar os endereços.');
+      dadosAtuais = data;
+      renderizar();
+    } catch (err) {
+      lista.innerHTML = '';
+      mostrarAviso(err.message || 'Não foi possível carregar os endereços.', 'error');
+    }
+  }
+
+  async function excluir(card) {
+    const endereco = card.dataset.endereco;
+    if (!confirm(`Excluir o endereço ${endereco}? Somente os registros sem saldo serão removidos.`)) return;
+    mostrarAviso(`Excluindo ${endereco}…`);
+    try {
+      const resp = await fetch(`/api/logistica/produtos/${encodeURIComponent(contexto.codigo)}/enderecos`, {
+        method: 'DELETE', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endereco })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao excluir endereço.');
+      await carregar();
+      mostrarAviso(`Endereço ${endereco} excluído.`, 'success');
+    } catch (err) { mostrarAviso(err.message || 'Falha ao excluir endereço.', 'error'); }
+  }
+
+  async function transferir(card) {
+    const origem = card.dataset.endereco;
+    const input = card.querySelector('.produto-endereco-transfer input');
+    let destino;
+    try { destino = _etqAssertEndereco(input.value); }
+    catch (err) { mostrarAviso(err?.message || ETQ_ENDERECO_MSG, 'error'); input.focus(); return; }
+    if (!confirm(`Mover todo o saldo de ${origem} para ${destino}?`)) return;
+    mostrarAviso(`Transferindo saldo de ${origem} para ${destino}…`);
+    try {
+      const resp = await fetch(`/api/logistica/produtos/${encodeURIComponent(contexto.codigo)}/enderecos`, {
+        method: 'PATCH', credentials: 'include', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ origem, destino })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao trocar endereço.');
+      await carregar();
+      mostrarAviso(`${formatarQtd(data.saldo_movido, dadosAtuais?.produto?.unidade)} movidos para ${destino}.`, 'success');
+    } catch (err) { mostrarAviso(err.message || 'Falha ao trocar endereço.', 'error'); }
+  }
+
+  lista.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    const card = button?.closest('.produto-endereco-card');
+    if (!button || !card || button.disabled) return;
+    const composer = card.querySelector('.produto-endereco-transfer');
+    const input = composer?.querySelector('input');
+    if (button.dataset.action === 'transferir') {
+      lista.querySelectorAll('.produto-endereco-transfer').forEach((el) => { if (el !== composer) el.hidden = true; });
+      composer.hidden = false; input.focus({ preventScroll: true });
+    } else if (button.dataset.action === 'cancelar') composer.hidden = true;
+    else if (button.dataset.action === 'scan') abrirScanner(input);
+    else if (button.dataset.action === 'confirmar') transferir(card);
+    else if (button.dataset.action === 'excluir') excluir(card);
+  });
+  lista.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && event.target.matches('.produto-endereco-transfer input')) {
+      event.preventDefault(); transferir(event.target.closest('.produto-endereco-card'));
+    }
+  });
+  overlay.querySelector('.produto-enderecos-close').addEventListener('click', fechar);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) fechar(); });
+  scanner.querySelector('[data-scanner-close]').addEventListener('click', fecharScanner);
+  scanner.querySelector('[data-scanner-use]').addEventListener('click', () => aplicarEnderecoLido(scannerInput.value));
+  scannerInput.addEventListener('keydown', (event) => { if (event.key === 'Enter') aplicarEnderecoLido(scannerInput.value); });
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    if (!scanner.hidden) fecharScanner();
+    else if (overlay.classList.contains('is-open')) fechar();
+  });
+
+  window.abrirModalEnderecosProduto = function abrirModalEnderecosProduto(novoContexto) {
+    if (!usuarioPodeGerenciarEnderecosProduto()) {
+      alert('Seu usuário não possui permissão para gerenciar endereços de produtos.');
+      return;
+    }
+    returnFocus = document.activeElement;
+    contexto = novoContexto || {};
+    overlay.querySelector('#produtoEnderecosTitulo').textContent = `Endereços · ${contexto.codigo || ''}`;
+    overlay.querySelector('#produtoEnderecosSubtitulo').textContent = contexto.descricao || 'Gestão dos locais internos deste produto';
+    overlay.classList.add('is-open');
+    document.body.classList.add('mobile-modal-open');
+    panel.scrollTop = 0;
+    carregar();
   };
 })();
 
@@ -71511,6 +71779,19 @@ window.usuarioTemPermissaoSistema = function usuarioTemPermissaoSistema(navKey) 
   return window.__navPermissionsByKey?.[navKey] === true;
 };
 
+const USUARIOS_GESTAO_ENDERECOS_PRODUTO = new Set([
+  'jair.r', 'leandro.s', 'denis.m', 'alexsandro.j'
+]);
+
+function usuarioPodeGerenciarEnderecosProduto() {
+  const username = String(window.__sessionUser?.username || window.__sessionUser?.login || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return USUARIOS_GESTAO_ENDERECOS_PRODUTO.has(username);
+}
+
 function atualizarAcoesSistemaPorPermissao() {
   const regras = [
     ['#listaProdutosAbrirCarrinhoBtn', SYSTEM_PERMISSION_KEYS.compras],
@@ -71527,6 +71808,9 @@ function atualizarAcoesSistemaPorPermissao() {
     document.querySelectorAll(selector).forEach((el) => {
       el.classList.toggle('perm-hidden', !window.usuarioTemPermissaoSistema(navKey));
     });
+  });
+  document.querySelectorAll('#modalAcoesBtnEnderecos').forEach((el) => {
+    el.classList.toggle('perm-hidden', !usuarioPodeGerenciarEnderecosProduto());
   });
   document.dispatchEvent(new CustomEvent('permissions:system-actions-changed'));
 }

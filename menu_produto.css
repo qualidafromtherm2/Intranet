@@ -16108,6 +16108,181 @@ body.mobile-modal-open {
   }
 }
 
+/* Gestão de endereços por produto */
+.produto-enderecos-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(3, 7, 18, .78);
+  backdrop-filter: blur(4px);
+}
+
+.produto-enderecos-overlay.is-open { display: flex; }
+
+.produto-enderecos-panel {
+  width: min(920px, 96vw);
+  max-height: min(820px, 92dvh);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  color: #e5e7eb;
+  background: #141821;
+  border: 1px solid #30394a;
+  border-radius: 16px;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, .55);
+}
+
+.produto-enderecos-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 18px;
+  border-bottom: 1px solid #2b3342;
+  background: #171c26;
+}
+
+.produto-enderecos-heading { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.produto-enderecos-icon,
+.produto-endereco-pin {
+  flex: 0 0 42px;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  background: #ff5a4f;
+  border-radius: 12px;
+}
+.produto-enderecos-heading h2 { margin: 0; color: #fff; font-size: 17px; line-height: 1.25; }
+.produto-enderecos-heading p { margin: 4px 0 0; color: #8994a8; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.produto-enderecos-close,
+.produto-enderecos-scanner header button {
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 12px;
+  color: #cbd5e1;
+  background: #252c38;
+  cursor: pointer;
+}
+
+.produto-enderecos-body { min-height: 0; overflow-y: auto; padding: 16px 18px 20px; }
+.produto-enderecos-summary { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-bottom: 14px; }
+.produto-enderecos-summary > div { padding: 12px 14px; background: #1c2330; border: 1px solid #30394a; border-radius: 12px; }
+.produto-enderecos-summary span { display: block; color: #8994a8; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .04em; }
+.produto-enderecos-summary strong { display: block; margin-top: 5px; color: #fff; font-size: 20px; }
+.produto-enderecos-aviso { margin-bottom: 12px; padding: 10px 12px; border: 1px solid #475569; border-radius: 10px; color: #cbd5e1; background: #1e293b; font-size: 13px; }
+.produto-enderecos-aviso.is-error { color: #fecaca; border-color: #7f1d1d; background: rgba(127, 29, 29, .24); }
+.produto-enderecos-aviso.is-success { color: #bbf7d0; border-color: #166534; background: rgba(22, 101, 52, .22); }
+.produto-enderecos-lista { display: grid; gap: 10px; }
+.produto-enderecos-loading,
+.produto-enderecos-empty { min-height: 210px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 9px; color: #8994a8; text-align: center; }
+.produto-enderecos-empty i { color: #ff5a4f; font-size: 28px; }
+.produto-enderecos-empty strong { color: #e5e7eb; font-size: 15px; }
+.produto-enderecos-empty span { max-width: 420px; font-size: 13px; }
+
+.produto-endereco-card { overflow: hidden; background: #1a202b; border: 1px solid #323b4c; border-radius: 13px; }
+.produto-endereco-card.is-empty { border-style: dashed; }
+.produto-endereco-main { display: grid; grid-template-columns: 42px minmax(180px, 1fr) minmax(170px, auto); align-items: center; gap: 12px; padding: 13px; }
+.produto-endereco-pin { color: #67e8f9; background: #12313b; }
+.produto-endereco-info,
+.produto-endereco-saldo { min-width: 0; }
+.produto-endereco-info span,
+.produto-endereco-saldo span { display: block; color: #8994a8; font-size: 10px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.produto-endereco-info strong,
+.produto-endereco-saldo strong { display: block; margin-top: 3px; color: #f8fafc; font-size: 15px; overflow-wrap: anywhere; }
+.produto-endereco-info small,
+.produto-endereco-saldo small { display: block; margin-top: 3px; color: #7f8aa3; font-size: 11px; }
+.produto-endereco-saldo { text-align: right; }
+.produto-endereco-saldo strong { color: #5eead4; font-variant-numeric: tabular-nums; }
+.produto-endereco-card.is-empty .produto-endereco-saldo strong { color: #94a3b8; }
+.produto-endereco-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 13px 13px; }
+.produto-endereco-actions button,
+.produto-endereco-transfer-actions button,
+.produto-endereco-transfer-input button {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 9px 13px;
+  border: 1px solid #3b4659;
+  border-radius: 10px;
+  color: #dbeafe;
+  background: #263044;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.produto-endereco-actions button.is-danger { color: #fecaca; border-color: #7f1d1d; background: rgba(127, 29, 29, .25); }
+.produto-endereco-actions button:disabled { opacity: .38; cursor: not-allowed; }
+.produto-endereco-transfer { padding: 14px; border-top: 1px solid #30394a; background: #111722; }
+.produto-endereco-transfer[hidden] { display: none; }
+.produto-endereco-transfer label { display: block; margin-bottom: 7px; color: #cbd5e1; font-size: 12px; font-weight: 750; }
+.produto-endereco-transfer-input { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.produto-endereco-transfer-input input,
+.produto-enderecos-scanner input { min-width: 0; min-height: 44px; padding: 10px 12px; border: 1px solid #445066; border-radius: 10px; outline: none; color: #f8fafc; background: #1a202b; font-size: 15px; }
+.produto-endereco-transfer-input input:focus,
+.produto-enderecos-scanner input:focus { border-color: #38bdf8; box-shadow: 0 0 0 3px rgba(56, 189, 248, .16); }
+.produto-endereco-transfer p { margin: 9px 0 12px; color: #8994a8; font-size: 11px; }
+.produto-endereco-transfer-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.produto-endereco-transfer-actions button.is-primary { color: #fff; border-color: #ff5a4f; background: #ff5a4f; }
+
+.produto-enderecos-scanner { position: fixed; inset: 0; z-index: 2; display: flex; align-items: center; justify-content: center; padding: 18px; background: rgba(3, 7, 18, .9); }
+.produto-enderecos-scanner[hidden] { display: none; }
+.produto-enderecos-scanner-panel { width: min(520px, 96vw); overflow: hidden; color: #e5e7eb; background: #141821; border: 1px solid #354055; border-radius: 16px; }
+.produto-enderecos-scanner header { display: flex; justify-content: space-between; gap: 12px; padding: 14px; }
+.produto-enderecos-scanner header strong,
+.produto-enderecos-scanner header span { display: block; }
+.produto-enderecos-scanner header span { margin-top: 3px; color: #8994a8; font-size: 12px; }
+.produto-enderecos-camera { position: relative; min-height: 280px; overflow: hidden; background: #05070a; }
+.produto-enderecos-camera video { width: 100%; height: 100%; min-height: 280px; object-fit: cover; }
+.produto-enderecos-mira { position: absolute; top: 50%; left: 50%; width: 82%; height: 88px; border: 2px solid #5eead4; border-radius: 10px; transform: translate(-50%, -50%); box-shadow: 0 0 0 999px rgba(0, 0, 0, .24); }
+.produto-enderecos-scanner-status { margin: 0; padding: 11px 14px 0; color: #94a3b8; font-size: 12px; }
+.produto-enderecos-scanner-status.is-error { color: #fca5a5; }
+.produto-enderecos-scanner-status.is-warning { color: #fcd34d; }
+.produto-enderecos-scanner label { display: block; padding: 12px 14px 16px; color: #cbd5e1; font-size: 12px; font-weight: 700; }
+.produto-enderecos-scanner label > div { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-top: 7px; }
+.produto-enderecos-scanner [data-scanner-use] { min-width: 76px; border: 0; border-radius: 10px; color: #fff; background: #ff5a4f; font-weight: 800; cursor: pointer; }
+
+@media (max-width: 760px) {
+  .produto-enderecos-overlay { align-items: flex-end; padding: 0; }
+  .produto-enderecos-panel { width: 100%; max-height: 100dvh; height: 100dvh; border: 0; border-radius: 0; }
+  .produto-enderecos-header { padding: calc(10px + env(safe-area-inset-top)) 12px 10px; }
+  .produto-enderecos-heading p { max-width: calc(100vw - 112px); }
+  .produto-enderecos-body { padding: 12px 12px calc(24px + env(safe-area-inset-bottom)); }
+  .produto-enderecos-summary strong { font-size: 17px; }
+  .produto-endereco-main { grid-template-columns: 38px 1fr; gap: 10px; }
+  .produto-endereco-pin { width: 38px; height: 38px; flex-basis: 38px; }
+  .produto-endereco-saldo { grid-column: 2; text-align: left; padding-top: 8px; border-top: 1px solid #30394a; }
+  .produto-endereco-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .produto-endereco-actions button { min-height: 46px; }
+  .produto-endereco-transfer-input { grid-template-columns: minmax(0, 1fr) 82px; }
+  .produto-endereco-transfer-actions { display: grid; grid-template-columns: 1fr; }
+  .produto-endereco-transfer-actions button.is-primary { grid-row: 1; min-height: 48px; }
+  .produto-enderecos-scanner { align-items: flex-end; padding: 0; }
+  .produto-enderecos-scanner-panel { width: 100%; max-height: 100dvh; border-radius: 16px 16px 0 0; padding-bottom: env(safe-area-inset-bottom); }
+  .produto-enderecos-camera,
+  .produto-enderecos-camera video { min-height: min(46dvh, 380px); }
+}
+
+@media (min-width: 761px) and (max-width: 1024px) {
+  .produto-enderecos-panel { width: min(760px, 95vw); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .produto-enderecos-panel,
+  .produto-enderecos-scanner-panel { animation: none !important; }
+}
+
 /* Compras workspace v3: separates daily work from archival volume. */
 .compras-board-overview {
   display: flex;
