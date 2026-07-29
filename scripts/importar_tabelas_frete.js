@@ -8,6 +8,12 @@ const XLSX = require('xlsx');
 const pdfParse = require('pdf-parse');
 const { Pool } = require('pg');
 const { normalizarTexto } = require('../utils/freteEngine');
+const {
+  EJL_PRACAS_OFICIAIS,
+  FONTE_EJL_PRACAS,
+  FONTE_EJL_PRACAS_CONSULTADA_EM
+} = require('./dados/ejl_pracas_oficiais');
+const { SAO_MIGUEL_CONTRATO, SAO_MIGUEL_TARIFAS } = require('./dados/sao_miguel_tarifas');
 
 const args = process.argv.slice(2);
 const valorArg = (nome) => {
@@ -21,6 +27,36 @@ const aplicar = args.includes('--apply');
 const diretorio = path.resolve(valorArg('--dir') || process.env.FRETE_TABELAS_DIR || '');
 
 const FONTES = [
+  {
+    arquivo: 'EXPRESSO SAO MIGUEL BIGUACU- Localidades Atendidas e Previsão de Entrega (1).xls',
+    slug: 'expresso-sao-miguel', nome: 'Expresso São Miguel',
+    abas: ['Comercial - Localidades Atendid']
+  },
+  {
+    arquivo: 'TABELA EXPRESSO SAO MIGUEL.pdf', slug: 'expresso-sao-miguel',
+    nome: 'Expresso São Miguel', tipo: 'pdf', sufixo: 'tarifa', status: 'inativa',
+    finalidade: 'Tarifa principal, generalidades e regras incorporadas à tabela de cobertura.'
+  },
+  {
+    arquivo: 'EXPRESSO SAO MIGUEL 2026 TDA 07 14.xls', slug: 'expresso-sao-miguel',
+    nome: 'Expresso São Miguel', abas: ['TAXAS - RELATÓRIO EXTERNO'], sufixo: 'tda', status: 'inativa',
+    finalidade: 'Relação de TDA por destinatário/CNPJ preservada para consulta, sem aplicação preventiva.'
+  },
+  {
+    arquivo: 'EXPRESSO SAO MIGUEL 2026 TDE 07 14.xls', slug: 'expresso-sao-miguel',
+    nome: 'Expresso São Miguel', abas: ['TAXAS - RELATÓRIO EXTERNO'], sufixo: 'tde', status: 'inativa',
+    finalidade: 'Relação de TDE por destinatário/CNPJ preservada para consulta, sem aplicação preventiva.'
+  },
+  {
+    arquivo: 'EXPRESSO SAO MIGUEL 2026 TDC 07 14.xls', slug: 'expresso-sao-miguel',
+    nome: 'Expresso São Miguel', abas: ['TAXAS - RELATÓRIO EXTERNO'], sufixo: 'tdc', status: 'inativa',
+    finalidade: 'Relação de TDC por destinatário/CNPJ preservada para consulta, sem aplicação preventiva.'
+  },
+  {
+    arquivo: 'EXPRESSO SAO MIGUEL 2026 TVD 14 07.xls', slug: 'expresso-sao-miguel',
+    nome: 'Expresso São Miguel', abas: ['TAXAS - RELATÓRIO EXTERNO'], sufixo: 'tvd', status: 'inativa',
+    finalidade: 'Relação de TVD por destinatário/CNPJ preservada para consulta, sem aplicação preventiva.'
+  },
   { arquivo: 'EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'] },
   { arquivo: 'RELAÇÃO DE TDE EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'], sufixo: 'tde', status: 'inativa' },
   { arquivo: 'TABELA FITLOG - ATUAL.xlsx', slug: 'fitlog', nome: 'Fitlog', abas: ['DADOS', 'PADRÃO', 'GENERALIDADES', 'PRAÇA', 'TABELA', 'TARIFA POR CIDADE', 'SSW-PROVISÓRIO'] },
@@ -452,7 +488,176 @@ function codigoSeguro(valor) {
   return normalizarTexto(valor).replace(/\s+/g, '_').replace(/[^A-Z0-9_]/g, '');
 }
 
+async function normalizarSaoMiguel(client, tabelaId, grupos, fontesAuxiliares = []) {
+  const coberturaGrupo = grupos.find((grupo) => grupo.aba === 'Comercial - Localidades Atendid');
+  if (!coberturaGrupo) {
+    return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A planilha de localidades da Expresso São Miguel não foi encontrada.'] };
+  }
+
+  const fonteTarifa = fontesAuxiliares.find((item) => item.fonte?.sufixo === 'tarifa');
+  const textoTarifa = fonteTarifa?.grupos?.flatMap((grupo) => grupo.linhas)
+    .map((linha) => String(linha.dados?.texto || '')).join(' ') || '';
+  const textoNormalizado = normalizarTexto(textoTarifa);
+  const pdfConferido = fonteTarifa?.sha === SAO_MIGUEL_CONTRATO.sha256
+    && textoNormalizado.includes('136588 2026')
+    && textoNormalizado.includes('SP1');
+
+  const coberturas = [];
+  const regioesCobertura = new Set();
+  const contagemPorRegiao = {};
+  for (const linha of coberturaGrupo.linhas.filter((item) => item.numero_linha >= 2)) {
+    const origem = normalizarTexto(celula(linha, 'A'));
+    const cidade = String(celula(linha, 'B') || '').trim();
+    const uf = String(celula(linha, 'C') || '').trim().toUpperCase();
+    const regiao = String(celula(linha, 'D') || '').trim().toUpperCase();
+    if (!origem.includes('BIGUACU') || !cidade || !/^(SP|PR|SC|RS)$/.test(uf) || !/^(SP|PR|SC|RS)\d+$/.test(regiao)) continue;
+    const codigoRegiao = `SAO_MIGUEL_${codigoSeguro(regiao)}`;
+    const prazoMin = Number(celula(linha, 'Q')) || null;
+    const prazoMax = Number(celula(linha, 'R')) || prazoMin;
+    const diasAtendimento = [
+      ['K', 'SEG'], ['L', 'TER'], ['M', 'QUA'], ['N', 'QUI'], ['O', 'SEX']
+    ].filter(([coluna]) => celula(linha, coluna)).map(([, dia]) => dia).join(', ');
+    regioesCobertura.add(regiao);
+    contagemPorRegiao[regiao] = (contagemPorRegiao[regiao] || 0) + 1;
+    coberturas.push({
+      codigo_regiao: codigoRegiao,
+      uf,
+      cidade,
+      cidade_normalizada: normalizarTexto(cidade),
+      codigo_ibge: Number(celula(linha, 'G')) || null,
+      cep_inicio: numeroCep(celula(linha, 'I')) || numeroCep(celula(linha, 'H')),
+      cep_fim: numeroCep(celula(linha, 'J')) || numeroCep(celula(linha, 'H')),
+      prazo_min: prazoMin,
+      prazo_max: prazoMax,
+      frequencia: diasAtendimento || null,
+      metadados: {
+        arquivo_linha: linha.numero_linha,
+        regiao_original: regiao,
+        sigla: celula(linha, 'E') || null,
+        unidade: celula(linha, 'F') || null,
+        cep_principal: numeroCep(celula(linha, 'H')),
+        previsao_entrega: celula(linha, 'P') || null
+      }
+    });
+  }
+
+  if (coberturas.length) await client.query(`
+    INSERT INTO frete.cobertura (
+      tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada, codigo_ibge,
+      cep_inicio, cep_fim, prazo_min_dias, prazo_max_dias, frequencia, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada, x.codigo_ibge,
+           x.cep_inicio, x.cep_fim, x.prazo_min, x.prazo_max, x.frequencia, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT, codigo_ibge BIGINT,
+      cep_inicio BIGINT, cep_fim BIGINT, prazo_min INTEGER, prazo_max INTEGER,
+      frequencia TEXT, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(coberturas)]);
+
+  const faixas = pdfConferido ? SAO_MIGUEL_TARIFAS.map((tarifa) => ({
+    codigo_regiao: `SAO_MIGUEL_${codigoSeguro(tarifa.regiao)}`,
+    peso_de: 0,
+    peso_ate: null,
+    valor_base: 0,
+    valor_excedente: tarifa.quilo,
+    peso_referencia: 0,
+    frete_minimo: tarifa.taxa,
+    ad_valorem: tarifa.percentual_nf,
+    pedagio: 3.47,
+    metadados: {
+      regiao: tarifa.regiao,
+      siglas: tarifa.siglas,
+      contrato: SAO_MIGUEL_CONTRATO.numero,
+      referencia: SAO_MIGUEL_CONTRATO.referencia,
+      fonte_sha256: SAO_MIGUEL_CONTRATO.sha256
+    }
+  })) : [];
+  if (faixas.length) await client.query(`
+    INSERT INTO frete.tarifa_faixa (
+      tabela_preco_id, codigo_regiao, peso_de_kg, peso_ate_kg, valor_base,
+      valor_kg_excedente, peso_referencia_excedente_kg, frete_minimo,
+      ad_valorem_aliquota, pedagio_por_100kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.peso_de, x.peso_ate, x.valor_base,
+           x.valor_excedente, x.peso_referencia, x.frete_minimo,
+           x.ad_valorem, x.pedagio, 100, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, peso_de NUMERIC, peso_ate NUMERIC, valor_base NUMERIC,
+      valor_excedente NUMERIC, peso_referencia NUMERIC, frete_minimo NUMERIC,
+      ad_valorem NUMERIC, pedagio NUMERIC, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(faixas)]);
+
+  const regras = pdfConferido ? [
+    { codigo: 'GRIS', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.0017, minimo: 3.63, prioridade: 20, observacao: '0,17% do valor da NF, mínimo de R$ 3,63.' },
+    { codigo: 'TAS', nome: 'Taxa administrativa', tipo: 'fixo', valor: 3, minimo: null, prioridade: 30, observacao: 'R$ 3,00 por CT-e.' }
+  ] : [];
+  if (regras.length) await client.query(`
+    INSERT INTO frete.regra_adicional (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, valor_minimo,
+      condicoes, prioridade, ativo, observacao
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.minimo,
+           '{}'::jsonb, x.prioridade, TRUE, x.observacao
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, minimo NUMERIC,
+      prioridade INTEGER, observacao TEXT
+    )
+  `, [tabelaId, JSON.stringify(regras)]);
+
+  await client.query(`
+    UPDATE frete.tabela_preco
+       SET origem_cep = $2, origem_cidade = $3, origem_uf = $4,
+           fator_cubagem_kg_m3 = 300, vigencia_inicio = $5, vigencia_fim = $6,
+           configuracao = COALESCE(configuracao, '{}'::jsonb) || $7::jsonb,
+           atualizado_em = NOW()
+     WHERE id = $1
+  `, [
+    tabelaId,
+    SAO_MIGUEL_CONTRATO.origem_cep,
+    SAO_MIGUEL_CONTRATO.origem_cidade,
+    SAO_MIGUEL_CONTRATO.origem_uf,
+    SAO_MIGUEL_CONTRATO.vigencia_inicio,
+    SAO_MIGUEL_CONTRATO.vigencia_fim,
+    JSON.stringify({
+      cubagem_isenta_ate_m3: 0.30,
+      icms_aplicar: true,
+      icms_incluso: false,
+      contrato: SAO_MIGUEL_CONTRATO.numero,
+      referencia: SAO_MIGUEL_CONTRATO.referencia
+    })
+  ]);
+
+  const regioesTarifa = new Set(SAO_MIGUEL_TARIFAS.map((item) => item.regiao));
+  const regioesSemTarifa = [...regioesCobertura].filter((regiao) => !regioesTarifa.has(regiao)).sort();
+  const auxiliares = Object.fromEntries(fontesAuxiliares
+    .filter((item) => ['tda', 'tde', 'tdc', 'tvd'].includes(item.fonte?.sufixo))
+    .map((item) => [item.fonte.sufixo.toUpperCase(), item.grupos.reduce((total, grupo) => total + Math.max(0, grupo.linhas.length - 1), 0)]));
+  const alertas = [
+    ...(pdfConferido ? [] : ['O PDF tarifário não corresponde ao contrato auditado; nenhuma tarifa foi aplicada.']),
+    ...(regioesSemTarifa.length ? [`${regioesSemTarifa.join(', ')} possui cobertura, mas não possui tarifa no contrato.`] : []),
+    'TDA, TDE, TDC e TVD foram preservadas por destinatário/CNPJ e não são aplicadas preventivamente.',
+    'SVD, T-CPF, TPC, reentrega e devolução dependem do perfil ou evento operacional e não são aplicadas automaticamente.',
+    'Tabela mantida em revisão até a homologação dos cálculos com CT-es reais.'
+  ];
+  return {
+    coberturas: coberturas.length,
+    faixas: faixas.length,
+    regras: regras.length,
+    contrato_pdf_conferido: pdfConferido,
+    regioes_cobertura: [...regioesCobertura].sort(),
+    regioes_tarifa: [...regioesTarifa].sort(),
+    regioes_sem_tarifa: regioesSemTarifa,
+    coberturas_por_regiao: contagemPorRegiao,
+    linhas_auxiliares: auxiliares,
+    alertas
+  };
+}
+
 async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
+  const prazoPadraoHoras = 48;
+  const prazoPadraoDias = 2;
   const principal = grupos.find((grupo) => grupo.aba === 'Planilha1');
   if (!principal) return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A planilha principal da Expresso EJL não foi encontrada.'] };
 
@@ -480,29 +685,108 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
     });
   }
 
-  const coberturaDados = destinos.map((item) => ({
-    codigo_regiao: item.codigo_regiao, uf: item.uf, cidade: item.cidade,
-    cidade_normalizada: item.cidade_normalizada, cep_inicio: null, cep_fim: null,
-    tde: null, metadados: { fonte: 'EXPRESSO EJL.xlsx', linha: item.linha }
-  }));
-  const cidadesTarifadas = new Set(destinos.map((item) => `${item.uf}|${item.cidade_normalizada}`));
+  const destinosPorRegiao = new Map(destinos.map((item) => [`${item.uf}|${item.cidade_normalizada}`, item]));
+  const coberturaDados = [];
+  const chavesCobertura = new Set();
+  let pracasComTarifa = 0;
+  let pracasSemTarifa = 0;
+
+  const adicionarCobertura = (cobertura) => {
+    const chave = `${cobertura.uf}|${cobertura.cidade_normalizada || '*'}|${cobertura.codigo_regiao}|${cobertura.cep_inicio || '*'}|${cobertura.cep_fim || '*'}`;
+    if (chavesCobertura.has(chave)) return;
+    chavesCobertura.add(chave);
+    coberturaDados.push({
+      ...cobertura,
+      prazo_min_dias: prazoPadraoDias,
+      prazo_max_dias: prazoPadraoDias,
+      metadados: {
+        ...(cobertura.metadados || {}),
+        prazo_padrao_horas: prazoPadraoHoras,
+        prazo_fonte: 'confirmacao_operacional_ejl_2026-07-29'
+      }
+    });
+  };
+
+  for (const grupo of EJL_PRACAS_OFICIAIS) {
+    const nomeRegiao = normalizarTexto(grupo.regiaoTarifaria);
+    const destinoTarifado = nomeRegiao ? destinosPorRegiao.get(`${grupo.uf}|${nomeRegiao}`) : null;
+    for (const cidade of grupo.cidades) {
+      const destinoDireto = destinosPorRegiao.get(`${grupo.uf}|${normalizarTexto(cidade)}`);
+      const destinoDaPraca = destinoDireto || destinoTarifado;
+      const codigoRegiao = destinoDaPraca?.codigo_regiao || `EJL_${grupo.uf}_SEM_TARIFA`;
+      adicionarCobertura({
+        codigo_regiao: codigoRegiao, uf: grupo.uf, cidade,
+        cidade_normalizada: normalizarTexto(cidade), cep_inicio: null, cep_fim: null,
+        tde: null, metadados: {
+          fonte: FONTE_EJL_PRACAS,
+          fonte_consultada_em: FONTE_EJL_PRACAS_CONSULTADA_EM,
+          grupo_praca: grupo.grupo,
+          regiao_tarifaria: grupo.regiaoTarifaria,
+          estrategia_tarifa: destinoDireto
+            ? 'tarifa_direta_planilha'
+            : (destinoTarifado ? 'tarifa_regional_planilha' : 'cobertura_sem_tarifa')
+        }
+      });
+      if (destinoDaPraca) pracasComTarifa += 1;
+      else pracasSemTarifa += 1;
+    }
+    if (grupo.coberturaUfCompleta) {
+      const codigoRegiao = destinoTarifado?.codigo_regiao || `EJL_${grupo.uf}_SEM_TARIFA`;
+      adicionarCobertura({
+        codigo_regiao: codigoRegiao, uf: grupo.uf, cidade: null,
+        cidade_normalizada: null, cep_inicio: null, cep_fim: null, tde: null,
+        metadados: {
+          fonte: FONTE_EJL_PRACAS,
+          fonte_consultada_em: FONTE_EJL_PRACAS_CONSULTADA_EM,
+          grupo_praca: grupo.grupo,
+          cobertura_uf_completa: true,
+          regiao_tarifaria: grupo.regiaoTarifaria,
+          estrategia_tarifa: destinoTarifado ? 'tarifa_regional_planilha' : 'cobertura_sem_tarifa'
+        }
+      });
+    }
+  }
+
+  // Preserva destinos tarifados da planilha caso a pagina oficial seja alterada.
+  for (const destino of destinos) {
+    adicionarCobertura({
+      codigo_regiao: destino.codigo_regiao, uf: destino.uf, cidade: destino.cidade,
+      cidade_normalizada: destino.cidade_normalizada, cep_inicio: null, cep_fim: null,
+      tde: null, metadados: {
+        fonte: 'EXPRESSO EJL.xlsx', linha: destino.linha,
+        estrategia_tarifa: 'tarifa_direta_planilha'
+      }
+    });
+  }
+
+  const codigosTarifados = new Set(destinos.map((item) => item.codigo_regiao));
+  const cidadesTarifadas = new Set(coberturaDados
+    .filter((item) => codigosTarifados.has(item.codigo_regiao) && item.cidade_normalizada)
+    .map((item) => `${item.uf}|${item.cidade_normalizada}`));
+  const coberturasPorCidade = new Map();
+  for (const cobertura of coberturaDados.filter((item) => item.cidade_normalizada)) {
+    if (!coberturasPorCidade.has(cobertura.cidade_normalizada)) coberturasPorCidade.set(cobertura.cidade_normalizada, []);
+    coberturasPorCidade.get(cobertura.cidade_normalizada).push(cobertura);
+  }
   let tdesAplicados = 0;
   for (const auxiliar of fontesAuxiliares.filter((item) => item.fonte?.slug === 'expresso-ejl' && item.fonte?.sufixo === 'tde')) {
     const aba = auxiliar.grupos.find((grupo) => grupo.aba === 'Planilha1');
     for (const linha of (aba?.linhas || []).filter((item) => item.numero_linha >= 2)) {
       const cidade = String(celula(linha, 'C') || '').trim();
       const cidadeNormalizada = normalizarTexto(cidade);
-      const destino = destinos.find((item) => item.cidade_normalizada === cidadeNormalizada);
+      const candidatas = coberturasPorCidade.get(cidadeNormalizada) || [];
+      const codigosRegiao = new Set(candidatas.map((item) => item.codigo_regiao));
+      const coberturaDestino = codigosRegiao.size === 1 ? candidatas[0] : null;
       const tde = Number(celula(linha, 'E'));
-      if (!destino || !(tde > 0)) continue;
+      if (!coberturaDestino || !(tde > 0)) continue;
       const faixaTexto = String(celula(linha, 'D') || '').trim();
       const ceps = faixaTexto.match(/\d[\d.\-\s]{6,}\d/g) || [];
       const cepInicio = numeroCep(ceps[0]);
       const cepFim = numeroCep(ceps[1]);
       if (!cepInicio || !cepFim) continue;
-      coberturaDados.push({
-        codigo_regiao: destino.codigo_regiao, uf: destino.uf, cidade: destino.cidade,
-        cidade_normalizada: destino.cidade_normalizada, cep_inicio: cepInicio, cep_fim: cepFim,
+      adicionarCobertura({
+        codigo_regiao: coberturaDestino.codigo_regiao, uf: coberturaDestino.uf, cidade: coberturaDestino.cidade,
+        cidade_normalizada: coberturaDestino.cidade_normalizada, cep_inicio: cepInicio, cep_fim: cepFim,
         tde, metadados: { fonte: auxiliar.fonte.arquivo, linha: linha.numero_linha, faixa_original: faixaTexto }
       });
       tdesAplicados += 1;
@@ -512,13 +796,14 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
   if (coberturaDados.length) await client.query(`
     INSERT INTO frete.cobertura (
       tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada,
-      cep_inicio, cep_fim, tde, metadados
+      cep_inicio, cep_fim, prazo_min_dias, prazo_max_dias, tde, metadados
     )
     SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada,
-           x.cep_inicio, x.cep_fim, x.tde, x.metadados
+           x.cep_inicio, x.cep_fim, x.prazo_min_dias, x.prazo_max_dias, x.tde, x.metadados
     FROM jsonb_to_recordset($2::jsonb) AS x(
       codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT,
-      cep_inicio INTEGER, cep_fim INTEGER, tde NUMERIC, metadados JSONB
+      cep_inicio INTEGER, cep_fim INTEGER, prazo_min_dias INTEGER,
+      prazo_max_dias INTEGER, tde NUMERIC, metadados JSONB
     )
   `, [tabelaId, JSON.stringify(coberturaDados)]);
 
@@ -568,8 +853,23 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
 
   return {
     coberturas: coberturaDados.length, faixas: faixaDados.length, regras: regrasDados.length,
-    diagnostico_chaves: { cidades_tarifadas: cidadesTarifadas.size, faixas_tde_aplicadas: tdesAplicados },
-    alertas: ['Tabela mantida em revisão; devolução e reentrega são eventos operacionais e não entram automaticamente na cotação.']
+    diagnostico_chaves: {
+      cidades_tarifadas: cidadesTarifadas.size,
+      pracas_oficiais_com_tarifa: pracasComTarifa,
+      pracas_oficiais_sem_tarifa: pracasSemTarifa,
+      estados_cobertos: [...new Set(EJL_PRACAS_OFICIAIS.map((item) => item.uf))].sort(),
+      estados_com_cobertura_integral: EJL_PRACAS_OFICIAIS.filter((item) => item.coberturaUfCompleta).map((item) => item.uf),
+      faixas_tde_aplicadas: tdesAplicados,
+      prazo_padrao_horas: prazoPadraoHoras,
+      fonte_cobertura: FONTE_EJL_PRACAS,
+      fonte_cobertura_consultada_em: FONTE_EJL_PRACAS_CONSULTADA_EM
+    },
+    alertas: [
+      'Cobertura oficial conciliada com a relação de praças da EJL; os valores continuam vindo exclusivamente da planilha comercial.',
+      'Prazo operacional padrão da EJL configurado em 48 horas para todas as praças atendidas.',
+      'Bahia possui cobertura oficial estadual, mas permanece com preço pendente porque a planilha comercial não informa tarifa principal.',
+      'Tabela mantida em revisão; devolução e reentrega são eventos operacionais e não entram automaticamente na cotação.'
+    ]
   };
 }
 
@@ -1220,11 +1520,11 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
     ON CONFLICT (slug) DO UPDATE SET nome = EXCLUDED.nome, atualizado_em = NOW()
     RETURNING id
   `, [fonte.slug, fonte.nome]);
-  const finalidadeFonte = fonte.sufixo === 'tde'
+  const finalidadeFonte = fonte.finalidade || (fonte.sufixo === 'tde'
     ? 'Faixas de TDE incorporadas à tabela principal.'
     : fonte.tipo === 'pdf'
       ? 'Tarifas atualizadas incorporadas à tabela principal.'
-      : null;
+      : null);
   const tabela = await client.query(`
     INSERT INTO frete.tabela_preco (
       transportadora_id, nome, versao, status, fator_cubagem_kg_m3, arquivo_origem, arquivo_sha256,
@@ -1261,6 +1561,7 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
   await client.query('DELETE FROM frete.cobertura WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   const total = await inserirLinhas(client, importacao.rows[0].id, grupos);
   let normalizacao = { alertas: ['Fonte preservada em staging; regras ainda não normalizadas.'] };
+  if (fonte.slug === 'expresso-sao-miguel' && !fonte.sufixo) normalizacao = await normalizarSaoMiguel(client, tabela.rows[0].id, grupos, fontesAuxiliares);
   if (fonte.slug === 'expresso-ejl' && !fonte.sufixo) normalizacao = await normalizarEjl(client, tabela.rows[0].id, grupos, fontesAuxiliares);
   if (fonte.slug === 'fitlog') normalizacao = await normalizarFitlogPorCidade(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'bristot-rocha') normalizacao = await normalizarBristot(client, tabela.rows[0].id, grupos);
@@ -1323,5 +1624,7 @@ if (require.main === module) {
 }
 
 module.exports = {
-  normalizarFitlogPorCidade
+  normalizarFitlogPorCidade,
+  normalizarEjl,
+  normalizarSaoMiguel
 };

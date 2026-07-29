@@ -56,6 +56,25 @@ test('simula peso cubado, excedente e adicionais com memória detalhada', () => 
   assert.equal(resultado.prazo_max_dias, 3);
 });
 
+test('respeita isenção de cubagem até o volume definido pela tabela', () => {
+  const base = {
+    tabela: { status: 'ativa', fator_cubagem_kg_m3: 300, configuracao: { cubagem_isenta_ate_m3: 0.30 } },
+    destino: { uf: 'SC', cidade: 'Biguaçu' },
+    valorMercadoria: 0,
+    coberturas: [{ uf: 'SC', cidade_normalizada: 'BIGUACU', codigo_regiao: 'SC1', atendida: true }],
+    tarifas: [{ codigo_regiao: 'SC1', peso_de_kg: 0, peso_ate_kg: null, valor_base: 0, valor_kg_excedente: 1, peso_referencia_excedente_kg: 0, frete_minimo: 20 }],
+    regras: []
+  };
+  const isenta = simularTransportadora({ ...base, romaneio: { peso_real_kg: 10, volume_m3: 0.30 } });
+  const cubada = simularTransportadora({ ...base, romaneio: { peso_real_kg: 10, volume_m3: 0.31 } });
+  assert.equal(isenta.cubagem_isenta, true);
+  assert.equal(isenta.peso_cubado_kg, 0);
+  assert.equal(isenta.peso_cobravel_kg, 10);
+  assert.equal(cubada.cubagem_isenta, false);
+  assert.equal(cubada.peso_cubado_kg, 93);
+  assert.equal(cubada.peso_cobravel_kg, 93);
+});
+
 test('aceita cobertura por cidade quando a transportadora nao informa faixa de CEP', () => {
   const cobertura = escolherCobertura([
     { id: 3, uf: 'SC', cidade: 'Sao Jose', cidade_normalizada: 'SAO JOSE', cep_inicio: null, cep_fim: null, atendida: true }

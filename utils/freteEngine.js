@@ -248,7 +248,10 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
   if (!cobertura) return { ok: false, motivo: 'Destino não atendido pela tabela.' };
 
   const fatorCubagem = numero(tabela.fator_cubagem_kg_m3, 300);
-  const pesoCubadoKg = arredondar(romaneio.volume_m3 * fatorCubagem, 4);
+  const volumeM3 = numero(romaneio.volume_m3);
+  const cubagemIsentaAteM3 = numero(tabela?.configuracao?.cubagem_isenta_ate_m3);
+  const cubagemIsenta = cubagemIsentaAteM3 > 0 && volumeM3 > 0 && volumeM3 <= cubagemIsentaAteM3;
+  const pesoCubadoKg = cubagemIsenta ? 0 : arredondar(volumeM3 * fatorCubagem, 4);
   const pesoCobravelKg = Math.max(numero(romaneio.peso_real_kg), pesoCubadoKg);
   const tarifa = escolherTarifa(tarifas, cobertura, destino, pesoCobravelKg);
   if (!tarifa) return {
@@ -306,6 +309,7 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
     tipo_resultado: homologado ? 'homologado' : 'previa_em_revisao',
     cobertura,
     tarifa,
+    cubagem_isenta: cubagemIsenta,
     peso_cubado_kg: pesoCubadoKg,
     peso_cobravel_kg: arredondar(pesoCobravelKg, 4),
     frete_peso: fretePeso,
