@@ -215,3 +215,41 @@ test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
   assert.equal(resultado.adicionais, 55.97);
   assert.equal(resultado.valor_total, 100.77);
 });
+
+test('prioriza SEC-CAT atual e acumula zona de risco sem duplicar o adicional', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SC', cidade: 'Camboriú', cep: '88340-000' },
+    romaneio: { peso_real_kg: 71, volume_m3: 0.1 },
+    valorMercadoria: 1000,
+    coberturas: [{ uf: 'SC', cidade_normalizada: 'CAMBORIU', codigo_regiao: 'UNIDADE_133' }],
+    tarifas: [{ codigo_regiao: 'UNIDADE_133', peso_de_kg: 60, peso_ate_kg: 80, valor_base: 44.8 }],
+    regras: [
+      { codigo: 'SEC_CAT', nome: 'SEC-CAT', tipo_calculo: 'fixo', valor: 99, prioridade: 100 },
+      { codigo: 'SEC_CAT', nome: 'SEC-CAT', tipo_calculo: 'fixo', valor: 25.71, prioridade: 10, condicoes: { peso_cobravel_maior_que: 60 } },
+      { codigo: 'ZONA_RISCO', nome: 'Zona de risco', tipo_calculo: 'fixo', valor: 72.98, prioridade: 20 }
+    ]
+  });
+
+  assert.deepEqual(resultado.adicionais_detalhe.map((item) => item.codigo), ['SEC_CAT', 'ZONA_RISCO']);
+  assert.equal(resultado.adicionais, 98.69);
+  assert.equal(resultado.valor_total, 143.49);
+});
+
+test('seleciona uma unica faixa de zona de restricao pelo peso cobravel', () => {
+  const criar = (peso) => simularTransportadora({
+    tabela: { status: 'ativa', fator_cubagem_kg_m3: 300 },
+    destino: { uf: 'SP', cidade: 'São Paulo', cep: '01526-000' },
+    romaneio: { peso_real_kg: peso, volume_m3: 0 },
+    coberturas: [{ uf: 'SP', cidade_normalizada: 'SAO PAULO', codigo_regiao: 'CAPITAL_SP' }],
+    tarifas: [{ codigo_regiao: 'CAPITAL_SP', peso_de_kg: 0, peso_ate_kg: null, valor_base: 100 }],
+    regras: [
+      { codigo: 'ZONA_RESTRICAO', nome: 'Zona de restrição', tipo_calculo: 'fixo', valor: 289.95, prioridade: 20, condicoes: { peso_cobravel_maior_que: 500, peso_cobravel_ate: 1000 } },
+      { codigo: 'ZONA_RESTRICAO', nome: 'Zona de restrição', tipo_calculo: 'fixo', valor: 571.64, prioridade: 20, condicoes: { peso_cobravel_maior_que: 1000, peso_cobravel_ate: 1500 } }
+    ]
+  });
+
+  assert.equal(criar(1000).adicionais, 289.95);
+  assert.equal(criar(1000.5).adicionais, 571.64);
+});

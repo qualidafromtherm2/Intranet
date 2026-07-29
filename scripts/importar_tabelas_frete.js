@@ -740,6 +740,8 @@ function regiaoTarifariaRodonaves(uf, cidadeNormalizada) {
 async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = []) {
   const prazosGrupo = grupos.find((grupo) => grupo.aba === 'Planilha7');
   const secCatGrupo = grupos.find((grupo) => grupo.aba === 'Tarifas Cidade Coleta-Entrega');
+  const restricaoGrupo = grupos.find((grupo) => normalizarTexto(grupo.aba) === 'CEPS ZONA DE RESTRICAO SP');
+  const riscoGrupo = grupos.find((grupo) => normalizarTexto(grupo.aba) === 'CEPS ZONA DE RISCO SP');
   if (!prazosGrupo) {
     return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A aba Planilha7 da Rodonaves não foi encontrada.'] };
   }
@@ -899,6 +901,93 @@ async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = 
     )
   `, [tabelaId, JSON.stringify(faixaDados)]);
 
+  const adicionaisCepDados = [];
+  for (const linha of (secCatGrupo?.linhas || []).filter((item) => item.numero_linha >= 2)) {
+    const uf = String(celula(linha, 'D') || '').trim().toUpperCase();
+    const cidade = normalizarTexto(celula(linha, 'C'));
+    const cepInicio = numeroCep(celula(linha, 'E'));
+    const cepFim = numeroCep(celula(linha, 'F'));
+    const valor = Number(celula(linha, 'B'));
+    if (!/^[A-Z]{2}$/.test(uf) || !cidade || !cepInicio || !cepFim || !(valor > 0)) continue;
+    adicionaisCepDados.push({
+      codigo: 'SEC_CAT', nome: 'SEC-CAT', tipo: 'fixo', valor,
+      uf, cidade_normalizada: cidade, cep_inicio: cepInicio, cep_fim: cepFim,
+      peso_maior_que: null, peso_ate: null, prioridade: 100,
+      metadados: {
+        fonte: 'Tarifas Cidade Coleta-Entrega', linha: linha.numero_linha,
+        nome_tarifa: celula(linha, 'A'), unidade: celula(linha, 'G'),
+        unidade_nome: celula(linha, 'H'), regional: celula(linha, 'I')
+      }
+    });
+  }
+
+  if (pdfConferido) {
+    const adicionarTarifaCidade = (uf, cidades, limite, valorAte, valorAcima, grupo) => {
+      for (const cidade of cidades) {
+        const comum = {
+          codigo: 'SEC_CAT', nome: 'SEC-CAT', tipo: 'fixo', uf,
+          cidade_normalizada: normalizarTexto(cidade), cep_inicio: null, cep_fim: null,
+          prioridade: 10, metadados: { fonte: pdfAtualizado.fonte.arquivo, grupo }
+        };
+        adicionaisCepDados.push({ ...comum, valor: valorAte, peso_maior_que: 0, peso_ate: limite });
+        adicionaisCepDados.push({ ...comum, valor: valorAcima, peso_maior_que: limite, peso_ate: null });
+      }
+    };
+    adicionarTarifaCidade('GO', [
+      'ABADIA DE GOIAS', 'APARECIDA DE GOIANIA', 'GOIANIA', 'GOIANIRA',
+      'INHUMAS', 'SENADOR CANEDO', 'TRINDADE'
+    ], 100, 15.79, 37.27, 'Tarifa Goiania');
+    adicionarTarifaCidade('RS', ['PORTO ALEGRE'], 60, 15.79, 37.27, 'Tarifa Cidades Especificas');
+    adicionarTarifaCidade('PR', ['CURITIBA'], 60, 15.79, 37.27, 'Tarifa Cidades Especificas');
+    adicionarTarifaCidade('SC', ['ITAJAI', 'NAVEGANTES'], 60, 15.79, 37.27, 'Tarifa Cidades Especificas');
+    adicionarTarifaCidade('SC', ['CAMBORIU', 'BALNEARIO CAMBORIU'], 60, 10.24, 25.71, 'Tarifa Camboriu');
+
+    for (const linha of (riscoGrupo?.linhas || []).filter((item) => item.numero_linha >= 2)) {
+      const uf = String(celula(linha, 'F') || '').trim().toUpperCase();
+      const cidade = normalizarTexto(celula(linha, 'E'));
+      const cepInicio = numeroCep(celula(linha, 'B'));
+      const cepFim = numeroCep(celula(linha, 'C'));
+      if (!/^[A-Z]{2}$/.test(uf) || !cidade || !cepInicio || !cepFim) continue;
+      adicionaisCepDados.push({
+        codigo: 'ZONA_RISCO', nome: 'Zona de risco', tipo: 'fixo', valor: 72.98,
+        uf, cidade_normalizada: cidade, cep_inicio: cepInicio, cep_fim: cepFim,
+        peso_maior_que: null, peso_ate: null, prioridade: 20,
+        metadados: { fonte: pdfAtualizado.fonte.arquivo, lista: riscoGrupo.aba, linha: linha.numero_linha, bairro: celula(linha, 'A') }
+      });
+    }
+
+    for (const linha of (restricaoGrupo?.linhas || []).filter((item) => item.numero_linha >= 2)) {
+      const uf = String(celula(linha, 'F') || '').trim().toUpperCase();
+      const cidade = normalizarTexto(celula(linha, 'E'));
+      const cepInicio = numeroCep(celula(linha, 'B'));
+      const cepFim = numeroCep(celula(linha, 'C'));
+      if (!/^[A-Z]{2}$/.test(uf) || !cidade || !cepInicio || !cepFim) continue;
+      const comum = {
+        codigo: 'ZONA_RESTRICAO', nome: 'Zona de restrição', tipo: 'fixo',
+        uf, cidade_normalizada: cidade, cep_inicio: cepInicio, cep_fim: cepFim,
+        prioridade: 20,
+        metadados: { fonte: pdfAtualizado.fonte.arquivo, lista: restricaoGrupo.aba, linha: linha.numero_linha, bairro: celula(linha, 'A') }
+      };
+      adicionaisCepDados.push({ ...comum, valor: 289.95, peso_maior_que: 500, peso_ate: 1000 });
+      adicionaisCepDados.push({ ...comum, valor: 571.64, peso_maior_que: 1000, peso_ate: 1500 });
+      adicionaisCepDados.push({ ...comum, valor: 795.31, peso_maior_que: 1500, peso_ate: null });
+    }
+  }
+
+  if (adicionaisCepDados.length) await client.query(`
+    INSERT INTO frete.adicional_cep (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, uf, cidade_normalizada,
+      cep_inicio, cep_fim, peso_maior_que_kg, peso_ate_kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.uf, x.cidade_normalizada,
+           x.cep_inicio, x.cep_fim, x.peso_maior_que, x.peso_ate, x.prioridade, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, uf CHAR(2), cidade_normalizada TEXT,
+      cep_inicio INTEGER, cep_fim INTEGER, peso_maior_que NUMERIC, peso_ate NUMERIC,
+      prioridade INTEGER, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(adicionaisCepDados)]);
+
   const regioes = (ufs) => [...new Set(ufs.flatMap((uf) => [...(regioesPorUf.get(uf) || [])]))];
   const goEspeciais = ['UNIDADE_203', 'UNIDADE_205'];
   const mgEspeciais = ['UNIDADE_881', 'UNIDADE_882', 'UNIDADE_883', 'UNIDADE_884', 'UNIDADE_885', 'UNIDADE_886'];
@@ -931,11 +1020,15 @@ async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = 
     coberturas: coberturaDados.length,
     faixas: faixaDados.length,
     regras: regrasDados.length,
+    adicionais_cep: adicionaisCepDados.length,
     diagnostico_chaves: {
       cidades_sec_cat: secCatPorCidade.size,
       cidades_com_multiplas_sec_cat: cidadesComMultiplasSecCat,
       regioes_destino: new Set(coberturaDados.map((item) => item.codigo_regiao)).size,
       cidades_com_tarifa_pdf: new Set(faixaDados.map((item) => `${item.uf}|${item.cidade_normalizada}`)).size,
+      sec_cat_por_cep: adicionaisCepDados.filter((item) => item.codigo === 'SEC_CAT' && item.cep_inicio).length,
+      faixas_zona_risco: adicionaisCepDados.filter((item) => item.codigo === 'ZONA_RISCO').length,
+      faixas_zona_restricao: adicionaisCepDados.filter((item) => item.codigo === 'ZONA_RESTRICAO').length,
       linhas_prazo_ignoradas_por_origem: prazosIgnoradosOutraOrigem
     },
     alertas: [
@@ -943,7 +1036,8 @@ async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = 
       ...(pdfConferido
         ? ['Tarifa principal de frete-peso reconciliada com o PDF atualizado para Sul, SP, MG, GO e DF.']
         : ['O PDF atualizado não corresponde à versão auditada; a tarifa principal não foi aplicada.']),
-      'SEC-CAT, zona de risco, zona de restrição, TFD, reentrega e devolução permanecem em metadados ou staging e não são aplicados automaticamente.'
+      'SEC-CAT e zonas de risco/restrição são aplicadas somente quando cidade, CEP e faixa de peso confirmam a incidência.',
+      'TFD, reentrega e devolução permanecem fora da cotação automática porque dependem de eventos operacionais.'
     ]
   };
 }
@@ -977,6 +1071,7 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
 
   await client.query('DELETE FROM frete.importacao_linha WHERE importacao_id = $1', [importacao.rows[0].id]);
   await client.query('DELETE FROM frete.regra_adicional WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
+  await client.query('DELETE FROM frete.adicional_cep WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   await client.query('DELETE FROM frete.tarifa_faixa WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   await client.query('DELETE FROM frete.cobertura WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   const total = await inserirLinhas(client, importacao.rows[0].id, grupos);

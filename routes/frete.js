@@ -389,8 +389,9 @@ router.post('/simular', async (req, res) => {
     let coberturas = [];
     let tarifas = [];
     let regras = [];
+    let adicionaisCep = [];
     if (ids.length) {
-      [coberturas, tarifas, regras] = await Promise.all([
+      [coberturas, tarifas, regras, adicionaisCep] = await Promise.all([
         pool.query(`SELECT * FROM frete.cobertura WHERE tabela_preco_id = ANY($1::bigint[]) AND atendida = TRUE AND uf = $2 AND (($3::int IS NOT NULL AND cep_inicio IS NOT NULL AND $3 BETWEEN cep_inicio AND cep_fim) OR cidade_normalizada = $4 OR (cep_inicio IS NULL AND cidade_normalizada IS NULL))`, [ids, destino.uf, cep, normalizarTexto(destino.cidade)]).then((r) => r.rows),
         pool.query(`
           SELECT *
@@ -400,7 +401,21 @@ router.post('/simular', async (req, res) => {
             AND (cidade_normalizada IS NULL OR cidade_normalizada = $3)
           ORDER BY prioridade, peso_de_kg
         `, [ids, destino.uf, normalizarTexto(destino.cidade)]).then((r) => r.rows),
-        pool.query('SELECT * FROM frete.regra_adicional WHERE tabela_preco_id = ANY($1::bigint[]) AND ativo = TRUE ORDER BY prioridade', [ids]).then((r) => r.rows)
+        pool.query('SELECT * FROM frete.regra_adicional WHERE tabela_preco_id = ANY($1::bigint[]) AND ativo = TRUE ORDER BY prioridade', [ids]).then((r) => r.rows),
+        pool.query(`
+          SELECT *
+          FROM frete.adicional_cep
+          WHERE tabela_preco_id = ANY($1::bigint[])
+            AND ativo = TRUE
+            AND (uf IS NULL OR uf = $2)
+            AND (cidade_normalizada IS NULL OR cidade_normalizada = $3)
+            AND (
+              (cep_inicio IS NULL AND cep_fim IS NULL)
+              OR ($4::int IS NOT NULL AND $4 BETWEEN cep_inicio AND cep_fim)
+            )
+          ORDER BY prioridade,
+                   CASE WHEN cep_inicio IS NOT NULL AND cep_fim IS NOT NULL THEN cep_fim - cep_inicio ELSE 99999999 END
+        `, [ids, destino.uf, normalizarTexto(destino.cidade), cep]).then((r) => r.rows)
       ]);
     }
 
@@ -413,7 +428,18 @@ router.post('/simular', async (req, res) => {
         valorMercadoria,
         coberturas: coberturas.filter((item) => String(item.tabela_preco_id) === String(tabela.id)),
         tarifas: tarifas.filter((item) => String(item.tabela_preco_id) === String(tabela.id)),
-        regras: regras.filter((item) => String(item.tabela_preco_id) === String(tabela.id))
+        regras: [
+          ...regras.filter((item) => String(item.tabela_preco_id) === String(tabela.id)),
+          ...adicionaisCep
+            .filter((item) => String(item.tabela_preco_id) === String(tabela.id))
+            .map((item) => ({
+              ...item,
+              condicoes: {
+                peso_cobravel_maior_que: item.peso_maior_que_kg,
+                peso_cobravel_ate: item.peso_ate_kg
+              }
+            }))
+        ]
       });
       return {
         tabela_id: tabela.id,

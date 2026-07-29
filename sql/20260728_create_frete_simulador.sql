@@ -136,6 +136,36 @@ CREATE TABLE IF NOT EXISTS frete.regra_adicional (
   UNIQUE (tabela_preco_id, codigo)
 );
 
+CREATE TABLE IF NOT EXISTS frete.adicional_cep (
+  id BIGSERIAL PRIMARY KEY,
+  tabela_preco_id BIGINT NOT NULL REFERENCES frete.tabela_preco(id) ON DELETE CASCADE,
+  codigo TEXT NOT NULL,
+  nome TEXT NOT NULL,
+  tipo_calculo TEXT NOT NULL
+    CHECK (tipo_calculo IN ('fixo', 'percentual_mercadoria', 'percentual_frete', 'por_100kg', 'por_kg', 'maior_entre_percentual_e_minimo')),
+  valor NUMERIC(16,8) NOT NULL,
+  valor_minimo NUMERIC(14,4),
+  valor_maximo NUMERIC(14,4),
+  uf CHAR(2),
+  cidade_normalizada TEXT,
+  cep_inicio INTEGER,
+  cep_fim INTEGER,
+  peso_maior_que_kg NUMERIC(14,4),
+  peso_ate_kg NUMERIC(14,4),
+  prioridade INTEGER NOT NULL DEFAULT 100,
+  ativo BOOLEAN NOT NULL DEFAULT TRUE,
+  metadados JSONB NOT NULL DEFAULT '{}'::jsonb,
+  CHECK (cep_inicio IS NULL OR cep_inicio BETWEEN 1000000 AND 99999999),
+  CHECK (cep_fim IS NULL OR cep_fim BETWEEN 1000000 AND 99999999),
+  CHECK (cep_inicio IS NULL OR cep_fim IS NULL OR cep_inicio <= cep_fim),
+  CHECK (peso_maior_que_kg IS NULL OR peso_maior_que_kg >= 0),
+  CHECK (peso_ate_kg IS NULL OR peso_ate_kg >= 0)
+);
+
+CREATE INDEX IF NOT EXISTS frete_adicional_cep_busca_idx
+  ON frete.adicional_cep (tabela_preco_id, uf, cidade_normalizada, cep_inicio, cep_fim, prioridade)
+  WHERE ativo = TRUE;
+
 CREATE TABLE IF NOT EXISTS frete.configuracao (
   chave TEXT PRIMARY KEY,
   valor JSONB NOT NULL,

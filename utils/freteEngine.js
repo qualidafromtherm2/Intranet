@@ -176,6 +176,8 @@ function condicaoAtende(condicoes, contexto) {
   if (Array.isArray(c.codigos_regiao) && !c.codigos_regiao.includes(contexto.cobertura?.codigo_regiao)) return false;
   if (c.valor_mercadoria_de != null && contexto.valorMercadoria < numero(c.valor_mercadoria_de)) return false;
   if (c.valor_mercadoria_ate != null && contexto.valorMercadoria > numero(c.valor_mercadoria_ate)) return false;
+  if (c.peso_cobravel_maior_que != null && contexto.pesoCobravelKg <= numero(c.peso_cobravel_maior_que)) return false;
+  if (c.peso_cobravel_ate != null && contexto.pesoCobravelKg > numero(c.peso_cobravel_ate)) return false;
   if (c.metadado_cobertura) {
     const meta = contexto.cobertura?.metadados || {};
     if (!Object.entries(c.metadado_cobertura).every(([chave, valor]) => meta[chave] === valor)) return false;
@@ -220,9 +222,15 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
 
   const fretePeso = calcularFretePeso(tarifa, pesoCobravelKg);
   const contexto = { destino, cobertura, fretePeso, pesoCobravelKg, valorMercadoria: numero(valorMercadoria) };
+  const codigosAplicados = new Set();
   const adicionaisDetalhe = (Array.isArray(regras) ? regras : [])
     .filter((regra) => regra.ativo !== false && condicaoAtende(regra.condicoes, contexto))
     .sort((a, b) => numero(a.prioridade, 100) - numero(b.prioridade, 100))
+    .filter((regra) => {
+      if (codigosAplicados.has(regra.codigo)) return false;
+      codigosAplicados.add(regra.codigo);
+      return true;
+    })
     .map((regra) => ({ codigo: regra.codigo, nome: regra.nome, valor: calcularRegra(regra, contexto) }));
 
   if (numero(tarifa.ad_valorem_aliquota) > 0 && !adicionaisDetalhe.some((item) => item.codigo === 'ADV')) {
