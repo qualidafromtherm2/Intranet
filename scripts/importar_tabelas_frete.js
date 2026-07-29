@@ -23,7 +23,7 @@ const diretorio = path.resolve(valorArg('--dir') || process.env.FRETE_TABELAS_DI
 const FONTES = [
   { arquivo: 'EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'] },
   { arquivo: 'RELAÇÃO DE TDE EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'], sufixo: 'tde', status: 'inativa' },
-  { arquivo: 'TABELA FITLOG - ATUAL.xlsx', slug: 'fitlog', nome: 'Fitlog', abas: ['DADOS', 'PADRÃO', 'GENERALIDADES', 'PRAÇA', 'TABELA', 'SSW-PROVISÓRIO'] },
+  { arquivo: 'TABELA FITLOG - ATUAL.xlsx', slug: 'fitlog', nome: 'Fitlog', abas: ['DADOS', 'PADRÃO', 'GENERALIDADES', 'PRAÇA', 'TABELA', 'TARIFA POR CIDADE', 'SSW-PROVISÓRIO'] },
   { arquivo: 'TABELA FROMTHERM BRISTOT ROCHA.xlsx', slug: 'bristot-rocha', nome: 'Bristot Rocha', abas: ['Tarifas', 'Cidades Prazos x Classificação', 'Generalidades'] },
   { arquivo: 'TABELA FROMTHERM X MENGUE EXPRESS.xlsx', slug: 'mengue-express', nome: 'Mengue Express', abas: ['TABELA MENGUE SSW', 'BD CIDADE+PRAÇA+TAXAS+FREQ+PREV'] },
   { arquivo: 'TABELA RODONAVES - DESATUALIZADA.xlsm', slug: 'rodonaves', nome: 'Rodonaves', abas: ['Proposta SUL-SUD-CO-AC & RO', 'Lista de Tarifas Valor-OCULTAR', 'Tarifas Cidade Coleta-Entrega', 'CEPS Zona de Restrição - SP', 'CEPS Zona de Risco - SP', 'Planilha7'] },
@@ -573,7 +573,176 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
   };
 }
 
-async function normalizarFitlog(client, tabelaId, grupos) {
+async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
+  const tarifaPorCidade = grupos.find((grupo) => grupo.aba === 'TARIFA POR CIDADE');
+  if (!tarifaPorCidade) {
+    return {
+      coberturas: 0,
+      faixas: 0,
+      regras: 0,
+      alertas: ['A aba TARIFA POR CIDADE da Fitlog nao foi encontrada.']
+    };
+  }
+
+  const cidades = new Map();
+  let linhasSemTarifa = 0;
+  for (const linha of tarifaPorCidade.linhas.filter((item) => item.numero_linha >= 5)) {
+    const cidade = String(celula(linha, 'B') || '').trim();
+    const uf = String(celula(linha, 'C') || '').trim().toUpperCase();
+    if (!cidade || !/^[A-Z]{2}$/.test(uf)) continue;
+    const cidadeNormalizada = normalizarTexto(cidade);
+    const chave = `${uf}|${cidadeNormalizada}`;
+    if (cidades.has(chave)) continue;
+    const valores = ['H', 'I', 'J', 'K', 'L', 'M'].map((coluna) => Number(celula(linha, coluna)));
+    if (!valores.some((valor) => valor > 0)) {
+      linhasSemTarifa += 1;
+      continue;
+    }
+    cidades.set(chave, {
+      codigo_regiao: `FITLOG_${uf}_${codigoSeguro(cidadeNormalizada)}`,
+      uf,
+      cidade,
+      cidade_normalizada: cidadeNormalizada,
+      linha: linha.numero_linha,
+      limites: [10, 20, 30, 50, 70, 100],
+      valores,
+      excedente: Number(celula(linha, 'N')),
+      frete_valor: Number(celula(linha, 'O')),
+      frete_valor_minimo: Number(celula(linha, 'P')),
+      pedagio: Number(celula(linha, 'U')),
+      despacho: Number(celula(linha, 'Q')),
+      cep_inicio: numeroCep(celula(linha, 'AE')),
+      cep_fim: numeroCep(celula(linha, 'AF')),
+      regiao: celula(linha, 'G') || null
+    });
+  }
+
+  const coberturaDados = [...cidades.values()].map((item) => ({
+    codigo_regiao: item.codigo_regiao,
+    uf: item.uf,
+    cidade: item.cidade,
+    cidade_normalizada: item.cidade_normalizada,
+    cep_inicio: item.cep_inicio,
+    cep_fim: item.cep_fim,
+    metadados: {
+      fonte: 'TARIFA POR CIDADE',
+      linha: item.linha,
+      origem_praca: 'FLNP/FLNR',
+      regiao: item.regiao
+    }
+  }));
+  if (coberturaDados.length) await client.query(`
+    INSERT INTO frete.cobertura (
+      tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada,
+      cep_inicio, cep_fim, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada,
+           x.cep_inicio, x.cep_fim, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT,
+      cep_inicio INTEGER, cep_fim INTEGER, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(coberturaDados)]);
+
+  const faixaDados = [];
+  for (const item of cidades.values()) {
+    let anterior = 0;
+    let ultimoLimite = null;
+    let ultimoValor = null;
+    for (let indice = 0; indice < item.limites.length; indice += 1) {
+      const valor = item.valores[indice];
+      if (!(valor > 0)) continue;
+      faixaDados.push({
+        codigo_regiao: item.codigo_regiao,
+        peso_de: anterior,
+        peso_ate: item.limites[indice],
+        valor_base: valor,
+        valor_excedente: null,
+        peso_referencia: null,
+        despacho: item.despacho > 0 ? item.despacho : null,
+        pedagio: item.pedagio > 0 ? item.pedagio : null,
+        metadados: { fonte: 'TARIFA POR CIDADE', linha: item.linha }
+      });
+      anterior = item.limites[indice];
+      ultimoLimite = item.limites[indice];
+      ultimoValor = valor;
+    }
+    if (ultimoValor != null && ultimoLimite != null && item.excedente > 0) {
+      faixaDados.push({
+        codigo_regiao: item.codigo_regiao,
+        peso_de: ultimoLimite,
+        peso_ate: null,
+        valor_base: ultimoValor,
+        valor_excedente: item.excedente,
+        peso_referencia: ultimoLimite,
+        despacho: item.despacho > 0 ? item.despacho : null,
+        pedagio: item.pedagio > 0 ? item.pedagio : null,
+        metadados: { fonte: 'TARIFA POR CIDADE', linha: item.linha, excedente_por_kg: true }
+      });
+    }
+  }
+  if (faixaDados.length) await client.query(`
+    INSERT INTO frete.tarifa_faixa (
+      tabela_preco_id, codigo_regiao, peso_de_kg, peso_ate_kg, valor_base,
+      valor_kg_excedente, peso_referencia_excedente_kg,
+      taxa_despacho, pedagio_por_100kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.peso_de, x.peso_ate, x.valor_base,
+           x.valor_excedente, x.peso_referencia,
+           x.despacho, x.pedagio, 100, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, peso_de NUMERIC, peso_ate NUMERIC, valor_base NUMERIC,
+      valor_excedente NUMERIC, peso_referencia NUMERIC,
+      despacho NUMERIC, pedagio NUMERIC, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(faixaDados)]);
+
+  const regrasDados = [
+    { codigo: 'GRIS', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.002, minimo: 5.3, condicoes: {}, prioridade: 20, observacao: '0,20% sobre o valor da mercadoria, minimo de R$ 5,30.' },
+    { codigo: 'POS', nome: 'POS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.0015, minimo: 10, condicoes: {}, prioridade: 30, observacao: '0,15% sobre o valor da mercadoria, minimo de R$ 10,00.' },
+    { codigo: 'TAS', nome: 'TAS', tipo: 'fixo', valor: 5.05, minimo: null, condicoes: {}, prioridade: 40, observacao: 'Taxa administrativa fixa.' },
+    ...[...cidades.values()].filter((item) => item.frete_valor > 0).map((item) => ({
+      codigo: `FRETE_VALOR_${item.codigo_regiao}`,
+      nome: 'Frete valor',
+      tipo: 'maior_entre_percentual_e_minimo',
+      valor: item.frete_valor,
+      minimo: item.frete_valor_minimo > 0 ? item.frete_valor_minimo : null,
+      condicoes: { codigos_regiao: [item.codigo_regiao] },
+      prioridade: 10,
+      observacao: `Percentual da linha ${item.linha} da TARIFA POR CIDADE.`
+    }))
+  ];
+  await client.query(`
+    INSERT INTO frete.regra_adicional (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, valor_minimo,
+      condicoes, prioridade, ativo, observacao
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.minimo,
+           x.condicoes, x.prioridade, TRUE, x.observacao
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, minimo NUMERIC,
+      condicoes JSONB, prioridade INTEGER, observacao TEXT
+    )
+  `, [tabelaId, JSON.stringify(regrasDados)]);
+
+  return {
+    coberturas: coberturaDados.length,
+    faixas: faixaDados.length,
+    regras: regrasDados.length,
+    diagnostico_chaves: {
+      cidades_destino: cidades.size,
+      cidades_com_cep: coberturaDados.filter((item) => item.cep_inicio && item.cep_fim).length,
+      linhas_sem_tarifa: linhasSemTarifa,
+      conflitos_tarifarios: 0
+    },
+    alertas: [
+      'Previa Fitlog baseada nas tarifas consolidadas por municipio e CEP da aba TARIFA POR CIDADE.',
+      'TDE, TRT, EMEX, reentrega e devolucao nao sao aplicados automaticamente sem o gatilho operacional correspondente.'
+    ]
+  };
+}
+
+async function normalizarFitlogLegado(client, tabelaId, grupos) {
   const provisoria = grupos.find((grupo) => grupo.aba.startsWith('SSW-PROVIS'));
   if (!provisoria) return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A aba SSW-PROVISÓRIO da Fitlog não foi encontrada.'] };
 
@@ -1082,11 +1251,18 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
   await client.query('DELETE FROM frete.regra_adicional WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   await client.query('DELETE FROM frete.adicional_cep WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   await client.query('DELETE FROM frete.tarifa_faixa WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
+  await client.query(`
+    UPDATE frete.cotacao_resultado
+       SET cobertura_id = NULL
+     WHERE cobertura_id IN (
+       SELECT id FROM frete.cobertura WHERE tabela_preco_id = $1
+     )
+  `, [tabela.rows[0].id]);
   await client.query('DELETE FROM frete.cobertura WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
   const total = await inserirLinhas(client, importacao.rows[0].id, grupos);
   let normalizacao = { alertas: ['Fonte preservada em staging; regras ainda não normalizadas.'] };
   if (fonte.slug === 'expresso-ejl' && !fonte.sufixo) normalizacao = await normalizarEjl(client, tabela.rows[0].id, grupos, fontesAuxiliares);
-  if (fonte.slug === 'fitlog') normalizacao = await normalizarFitlog(client, tabela.rows[0].id, grupos);
+  if (fonte.slug === 'fitlog') normalizacao = await normalizarFitlogPorCidade(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'bristot-rocha') normalizacao = await normalizarBristot(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'mengue-express') normalizacao = await normalizarMengueCobertura(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'rodonaves' && fonte.tipo !== 'pdf') normalizacao = await normalizarRodonaves(client, tabela.rows[0].id, grupos, fontesAuxiliares);
@@ -1139,7 +1315,13 @@ async function main() {
   }
 }
 
-main().catch((erro) => {
-  console.error(erro.stack || erro.message || erro);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((erro) => {
+    console.error(erro.stack || erro.message || erro);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = {
+  normalizarFitlogPorCidade
+};
