@@ -30,6 +30,7 @@ const esc = (valor) => String(valor ?? '')
 const numero = (valor) => Number.isFinite(Number(valor)) ? Number(valor) : 0;
 const moeda = (valor) => numero(valor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 const decimal = (valor, casas = 2) => numero(valor).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
+const percentual = (valor) => `${decimal(valor, Number(valor) % 1 === 0 ? 0 : 2)}%`;
 const limparCep = (valor) => String(valor || '').replace(/\D/g, '').slice(0, 8);
 const formatarCep = (valor) => limparCep(valor).replace(/^(\d{5})(\d{0,3}).*/, (_, a, b) => b ? `${a}-${b}` : a);
 
@@ -176,6 +177,8 @@ function renderResultados(cotacao) {
       return `<article class="frete-quote ${classe}"><div class="frete-quote-head"><div><h3>${esc(item.transportadora)}</h3><small>Tabela ${esc(item.versao || 'sem versão')}</small></div><span class="frete-quote-price">${status}</span></div><div class="frete-alert" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i><span>${esc(item.motivo)}</span></div></article>`;
     }
     const previa = !item.homologado;
+    const temIcmsDeclarado = item.icms_percentual != null && item.subtotal_sem_icms != null;
+    const rotuloIcms = item.icms_estimado ? 'assumido' : 'configurado';
     return `
       <article class="frete-quote ${melhor ? 'is-best' : ''} ${previa ? 'is-preview' : ''} ${melhorEmRevisao ? 'is-best-preview' : ''}">
         <div class="frete-quote-head">
@@ -187,9 +190,11 @@ function renderResultados(cotacao) {
           <span class="frete-chip"><i class="fa-solid fa-clock"></i>${item.prazo_min_dias == null ? 'Prazo não informado' : `${item.prazo_min_dias}${item.prazo_max_dias && item.prazo_max_dias !== item.prazo_min_dias ? `–${item.prazo_max_dias}` : ''} dias`}</span>
           <span class="frete-chip"><i class="fa-solid fa-weight-hanging"></i>${decimal(item.peso_cobravel_kg, 1)} kg cobrados</span>
         </div>
+        ${temIcmsDeclarado ? `<div class="frete-icms-assumption"><i class="fa-solid fa-receipt"></i><span>ICMS estimado por dentro: <strong>${percentual(item.icms_percentual)} ${rotuloIcms}</strong> para ${esc(item.icms_origem_uf)} → ${esc(item.icms_destino_uf)}.</span></div>` : ''}
         <div class="frete-breakdown">
           <div><span>Frete peso</span><strong>${moeda(item.frete_peso)}</strong></div>
           ${(item.adicionais_detalhe || []).map((taxa) => `<div><span>${esc(taxa.nome)}</span><strong>${moeda(taxa.valor)}</strong></div>`).join('')}
+          ${temIcmsDeclarado ? `<div class="frete-breakdown-subtotal"><span>Subtotal antes do ICMS</span><strong>${moeda(item.subtotal_sem_icms)}</strong></div><div class="frete-breakdown-tax"><span>ICMS (${percentual(item.icms_percentual)} por dentro)</span><strong>${moeda(item.icms_valor)}</strong></div>` : ''}
           <div><span>Peso cubado</span><strong>${decimal(item.peso_cubado_kg, 1)} kg</strong></div>
         </div>
       </article>
@@ -360,7 +365,12 @@ function montarResumoCotacao() {
   const linhas = [`Cotação de frete #${freteState.cotacao.cotacao_id || ''}`, `Destino: ${destino}`, `Valor da mercadoria: ${formatarValorMercadoria(document.getElementById('freteValorMercadoria')?.value)}`, '', 'Carga:'];
   freteState.itens.forEach((item) => linhas.push(`- ${item.quantidade}x ${item.codigo} · ${item.descricao}`));
   linhas.push('', 'Opções:');
-  (freteState.cotacao.resultados || []).filter((item) => item.ok).forEach((item) => linhas.push(`- ${item.transportadora}: ${moeda(item.valor_total)}${item.homologado ? '' : ' (prévia em revisão)'}`));
+  (freteState.cotacao.resultados || []).filter((item) => item.ok).forEach((item) => {
+    const icms = item.icms_percentual != null
+      ? `; ICMS ${percentual(item.icms_percentual)} ${item.icms_estimado ? 'assumido' : 'configurado'}: ${moeda(item.icms_valor)}`
+      : '';
+    linhas.push(`- ${item.transportadora}: ${moeda(item.valor_total)}${icms}${item.homologado ? '' : ' (prévia em revisão)'}`);
+  });
   return linhas.join('\n');
 }
 

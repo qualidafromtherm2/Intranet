@@ -202,6 +202,44 @@ function calcularRegra(regra, contexto) {
   return arredondar(calculado, 2);
 }
 
+const UFS_ICMS_7 = new Set([
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 'MT', 'MS',
+  'PA', 'PB', 'PE', 'PI', 'RN', 'RO', 'RR', 'SE', 'TO'
+]);
+
+function calcularIcmsFrete({ subtotal, origemUf = 'SC', destinoUf, configuracao = {} }) {
+  const origem = String(origemUf || 'SC').trim().toUpperCase();
+  const destino = String(destinoUf || '').trim().toUpperCase();
+  const config = configuracao && typeof configuracao === 'object' ? configuracao : {};
+  const aliquotaConfigurada = numero(config.icms_aliquota, NaN);
+  const aliquota = Number.isFinite(aliquotaConfigurada)
+    ? aliquotaConfigurada
+    : origem === destino
+      ? 0.17
+      : origem === 'SC' && UFS_ICMS_7.has(destino)
+        ? 0.07
+        : 0.12;
+  const subtotalArredondado = arredondar(subtotal, 2);
+  const inclusoNaTabela = config.icms_incluso === true;
+  const aplicar = config.icms_aplicar !== false && aliquota > 0;
+  const total = aplicar && !inclusoNaTabela
+    ? arredondar(subtotalArredondado / (1 - aliquota), 2)
+    : subtotalArredondado;
+
+  return {
+    subtotal_sem_icms: subtotalArredondado,
+    icms_aliquota: aliquota,
+    icms_percentual: arredondar(aliquota * 100, 2),
+    icms_valor: arredondar(total - subtotalArredondado, 2),
+    icms_estimado: !Number.isFinite(aliquotaConfigurada),
+    icms_incluso_tabela: inclusoNaTabela,
+    icms_metodo: inclusoNaTabela ? 'incluso_na_tabela' : 'por_dentro',
+    icms_origem_uf: origem,
+    icms_destino_uf: destino,
+    valor_total: total
+  };
+}
+
 function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, romaneio, valorMercadoria = 0, permitirRevisao = false }) {
   const homologado = tabela?.status === 'ativa';
   const previaEmRevisao = tabela?.status === 'em_revisao' && permitirRevisao;
@@ -254,6 +292,13 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
   if (numero(cobertura.tde) > 0) adicionaisDetalhe.push({ codigo: 'TDE_COBERTURA', nome: 'Taxa de dificuldade de entrega', valor: arredondar(cobertura.tde, 2) });
   if (numero(cobertura.trt) > 0) adicionaisDetalhe.push({ codigo: 'TRT_COBERTURA', nome: 'Taxa de restrição de trânsito', valor: arredondar(cobertura.trt, 2) });
   const adicionais = arredondar(adicionaisDetalhe.reduce((total, item) => total + item.valor, 0), 2);
+  const subtotalSemIcms = arredondar(fretePeso + adicionais, 2);
+  const icms = calcularIcmsFrete({
+    subtotal: subtotalSemIcms,
+    origemUf: tabela?.origem_uf || 'SC',
+    destinoUf: destino?.uf,
+    configuracao: tabela?.configuracao
+  });
 
   return {
     ok: true,
@@ -266,7 +311,7 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
     frete_peso: fretePeso,
     adicionais,
     adicionais_detalhe: adicionaisDetalhe,
-    valor_total: arredondar(fretePeso + adicionais, 2),
+    ...icms,
     prazo_min_dias: cobertura.prazo_min_dias ?? null,
     prazo_max_dias: cobertura.prazo_max_dias ?? cobertura.prazo_min_dias ?? null
   };
@@ -301,6 +346,7 @@ module.exports = {
   escolherCobertura,
   escolherTarifa,
   calcularFretePeso,
+  calcularIcmsFrete,
   simularTransportadora,
   prepararResultadosCotacao
 };

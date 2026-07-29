@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
   calcularRomaneio,
+  calcularIcmsFrete,
   escolherCobertura,
   parseCurrencyBR,
   prepararResultadosCotacao,
@@ -49,7 +50,9 @@ test('simula peso cubado, excedente e adicionais com memória detalhada', () => 
   assert.equal(resultado.peso_cobravel_kg, 288);
   assert.equal(resultado.frete_peso, 270.4);
   assert.equal(resultado.adicionais, 60);
-  assert.equal(resultado.valor_total, 330.4);
+  assert.equal(resultado.subtotal_sem_icms, 330.4);
+  assert.equal(resultado.icms_percentual, 17);
+  assert.equal(resultado.valor_total, 398.07);
   assert.equal(resultado.prazo_max_dias, 3);
 });
 
@@ -81,7 +84,7 @@ test('calcula tabela em revisão somente quando solicitada como prévia técnica
   assert.equal(previa.homologado, false);
   assert.equal(previa.tipo_resultado, 'previa_em_revisao');
   assert.equal(previa.peso_cobravel_kg, 71.424);
-  assert.equal(previa.valor_total, 209.92);
+  assert.equal(previa.valor_total, 225.72);
 });
 
 test('entende formatos monetarios brasileiros usados pelo Comercial', () => {
@@ -132,7 +135,7 @@ test('calcula a previa EJL com minimo, ITR, ad valorem, GRIS e pedagio', () => {
 
   assert.equal(resultado.peso_cobravel_kg, 71.424);
   assert.equal(resultado.frete_peso, 85);
-  assert.equal(resultado.valor_total, 152);
+  assert.equal(resultado.valor_total, 172.73);
 });
 
 test('aplica TDE EJL apenas quando o CEP cai na faixa especifica', () => {
@@ -167,7 +170,9 @@ test('calcula faixa Fitlog sem aplicar TDE ou TRT preventivamente', () => {
 
   assert.equal(resultado.frete_peso, 57.63);
   assert.equal(resultado.adicionais, 66.75);
-  assert.equal(resultado.valor_total, 124.38);
+  assert.equal(resultado.subtotal_sem_icms, 124.38);
+  assert.equal(resultado.icms_percentual, 12);
+  assert.equal(resultado.valor_total, 141.34);
   assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
 });
 
@@ -193,7 +198,7 @@ test('calcula Mengue com adicionais declarados sem TDA e TRT preventivos', () =>
 
   assert.equal(resultado.frete_peso, 38.32);
   assert.equal(resultado.adicionais, 34.66);
-  assert.equal(resultado.valor_total, 72.98);
+  assert.equal(resultado.valor_total, 87.93);
   assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
 });
 
@@ -219,7 +224,7 @@ test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
   assert.equal(resultado.peso_cobravel_kg, 71.424);
   assert.equal(resultado.frete_peso, 44.8);
   assert.equal(resultado.adicionais, 55.97);
-  assert.equal(resultado.valor_total, 100.77);
+  assert.equal(resultado.valor_total, 121.41);
 });
 
 test('prioriza SEC-CAT atual e acumula zona de risco sem duplicar o adicional', () => {
@@ -240,7 +245,7 @@ test('prioriza SEC-CAT atual e acumula zona de risco sem duplicar o adicional', 
 
   assert.deepEqual(resultado.adicionais_detalhe.map((item) => item.codigo), ['SEC_CAT', 'ZONA_RISCO']);
   assert.equal(resultado.adicionais, 98.69);
-  assert.equal(resultado.valor_total, 143.49);
+  assert.equal(resultado.valor_total, 172.88);
 });
 
 test('seleciona uma unica faixa de zona de restricao pelo peso cobravel', () => {
@@ -258,6 +263,44 @@ test('seleciona uma unica faixa de zona de restricao pelo peso cobravel', () => 
 
   assert.equal(criar(1000).adicionais, 289.95);
   assert.equal(criar(1000.5).adicionais, 571.64);
+});
+
+test('declara a aliquota estimada de ICMS pela rota iniciada em SC', () => {
+  const interna = calcularIcmsFrete({ subtotal: 100, origemUf: 'SC', destinoUf: 'SC' });
+  const sulSudeste = calcularIcmsFrete({ subtotal: 130.81, origemUf: 'SC', destinoUf: 'SP' });
+  const norteNordesteCentroOesteEs = calcularIcmsFrete({ subtotal: 100, origemUf: 'SC', destinoUf: 'MT' });
+
+  assert.deepEqual(
+    [interna.icms_percentual, sulSudeste.icms_percentual, norteNordesteCentroOesteEs.icms_percentual],
+    [17, 12, 7]
+  );
+  assert.equal(sulSudeste.subtotal_sem_icms, 130.81);
+  assert.equal(sulSudeste.icms_valor, 17.84);
+  assert.equal(sulSudeste.valor_total, 148.65);
+  assert.equal(sulSudeste.icms_estimado, true);
+  assert.equal(sulSudeste.icms_metodo, 'por_dentro');
+});
+
+test('respeita aliquota configurada ou ICMS ja incluso na tabela', () => {
+  const configurada = calcularIcmsFrete({
+    subtotal: 100,
+    origemUf: 'SC',
+    destinoUf: 'SP',
+    configuracao: { icms_aliquota: 0.1 }
+  });
+  const incluso = calcularIcmsFrete({
+    subtotal: 100,
+    origemUf: 'SC',
+    destinoUf: 'SP',
+    configuracao: { icms_incluso: true }
+  });
+
+  assert.equal(configurada.icms_estimado, false);
+  assert.equal(configurada.icms_percentual, 10);
+  assert.equal(configurada.valor_total, 111.11);
+  assert.equal(incluso.icms_valor, 0);
+  assert.equal(incluso.valor_total, 100);
+  assert.equal(incluso.icms_metodo, 'incluso_na_tabela');
 });
 
 test('preserva o id da tabela ao preparar a cotacao para o historico', () => {
