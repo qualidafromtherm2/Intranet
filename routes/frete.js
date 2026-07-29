@@ -392,7 +392,14 @@ router.post('/simular', async (req, res) => {
     if (ids.length) {
       [coberturas, tarifas, regras] = await Promise.all([
         pool.query(`SELECT * FROM frete.cobertura WHERE tabela_preco_id = ANY($1::bigint[]) AND atendida = TRUE AND uf = $2 AND (($3::int IS NOT NULL AND cep_inicio IS NOT NULL AND $3 BETWEEN cep_inicio AND cep_fim) OR cidade_normalizada = $4 OR (cep_inicio IS NULL AND cidade_normalizada IS NULL))`, [ids, destino.uf, cep, normalizarTexto(destino.cidade)]).then((r) => r.rows),
-        pool.query('SELECT * FROM frete.tarifa_faixa WHERE tabela_preco_id = ANY($1::bigint[]) ORDER BY prioridade, peso_de_kg', [ids]).then((r) => r.rows),
+        pool.query(`
+          SELECT *
+          FROM frete.tarifa_faixa
+          WHERE tabela_preco_id = ANY($1::bigint[])
+            AND (uf_destino IS NULL OR uf_destino = $2)
+            AND (cidade_normalizada IS NULL OR cidade_normalizada = $3)
+          ORDER BY prioridade, peso_de_kg
+        `, [ids, destino.uf, normalizarTexto(destino.cidade)]).then((r) => r.rows),
         pool.query('SELECT * FROM frete.regra_adicional WHERE tabela_preco_id = ANY($1::bigint[]) AND ativo = TRUE ORDER BY prioridade', [ids]).then((r) => r.rows)
       ]);
     }

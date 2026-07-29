@@ -702,7 +702,42 @@ function frequenciaRodonaves(linha) {
   return `${vezes || dias.length}x/semana${dias.length ? ` (${dias.join(', ')})` : ''}`;
 }
 
-async function normalizarRodonaves(client, tabelaId, grupos) {
+const SHA_PDF_RODONAVES_ATUAL = '015c20915c9c9bcad51ba10c3731f506259169daac42110272bbb8444aabcda6';
+const CAPITAIS_RODONAVES = new Map([
+  ['SC', 'FLORIANOPOLIS'],
+  ['RS', 'PORTO ALEGRE'],
+  ['PR', 'CURITIBA'],
+  ['SP', 'SAO PAULO'],
+  ['MG', 'BELO HORIZONTE'],
+  ['GO', 'GOIANIA']
+]);
+const TARIFAS_PDF_RODONAVES = {
+  'CAPITAL SC': [31.64, 40.10, 49.64, 61.12, 44.80, 48.86, 0.85],
+  'SANTA CATARINA': [42.39, 53.99, 64.63, 78.14, 57.16, 62.23, 1.10],
+  'CAPITAL RS': [51.93, 66.67, 81.53, 97.11, 70.77, 76.81, 1.34],
+  'RIO GRANDE DO SUL': [63.52, 78.04, 94.97, 112.15, 81.60, 88.43, 1.55],
+  'CAPITAL PR': [42.39, 53.99, 64.63, 78.14, 57.16, 62.23, 1.10],
+  'PARANA': [63.52, 78.04, 94.97, 112.15, 81.60, 88.43, 1.55],
+  'CAPITAL SP': [63.52, 78.04, 94.97, 112.15, 81.60, 88.43, 1.55],
+  'SAO PAULO': [72.36, 90.64, 106.59, 126.79, 91.85, 99.17, 1.73],
+  'CAPITAL MG': [105.47, 118.38, 139.17, 165.35, 118.74, 127.26, 2.23],
+  'MINAS GERAIS': [114.78, 128.82, 151.44, 179.93, 129.22, 138.48, 2.43],
+  'CAPITAL GO': [114.78, 128.82, 151.44, 179.93, 129.22, 138.48, 2.43],
+  'GOIAS': [117.00, 130.04, 153.57, 181.52, 130.45, 139.89, 2.45],
+  'DISTRITO FEDERAL': [117.00, 130.04, 153.57, 181.52, 130.45, 139.89, 2.45]
+};
+
+function regiaoTarifariaRodonaves(uf, cidadeNormalizada) {
+  const nomesUf = {
+    SC: 'SANTA CATARINA', RS: 'RIO GRANDE DO SUL', PR: 'PARANA',
+    SP: 'SAO PAULO', MG: 'MINAS GERAIS', GO: 'GOIAS', DF: 'DISTRITO FEDERAL'
+  };
+  if (!nomesUf[uf]) return null;
+  if (uf === 'DF') return nomesUf[uf];
+  return CAPITAIS_RODONAVES.get(uf) === cidadeNormalizada ? `CAPITAL ${uf}` : nomesUf[uf];
+}
+
+async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = []) {
   const prazosGrupo = grupos.find((grupo) => grupo.aba === 'Planilha7');
   const secCatGrupo = grupos.find((grupo) => grupo.aba === 'Tarifas Cidade Coleta-Entrega');
   if (!prazosGrupo) {
@@ -750,7 +785,9 @@ async function normalizarRodonaves(client, tabelaId, grupos) {
     const chaveCidade = `${uf}|${normalizarTexto(cidade)}`;
     const adicionaisCidade = secCatPorCidade.get(chaveCidade) || [];
     if (adicionaisCidade.length > 1) cidadesComMultiplasSecCat += 1;
-    const faixas = adicionaisCidade.length ? adicionaisCidade : [null];
+    // A cobertura genérica mantém a seleção manual por UF/cidade funcionando.
+    // Quando o CEP é informado, escolherCobertura prioriza a faixa SEC-CAT mais específica.
+    const faixas = [null, ...adicionaisCidade];
     for (const adicional of faixas) {
       const chaveCobertura = [chaveCidade, codigoRegiao, adicional?.cep_inicio || '', adicional?.cep_fim || ''].join('|');
       if (chavesCobertura.has(chaveCobertura)) continue;
@@ -803,6 +840,65 @@ async function normalizarRodonaves(client, tabelaId, grupos) {
     )
   `, [tabelaId, JSON.stringify(coberturaDados)]);
 
+  const pdfAtualizado = fontesAuxiliares.find((item) => item.fonte.tipo === 'pdf' && item.fonte.sufixo === 'pdf-atualizado');
+  const pdfConferido = pdfAtualizado?.sha === SHA_PDF_RODONAVES_ATUAL;
+  const faixaDados = [];
+  if (pdfConferido) {
+    const destinosUnicos = new Map();
+    for (const cobertura of coberturaDados) {
+      const regiaoTarifaria = regiaoTarifariaRodonaves(cobertura.uf, cobertura.cidade_normalizada);
+      if (!regiaoTarifaria) continue;
+      const chave = `${cobertura.codigo_regiao}|${cobertura.uf}|${cobertura.cidade_normalizada}`;
+      destinosUnicos.set(chave, { ...cobertura, regiao_tarifaria: regiaoTarifaria });
+    }
+    const limites = [10, 20, 40, 60, 80, 100];
+    for (const destino of destinosUnicos.values()) {
+      const valores = TARIFAS_PDF_RODONAVES[destino.regiao_tarifaria];
+      if (!valores) continue;
+      let anterior = 0;
+      limites.forEach((limite, indice) => {
+        faixaDados.push({
+          codigo_regiao: destino.codigo_regiao,
+          uf: destino.uf,
+          cidade_normalizada: destino.cidade_normalizada,
+          peso_de: anterior,
+          peso_ate: limite,
+          valor_base: valores[indice],
+          valor_excedente: null,
+          peso_referencia: null,
+          metadados: { fonte: pdfAtualizado.fonte.arquivo, regiao_tarifaria: destino.regiao_tarifaria }
+        });
+        anterior = limite;
+      });
+      faixaDados.push({
+        codigo_regiao: destino.codigo_regiao,
+        uf: destino.uf,
+        cidade_normalizada: destino.cidade_normalizada,
+        peso_de: 100,
+        peso_ate: null,
+        valor_base: valores[5],
+        valor_excedente: valores[6],
+        peso_referencia: 100,
+        metadados: { fonte: pdfAtualizado.fonte.arquivo, regiao_tarifaria: destino.regiao_tarifaria, excedente: true }
+      });
+    }
+  }
+  if (faixaDados.length) await client.query(`
+    INSERT INTO frete.tarifa_faixa (
+      tabela_preco_id, codigo_regiao, uf_destino, cidade_normalizada,
+      peso_de_kg, peso_ate_kg, valor_base, valor_kg_excedente,
+      peso_referencia_excedente_kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.uf, x.cidade_normalizada,
+           x.peso_de, x.peso_ate, x.valor_base, x.valor_excedente,
+           x.peso_referencia, 100, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, uf CHAR(2), cidade_normalizada TEXT,
+      peso_de NUMERIC, peso_ate NUMERIC, valor_base NUMERIC,
+      valor_excedente NUMERIC, peso_referencia NUMERIC, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(faixaDados)]);
+
   const regioes = (ufs) => [...new Set(ufs.flatMap((uf) => [...(regioesPorUf.get(uf) || [])]))];
   const goEspeciais = ['UNIDADE_203', 'UNIDADE_205'];
   const mgEspeciais = ['UNIDADE_881', 'UNIDADE_882', 'UNIDADE_883', 'UNIDADE_884', 'UNIDADE_885', 'UNIDADE_886'];
@@ -833,17 +929,20 @@ async function normalizarRodonaves(client, tabelaId, grupos) {
 
   return {
     coberturas: coberturaDados.length,
-    faixas: 0,
+    faixas: faixaDados.length,
     regras: regrasDados.length,
     diagnostico_chaves: {
       cidades_sec_cat: secCatPorCidade.size,
       cidades_com_multiplas_sec_cat: cidadesComMultiplasSecCat,
       regioes_destino: new Set(coberturaDados.map((item) => item.codigo_regiao)).size,
+      cidades_com_tarifa_pdf: new Set(faixaDados.map((item) => `${item.uf}|${item.cidade_normalizada}`)).size,
       linhas_prazo_ignoradas_por_origem: prazosIgnoradosOutraOrigem
     },
     alertas: [
       'Cobertura, CEPs, prazos e regras gerais foram normalizados para a origem 133/Biguaçu-SC.',
-      'A fonte não contém a tarifa principal de frete-peso; a Rodonaves permanece sem valor total até essa tabela ser fornecida.',
+      ...(pdfConferido
+        ? ['Tarifa principal de frete-peso reconciliada com o PDF atualizado para Sul, SP, MG, GO e DF.']
+        : ['O PDF atualizado não corresponde à versão auditada; a tarifa principal não foi aplicada.']),
       'SEC-CAT, zona de risco, zona de restrição, TFD, reentrega e devolução permanecem em metadados ou staging e não são aplicados automaticamente.'
     ]
   };
@@ -886,7 +985,7 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
   if (fonte.slug === 'fitlog') normalizacao = await normalizarFitlog(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'bristot-rocha') normalizacao = await normalizarBristot(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'mengue-express') normalizacao = await normalizarMengueCobertura(client, tabela.rows[0].id, grupos);
-  if (fonte.slug === 'rodonaves' && fonte.tipo !== 'pdf') normalizacao = await normalizarRodonaves(client, tabela.rows[0].id, grupos);
+  if (fonte.slug === 'rodonaves' && fonte.tipo !== 'pdf') normalizacao = await normalizarRodonaves(client, tabela.rows[0].id, grupos, fontesAuxiliares);
   const alertas = normalizacao.alertas || [];
   await client.query(`
     UPDATE frete.importacao

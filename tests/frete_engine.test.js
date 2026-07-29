@@ -190,3 +190,28 @@ test('calcula Mengue com adicionais declarados sem TDA e TRT preventivos', () =>
   assert.equal(resultado.valor_total, 72.98);
   assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
 });
+
+test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SC', cidade: 'Florianópolis' },
+    romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
+    valorMercadoria: 7000,
+    coberturas: [{ uf: 'SC', cidade_normalizada: 'FLORIANOPOLIS', codigo_regiao: 'UNIDADE_133' }],
+    tarifas: [{
+      codigo_regiao: 'UNIDADE_133', uf_destino: 'SC', cidade_normalizada: 'FLORIANOPOLIS',
+      peso_de_kg: 60, peso_ate_kg: 80, valor_base: 44.80
+    }],
+    regras: [
+      { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.005, valor_minimo: 12.98 },
+      { codigo: 'GRIS_PADRAO_ATE_10K', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.001, valor_minimo: 1.74, condicoes: { codigos_regiao: ['UNIDADE_133'], valor_mercadoria_ate: 10000 } },
+      { codigo: 'PEDAGIO', nome: 'Pedágio', tipo_calculo: 'por_100kg', valor: 13.97 }
+    ]
+  });
+
+  assert.equal(resultado.peso_cobravel_kg, 71.424);
+  assert.equal(resultado.frete_peso, 44.8);
+  assert.equal(resultado.adicionais, 55.97);
+  assert.equal(resultado.valor_total, 100.77);
+});
