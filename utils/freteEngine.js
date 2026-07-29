@@ -115,6 +115,7 @@ function coberturaAtende(cobertura, destino) {
   const inicio = temFaixaCep ? numero(cobertura.cep_inicio, NaN) : NaN;
   const fim = temFaixaCep ? numero(cobertura.cep_fim, NaN) : NaN;
   if (cep && Number.isFinite(inicio) && Number.isFinite(fim)) return cep >= inicio && cep <= fim;
+  if (temFaixaCep) return false;
   if (cobertura?.cidade_normalizada || cobertura?.cidade) {
     return normalizarTexto(cobertura.cidade_normalizada || cobertura.cidade) === normalizarTexto(destino?.cidade);
   }

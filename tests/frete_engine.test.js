@@ -103,3 +103,64 @@ test('distingue destino atendido quando falta somente a tarifa principal', () =>
   assert.equal(resultado.cobertura.codigo_regiao, 'UNIDADE_133');
   assert.match(resultado.motivo, /atende o destino/i);
 });
+
+test('calcula a previa EJL com minimo, ITR, ad valorem, GRIS e pedagio', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SP', cidade: 'São Paulo', cep: '01001-000' },
+    romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
+    valorMercadoria: 7000,
+    coberturas: [{ uf: 'SP', cidade_normalizada: 'SAO PAULO', codigo_regiao: 'EJL_SP_SAO_PAULO' }],
+    tarifas: [{
+      codigo_regiao: 'EJL_SP_SAO_PAULO', peso_de_kg: 0, peso_ate_kg: null,
+      valor_base: 0, valor_kg_excedente: 0.6, peso_referencia_excedente_kg: 0,
+      frete_minimo: 85, ad_valorem_aliquota: 0.004
+    }],
+    regras: [
+      { codigo: 'GRIS', nome: 'GRIS', tipo_calculo: 'percentual_mercadoria', valor: 0.0015 },
+      { codigo: 'PEDAGIO', nome: 'Pedágio', tipo_calculo: 'por_100kg', valor: 3.5 },
+      { codigo: 'ITR_EJL_SP', nome: 'ITR', tipo_calculo: 'fixo', valor: 25, condicoes: { codigos_regiao: ['EJL_SP_SAO_PAULO'] } }
+    ]
+  });
+
+  assert.equal(resultado.peso_cobravel_kg, 71.424);
+  assert.equal(resultado.frete_peso, 85);
+  assert.equal(resultado.valor_total, 152);
+});
+
+test('aplica TDE EJL apenas quando o CEP cai na faixa especifica', () => {
+  const coberturas = [
+    { id: 1, uf: 'SP', cidade_normalizada: 'SAO PAULO', codigo_regiao: 'EJL_SP_SAO_PAULO' },
+    { id: 2, uf: 'SP', cidade_normalizada: 'SAO PAULO', codigo_regiao: 'EJL_SP_SAO_PAULO', cep_inicio: 4700000, cep_fim: 4999999, tde: 100 }
+  ];
+  assert.equal(escolherCobertura(coberturas, { uf: 'SP', cidade: 'São Paulo', cep: '04710-000' }).id, 2);
+  assert.equal(escolherCobertura(coberturas, { uf: 'SP', cidade: 'São Paulo', cep: '01001-000' }).id, 1);
+  assert.equal(escolherCobertura(coberturas, { uf: 'SP', cidade: 'São Paulo' }).id, 1);
+});
+
+test('calcula faixa Fitlog sem aplicar TDE ou TRT preventivamente', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SP', cidade: 'São Paulo' },
+    romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
+    valorMercadoria: 7000,
+    coberturas: [{ uf: 'SP', cidade_normalizada: 'SAO PAULO', codigo_regiao: 'FITLOG_SP_SAO_PAULO' }],
+    tarifas: [{
+      codigo_regiao: 'FITLOG_SP_SAO_PAULO', peso_de_kg: 70, peso_ate_kg: 100,
+      valor_base: 57.63, taxa_despacho: 9.3, pedagio_por_100kg: 6.9
+    }],
+    regras: [
+      { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.003, valor_minimo: 5.3 },
+      { codigo: 'GRIS', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.002, valor_minimo: 5.3 },
+      { codigo: 'POS', nome: 'POS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0015, valor_minimo: 10 },
+      { codigo: 'TAS', nome: 'TAS', tipo_calculo: 'fixo', valor: 5.05 }
+    ]
+  });
+
+  assert.equal(resultado.frete_peso, 57.63);
+  assert.equal(resultado.adicionais, 66.75);
+  assert.equal(resultado.valor_total, 124.38);
+  assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
+});
