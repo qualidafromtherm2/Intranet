@@ -263,17 +263,18 @@ function renderGestao() {
   const container = document.getElementById('freteGestaoConteudo');
   if (!container || !freteState.gestao) return;
   const { tabelas = [], pode_gerenciar: podeGerenciar } = freteState.gestao;
+  const tabelasPrincipais = tabelas.filter((item) => !item.eh_auxiliar);
   const pendentes = freteState.produtosPendentes;
   const resumo = pendentes?.resumo || {};
   container.innerHTML = `
     <div class="frete-quality-summary">
-      <div class="frete-quality-metric"><span>Tabelas cadastradas</span><strong>${tabelas.length}</strong></div>
-      <div class="frete-quality-metric"><span>Homologadas</span><strong>${tabelas.filter((item) => item.status === 'ativa').length}</strong></div>
-      <div class="frete-quality-metric"><span>Com bloqueios</span><strong>${tabelas.filter((item) => item.diagnostico?.bloqueios?.length).length}</strong></div>
+      <div class="frete-quality-metric"><span>Transportadoras</span><strong>${tabelasPrincipais.length}</strong></div>
+      <div class="frete-quality-metric"><span>Homologadas</span><strong>${tabelasPrincipais.filter((item) => item.status === 'ativa').length}</strong></div>
+      <div class="frete-quality-metric"><span>Com bloqueios</span><strong>${tabelasPrincipais.filter((item) => item.diagnostico?.bloqueios?.length).length}</strong></div>
       <div class="frete-quality-metric"><span>Produtos pendentes</span><strong>${numero(resumo.total_pendentes)}</strong></div>
     </div>
     <div class="frete-table-health-grid">
-      ${tabelas.map((item) => {
+      ${tabelasPrincipais.map((item) => {
         const diagnostico = item.diagnostico || {};
         const bloqueios = diagnostico.bloqueios || [];
         const avisos = diagnostico.avisos || [];
@@ -284,7 +285,14 @@ function renderGestao() {
           ${bloqueios.map((texto) => `<div class="frete-quality-note is-blocker"><i class="fa-solid fa-circle-xmark"></i><span>${esc(texto)}</span></div>`).join('')}
           ${avisos.slice(0, 3).map((texto) => `<div class="frete-quality-note is-warning"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(texto)}</span></div>`).join('')}
           ${avisos.length > 3 ? `<small class="frete-more-notes">+ ${avisos.length - 3} alerta(s) no relatório de importação</small>` : ''}
-          <div class="frete-table-source"><span title="${esc(item.arquivo_origem || '')}"><i class="fa-solid fa-file-lines"></i>${esc(item.arquivo_origem || 'Fonte não informada')}</span><span>${esc(dataHora(item.atualizado_em))}</span></div>
+          <div class="frete-table-source"><span title="${esc(item.arquivo_origem || '')}"><i class="fa-solid fa-file-lines"></i>${esc(item.arquivo_origem || 'Fonte principal não informada')}</span><span>${esc(dataHora(item.atualizado_em))}</span></div>
+          ${(item.fontes_auxiliares || []).length ? `<div class="frete-aux-sources">
+            <strong>Fontes incorporadas</strong>
+            ${(item.fontes_auxiliares || []).map((fonte) => `<div class="frete-aux-source">
+              <span title="${esc(fonte.arquivo_origem || '')}"><i class="fa-solid fa-paperclip"></i><b>${esc(fonte.arquivo_origem || 'Fonte auxiliar')}</b><small>${esc(fonte.finalidade_fonte || 'Dados incorporados à tabela principal.')}</small></span>
+              <em>Incorporada</em>
+            </div>`).join('')}
+          </div>` : ''}
           ${podeGerenciar ? `<div class="frete-table-actions">
             ${item.status !== 'ativa' ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-table-status="ativa" data-frete-table-id="${item.id}" ${bloqueios.length ? 'disabled' : ''}><i class="fa-solid fa-shield-check"></i>Homologar</button>` : ''}
             ${item.status !== 'em_revisao' ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-table-status="em_revisao" data-frete-table-id="${item.id}">Revisar</button>` : ''}

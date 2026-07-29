@@ -15,6 +15,23 @@ function usuarioEhAdmin(req) {
   return roles.some((role) => String(role || '').trim().toLowerCase() === 'admin');
 }
 
+function classificarFonteTabela(item) {
+  const arquivo = String(item.arquivo_origem || '').toUpperCase();
+  const versao = String(item.versao || '').toLowerCase();
+  const tipoConfigurado = String(item.configuracao?.tipo_fonte || '').toLowerCase();
+  const ehTdeEjl = arquivo.includes('RELAÇÃO DE TDE EXPRESSO EJL') || arquivo.includes('RELACAO DE TDE EXPRESSO EJL') || versao.includes('-tde-');
+  const ehPdfRodonaves = arquivo.includes('TABELA FROMTHERM ATUALIZADA.PDF') || versao.includes('-pdf-atualizado-');
+  const ehAuxiliar = tipoConfigurado === 'auxiliar' || ehTdeEjl || ehPdfRodonaves;
+  return {
+    ...item,
+    eh_auxiliar: ehAuxiliar,
+    finalidade_fonte: item.configuracao?.finalidade_fonte
+      || (ehTdeEjl ? 'Faixas de TDE incorporadas à tabela principal.' : null)
+      || (ehPdfRodonaves ? 'Tarifas atualizadas incorporadas à tabela principal.' : null)
+      || (ehAuxiliar ? 'Fonte complementar incorporada à tabela principal.' : null)
+  };
+}
+
 function garantirSchema() {
   if (!schemaPromise) {
     schemaPromise = pool.query(SCHEMA_SQL).catch((erro) => {
@@ -218,7 +235,7 @@ router.get('/gestao', async (req, res) => {
     const { rows } = await pool.query(`
       SELECT t.id, t.transportadora_id, tr.nome AS transportadora, t.nome, t.versao,
              t.status, t.vigencia_inicio, t.vigencia_fim, t.arquivo_origem,
-             t.arquivo_sha256, t.homologado_em, t.homologacao_observacao,
+             t.arquivo_sha256, t.configuracao, t.homologado_em, t.homologacao_observacao,
              u.username AS homologado_por_nome, t.atualizado_em
       FROM frete.tabela_preco t
       JOIN frete.transportadora tr ON tr.id = t.transportadora_id
@@ -226,10 +243,20 @@ router.get('/gestao', async (req, res) => {
       WHERE tr.ativo = TRUE
       ORDER BY tr.nome, t.criado_em DESC
     `);
-    const tabelas = await Promise.all(rows.map(async (item) => ({
-      ...item,
-      diagnostico: await diagnosticarTabela(item.id)
-    })));
+    const classificadas = rows.map(classificarFonteTabela);
+    const auxiliaresPorTransportadora = new Map();
+    for (const item of classificadas.filter((tabela) => tabela.eh_auxiliar)) {
+      const chave = String(item.transportadora_id);
+      if (!auxiliaresPorTransportadora.has(chave)) auxiliaresPorTransportadora.set(chave, []);
+      auxiliaresPorTransportadora.get(chave).push(item);
+    }
+    const tabelas = await Promise.all(classificadas
+      .filter((item) => !item.eh_auxiliar)
+      .map(async (item) => ({
+        ...item,
+        fontes_auxiliares: auxiliaresPorTransportadora.get(String(item.transportadora_id)) || [],
+        diagnostico: await diagnosticarTabela(item.id)
+      })));
     res.json({ ok: true, pode_gerenciar: usuarioEhAdmin(req), tabelas });
   } catch (erro) {
     console.error('[frete/gestao]', erro);

@@ -1051,6 +1051,11 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
     ON CONFLICT (slug) DO UPDATE SET nome = EXCLUDED.nome, atualizado_em = NOW()
     RETURNING id
   `, [fonte.slug, fonte.nome]);
+  const finalidadeFonte = fonte.sufixo === 'tde'
+    ? 'Faixas de TDE incorporadas à tabela principal.'
+    : fonte.tipo === 'pdf'
+      ? 'Tarifas atualizadas incorporadas à tabela principal.'
+      : null;
   const tabela = await client.query(`
     INSERT INTO frete.tabela_preco (
       transportadora_id, nome, versao, status, fator_cubagem_kg_m3, arquivo_origem, arquivo_sha256,
@@ -1061,7 +1066,11 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
           status = EXCLUDED.status,
           atualizado_em = NOW()
     RETURNING id
-  `, [transportadora.rows[0].id, `Tabela ${fonte.nome}`, versao, statusTabela, fonte.arquivo, sha, JSON.stringify({ abas_importadas: grupos.map((g) => g.aba) })]);
+  `, [transportadora.rows[0].id, `Tabela ${fonte.nome}`, versao, statusTabela, fonte.arquivo, sha, JSON.stringify({
+    abas_importadas: grupos.map((g) => g.aba),
+    tipo_fonte: (fonte.sufixo || fonte.tipo === 'pdf') ? 'auxiliar' : 'principal',
+    finalidade_fonte: finalidadeFonte
+  })]);
   const importacao = await client.query(`
     INSERT INTO frete.importacao (tabela_preco_id, arquivo_nome, arquivo_sha256, status)
     VALUES ($1,$2,$3,'processando')
