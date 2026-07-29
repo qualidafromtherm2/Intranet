@@ -210,7 +210,12 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
   const pesoCubadoKg = arredondar(romaneio.volume_m3 * fatorCubagem, 4);
   const pesoCobravelKg = Math.max(numero(romaneio.peso_real_kg), pesoCubadoKg);
   const tarifa = escolherTarifa(tarifas, cobertura, destino, pesoCobravelKg);
-  if (!tarifa) return { ok: false, motivo: 'Não existe faixa de tarifa validada para este peso e destino.' };
+  if (!tarifa) return {
+    ok: false,
+    tipo_resultado: 'cobertura_sem_tarifa',
+    cobertura,
+    motivo: 'A transportadora atende o destino, mas a tarifa principal de frete-peso ainda não foi cadastrada.'
+  };
 
   const fretePeso = calcularFretePeso(tarifa, pesoCobravelKg);
   const contexto = { destino, cobertura, fretePeso, pesoCobravelKg, valorMercadoria: numero(valorMercadoria) };

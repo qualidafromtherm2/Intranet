@@ -119,6 +119,8 @@
 .frete-breakdown strong { color: #e2e8f0; }
 .frete-quote.is-unavailable { opacity: .82; }
 .frete-quote.is-unavailable .frete-quote-price { color: #fbbf24; font-size: 12px; }
+.frete-quote.is-pending { border-color: rgba(245,158,11,.45); box-shadow: inset 3px 0 #f59e0b; }
+.frete-quote.is-pending .frete-quote-price { color: #fbbf24; font-size: 13px; }
 .frete-loading { min-height: 120px; display: grid; place-items: center; gap: 8px; color: var(--frete-muted); font-size: 12px; }
 
 @media (max-width: 1180px) {

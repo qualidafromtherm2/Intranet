@@ -162,7 +162,10 @@ function renderResultados(cotacao) {
     const melhor = item.ok && item.homologado && !marcouMelhor;
     if (melhor) marcouMelhor = true;
     if (!item.ok) {
-      return `<article class="frete-quote is-unavailable"><div class="frete-quote-head"><div><h3>${esc(item.transportadora)}</h3><small>Tabela ${esc(item.versao || 'sem versão')}</small></div><span class="frete-quote-price">Não participa</span></div><div class="frete-alert" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i><span>${esc(item.motivo)}</span></div></article>`;
+      const atendeSemTarifa = item.tipo_resultado === 'cobertura_sem_tarifa';
+      const status = atendeSemTarifa ? 'Preço pendente' : 'Não participa';
+      const classe = atendeSemTarifa ? 'is-pending' : 'is-unavailable';
+      return `<article class="frete-quote ${classe}"><div class="frete-quote-head"><div><h3>${esc(item.transportadora)}</h3><small>Tabela ${esc(item.versao || 'sem versão')}</small></div><span class="frete-quote-price">${status}</span></div><div class="frete-alert" style="margin-top:10px"><i class="fa-solid fa-circle-info"></i><span>${esc(item.motivo)}</span></div></article>`;
     }
     const previa = !item.homologado;
     return `

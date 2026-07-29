@@ -85,3 +85,21 @@ test('entende formatos monetarios brasileiros usados pelo Comercial', () => {
   assert.equal(parseCurrencyBR('R$ 12.000,00'), 12000);
   assert.equal(parseCurrencyBR('12000.00'), 12000);
 });
+
+test('distingue destino atendido quando falta somente a tarifa principal', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SC', cidade: 'Florianópolis' },
+    romaneio: { peso_real_kg: 50, volume_m3: 0.2 },
+    valorMercadoria: 7000,
+    coberturas: [{ uf: 'SC', cidade_normalizada: 'FLORIANOPOLIS', codigo_regiao: 'UNIDADE_133' }],
+    tarifas: [],
+    regras: []
+  });
+
+  assert.equal(resultado.ok, false);
+  assert.equal(resultado.tipo_resultado, 'cobertura_sem_tarifa');
+  assert.equal(resultado.cobertura.codigo_regiao, 'UNIDADE_133');
+  assert.match(resultado.motivo, /atende o destino/i);
+});

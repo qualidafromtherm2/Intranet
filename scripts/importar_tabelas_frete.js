@@ -386,8 +386,170 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
   };
 }
 
+function numeroCep(valor) {
+  const digitos = String(valor || '').replace(/\D/g, '');
+  return /^\d{8}$/.test(digitos) ? Number(digitos) : null;
+}
+
+function frequenciaRodonaves(linha) {
+  const dias = [['J', 'seg'], ['K', 'ter'], ['L', 'qua'], ['M', 'qui'], ['N', 'sex']]
+    .filter(([coluna]) => String(celula(linha, coluna) || '').trim().toUpperCase() === 'S')
+    .map(([, nome]) => nome);
+  const vezes = Number(celula(linha, 'I')) || dias.length || null;
+  if (!vezes && !dias.length) return null;
+  return `${vezes || dias.length}x/semana${dias.length ? ` (${dias.join(', ')})` : ''}`;
+}
+
+async function normalizarRodonaves(client, tabelaId, grupos) {
+  const prazosGrupo = grupos.find((grupo) => grupo.aba === 'Planilha7');
+  const secCatGrupo = grupos.find((grupo) => grupo.aba === 'Tarifas Cidade Coleta-Entrega');
+  if (!prazosGrupo) {
+    return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A aba Planilha7 da Rodonaves não foi encontrada.'] };
+  }
+
+  const secCatPorCidade = new Map();
+  for (const linha of (secCatGrupo?.linhas || []).filter((item) => item.numero_linha >= 2)) {
+    const uf = String(celula(linha, 'D') || '').trim().toUpperCase();
+    const cidade = String(celula(linha, 'C') || '').trim();
+    if (!/^[A-Z]{2}$/.test(uf) || !cidade) continue;
+    const chave = `${uf}|${normalizarTexto(cidade)}`;
+    const item = {
+      nome: String(celula(linha, 'A') || '').trim() || null,
+      valor: Number(celula(linha, 'B')) || null,
+      cep_inicio: numeroCep(celula(linha, 'E')),
+      cep_fim: numeroCep(celula(linha, 'F')),
+      unidade: String(celula(linha, 'G') || '').trim() || null,
+      unidade_nome: String(celula(linha, 'H') || '').trim() || null,
+      regional: String(celula(linha, 'I') || '').trim() || null,
+      linha: linha.numero_linha
+    };
+    if (!secCatPorCidade.has(chave)) secCatPorCidade.set(chave, []);
+    secCatPorCidade.get(chave).push(item);
+  }
+
+  const coberturaDados = [];
+  const regioesPorUf = new Map();
+  const chavesCobertura = new Set();
+  let prazosIgnoradosOutraOrigem = 0;
+  let cidadesComMultiplasSecCat = 0;
+  for (const linha of prazosGrupo.linhas.filter((item) => item.numero_linha >= 2)) {
+    const origemUnidade = String(celula(linha, 'A') || '').trim();
+    const origemCidade = normalizarTexto(celula(linha, 'B'));
+    const origemUf = String(celula(linha, 'C') || '').trim().toUpperCase();
+    if (!(origemUnidade === '133' || (origemCidade === 'BIGUACU' && origemUf === 'SC'))) {
+      prazosIgnoradosOutraOrigem += 1;
+      continue;
+    }
+    const cidade = String(celula(linha, 'D') || '').trim();
+    const uf = String(celula(linha, 'E') || '').trim().toUpperCase();
+    if (!/^[A-Z]{2}$/.test(uf) || !cidade) continue;
+    const unidadeDestino = String(celula(linha, 'H') || '').trim() || 'SEM_UNIDADE';
+    const codigoRegiao = `UNIDADE_${normalizarTexto(unidadeDestino).replace(/\s+/g, '_')}`;
+    const chaveCidade = `${uf}|${normalizarTexto(cidade)}`;
+    const adicionaisCidade = secCatPorCidade.get(chaveCidade) || [];
+    if (adicionaisCidade.length > 1) cidadesComMultiplasSecCat += 1;
+    const faixas = adicionaisCidade.length ? adicionaisCidade : [null];
+    for (const adicional of faixas) {
+      const chaveCobertura = [chaveCidade, codigoRegiao, adicional?.cep_inicio || '', adicional?.cep_fim || ''].join('|');
+      if (chavesCobertura.has(chaveCobertura)) continue;
+      chavesCobertura.add(chaveCobertura);
+      coberturaDados.push({
+        codigo_regiao: codigoRegiao,
+        uf,
+        cidade,
+        cidade_normalizada: normalizarTexto(cidade),
+        cep_inicio: adicional?.cep_inicio || null,
+        cep_fim: adicional?.cep_fim || null,
+        prazo_min: Number(celula(linha, 'F')) || null,
+        prazo_max: Number(celula(linha, 'F')) || null,
+        frequencia: frequenciaRodonaves(linha),
+        metadados: {
+          origem_unidade: origemUnidade,
+          origem_cidade: celula(linha, 'B'),
+          origem_uf: origemUf,
+          unidade_destino: unidadeDestino,
+          prazo_pj_dias: Number(celula(linha, 'F')) || null,
+          prazo_pf_dias: Number(celula(linha, 'G')) || null,
+          sec_cat: adicional ? {
+            nome: adicional.nome,
+            valor: adicional.valor,
+            unidade: adicional.unidade,
+            unidade_nome: adicional.unidade_nome,
+            regional: adicional.regional,
+            linha_origem: adicional.linha,
+            aplicada_automaticamente: false
+          } : null,
+          linha_prazo: linha.numero_linha
+        }
+      });
+    }
+    if (!regioesPorUf.has(uf)) regioesPorUf.set(uf, new Set());
+    regioesPorUf.get(uf).add(codigoRegiao);
+  }
+
+  if (coberturaDados.length) await client.query(`
+    INSERT INTO frete.cobertura (
+      tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada,
+      cep_inicio, cep_fim, prazo_min_dias, prazo_max_dias, frequencia, metadados
+    )
+    SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada,
+           x.cep_inicio, x.cep_fim, x.prazo_min, x.prazo_max, x.frequencia, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT,
+      cep_inicio INTEGER, cep_fim INTEGER, prazo_min INTEGER, prazo_max INTEGER,
+      frequencia TEXT, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(coberturaDados)]);
+
+  const regioes = (ufs) => [...new Set(ufs.flatMap((uf) => [...(regioesPorUf.get(uf) || [])]))];
+  const goEspeciais = ['UNIDADE_203', 'UNIDADE_205'];
+  const mgEspeciais = ['UNIDADE_881', 'UNIDADE_882', 'UNIDADE_883', 'UNIDADE_884', 'UNIDADE_885', 'UNIDADE_886'];
+  const regioesPadrao = regioes(['RS', 'SC', 'PR', 'SP', 'GO', 'DF', 'MG'])
+    .filter((codigo) => !goEspeciais.includes(codigo) && !mgEspeciais.includes(codigo));
+  const regrasDados = [
+    { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo: 'maior_entre_percentual_e_minimo', valor: 0.005, minimo: 12.98, condicoes: {}, prioridade: 10, observacao: '0,50% sobre o valor da mercadoria, mínimo de R$ 12,98 por CT-e.' },
+    { codigo: 'PEDAGIO', nome: 'Pedágio', tipo: 'por_100kg', valor: 13.97, minimo: null, condicoes: {}, prioridade: 30, observacao: 'R$ 13,97 por fração de 100 kg.' },
+    { codigo: 'TAS', nome: 'TAS', tipo: 'fixo', valor: 12.75, minimo: null, condicoes: { ufs: ['GO', 'MG', 'DF', 'MT', 'MS', 'RO', 'AC', 'PA', 'RR', 'AP', 'TO', 'AM'] }, prioridade: 40, observacao: 'Taxa administrativa por CT-e nos destinos indicados na proposta.' },
+    { codigo: 'GRIS_PADRAO_ATE_10K', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.001, minimo: 1.74, condicoes: { codigos_regiao: regioesPadrao, valor_mercadoria_ate: 10000 }, prioridade: 20, observacao: 'GRIS padrão até R$ 10.000,00.' },
+    { codigo: 'GRIS_PADRAO_ACIMA_10K', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.0023, minimo: 1.74, condicoes: { codigos_regiao: regioesPadrao, valor_mercadoria_de: 10000.01 }, prioridade: 20, observacao: 'GRIS padrão acima de R$ 10.000,00.' },
+    { codigo: 'GRIS_GO_203_205', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.001, minimo: 1.74, condicoes: { codigos_regiao: goEspeciais }, prioridade: 20, observacao: 'GRIS para destinos atendidos pelas unidades 203 e 205.' },
+    { codigo: 'GRIS_MG_881_886', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.0015, minimo: 1.74, condicoes: { codigos_regiao: mgEspeciais }, prioridade: 20, observacao: 'GRIS para destinos atendidos pelas unidades 881 a 886.' },
+    { codigo: 'GRIS_OUTRAS_UFS', nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: 0.003, minimo: 1.74, condicoes: { ufs: ['RJ', 'ES', 'MT', 'MS', 'AM', 'PA', 'RO', 'RR', 'AP', 'TO', 'AC'] }, prioridade: 20, observacao: 'GRIS de 0,30% para os destinos indicados na proposta.' }
+  ];
+  await client.query(`
+    INSERT INTO frete.regra_adicional (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, valor_minimo,
+      condicoes, prioridade, ativo, observacao
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.minimo,
+           x.condicoes, x.prioridade, TRUE, x.observacao
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, minimo NUMERIC,
+      condicoes JSONB, prioridade INTEGER, observacao TEXT
+    )
+  `, [tabelaId, JSON.stringify(regrasDados)]);
+
+  return {
+    coberturas: coberturaDados.length,
+    faixas: 0,
+    regras: regrasDados.length,
+    diagnostico_chaves: {
+      cidades_sec_cat: secCatPorCidade.size,
+      cidades_com_multiplas_sec_cat: cidadesComMultiplasSecCat,
+      regioes_destino: new Set(coberturaDados.map((item) => item.codigo_regiao)).size,
+      linhas_prazo_ignoradas_por_origem: prazosIgnoradosOutraOrigem
+    },
+    alertas: [
+      'Cobertura, CEPs, prazos e regras gerais foram normalizados para a origem 133/Biguaçu-SC.',
+      'A fonte não contém a tarifa principal de frete-peso; a Rodonaves permanece sem valor total até essa tabela ser fornecida.',
+      'SEC-CAT, zona de risco, zona de restrição, TFD, reentrega e devolução permanecem em metadados ou staging e não são aplicados automaticamente.'
+    ]
+  };
+}
+
 async function persistirFonte(client, fonte, caminho, grupos, sha) {
   const versao = `${new Date(fs.statSync(caminho).mtime).toISOString().slice(0, 10)}-${fonte.sufixo || 'tabela'}-${sha.slice(0, 8)}`;
+  const statusTabela = fonte.tipo === 'pdf' ? 'inativa' : 'em_revisao';
   const transportadora = await client.query(`
     INSERT INTO frete.transportadora (slug, nome)
     VALUES ($1,$2)
@@ -398,10 +560,13 @@ async function persistirFonte(client, fonte, caminho, grupos, sha) {
     INSERT INTO frete.tabela_preco (
       transportadora_id, nome, versao, status, fator_cubagem_kg_m3, arquivo_origem, arquivo_sha256,
       configuracao
-    ) VALUES ($1,$2,$3,'em_revisao',300,$4,$5,$6::jsonb)
-    ON CONFLICT (transportadora_id, versao) DO UPDATE SET arquivo_sha256 = EXCLUDED.arquivo_sha256, atualizado_em = NOW()
+    ) VALUES ($1,$2,$3,$4,300,$5,$6,$7::jsonb)
+    ON CONFLICT (transportadora_id, versao) DO UPDATE
+      SET arquivo_sha256 = EXCLUDED.arquivo_sha256,
+          status = EXCLUDED.status,
+          atualizado_em = NOW()
     RETURNING id
-  `, [transportadora.rows[0].id, `Tabela ${fonte.nome}`, versao, fonte.arquivo, sha, JSON.stringify({ abas_importadas: grupos.map((g) => g.aba) })]);
+  `, [transportadora.rows[0].id, `Tabela ${fonte.nome}`, versao, statusTabela, fonte.arquivo, sha, JSON.stringify({ abas_importadas: grupos.map((g) => g.aba) })]);
   const importacao = await client.query(`
     INSERT INTO frete.importacao (tabela_preco_id, arquivo_nome, arquivo_sha256, status)
     VALUES ($1,$2,$3,'processando')
@@ -417,6 +582,7 @@ async function persistirFonte(client, fonte, caminho, grupos, sha) {
   let normalizacao = { alertas: ['Fonte preservada em staging; regras ainda não normalizadas.'] };
   if (fonte.slug === 'bristot-rocha') normalizacao = await normalizarBristot(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'mengue-express') normalizacao = await normalizarMengueCobertura(client, tabela.rows[0].id, grupos);
+  if (fonte.slug === 'rodonaves' && fonte.tipo !== 'pdf') normalizacao = await normalizarRodonaves(client, tabela.rows[0].id, grupos);
   const alertas = normalizacao.alertas || [];
   await client.query(`
     UPDATE frete.importacao
