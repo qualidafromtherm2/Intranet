@@ -1,6 +1,12 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { calcularRomaneio, escolherCobertura, parseCurrencyBR, simularTransportadora } = require('../utils/freteEngine');
+const {
+  calcularRomaneio,
+  escolherCobertura,
+  parseCurrencyBR,
+  prepararResultadosCotacao,
+  simularTransportadora
+} = require('../utils/freteEngine');
 
 test('calcula peso e cubagem do romaneio em centímetros', () => {
   const resultado = calcularRomaneio([
@@ -252,4 +258,21 @@ test('seleciona uma unica faixa de zona de restricao pelo peso cobravel', () => 
 
   assert.equal(criar(1000).adicionais, 289.95);
   assert.equal(criar(1000.5).adicionais, 571.64);
+});
+
+test('preserva o id da tabela ao preparar a cotacao para o historico', () => {
+  const [resultado] = prepararResultadosCotacao([
+    {
+      ok: true,
+      tabela_id: '78407',
+      cobertura: { id: '94' },
+      transportadora: 'Fitlog',
+      valor_total: 130.81
+    },
+    { ok: false, tabela_id: '99999', motivo: 'Destino nÃ£o atendido.' }
+  ]);
+
+  assert.equal(resultado.tabela_preco_id, '78407');
+  assert.equal(resultado.cobertura_id, '94');
+  assert.equal(resultado.memoria_calculo.tabela_id, '78407');
 });

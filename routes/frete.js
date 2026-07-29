@@ -3,7 +3,14 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { pool } = require('../src/db');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
-const { calcularRomaneio, normalizarCep, normalizarTexto, parseCurrencyBR, simularTransportadora } = require('../utils/freteEngine');
+const {
+  calcularRomaneio,
+  normalizarCep,
+  normalizarTexto,
+  parseCurrencyBR,
+  prepararResultadosCotacao,
+  simularTransportadora
+} = require('../utils/freteEngine');
 
 const router = express.Router();
 const NAV_KEY = 'side:log:simulador-frete';
@@ -130,7 +137,7 @@ async function salvarCotacao({ usuarioId, destino, valorMercadoria, romaneio, re
       )
     `, [cotacaoId, JSON.stringify(romaneio.itens.map((item) => ({ ...item, produto_snapshot: item })))]);
 
-    const validos = resultados.filter((item) => item.ok);
+    const validos = prepararResultadosCotacao(resultados);
     if (validos.length) {
       await client.query(`
         INSERT INTO frete.cotacao_resultado (
@@ -149,11 +156,7 @@ async function salvarCotacao({ usuarioId, destino, valorMercadoria, romaneio, re
           valor_total numeric, prazo_min_dias integer, prazo_max_dias integer,
           homologado boolean, transportadora text, versao text, memoria_calculo jsonb
         )
-      `, [cotacaoId, JSON.stringify(validos.map((item) => ({
-        ...item,
-        cobertura_id: item.cobertura?.id || null,
-        memoria_calculo: item
-      })))]);
+      `, [cotacaoId, JSON.stringify(validos)]);
     }
     await client.query('COMMIT');
     return cotacaoId;

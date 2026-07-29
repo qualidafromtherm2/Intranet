@@ -272,6 +272,25 @@ function simularTransportadora({ tabela, coberturas, tarifas, regras, destino, r
   };
 }
 
+function prepararResultadosCotacao(resultados) {
+  return (Array.isArray(resultados) ? resultados : [])
+    .filter((item) => item?.ok)
+    .map((item) => {
+      const tabelaPrecoId = item.tabela_preco_id ?? item.tabela_id ?? null;
+      if (tabelaPrecoId == null) {
+        const erro = new Error('Resultado de frete sem identificaÃ§Ã£o da tabela de preÃ§o.');
+        erro.code = 'TABELA_PRECO_AUSENTE';
+        throw erro;
+      }
+      return {
+        ...item,
+        tabela_preco_id: tabelaPrecoId,
+        cobertura_id: item.cobertura_id ?? item.cobertura?.id ?? null,
+        memoria_calculo: item.memoria_calculo ?? item
+      };
+    });
+}
+
 module.exports = {
   arredondar,
   normalizarTexto,
@@ -282,5 +301,6 @@ module.exports = {
   escolherCobertura,
   escolherTarifa,
   calcularFretePeso,
-  simularTransportadora
+  simularTransportadora,
+  prepararResultadosCotacao
 };
