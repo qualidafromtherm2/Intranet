@@ -164,3 +164,29 @@ test('calcula faixa Fitlog sem aplicar TDE ou TRT preventivamente', () => {
   assert.equal(resultado.valor_total, 124.38);
   assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
 });
+
+test('calcula Mengue com adicionais declarados sem TDA e TRT preventivos', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    permitirRevisao: true,
+    destino: { uf: 'SC', cidade: 'Florianópolis' },
+    romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
+    valorMercadoria: 7000,
+    coberturas: [{ uf: 'SC', cidade_normalizada: 'FLORIANOPOLIS', codigo_regiao: 'FLPP' }],
+    tarifas: [{
+      codigo_regiao: 'FLPP', peso_de_kg: 70, peso_ate_kg: 100,
+      valor_base: 38.322, taxa_despacho: null, pedagio_por_100kg: 4.15608
+    }],
+    regras: [
+      { codigo: 'GRIS_FLPP', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0015, valor_minimo: 1.5, condicoes: { codigos_regiao: ['FLPP'] } },
+      { codigo: 'ADV_FLPP', nome: 'Ad valorem', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.002, valor_minimo: 2.5, condicoes: { codigos_regiao: ['FLPP'] } },
+      { codigo: 'POS_FLPP', nome: 'POS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0004, valor_minimo: 1.35, condicoes: { codigos_regiao: ['FLPP'] } },
+      { codigo: 'TAS_FLPP', nome: 'TAS', tipo_calculo: 'fixo', valor: 3.2, condicoes: { codigos_regiao: ['FLPP'] } }
+    ]
+  });
+
+  assert.equal(resultado.frete_peso, 38.32);
+  assert.equal(resultado.adicionais, 34.66);
+  assert.equal(resultado.valor_total, 72.98);
+  assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
+});

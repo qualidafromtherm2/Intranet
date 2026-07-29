@@ -258,8 +258,18 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
   const base = grupos.find((grupo) => grupo.aba === 'BD CIDADE+PRAÇA+TAXAS+FREQ+PREV');
   const tabelaGrupo = grupos.find((grupo) => grupo.aba === 'TABELA MENGUE SSW');
   if (!base || !tabelaGrupo) return { coberturas: 0, faixas: 0, alertas: ['Abas obrigatórias da Mengue ausentes.'] };
+  const regioesTarifariasNormais = new Set();
+  for (const linha of tabelaGrupo.linhas.filter((item) => item.numero_linha >= 5)) {
+    if (String(celula(linha, 'E') || '').trim().toUpperCase() !== 'N') continue;
+    if (Number(celula(linha, 'D')) !== 0) continue;
+    for (const regiao of String(celula(linha, 'C') || '').split(',').map((item) => normalizarTexto(item)).filter(Boolean)) {
+      regioesTarifariasNormais.add(regiao);
+    }
+  }
   const coberturaDados = [];
   let divergenciasSiglaComercialPraca = 0;
+  let coberturasComTarifaEspecifica = 0;
+  let coberturasComFallbackUf = 0;
   for (const linha of base.linhas.filter((item) => item.numero_linha >= 2)) {
     const uf = String(celula(linha, 'A') || '').trim().toUpperCase();
     const cidade = String(celula(linha, 'B') || '').trim();
@@ -267,18 +277,55 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
     const siglaComercial = normalizarTexto(celula(linha, 'K'));
     const siglaPraca = normalizarTexto(celula(linha, 'L'));
     if (siglaComercial && siglaPraca && siglaComercial !== siglaPraca) divergenciasSiglaComercialPraca += 1;
+    const regiaoOriginal = siglaPraca || siglaComercial;
+    const regiaoEspecifica = regioesTarifariasNormais.has(siglaPraca)
+      ? siglaPraca
+      : (regioesTarifariasNormais.has(siglaComercial) ? siglaComercial : null);
+    const possuiTarifaEspecifica = Boolean(regiaoEspecifica);
+    const usaFallbackUf = !possuiTarifaEspecifica && regioesTarifariasNormais.has(uf);
+    const codigoRegiao = regiaoEspecifica || (usaFallbackUf ? uf : regiaoOriginal);
+    if (possuiTarifaEspecifica) coberturasComTarifaEspecifica += 1;
+    if (usaFallbackUf) coberturasComFallbackUf += 1;
     coberturaDados.push({
-      // A tabela tarifaria usa a SIGLA PRACA (L). A praca comercial (K) fica
-      // preservada para auditoria e serve apenas de fallback quando L estiver vazia.
-      codigo_regiao: siglaPraca || siglaComercial, uf, cidade,
+      codigo_regiao: codigoRegiao, uf, cidade,
       cidade_normalizada: normalizarTexto(cidade), codigo_ibge: Number(celula(linha, 'E')) || null,
       cep_inicio: Number(String(celula(linha, 'C') || '').replace(/\D/g, '')) || null,
       cep_fim: Number(String(celula(linha, 'D') || '').replace(/\D/g, '')) || null,
       prazo_min: Number(celula(linha, 'F')) || null, prazo_max: Number(celula(linha, 'G')) || null,
       frequencia: celula(linha, 'H') || null, tde: null,
       trt: null, observacao: celula(linha, 'N') || null,
-      metadados: { tde_fonte: celula(linha, 'I'), trt_fonte: celula(linha, 'J'), sigla_praca_comercial: celula(linha, 'K'), sigla_praca: celula(linha, 'L'), sigla_unidade: celula(linha, 'M') }
+      metadados: {
+        tde_fonte: celula(linha, 'I'), trt_fonte: celula(linha, 'J'),
+        sigla_praca_comercial: celula(linha, 'K'), sigla_praca: celula(linha, 'L'),
+        sigla_unidade: celula(linha, 'M'), codigo_regiao_original: regiaoOriginal,
+        estrategia_tarifa: possuiTarifaEspecifica
+          ? (codigoRegiao === siglaPraca ? 'sigla_praca' : 'sigla_praca_comercial')
+          : (usaFallbackUf ? 'fallback_uf' : 'sem_tarifa')
+      }
     });
+  }
+  const coberturasPorCidade = new Map();
+  for (const cobertura of coberturaDados) {
+    const chaveCidade = `${cobertura.uf}|${cobertura.cidade_normalizada}`;
+    if (!coberturasPorCidade.has(chaveCidade)) coberturasPorCidade.set(chaveCidade, []);
+    coberturasPorCidade.get(chaveCidade).push(cobertura);
+  }
+  let coberturasGenericasCidade = 0;
+  let cidadesQueExigemCep = 0;
+  for (const coberturasCidade of coberturasPorCidade.values()) {
+    const regioes = new Set(coberturasCidade.map((item) => item.codigo_regiao));
+    if (regioes.size !== 1) {
+      cidadesQueExigemCep += 1;
+      continue;
+    }
+    const referencia = coberturasCidade[0];
+    coberturaDados.push({
+      ...referencia,
+      cep_inicio: null,
+      cep_fim: null,
+      metadados: { ...referencia.metadados, cobertura_generica_cidade: true }
+    });
+    coberturasGenericasCidade += 1;
   }
   if (coberturaDados.length) await client.query(`
     INSERT INTO frete.cobertura (
@@ -301,13 +348,17 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
   const regioesTarifa = new Set();
   for (const linha of tabelaGrupo.linhas.filter((item) => item.numero_linha >= 5)) {
     if (String(celula(linha, 'E') || '').trim().toUpperCase() !== 'N') continue;
+    if (Number(celula(linha, 'D')) !== 0) continue;
     const regioes = String(celula(linha, 'C') || '').split(',').map((item) => normalizarTexto(item)).filter(Boolean);
     if (!regioes.length) continue;
     const adValorem = Number(celula(linha, 'V')) / 100 || null;
+    const adValoremMinimo = Number(celula(linha, 'W')) || null;
     const despacho = Number(celula(linha, 'P')) || null;
     const pedagio = Number(celula(linha, 'N')) || null;
     const gris = Number(celula(linha, 'Q')) / 100 || null;
     const grisMinimo = Number(celula(linha, 'R')) || null;
+    const pos = Number(celula(linha, 'S')) / 100 || null;
+    const posMinimo = Number(celula(linha, 'T')) || null;
     const tas = Number(celula(linha, 'U')) || null;
     for (const codigoRegiao of regioes) {
       regioesTarifa.add(codigoRegiao);
@@ -321,7 +372,7 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
         faixaDados.push({
           codigo_regiao: codigoRegiao, peso_de: pesoAnterior, peso_ate: pesoAte,
           valor_base: valorBase, valor_excedente: null, peso_referencia: null,
-          ad_valorem: adValorem, despacho, pedagio,
+          ad_valorem: null, despacho, pedagio,
           metadados: { arquivo_linha: linha.numero_linha, faixa_tipo: celula(linha, 'X'), aplica_se: celula(linha, 'M'), pos: celula(linha, 'S'), pos_minimo: celula(linha, 'T'), cod_mercad: celula(linha, 'D') }
         });
         pesoAnterior = pesoAte;
@@ -333,11 +384,13 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
         faixaDados.push({
           codigo_regiao: codigoRegiao, peso_de: ultimoLimite, peso_ate: null,
           valor_base: ultimoValor, valor_excedente: valorToneladaExcedente / 1000,
-          peso_referencia: ultimoLimite, ad_valorem: adValorem, despacho, pedagio,
+          peso_referencia: ultimoLimite, ad_valorem: null, despacho, pedagio,
           metadados: { arquivo_linha: linha.numero_linha, excedente_por_kg: true, valor_tonelada: valorToneladaExcedente, faixa_tipo: celula(linha, 'X'), aplica_se: celula(linha, 'M'), pos: celula(linha, 'S'), pos_minimo: celula(linha, 'T'), cod_mercad: celula(linha, 'D') }
         });
       }
       if (gris) regrasDados.push({ codigo: `GRIS_${codigoRegiao}`, nome: 'GRIS', tipo: 'maior_entre_percentual_e_minimo', valor: gris, minimo: grisMinimo, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 20, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
+      if (adValorem) regrasDados.push({ codigo: `ADV_${codigoRegiao}`, nome: 'Ad valorem', tipo: 'maior_entre_percentual_e_minimo', valor: adValorem, minimo: adValoremMinimo, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 25, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
+      if (pos) regrasDados.push({ codigo: `POS_${codigoRegiao}`, nome: 'POS', tipo: 'maior_entre_percentual_e_minimo', valor: pos, minimo: posMinimo, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 30, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
       if (tas) regrasDados.push({ codigo: `TAS_${codigoRegiao}`, nome: 'TAS', tipo: 'fixo', valor: tas, minimo: null, condicoes: { codigos_regiao: [codigoRegiao] }, prioridade: 40, observacao: `Linha ${linha.numero_linha} da TABELA MENGUE SSW.` });
     }
   }
@@ -378,11 +431,15 @@ async function normalizarMengueCobertura(client, tabelaId, grupos) {
       regioes_cobertura: regioesCobertura.size,
       regioes_tarifa: regioesTarifa.size,
       regioes_conciliadas: [...regioesCobertura].filter((item) => regioesTarifa.has(item)).length,
+      coberturas_com_tarifa_especifica: coberturasComTarifaEspecifica,
+      coberturas_com_fallback_uf: coberturasComFallbackUf,
+      coberturas_genericas_cidade: coberturasGenericasCidade,
+      cidades_que_exigem_cep: cidadesQueExigemCep,
       divergencias_sigla_comercial_praca: divergenciasSiglaComercialPraca,
       regioes_sem_tarifa: regioesSemTarifa,
       tarifas_sem_cobertura: tarifasSemCobertura
     },
-    alertas: ['Prévia parcial: POS, TDE, TRT, TDE mínimo, TAR mínimo, APLICA-SE e COD_MERCAD permanecem apenas nos metadados até validação.']
+    alertas: [`Prévia parcial: TDA, TRT, TDE mínimo, TAR mínimo e APLICA-SE permanecem apenas nos metadados até validação. Linhas COD_MERCAD 115 não participam desta simulação. ${cidadesQueExigemCep} cidade(s) com mais de uma região tarifária exigem CEP.`]
   };
 }
 
