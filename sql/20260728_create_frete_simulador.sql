@@ -35,6 +35,22 @@ CREATE TABLE IF NOT EXISTS frete.tabela_preco (
   UNIQUE (transportadora_id, versao)
 );
 
+ALTER TABLE frete.tabela_preco
+  ADD COLUMN IF NOT EXISTS homologado_em TIMESTAMPTZ,
+  ADD COLUMN IF NOT EXISTS homologado_por BIGINT REFERENCES public.auth_user(id),
+  ADD COLUMN IF NOT EXISTS homologacao_observacao TEXT;
+
+CREATE TABLE IF NOT EXISTS frete.tabela_preco_auditoria (
+  id BIGSERIAL PRIMARY KEY,
+  tabela_preco_id BIGINT NOT NULL REFERENCES frete.tabela_preco(id) ON DELETE CASCADE,
+  status_anterior TEXT,
+  status_novo TEXT NOT NULL,
+  usuario_id BIGINT REFERENCES public.auth_user(id),
+  usuario_nome TEXT,
+  observacao TEXT,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS frete.importacao (
   id BIGSERIAL PRIMARY KEY,
   tabela_preco_id BIGINT REFERENCES frete.tabela_preco(id) ON DELETE CASCADE,
@@ -237,6 +253,36 @@ CREATE TABLE IF NOT EXISTS frete.cotacao_resultado (
   memoria_calculo JSONB NOT NULL,
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+ALTER TABLE frete.cotacao_resultado
+  ADD COLUMN IF NOT EXISTS homologado BOOLEAN NOT NULL DEFAULT FALSE,
+  ADD COLUMN IF NOT EXISTS transportadora TEXT,
+  ADD COLUMN IF NOT EXISTS versao TEXT;
+
+-- Antes desta migração somente resultados homologados eram persistidos.
+-- A ausência dos novos campos identifica com segurança esses registros legados.
+UPDATE frete.cotacao_resultado r
+SET homologado = TRUE,
+    transportadora = tr.nome,
+    versao = t.versao
+FROM frete.tabela_preco t
+JOIN frete.transportadora tr ON tr.id = t.transportadora_id
+WHERE r.tabela_preco_id = t.id
+  AND r.transportadora IS NULL
+  AND r.versao IS NULL;
+
+CREATE TABLE IF NOT EXISTS frete.schema_migration (
+  versao TEXT PRIMARY KEY,
+  descricao TEXT NOT NULL,
+  aplicado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+INSERT INTO frete.schema_migration (versao, descricao)
+VALUES
+  ('20260728.1', 'Schema inicial do simulador de frete'),
+  ('20260728.2', 'Adicionais por CEP da Rodonaves'),
+  ('20260728.3', 'Homologação auditável e persistência de prévias')
+ON CONFLICT (versao) DO NOTHING;
 
 INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
 SELECT

@@ -1,3 +1,6 @@
+(function inicializarModuloSimuladorFrete() {
+'use strict';
+
 const freteState = {
   inicializado: false,
   carregado: false,
@@ -5,6 +8,8 @@ const freteState = {
   resultadosBusca: [],
   cotacao: null,
   cotacoesRecentes: [],
+  gestao: null,
+  produtosPendentes: null,
   status: null,
   buscaTimer: null,
   buscaController: null,
@@ -157,10 +162,13 @@ function renderResultados(cotacao) {
     container.innerHTML = '<div class="frete-empty"><i class="fa-solid fa-route"></i><strong>Nenhuma tabela cadastrada</strong><span>Importe e valide as tabelas das transportadoras para iniciar a competição.</span></div>';
     return;
   }
-  let marcouMelhor = false;
+  const homologados = resultados.filter((item) => item.ok && item.homologado);
+  const previas = resultados.filter((item) => item.ok && !item.homologado);
+  const melhorHomologado = homologados.length ? Math.min(...homologados.map((item) => numero(item.valor_total))) : null;
+  const melhorPrevia = previas.length ? Math.min(...previas.map((item) => numero(item.valor_total))) : null;
   container.innerHTML = resultados.map((item) => {
-    const melhor = item.ok && item.homologado && !marcouMelhor;
-    if (melhor) marcouMelhor = true;
+    const melhor = item.ok && item.homologado && numero(item.valor_total) === melhorHomologado;
+    const melhorEmRevisao = item.ok && !item.homologado && numero(item.valor_total) === melhorPrevia;
     if (!item.ok) {
       const atendeSemTarifa = item.tipo_resultado === 'cobertura_sem_tarifa';
       const status = atendeSemTarifa ? 'Preço pendente' : 'Não participa';
@@ -169,9 +177,9 @@ function renderResultados(cotacao) {
     }
     const previa = !item.homologado;
     return `
-      <article class="frete-quote ${melhor ? 'is-best' : ''} ${previa ? 'is-preview' : ''}">
+      <article class="frete-quote ${melhor ? 'is-best' : ''} ${previa ? 'is-preview' : ''} ${melhorEmRevisao ? 'is-best-preview' : ''}">
         <div class="frete-quote-head">
-          <div><h3>${esc(item.transportadora)}</h3><small>${previa ? 'Prévia técnica · ' : melhor ? 'Melhor valor homologado · ' : ''}Tabela ${esc(item.versao)}</small></div>
+          <div><h3>${esc(item.transportadora)}</h3><small>${melhor ? 'Melhor valor homologado · ' : melhorEmRevisao ? 'Menor prévia técnica · ' : previa ? 'Prévia técnica · ' : ''}Tabela ${esc(item.versao)}</small></div>
           <span class="frete-quote-price">${moeda(item.valor_total)}</span>
         </div>
         ${previa ? '<div class="frete-alert is-preview-note"><i class="fa-solid fa-flask"></i><span>Valor em validação. Não utilize como preço homologado para o cliente.</span></div>' : ''}
@@ -200,7 +208,7 @@ function renderCotacoesRecentes() {
   container.innerHTML = freteState.cotacoesRecentes.map((item) => `
     <button type="button" class="frete-recent" data-frete-reopen="${esc(item.id)}">
       <span class="frete-recent-main"><strong>#${esc(item.id)} · ${esc(item.destino_cidade)}/${esc(item.destino_uf)}</strong><small>${esc(dataHora(item.criado_em))} · ${numero(item.itens)} produto(s)</small></span>
-      <span class="frete-recent-meta"><strong>${item.melhor_valor == null ? 'Sem preço validado' : moeda(item.melhor_valor)}</strong><small>${decimal(item.peso_real_kg, 1)} kg · ${decimal(item.volume_m3, 3)} m³</small></span>
+      <span class="frete-recent-meta"><strong>${item.melhor_valor != null ? moeda(item.melhor_valor) : item.melhor_previa != null ? `Prévia ${moeda(item.melhor_previa)}` : 'Sem preço calculado'}</strong><small>${decimal(item.peso_real_kg, 1)} kg · ${decimal(item.volume_m3, 3)} m³</small></span>
       <i class="fa-solid fa-arrow-rotate-left" aria-hidden="true"></i>
     </button>
   `).join('');
@@ -213,6 +221,7 @@ async function carregarCotacoesRecentes() {
   const abrir = painel.hidden;
   painel.hidden = !abrir;
   if (!abrir) return;
+  document.getElementById('freteGestaoPanel').hidden = true;
   container.innerHTML = '<div class="frete-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Carregando cotações...</span></div>';
   try {
     const data = await fetchJson('/api/frete/cotacoes?limit=8');
@@ -240,12 +249,126 @@ async function reabrirCotacao(id) {
     if (valor) valor.value = formatarValorMercadoria(cotacao.valor_mercadoria);
     atualizarUf({ preservarCidade: true, buscaCidade: cotacao.destino_cidade || '' });
     renderItens();
-    freteState.cotacao = null;
-    document.getElementById('freteResultadosPanel').hidden = true;
+    freteState.cotacao = data.resultados?.length ? { cotacao_id: cotacao.id, resultados: data.resultados, historica: true } : null;
+    if (freteState.cotacao) renderResultados(freteState.cotacao);
+    else document.getElementById('freteResultadosPanel').hidden = true;
     document.getElementById('freteRecentesPanel').hidden = true;
     document.getElementById('freteSimuladorRoot')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
   } catch (erro) {
     if (container) container.innerHTML = `<div class="frete-alert is-error"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(erro.message)}</span></div>`;
+  }
+}
+
+function renderGestao() {
+  const container = document.getElementById('freteGestaoConteudo');
+  if (!container || !freteState.gestao) return;
+  const { tabelas = [], pode_gerenciar: podeGerenciar } = freteState.gestao;
+  const pendentes = freteState.produtosPendentes;
+  const resumo = pendentes?.resumo || {};
+  container.innerHTML = `
+    <div class="frete-quality-summary">
+      <div class="frete-quality-metric"><span>Tabelas cadastradas</span><strong>${tabelas.length}</strong></div>
+      <div class="frete-quality-metric"><span>Homologadas</span><strong>${tabelas.filter((item) => item.status === 'ativa').length}</strong></div>
+      <div class="frete-quality-metric"><span>Com bloqueios</span><strong>${tabelas.filter((item) => item.diagnostico?.bloqueios?.length).length}</strong></div>
+      <div class="frete-quality-metric"><span>Produtos pendentes</span><strong>${numero(resumo.total_pendentes)}</strong></div>
+    </div>
+    <div class="frete-table-health-grid">
+      ${tabelas.map((item) => {
+        const diagnostico = item.diagnostico || {};
+        const bloqueios = diagnostico.bloqueios || [];
+        const avisos = diagnostico.avisos || [];
+        const classeStatus = item.status === 'ativa' ? 'is-active' : item.status === 'inativa' ? 'is-inactive' : 'is-review';
+        return `<article class="frete-table-health ${bloqueios.length ? 'has-blockers' : ''}">
+          <div class="frete-table-health-head"><div><h3>${esc(item.transportadora)}</h3><small>${esc(item.versao)}</small></div><span class="frete-table-status ${classeStatus}">${item.status === 'ativa' ? 'Homologada' : item.status === 'inativa' ? 'Inativa' : 'Em revisão'}</span></div>
+          <div class="frete-table-stats"><span>${numero(diagnostico.coberturas)} coberturas</span><span>${numero(diagnostico.faixas)} tarifas</span><span>${numero(diagnostico.regras) + numero(diagnostico.adicionais_cep)} regras</span></div>
+          ${bloqueios.map((texto) => `<div class="frete-quality-note is-blocker"><i class="fa-solid fa-circle-xmark"></i><span>${esc(texto)}</span></div>`).join('')}
+          ${avisos.slice(0, 3).map((texto) => `<div class="frete-quality-note is-warning"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(texto)}</span></div>`).join('')}
+          ${avisos.length > 3 ? `<small class="frete-more-notes">+ ${avisos.length - 3} alerta(s) no relatório de importação</small>` : ''}
+          <div class="frete-table-source"><span title="${esc(item.arquivo_origem || '')}"><i class="fa-solid fa-file-lines"></i>${esc(item.arquivo_origem || 'Fonte não informada')}</span><span>${esc(dataHora(item.atualizado_em))}</span></div>
+          ${podeGerenciar ? `<div class="frete-table-actions">
+            ${item.status !== 'ativa' ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-table-status="ativa" data-frete-table-id="${item.id}" ${bloqueios.length ? 'disabled' : ''}><i class="fa-solid fa-shield-check"></i>Homologar</button>` : ''}
+            ${item.status !== 'em_revisao' ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-table-status="em_revisao" data-frete-table-id="${item.id}">Revisar</button>` : ''}
+            ${item.status !== 'inativa' ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-table-status="inativa" data-frete-table-id="${item.id}">Inativar</button>` : ''}
+          </div>` : ''}
+        </article>`;
+      }).join('')}
+    </div>
+    <section class="frete-product-quality">
+      <div class="frete-subhead"><div><h3>Qualidade do cadastro dos produtos</h3><p>Produtos fiscais 00 e 04 que ainda não podem compor uma cotação confiável.</p></div><span>${numero(resumo.total_pendentes)} pendente(s)</span></div>
+      <div class="frete-quality-tags"><span>Sem altura: ${numero(resumo.sem_altura)}</span><span>Sem largura: ${numero(resumo.sem_largura)}</span><span>Sem profundidade: ${numero(resumo.sem_profundidade)}</span><span>Sem peso: ${numero(resumo.sem_peso)}</span><span>Unidade suspeita: ${numero(resumo.unidade_suspeita)}</span></div>
+      <div class="frete-product-pending-list">
+        ${(pendentes?.itens || []).slice(0, 30).map((item) => `<div class="frete-product-pending"><strong>${esc(item.codigo)}</strong><span>${esc(item.descricao)}</span><small>${(item.pendencias || []).map(esc).join(' · ')}</small></div>`).join('') || '<div class="frete-empty"><strong>Cadastros completos</strong><span>Nenhuma pendência encontrada.</span></div>'}
+      </div>
+      ${(pendentes?.itens || []).length > 30 ? `<p class="frete-quality-footnote">Exibindo 30 de ${pendentes.itens.length} registros retornados.</p>` : ''}
+    </section>`;
+}
+
+async function carregarGestao() {
+  const painel = document.getElementById('freteGestaoPanel');
+  const container = document.getElementById('freteGestaoConteudo');
+  if (!painel || !container) return;
+  const abrir = painel.hidden;
+  painel.hidden = !abrir;
+  if (!abrir) return;
+  document.getElementById('freteRecentesPanel').hidden = true;
+  container.innerHTML = '<div class="frete-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Auditando tabelas e produtos...</span></div>';
+  try {
+    const [gestao, produtosPendentes] = await Promise.all([
+      fetchJson('/api/frete/gestao'),
+      fetchJson('/api/frete/produtos-pendentes?limit=100')
+    ]);
+    freteState.gestao = gestao;
+    freteState.produtosPendentes = produtosPendentes;
+    renderGestao();
+  } catch (erro) {
+    container.innerHTML = `<div class="frete-alert is-error"><i class="fa-solid fa-triangle-exclamation"></i><span>${esc(erro.message)}</span></div>`;
+  }
+}
+
+async function alterarStatusTabela(tabelaId, status) {
+  const tabela = freteState.gestao?.tabelas?.find((item) => String(item.id) === String(tabelaId));
+  if (!tabela) return;
+  const rotulo = status === 'ativa' ? 'homologar' : status === 'inativa' ? 'inativar' : 'colocar em revisão';
+  const observacao = window.prompt(`Informe o motivo para ${rotulo} a tabela ${tabela.transportadora}:`, 'Validação operacional registrada');
+  if (observacao == null) return;
+  try {
+    await fetchJson(`/api/frete/tabelas/${encodeURIComponent(tabelaId)}/status`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, observacao })
+    });
+    freteState.gestao = null;
+    document.getElementById('freteGestaoPanel').hidden = true;
+    await carregarStatus();
+    await carregarGestao();
+  } catch (erro) {
+    const bloqueios = erro.data?.bloqueios || [];
+    window.alert(`${erro.message}${bloqueios.length ? `\n\n${bloqueios.join('\n')}` : ''}`);
+  }
+}
+
+function montarResumoCotacao() {
+  if (!freteState.cotacao) return '';
+  const destino = `${document.getElementById('freteCidade')?.value || ''}/${document.getElementById('freteUf')?.value || ''}`;
+  const linhas = [`Cotação de frete #${freteState.cotacao.cotacao_id || ''}`, `Destino: ${destino}`, `Valor da mercadoria: ${formatarValorMercadoria(document.getElementById('freteValorMercadoria')?.value)}`, '', 'Carga:'];
+  freteState.itens.forEach((item) => linhas.push(`- ${item.quantidade}x ${item.codigo} · ${item.descricao}`));
+  linhas.push('', 'Opções:');
+  (freteState.cotacao.resultados || []).filter((item) => item.ok).forEach((item) => linhas.push(`- ${item.transportadora}: ${moeda(item.valor_total)}${item.homologado ? '' : ' (prévia em revisão)'}`));
+  return linhas.join('\n');
+}
+
+async function copiarResumoCotacao() {
+  const texto = montarResumoCotacao();
+  if (!texto) return;
+  try {
+    await navigator.clipboard.writeText(texto);
+    const botao = document.getElementById('freteCopiarResumoBtn');
+    if (botao) {
+      const original = botao.innerHTML;
+      botao.innerHTML = '<i class="fa-solid fa-check"></i>Copiado';
+      setTimeout(() => { botao.innerHTML = original; }, 1800);
+    }
+  } catch (_erro) {
+    window.prompt('Copie o resumo da cotação:', texto);
   }
 }
 
@@ -254,10 +377,11 @@ function template() {
     <div class="frete-shell">
       <header class="frete-header">
         <div class="frete-title"><span class="frete-title-icon"><i class="fa-solid fa-calculator"></i></span><div><h1>Simulador de frete</h1><p>Monte a carga e compare apenas transportadoras que atendem ao destino.</p></div></div>
-        <div class="frete-header-actions"><button id="freteRecentesBtn" class="frete-btn frete-btn-secondary" type="button"><i class="fa-solid fa-clock-rotate-left"></i>Cotações recentes</button><span class="frete-status-pill" id="freteStatus"><i class="fa-solid fa-circle"></i>Preparando tabelas...</span></div>
+        <div class="frete-header-actions"><button id="freteGestaoBtn" class="frete-btn frete-btn-secondary" type="button"><i class="fa-solid fa-clipboard-check"></i>Tabelas e qualidade</button><button id="freteRecentesBtn" class="frete-btn frete-btn-secondary" type="button"><i class="fa-solid fa-clock-rotate-left"></i>Cotações recentes</button><span class="frete-status-pill" id="freteStatus"><i class="fa-solid fa-circle"></i>Preparando tabelas...</span></div>
       </header>
       <main class="frete-workspace">
         <section id="freteRecentesPanel" class="frete-panel frete-recents" hidden><div class="frete-panel-head"><div><h2>Últimas cotações</h2><p>Reabra uma simulação para ajustar destino, valor ou quantidades.</p></div><span class="frete-step"><i class="fa-solid fa-clock-rotate-left"></i></span></div><div class="frete-panel-body"><div id="freteCotacoesRecentes" class="frete-recents-list"></div></div></section>
+        <section id="freteGestaoPanel" class="frete-panel frete-management" hidden><div class="frete-panel-head"><div><h2>Tabelas e qualidade</h2><p>Homologue somente fontes conferidas e acompanhe dados que afetam o cálculo.</p></div><span class="frete-step"><i class="fa-solid fa-shield-halved"></i></span></div><div class="frete-panel-body"><div id="freteGestaoConteudo"></div></div></section>
         <section class="frete-panel">
           <div class="frete-panel-head"><div><h2>Destino</h2><p id="freteOrigem">A origem Fromtherm é fixa.</p></div><span class="frete-step">1</span></div>
           <div class="frete-panel-body">
@@ -280,7 +404,7 @@ function template() {
             <button id="freteSimularBtn" class="frete-btn frete-btn-primary frete-simulate" type="button" disabled><i class="fa-solid fa-bolt"></i>Comparar fretes</button>
           </div>
         </section>
-        <section id="freteResultadosPanel" class="frete-panel frete-quotes" hidden><div class="frete-panel-head"><div><h2>Opções para este frete</h2><p>Estimativa detalhada; confirme a contratação com a transportadora.</p></div><span class="frete-step"><i class="fa-solid fa-ranking-star"></i></span></div><div class="frete-panel-body"><div id="freteResultados" class="frete-quotes-grid"></div></div></section>
+        <section id="freteResultadosPanel" class="frete-panel frete-quotes" hidden><div class="frete-panel-head"><div><h2>Opções para este frete</h2><p>Estimativa detalhada; confirme a contratação com a transportadora.</p></div><div class="frete-result-actions"><button id="freteCopiarResumoBtn" class="frete-btn frete-btn-ghost" type="button"><i class="fa-solid fa-copy"></i>Copiar resumo</button><button id="freteImprimirBtn" class="frete-btn frete-btn-ghost" type="button"><i class="fa-solid fa-print"></i>Imprimir</button></div></div><div class="frete-panel-body"><div id="freteResultados" class="frete-quotes-grid"></div></div></section>
       </main>
     </div>
   `;
@@ -484,11 +608,18 @@ function bind() {
     if (event.target.value.trim()) event.target.value = formatarValorMercadoria(event.target.value);
   });
   document.getElementById('freteRecentesBtn')?.addEventListener('click', carregarCotacoesRecentes);
+  document.getElementById('freteGestaoBtn')?.addEventListener('click', carregarGestao);
+  document.getElementById('freteGestaoConteudo')?.addEventListener('click', (event) => {
+    const botao = event.target.closest('[data-frete-table-status]');
+    if (botao && !botao.disabled) alterarStatusTabela(botao.dataset.freteTableId, botao.dataset.freteTableStatus);
+  });
   document.getElementById('freteCotacoesRecentes')?.addEventListener('click', (event) => {
     const botao = event.target.closest('[data-frete-reopen]');
     if (botao) reabrirCotacao(botao.dataset.freteReopen);
   });
   document.getElementById('freteSimularBtn')?.addEventListener('click', simular);
+  document.getElementById('freteCopiarResumoBtn')?.addEventListener('click', copiarResumoCotacao);
+  document.getElementById('freteImprimirBtn')?.addEventListener('click', () => window.print());
 }
 
 async function carregarStatus() {
@@ -535,3 +666,5 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 window.abrirSimuladorFrete = abrir;
+
+})();

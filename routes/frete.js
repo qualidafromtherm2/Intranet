@@ -10,6 +10,11 @@ const NAV_KEY = 'side:log:simulador-frete';
 const SCHEMA_SQL = fs.readFileSync(path.join(__dirname, '..', 'sql', '20260728_create_frete_simulador.sql'), 'utf8');
 let schemaPromise = null;
 
+function usuarioEhAdmin(req) {
+  const roles = Array.isArray(req.session?.user?.roles) ? req.session.user.roles : [];
+  return roles.some((role) => String(role || '').trim().toLowerCase() === 'admin');
+}
+
 function garantirSchema() {
   if (!schemaPromise) {
     schemaPromise = pool.query(SCHEMA_SQL).catch((erro) => {
@@ -18,6 +23,50 @@ function garantirSchema() {
     });
   }
   return schemaPromise;
+}
+
+async function diagnosticarTabela(tabelaId) {
+  const { rows } = await pool.query(`
+    WITH faixas_ordenadas AS (
+      SELECT valor_base,
+             LAG(valor_base) OVER (
+               PARTITION BY codigo_regiao, COALESCE(uf_destino, ''), COALESCE(cidade_normalizada, '')
+               ORDER BY peso_de_kg, COALESCE(peso_ate_kg, 99999999)
+             ) AS valor_anterior
+      FROM frete.tarifa_faixa
+      WHERE tabela_preco_id = $1
+    ), cobertura_sem_tarifa AS (
+      SELECT COUNT(*)::int AS total
+      FROM frete.cobertura c
+      WHERE c.tabela_preco_id = $1 AND c.atendida = TRUE
+        AND NOT EXISTS (
+          SELECT 1 FROM frete.tarifa_faixa f
+          WHERE f.tabela_preco_id = c.tabela_preco_id
+            AND (f.codigo_regiao IS NULL OR f.codigo_regiao = c.codigo_regiao)
+            AND (f.uf_destino IS NULL OR f.uf_destino = c.uf)
+            AND (f.cidade_normalizada IS NULL OR f.cidade_normalizada = c.cidade_normalizada)
+        )
+    )
+    SELECT
+      (SELECT COUNT(*)::int FROM frete.cobertura WHERE tabela_preco_id = $1) AS coberturas,
+      (SELECT COUNT(*)::int FROM frete.tarifa_faixa WHERE tabela_preco_id = $1) AS faixas,
+      (SELECT COUNT(*)::int FROM frete.regra_adicional WHERE tabela_preco_id = $1 AND ativo = TRUE) AS regras,
+      (SELECT COUNT(*)::int FROM frete.adicional_cep WHERE tabela_preco_id = $1 AND ativo = TRUE) AS adicionais_cep,
+      (SELECT total FROM cobertura_sem_tarifa) AS coberturas_sem_tarifa,
+      (SELECT COUNT(*)::int FROM faixas_ordenadas WHERE valor_anterior IS NOT NULL AND valor_base < valor_anterior) AS reducoes_preco,
+      (SELECT status FROM frete.importacao WHERE tabela_preco_id = $1 ORDER BY concluido_em DESC NULLS LAST, id DESC LIMIT 1) AS importacao_status,
+      (SELECT resumo FROM frete.importacao WHERE tabela_preco_id = $1 ORDER BY concluido_em DESC NULLS LAST, id DESC LIMIT 1) AS importacao_resumo
+  `, [tabelaId]);
+  const d = rows[0] || {};
+  const bloqueios = [];
+  const avisos = [];
+  if (!Number(d.coberturas)) bloqueios.push('Nenhuma cobertura de destino foi importada.');
+  if (!Number(d.faixas)) bloqueios.push('Nenhuma tarifa principal de frete-peso foi importada.');
+  if (!String(d.importacao_status || '').startsWith('concluida')) bloqueios.push('A importacao da tabela ainda nao foi concluida.');
+  if (Number(d.reducoes_preco) > 0) bloqueios.push(`${d.reducoes_preco} transicao(oes) de peso reduzem o preco; confirme a fonte antes de homologar.`);
+  if (Number(d.coberturas_sem_tarifa) > 0) avisos.push(`${d.coberturas_sem_tarifa} cobertura(s) ainda nao possuem tarifa principal compativel.`);
+  for (const alerta of (d.importacao_resumo?.alertas || [])) avisos.push(String(alerta));
+  return { ...d, bloqueios, avisos, pode_homologar: bloqueios.length === 0 };
 }
 
 async function salvarCotacao({ usuarioId, destino, valorMercadoria, romaneio, resultados }) {
@@ -64,22 +113,24 @@ async function salvarCotacao({ usuarioId, destino, valorMercadoria, romaneio, re
       )
     `, [cotacaoId, JSON.stringify(romaneio.itens.map((item) => ({ ...item, produto_snapshot: item })))]);
 
-    const validos = resultados.filter((item) => item.ok && item.homologado);
+    const validos = resultados.filter((item) => item.ok);
     if (validos.length) {
       await client.query(`
         INSERT INTO frete.cotacao_resultado (
           cotacao_id, tabela_preco_id, cobertura_id, peso_cubado_kg,
           peso_cobravel_kg, frete_peso, adicionais, valor_total,
-          prazo_min_dias, prazo_max_dias, memoria_calculo
+          prazo_min_dias, prazo_max_dias, homologado, transportadora,
+          versao, memoria_calculo
         )
         SELECT $1, x.tabela_preco_id, x.cobertura_id, x.peso_cubado_kg,
                x.peso_cobravel_kg, x.frete_peso, x.adicionais, x.valor_total,
-               x.prazo_min_dias, x.prazo_max_dias, x.memoria_calculo
+               x.prazo_min_dias, x.prazo_max_dias, x.homologado,
+               x.transportadora, x.versao, x.memoria_calculo
         FROM jsonb_to_recordset($2::jsonb) AS x(
           tabela_preco_id bigint, cobertura_id bigint, peso_cubado_kg numeric,
           peso_cobravel_kg numeric, frete_peso numeric, adicionais numeric,
           valor_total numeric, prazo_min_dias integer, prazo_max_dias integer,
-          memoria_calculo jsonb
+          homologado boolean, transportadora text, versao text, memoria_calculo jsonb
         )
       `, [cotacaoId, JSON.stringify(validos.map((item) => ({
         ...item,
@@ -116,7 +167,7 @@ async function exigirAcesso(req, res, next) {
 router.use(express.json({ limit: '1mb' }));
 router.use(exigirAcesso);
 
-router.get('/status', async (_req, res) => {
+router.get('/status', async (req, res) => {
   try {
     const [produtos, tabelas, configuracao] = await Promise.all([
       pool.query(`
@@ -149,10 +200,99 @@ router.get('/status', async (_req, res) => {
       `),
       pool.query("SELECT valor FROM frete.configuracao WHERE chave = 'origem_padrao'")
     ]);
-    res.json({ ok: true, produtos: produtos.rows[0], tabelas: tabelas.rows, origem: configuracao.rows[0]?.valor || null });
+    res.json({
+      ok: true,
+      produtos: produtos.rows[0],
+      tabelas: tabelas.rows,
+      origem: configuracao.rows[0]?.valor || null,
+      pode_gerenciar: usuarioEhAdmin(req)
+    });
   } catch (erro) {
     console.error('[frete/status]', erro);
     res.status(500).json({ ok: false, error: 'Falha ao carregar o status do simulador.' });
+  }
+});
+
+router.get('/gestao', async (req, res) => {
+  try {
+    const { rows } = await pool.query(`
+      SELECT t.id, t.transportadora_id, tr.nome AS transportadora, t.nome, t.versao,
+             t.status, t.vigencia_inicio, t.vigencia_fim, t.arquivo_origem,
+             t.arquivo_sha256, t.homologado_em, t.homologacao_observacao,
+             u.username AS homologado_por_nome, t.atualizado_em
+      FROM frete.tabela_preco t
+      JOIN frete.transportadora tr ON tr.id = t.transportadora_id
+      LEFT JOIN public.auth_user u ON u.id = t.homologado_por
+      WHERE tr.ativo = TRUE
+      ORDER BY tr.nome, t.criado_em DESC
+    `);
+    const tabelas = await Promise.all(rows.map(async (item) => ({
+      ...item,
+      diagnostico: await diagnosticarTabela(item.id)
+    })));
+    res.json({ ok: true, pode_gerenciar: usuarioEhAdmin(req), tabelas });
+  } catch (erro) {
+    console.error('[frete/gestao]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao carregar a central de tabelas.' });
+  }
+});
+
+router.patch('/tabelas/:id/status', async (req, res) => {
+  if (!usuarioEhAdmin(req)) return res.status(403).json({ ok: false, error: 'Apenas administradores podem homologar tabelas.' });
+  const tabelaId = Number(req.params.id);
+  const statusNovo = String(req.body?.status || '').trim();
+  const observacao = String(req.body?.observacao || '').trim().slice(0, 1000);
+  if (!Number.isInteger(tabelaId) || tabelaId <= 0 || !['ativa', 'em_revisao', 'inativa'].includes(statusNovo)) {
+    return res.status(400).json({ ok: false, error: 'Tabela ou status invalido.' });
+  }
+  try {
+    const diagnostico = await diagnosticarTabela(tabelaId);
+    if (statusNovo === 'ativa' && !diagnostico.pode_homologar) {
+      return res.status(422).json({ ok: false, error: 'A tabela possui bloqueios de homologacao.', bloqueios: diagnostico.bloqueios });
+    }
+    if (statusNovo === 'ativa' && observacao.length < 5) {
+      return res.status(400).json({ ok: false, error: 'Informe uma observacao curta sobre a validacao realizada.' });
+    }
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const atual = await client.query('SELECT id, transportadora_id, status FROM frete.tabela_preco WHERE id = $1 FOR UPDATE', [tabelaId]);
+      if (!atual.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Tabela nao encontrada.' });
+      }
+      if (statusNovo === 'ativa') {
+        await client.query(`
+          UPDATE frete.tabela_preco
+          SET status = 'inativa', atualizado_em = NOW()
+          WHERE transportadora_id = $1 AND id <> $2 AND status = 'ativa'
+        `, [atual.rows[0].transportadora_id, tabelaId]);
+      }
+      await client.query(`
+        UPDATE frete.tabela_preco
+        SET status = $2,
+            homologado_em = CASE WHEN $2 = 'ativa' THEN NOW() ELSE homologado_em END,
+            homologado_por = CASE WHEN $2 = 'ativa' THEN $3 ELSE homologado_por END,
+            homologacao_observacao = CASE WHEN $2 = 'ativa' THEN $4 ELSE homologacao_observacao END,
+            atualizado_em = NOW()
+        WHERE id = $1
+      `, [tabelaId, statusNovo, req.session.user.id, observacao || null]);
+      await client.query(`
+        INSERT INTO frete.tabela_preco_auditoria (
+          tabela_preco_id, status_anterior, status_novo, usuario_id, usuario_nome, observacao
+        ) VALUES ($1,$2,$3,$4,$5,$6)
+      `, [tabelaId, atual.rows[0].status, statusNovo, req.session.user.id, req.session.user.username || null, observacao || null]);
+      await client.query('COMMIT');
+    } catch (erro) {
+      await client.query('ROLLBACK');
+      throw erro;
+    } finally {
+      client.release();
+    }
+    res.json({ ok: true, status: statusNovo, diagnostico });
+  } catch (erro) {
+    console.error('[frete/tabelas/status]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao atualizar a homologacao da tabela.' });
   }
 });
 
@@ -203,6 +343,47 @@ router.get('/produtos', async (req, res) => {
   } catch (erro) {
     console.error('[frete/produtos]', erro);
     res.status(500).json({ ok: false, error: 'Falha ao pesquisar produtos.' });
+  }
+});
+
+router.get('/produtos-pendentes', async (req, res) => {
+  try {
+    const limite = Math.min(200, Math.max(10, Number(req.query.limit) || 100));
+    const baseSql = `
+      WITH base AS (
+        SELECT p.codigo, p.descricao, p.altura, p.largura, p.profundidade,
+               p.peso_bruto, p.peso_liq,
+               ARRAY_REMOVE(ARRAY[
+                 CASE WHEN COALESCE(p.altura, 0) <= 0 THEN 'Altura ausente' END,
+                 CASE WHEN COALESCE(p.largura, 0) <= 0 THEN 'Largura ausente' END,
+                 CASE WHEN COALESCE(p.profundidade, 0) <= 0 THEN 'Profundidade ausente' END,
+                 CASE WHEN GREATEST(COALESCE(p.peso_bruto, 0), COALESCE(p.peso_liq, 0)) <= 0 THEN 'Peso ausente' END,
+                 CASE WHEN GREATEST(COALESCE(p.altura, 0), COALESCE(p.largura, 0), COALESCE(p.profundidade, 0)) > 500 THEN 'Dimensao acima de 500 cm; conferir unidade' END
+               ], NULL) AS pendencias
+        FROM public.produtos_omie p
+        WHERE LPAD(REGEXP_REPLACE(COALESCE(p.tipoitem, ''), '\\D', '', 'g'), 2, '0') IN ('00', '04')
+          AND COALESCE(p.inativo, 'N') <> 'S'
+      )
+    `;
+    const [itens, resumo] = await Promise.all([
+      pool.query(`${baseSql}
+        SELECT * FROM base WHERE CARDINALITY(pendencias) > 0
+        ORDER BY codigo LIMIT $1
+      `, [limite]),
+      pool.query(`${baseSql}
+        SELECT COUNT(*) FILTER (WHERE CARDINALITY(pendencias) > 0)::int AS total_pendentes,
+               COUNT(*) FILTER (WHERE 'Altura ausente' = ANY(pendencias))::int AS sem_altura,
+               COUNT(*) FILTER (WHERE 'Largura ausente' = ANY(pendencias))::int AS sem_largura,
+               COUNT(*) FILTER (WHERE 'Profundidade ausente' = ANY(pendencias))::int AS sem_profundidade,
+               COUNT(*) FILTER (WHERE 'Peso ausente' = ANY(pendencias))::int AS sem_peso,
+               COUNT(*) FILTER (WHERE 'Dimensao acima de 500 cm; conferir unidade' = ANY(pendencias))::int AS unidade_suspeita
+        FROM base
+      `)
+    ]);
+    res.json({ ok: true, resumo: resumo.rows[0], itens: itens.rows });
+  } catch (erro) {
+    console.error('[frete/produtos-pendentes]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao diagnosticar os produtos.' });
   }
 });
 
@@ -260,7 +441,8 @@ router.get('/cotacoes', async (req, res) => {
              c.valor_mercadoria, c.peso_real_kg, c.volume_m3,
              COUNT(DISTINCT i.id)::int AS itens,
              COUNT(DISTINCT r.id)::int AS resultados,
-             MIN(r.valor_total) AS melhor_valor
+             MIN(r.valor_total) FILTER (WHERE r.homologado = TRUE) AS melhor_valor,
+             MIN(r.valor_total) FILTER (WHERE r.homologado = FALSE) AS melhor_previa
       FROM frete.cotacao c
       LEFT JOIN frete.cotacao_item i ON i.cotacao_id = c.id
       LEFT JOIN frete.cotacao_resultado r ON r.cotacao_id = c.id
@@ -291,7 +473,7 @@ router.get('/cotacoes/:id', async (req, res) => {
     `, [cotacaoId, usuarioId]);
     if (!cotacao.rows[0]) return res.status(404).json({ ok: false, error: 'Cotação não encontrada.' });
 
-    const itens = await pool.query(`
+    const [itens, resultados] = await Promise.all([pool.query(`
       SELECT ci.codigo_produto, ci.codigo,
              COALESCE(p.descricao, ci.descricao) AS descricao,
              ci.quantidade, COALESCE(p.tipoitem, ci.produto_snapshot->>'tipoitem') AS tipoitem,
@@ -322,8 +504,28 @@ router.get('/cotacoes/:id', async (req, res) => {
       ) img ON TRUE
       WHERE ci.cotacao_id = $1
       ORDER BY ci.id
-    `, [cotacaoId]);
-    res.json({ ok: true, cotacao: cotacao.rows[0], itens: itens.rows });
+    `, [cotacaoId]), pool.query(`
+      SELECT tabela_preco_id, cobertura_id, peso_cubado_kg, peso_cobravel_kg,
+             frete_peso, adicionais, valor_total, prazo_min_dias, prazo_max_dias,
+             homologado, transportadora, versao, memoria_calculo
+      FROM frete.cotacao_resultado
+      WHERE cotacao_id = $1
+      ORDER BY homologado DESC, valor_total, id
+    `, [cotacaoId])]);
+    res.json({
+      ok: true,
+      cotacao: cotacao.rows[0],
+      itens: itens.rows,
+      resultados: resultados.rows.map((item) => ({
+        ...item,
+        ...(item.memoria_calculo || {}),
+        tabela_id: item.tabela_preco_id,
+        ok: true,
+        homologado: Boolean(item.homologado),
+        transportadora: item.transportadora || item.memoria_calculo?.transportadora,
+        versao: item.versao || item.memoria_calculo?.versao
+      }))
+    });
   } catch (erro) {
     console.error('[frete/cotacoes/detalhe]', erro);
     res.status(500).json({ ok: false, error: 'Falha ao reabrir a cotação.' });
