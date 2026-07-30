@@ -78306,7 +78306,7 @@ window.adicionarNovaLinhaPIR = adicionarNovaLinhaPIR;
         { id: 'produtos', title: 'Produtos', description: 'Cadastro e consulta de produtos.', icon: 'fa-box-open', selectors: ['#btn-omie-list1', '#menu-produto', '#btn-definicoes'] },
         { id: 'estoque', title: 'Estoque', description: 'Armaz\u00e9ns, recebimento e movimenta\u00e7\u00f5es.', icon: 'fa-boxes-stacked', selectors: ['#menu-armazens', '#menu-recebimento', '#menu-produto-recebido', '#menu-estoque-minimo', '#menu-guardar-materiais', '#menu-identificacao-produto', '#menu-solicitacao-ajuste'] },
         { id: 'compras', title: 'Compras', description: 'Solicita\u00e7\u00f5es e acompanhamento de compras.', icon: 'fa-bag-shopping', selectors: ['#cart-icon', '#menu-compras-contas-utilizadas', '#menu-compras-configuracoes'] },
-        { id: 'expedicao', title: 'Expedi\u00e7\u00e3o', description: 'Transfer\u00eancias, envios e relat\u00f3rios.', icon: 'fa-truck-ramp-box', selectors: ['#menu-solicitacao-transferencia', '#menu-envio-mercadoria', '#menu-log-relatorio'] }
+        { id: 'expedicao', title: 'Expedi\u00e7\u00e3o', description: 'Transfer\u00eancias, envios, fretes e relat\u00f3rios.', icon: 'fa-truck-ramp-box', selectors: ['#menu-solicitacao-transferencia', '#menu-envio-mercadoria', '#menu-simulador-frete', '#menu-log-relatorio'] }
       ]
     },
     { id: 'producao', title: 'Produ\u00e7\u00e3o', description: 'Registros, inspe\u00e7\u00e3o e acompanhamento da produ\u00e7\u00e3o.', icon: 'fa-industry', color: '#0f766e', selectors: ['#menu-producao-primeira-peca-ok', '#menu-registrar-producao', '#menu-producao-3d', '#menu-monta-producao', '#menu-ri-registro-inspecao'] },
