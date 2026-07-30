@@ -692,15 +692,19 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
 
   const destinosPorRegiao = new Map(destinos.map((item) => [`${item.uf}|${item.cidade_normalizada}`, item]));
   const coberturaDados = [];
-  const chavesCobertura = new Set();
+  const coberturasPorChave = new Map();
   let pracasComTarifa = 0;
   let pracasSemTarifa = 0;
 
   const adicionarCobertura = (cobertura) => {
     const chave = `${cobertura.uf}|${cobertura.cidade_normalizada || '*'}|${cobertura.codigo_regiao}|${cobertura.cep_inicio || '*'}|${cobertura.cep_fim || '*'}`;
-    if (chavesCobertura.has(chave)) return;
-    chavesCobertura.add(chave);
-    coberturaDados.push({
+    const existente = coberturasPorChave.get(chave);
+    if (existente) {
+      if (cobertura.tde > 0) existente.tde = cobertura.tde;
+      existente.metadados = { ...existente.metadados, ...(cobertura.metadados || {}) };
+      return existente;
+    }
+    const nova = {
       ...cobertura,
       prazo_min_dias: prazoPadraoDias,
       prazo_max_dias: prazoPadraoDias,
@@ -709,7 +713,10 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
         prazo_padrao_horas: prazoPadraoHoras,
         prazo_fonte: 'confirmacao_operacional_ejl_2026-07-29'
       }
-    });
+    };
+    coberturasPorChave.set(chave, nova);
+    coberturaDados.push(nova);
+    return nova;
   };
 
   for (const grupo of EJL_PRACAS_OFICIAIS) {
@@ -768,33 +775,59 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
   const cidadesTarifadas = new Set(coberturaDados
     .filter((item) => codigosTarifados.has(item.codigo_regiao) && item.cidade_normalizada)
     .map((item) => `${item.uf}|${item.cidade_normalizada}`));
-  const coberturasPorCidade = new Map();
+  const coberturasPorCidadeUf = new Map();
   for (const cobertura of coberturaDados.filter((item) => item.cidade_normalizada)) {
-    if (!coberturasPorCidade.has(cobertura.cidade_normalizada)) coberturasPorCidade.set(cobertura.cidade_normalizada, []);
-    coberturasPorCidade.get(cobertura.cidade_normalizada).push(cobertura);
+    const chave = `${cobertura.uf}|${cobertura.cidade_normalizada}`;
+    if (!coberturasPorCidadeUf.has(chave)) coberturasPorCidadeUf.set(chave, []);
+    coberturasPorCidadeUf.get(chave).push(cobertura);
   }
+  const ufPorFilialTde = { CWB: 'PR', FLP: 'SC', FLS: 'SC', FLN: 'SC', JVL: 'SC', SPO: 'SP' };
   let tdesAplicados = 0;
+  let tdesCidadeTodaAplicados = 0;
+  let tdesFaixaCepAplicados = 0;
+  const tdesNaoVinculados = [];
   for (const auxiliar of fontesAuxiliares.filter((item) => item.fonte?.slug === 'expresso-ejl' && item.fonte?.sufixo === 'tde')) {
     const aba = auxiliar.grupos.find((grupo) => grupo.aba === 'Planilha1');
-    for (const linha of (aba?.linhas || []).filter((item) => item.numero_linha >= 2)) {
+    for (const linha of (aba?.linhas || []).filter((item) => item.numero_linha >= 3)) {
+      const filial = normalizarTexto(celula(linha, 'B'));
+      const uf = ufPorFilialTde[filial];
       const cidade = String(celula(linha, 'C') || '').trim();
       const cidadeNormalizada = normalizarTexto(cidade);
-      const candidatas = coberturasPorCidade.get(cidadeNormalizada) || [];
+      const candidatas = uf ? (coberturasPorCidadeUf.get(`${uf}|${cidadeNormalizada}`) || []) : [];
       const codigosRegiao = new Set(candidatas.map((item) => item.codigo_regiao));
       const coberturaDestino = codigosRegiao.size === 1 ? candidatas[0] : null;
       const tde = Number(celula(linha, 'E'));
-      if (!coberturaDestino || !(tde > 0)) continue;
       const faixaTexto = String(celula(linha, 'D') || '').trim();
+      if (!coberturaDestino || !(tde > 0)) {
+        tdesNaoVinculados.push({ linha: linha.numero_linha, filial, uf: uf || null, cidade, faixa: faixaTexto });
+        continue;
+      }
+      const metadadosTde = {
+        fonte_tde: auxiliar.fonte.arquivo,
+        linha_tde: linha.numero_linha,
+        filial_tde: filial,
+        faixa_original_tde: faixaTexto
+      };
+      if (normalizarTexto(faixaTexto) === 'CIDADE TODA') {
+        adicionarCobertura({ ...coberturaDestino, tde, metadados: metadadosTde });
+        tdesAplicados += 1;
+        tdesCidadeTodaAplicados += 1;
+        continue;
+      }
       const ceps = faixaTexto.match(/\d[\d.\-\s]{6,}\d/g) || [];
       const cepInicio = numeroCep(ceps[0]);
       const cepFim = numeroCep(ceps[1]);
-      if (!cepInicio || !cepFim) continue;
+      if (!cepInicio || !cepFim) {
+        tdesNaoVinculados.push({ linha: linha.numero_linha, filial, uf, cidade, faixa: faixaTexto });
+        continue;
+      }
       adicionarCobertura({
         codigo_regiao: coberturaDestino.codigo_regiao, uf: coberturaDestino.uf, cidade: coberturaDestino.cidade,
         cidade_normalizada: coberturaDestino.cidade_normalizada, cep_inicio: cepInicio, cep_fim: cepFim,
-        tde, metadados: { fonte: auxiliar.fonte.arquivo, linha: linha.numero_linha, faixa_original: faixaTexto }
+        tde, metadados: metadadosTde
       });
       tdesAplicados += 1;
+      tdesFaixaCepAplicados += 1;
     }
   }
 
@@ -865,6 +898,9 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
       estados_cobertos: [...new Set(EJL_PRACAS_OFICIAIS.map((item) => item.uf))].sort(),
       estados_com_cobertura_integral: EJL_PRACAS_OFICIAIS.filter((item) => item.coberturaUfCompleta).map((item) => item.uf),
       faixas_tde_aplicadas: tdesAplicados,
+      tdes_cidade_toda_aplicados: tdesCidadeTodaAplicados,
+      tdes_faixa_cep_aplicados: tdesFaixaCepAplicados,
+      tdes_nao_vinculados: tdesNaoVinculados,
       prazo_padrao_horas: prazoPadraoHoras,
       fonte_cobertura: FONTE_EJL_PRACAS,
       fonte_cobertura_consultada_em: FONTE_EJL_PRACAS_CONSULTADA_EM
@@ -872,6 +908,7 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
     alertas: [
       'Cobertura oficial conciliada com a relação de praças da EJL; os valores continuam vindo exclusivamente da planilha comercial.',
       'Prazo operacional padrão da EJL configurado em 48 horas para todas as praças atendidas.',
+      `${tdesAplicados} taxa(s) TDE vinculada(s) automaticamente pela filial, UF e cidade${tdesNaoVinculados.length ? `; ${tdesNaoVinculados.length} linha(s) permaneceram sem vínculo seguro` : ''}.`,
       'Bahia possui cobertura oficial estadual, mas permanece com preço pendente porque a planilha comercial não informa tarifa principal.',
       'Tabela mantida em revisão; devolução e reentrega são eventos operacionais e não entram automaticamente na cotação.'
     ]
@@ -1027,6 +1064,43 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos, fontesAuxilia
     )
   `, [tabelaId, JSON.stringify(coberturaDados)]);
 
+  const adicionaisTdaDados = [...cidades.values()]
+    .filter((item) => item.prazo?.tda_referencia > 0)
+    .map((item) => ({
+      codigo: 'TDA',
+      nome: 'Taxa de dificuldade de acesso',
+      tipo: 'fixo',
+      valor: item.prazo.tda_referencia,
+      uf: item.uf,
+      cidade_normalizada: item.cidade_normalizada,
+      cep_inicio: item.cep_inicio || item.prazo.cep_inicio || null,
+      cep_fim: item.cep_fim || item.prazo.cep_fim || null,
+      peso_maior_que: null,
+      peso_ate: null,
+      prioridade: 50,
+      metadados: {
+        fonte: item.prazo.arquivo,
+        linha: item.prazo.linha,
+        unidade_origem: 'FLN',
+        cidade_origem: 'PALHOCA',
+        estrategia_correspondencia: item.prazo.estrategia_correspondencia,
+        classificacao_praca: item.prazo.classificacao
+      }
+    }));
+  if (adicionaisTdaDados.length) await client.query(`
+    INSERT INTO frete.adicional_cep (
+      tabela_preco_id, codigo, nome, tipo_calculo, valor, uf, cidade_normalizada,
+      cep_inicio, cep_fim, peso_maior_que_kg, peso_ate_kg, prioridade, metadados
+    )
+    SELECT $1, x.codigo, x.nome, x.tipo, x.valor, x.uf, x.cidade_normalizada,
+           x.cep_inicio, x.cep_fim, x.peso_maior_que, x.peso_ate, x.prioridade, x.metadados
+    FROM jsonb_to_recordset($2::jsonb) AS x(
+      codigo TEXT, nome TEXT, tipo TEXT, valor NUMERIC, uf CHAR(2), cidade_normalizada TEXT,
+      cep_inicio INTEGER, cep_fim INTEGER, peso_maior_que NUMERIC, peso_ate NUMERIC,
+      prioridade INTEGER, metadados JSONB
+    )
+  `, [tabelaId, JSON.stringify(adicionaisTdaDados)]);
+
   const faixaDados = [];
   for (const item of cidades.values()) {
     let anterior = 0;
@@ -1117,6 +1191,7 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos, fontesAuxilia
       cidades_com_cep: coberturaDados.filter((item) => item.cep_inicio && item.cep_fim).length,
       cidades_com_prazo: coberturaDados.filter((item) => item.prazo_min_dias).length,
       cidades_sem_prazo: coberturaDados.filter((item) => !item.prazo_min_dias).length,
+      cidades_com_tda_automatica: adicionaisTdaDados.length,
       linhas_prazo_origem_fln_palhoca: [...prazosPorDestino.values()].reduce((total, itens) => total + itens.length, 0),
       linhas_prazo_ignoradas_outras_origens: linhasPrazoOutraOrigem,
       linhas_sem_tarifa: linhasSemTarifa,
@@ -1125,6 +1200,7 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos, fontesAuxilia
     alertas: [
       'Previa Fitlog baseada nas tarifas consolidadas por municipio e CEP da aba TARIFA POR CIDADE.',
       'Prazos e frequencias conciliados exclusivamente com a unidade FLN/Palhoca-SC.',
+      'TDA aplicada automaticamente somente quando a relacao de pracas da unidade FLN/Palhoca-SC informa valor positivo para o destino.',
       'TDE, TRT, EMEX, reentrega e devolucao nao sao aplicados automaticamente sem o gatilho operacional correspondente.'
     ]
   };

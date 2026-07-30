@@ -34,7 +34,7 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
           numero_linha: 60001,
           dados: {
             A: 'FLN', B: 'SC', C: 'PALHOCA', E: 'RJ', F: 'PETROPOLIS', G: 3303906,
-            H: 1169, I: 4, J: 5, K: 'STQQS.', L: 0, M: 'RIOI', N: 'I', O: 'RJ - INTERIOR',
+            H: 1169, I: 4, J: 5, K: 'STQQS.', L: 42.5, M: 'RIOI', N: 'I', O: 'RJ - INTERIOR',
             P: 25600001, Q: 25779999
           }
         }
@@ -46,7 +46,7 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
   assert.equal(resumo.coberturas, 1);
   assert.equal(resumo.faixas, 7);
 
-  const cobertura = JSON.parse(chamadas[0].params[1])[0];
+  const cobertura = JSON.parse(chamadas.find((item) => item.sql.includes('INSERT INTO frete.cobertura')).params[1])[0];
   assert.deepEqual(
     {
       cidade: cobertura.cidade, uf: cobertura.uf, inicio: cobertura.cep_inicio, fim: cobertura.cep_fim,
@@ -58,9 +58,22 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
   assert.equal(cobertura.metadados.cidade_origem_prazo, 'PALHOCA');
   assert.equal(cobertura.metadados.prazo_dificil_entrega_dias, 5);
   assert.equal(resumo.diagnostico_chaves.cidades_com_prazo, 1);
+  assert.equal(resumo.diagnostico_chaves.cidades_com_tda_automatica, 1);
   assert.equal(resumo.diagnostico_chaves.linhas_prazo_ignoradas_outras_origens, 1);
 
-  const faixas = JSON.parse(chamadas[1].params[1]);
+  const adicionais = JSON.parse(chamadas.find((item) => item.sql.includes('INSERT INTO frete.adicional_cep')).params[1]);
+  assert.deepEqual(adicionais[0], {
+    codigo: 'TDA', nome: 'Taxa de dificuldade de acesso', tipo: 'fixo', valor: 42.5,
+    uf: 'RJ', cidade_normalizada: 'PETROPOLIS', cep_inicio: 25600001, cep_fim: 25779999,
+    peso_maior_que: null, peso_ate: null, prioridade: 50,
+    metadados: {
+      fonte: 'fitlog RELAÇÃO DE PRAÇAS E PRAZOS - GERAL - 13ABR26.xlsx', linha: 60001,
+      unidade_origem: 'FLN', cidade_origem: 'PALHOCA', estrategia_correspondencia: 'cidade_uf',
+      classificacao_praca: 'I'
+    }
+  });
+
+  const faixas = JSON.parse(chamadas.find((item) => item.sql.includes('INSERT INTO frete.tarifa_faixa')).params[1]);
   assert.deepEqual(
     faixas.find((item) => item.peso_de === 70 && item.peso_ate === 100),
     {
@@ -76,7 +89,7 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
     }
   );
 
-  const regras = JSON.parse(chamadas[2].params[1]);
+  const regras = JSON.parse(chamadas.find((item) => item.sql.includes('INSERT INTO frete.regra_adicional')).params[1]);
   const freteValor = regras.find((item) => item.codigo === 'FRETE_VALOR_FITLOG_RJ_PETROPOLIS');
   assert.equal(freteValor.valor, 0.004);
   assert.equal(freteValor.minimo, 5.3);
