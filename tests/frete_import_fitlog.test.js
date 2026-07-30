@@ -23,15 +23,42 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
     }]
   }];
 
-  const resumo = await normalizarFitlogPorCidade(client, 8, grupos);
+  const fontesAuxiliares = [{
+    fonte: { slug: 'fitlog', sufixo: 'prazos', arquivo: 'fitlog RELAÇÃO DE PRAÇAS E PRAZOS - GERAL - 13ABR26.xlsx' },
+    grupos: [{
+      aba: 'FIT',
+      linhas: [
+        { numero_linha: 2, dados: { A: 'unidade_origem', B: 'uf_origem', C: 'cidade_origem' } },
+        { numero_linha: 3, dados: { A: 'BHZ', B: 'MG', C: 'CONTAGEM', E: 'RJ', F: 'PETROPOLIS', I: 9 } },
+        {
+          numero_linha: 60001,
+          dados: {
+            A: 'FLN', B: 'SC', C: 'PALHOCA', E: 'RJ', F: 'PETROPOLIS', G: 3303906,
+            H: 1169, I: 4, J: 5, K: 'STQQS.', L: 0, M: 'RIOI', N: 'I', O: 'RJ - INTERIOR',
+            P: 25600001, Q: 25779999
+          }
+        }
+      ]
+    }]
+  }];
+
+  const resumo = await normalizarFitlogPorCidade(client, 8, grupos, fontesAuxiliares);
   assert.equal(resumo.coberturas, 1);
   assert.equal(resumo.faixas, 7);
 
   const cobertura = JSON.parse(chamadas[0].params[1])[0];
   assert.deepEqual(
-    { cidade: cobertura.cidade, uf: cobertura.uf, inicio: cobertura.cep_inicio, fim: cobertura.cep_fim },
-    { cidade: 'PETROPOLIS', uf: 'RJ', inicio: 25600001, fim: 25779999 }
+    {
+      cidade: cobertura.cidade, uf: cobertura.uf, inicio: cobertura.cep_inicio, fim: cobertura.cep_fim,
+      prazo: cobertura.prazo_min_dias, frequencia: cobertura.frequencia
+    },
+    { cidade: 'PETROPOLIS', uf: 'RJ', inicio: 25600001, fim: 25779999, prazo: 4, frequencia: 'STQQS.' }
   );
+  assert.equal(cobertura.metadados.unidade_origem_prazo, 'FLN');
+  assert.equal(cobertura.metadados.cidade_origem_prazo, 'PALHOCA');
+  assert.equal(cobertura.metadados.prazo_dificil_entrega_dias, 5);
+  assert.equal(resumo.diagnostico_chaves.cidades_com_prazo, 1);
+  assert.equal(resumo.diagnostico_chaves.linhas_prazo_ignoradas_outras_origens, 1);
 
   const faixas = JSON.parse(chamadas[1].params[1]);
   assert.deepEqual(
@@ -53,4 +80,39 @@ test('importa Petrópolis e sua tarifa pela aba consolidada da Fitlog', async ()
   const freteValor = regras.find((item) => item.codigo === 'FRETE_VALOR_FITLOG_RJ_PETROPOLIS');
   assert.equal(freteValor.valor, 0.004);
   assert.equal(freteValor.minimo, 5.3);
+});
+
+test('concilia prazo Fitlog pelo CEP quando a tarifa usa o nome de um distrito', async () => {
+  const chamadas = [];
+  const client = { async query(sql, params) { chamadas.push({ sql, params }); return { rows: [] }; } };
+  const grupos = [{
+    aba: 'TARIFA POR CIDADE',
+    linhas: [{
+      numero_linha: 100,
+      dados: {
+        B: 'SAO MATEUS DE MINAS', C: 'MG', G: 'MG - INTERIOR',
+        H: 50, I: 50, J: 60, K: 70, L: 80, M: 90, N: 1,
+        AE: 37652000, AF: 37652000
+      }
+    }]
+  }];
+  const auxiliares = [{
+    fonte: { slug: 'fitlog', sufixo: 'prazos', arquivo: 'prazos.xlsx' },
+    grupos: [{
+      aba: 'FIT',
+      linhas: [{
+        numero_linha: 200,
+        dados: {
+          A: 'FLN', B: 'SC', C: 'PALHOCA', E: 'MG', F: 'CAMANDUCAIA',
+          I: 8, J: 9, P: 37650000, Q: 37652000
+        }
+      }]
+    }]
+  }];
+
+  await normalizarFitlogPorCidade(client, 8, grupos, auxiliares);
+  const cobertura = JSON.parse(chamadas[0].params[1])[0];
+  assert.equal(cobertura.prazo_min_dias, 8);
+  assert.equal(cobertura.metadados.estrategia_correspondencia_prazo, 'cep_contido');
+  assert.equal(cobertura.metadados.cidade_origem_prazo, 'PALHOCA');
 });

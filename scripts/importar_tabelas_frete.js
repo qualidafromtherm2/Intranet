@@ -60,6 +60,11 @@ const FONTES = [
   { arquivo: 'EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'] },
   { arquivo: 'RELAÇÃO DE TDE EXPRESSO EJL.xlsx', slug: 'expresso-ejl', nome: 'Expresso EJL', abas: ['Planilha1'], sufixo: 'tde', status: 'inativa' },
   { arquivo: 'TABELA FITLOG - ATUAL.xlsx', slug: 'fitlog', nome: 'Fitlog', abas: ['DADOS', 'PADRÃO', 'GENERALIDADES', 'PRAÇA', 'TABELA', 'TARIFA POR CIDADE', 'SSW-PROVISÓRIO'] },
+  {
+    arquivo: 'fitlog RELAÇÃO DE PRAÇAS E PRAZOS - GERAL - 13ABR26.xlsx',
+    slug: 'fitlog', nome: 'Fitlog', abas: ['FIT'], sufixo: 'prazos', status: 'inativa',
+    finalidade: 'Cobertura, frequência e prazos da unidade FLN/Palhoça incorporados à tabela principal.'
+  },
   { arquivo: 'TABELA FROMTHERM BRISTOT ROCHA.xlsx', slug: 'bristot-rocha', nome: 'Bristot Rocha', abas: ['Tarifas', 'Cidades Prazos x Classificação', 'Generalidades'] },
   { arquivo: 'TABELA FROMTHERM X MENGUE EXPRESS.xlsx', slug: 'mengue-express', nome: 'Mengue Express', abas: ['TABELA MENGUE SSW', 'BD CIDADE+PRAÇA+TAXAS+FREQ+PREV'] },
   { arquivo: 'TABELA RODONAVES - DESATUALIZADA.xlsm', slug: 'rodonaves', nome: 'Rodonaves', abas: ['Proposta SUL-SUD-CO-AC & RO', 'Lista de Tarifas Valor-OCULTAR', 'Tarifas Cidade Coleta-Entrega', 'CEPS Zona de Restrição - SP', 'CEPS Zona de Risco - SP', 'Planilha7'] },
@@ -873,7 +878,7 @@ async function normalizarEjl(client, tabelaId, grupos, fontesAuxiliares = []) {
   };
 }
 
-async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
+async function normalizarFitlogPorCidade(client, tabelaId, grupos, fontesAuxiliares = []) {
   const tarifaPorCidade = grupos.find((grupo) => grupo.aba === 'TARIFA POR CIDADE');
   if (!tarifaPorCidade) {
     return {
@@ -883,6 +888,64 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
       alertas: ['A aba TARIFA POR CIDADE da Fitlog nao foi encontrada.']
     };
   }
+
+  const prazosPorDestino = new Map();
+  const prazosOrigemFln = [];
+  let linhasPrazoOutraOrigem = 0;
+  for (const auxiliar of fontesAuxiliares.filter((item) => item.fonte?.slug === 'fitlog' && item.fonte?.sufixo === 'prazos')) {
+    const abaPrazos = auxiliar.grupos.find((grupo) => grupo.aba === 'FIT');
+    for (const linha of (abaPrazos?.linhas || []).filter((item) => item.numero_linha >= 3)) {
+      const unidadeOrigem = normalizarTexto(celula(linha, 'A'));
+      const ufOrigem = normalizarTexto(celula(linha, 'B'));
+      const cidadeOrigem = normalizarTexto(celula(linha, 'C'));
+      if (!(unidadeOrigem === 'FLN' && ufOrigem === 'SC' && cidadeOrigem === 'PALHOCA')) {
+        linhasPrazoOutraOrigem += 1;
+        continue;
+      }
+      const uf = String(celula(linha, 'E') || '').trim().toUpperCase();
+      const cidade = String(celula(linha, 'F') || '').trim();
+      const prazo = Number(celula(linha, 'I'));
+      if (!/^[A-Z]{2}$/.test(uf) || !cidade || !(prazo > 0)) continue;
+      const cidadeNormalizada = normalizarTexto(cidade);
+      const chave = `${uf}|${cidadeNormalizada}`;
+      const registro = {
+        uf,
+        cidade,
+        cidade_normalizada: cidadeNormalizada,
+        codigo_ibge: Number(celula(linha, 'G')) || null,
+        distancia_km: Number(celula(linha, 'H')) || null,
+        prazo,
+        prazo_dificil_entrega: Number(celula(linha, 'J')) || null,
+        frequencia: String(celula(linha, 'K') || '').trim() || null,
+        tda_referencia: Number(celula(linha, 'L')) || null,
+        praca_comercial: celula(linha, 'M') || null,
+        classificacao: celula(linha, 'N') || null,
+        regiao: celula(linha, 'O') || null,
+        cep_inicio: numeroCep(celula(linha, 'P')),
+        cep_fim: numeroCep(celula(linha, 'Q')),
+        linha: linha.numero_linha,
+        arquivo: auxiliar.fonte.arquivo
+      };
+      if (!prazosPorDestino.has(chave)) prazosPorDestino.set(chave, []);
+      prazosPorDestino.get(chave).push(registro);
+      prazosOrigemFln.push(registro);
+    }
+  }
+
+  const escolherPrazo = (item) => {
+    const candidatas = prazosPorDestino.get(`${item.uf}|${item.cidade_normalizada}`) || [];
+    if (candidatas.length === 1) return { ...candidatas[0], estrategia_correspondencia: 'cidade_uf' };
+    if (item.cep_inicio && item.cep_fim) {
+      const porCidadeECep = candidatas.filter((prazo) => prazo.cep_inicio && prazo.cep_fim
+        && prazo.cep_inicio <= item.cep_inicio && prazo.cep_fim >= item.cep_fim);
+      if (porCidadeECep.length === 1) return { ...porCidadeECep[0], estrategia_correspondencia: 'cidade_uf_cep' };
+      const porCep = prazosOrigemFln.filter((prazo) => prazo.uf === item.uf
+        && prazo.cep_inicio && prazo.cep_fim
+        && prazo.cep_inicio <= item.cep_inicio && prazo.cep_fim >= item.cep_fim);
+      if (porCep.length === 1) return { ...porCep[0], estrategia_correspondencia: 'cep_contido' };
+    }
+    return null;
+  };
 
   const cidades = new Map();
   let linhasSemTarifa = 0;
@@ -898,7 +961,7 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
       linhasSemTarifa += 1;
       continue;
     }
-    cidades.set(chave, {
+    const item = {
       codigo_regiao: `FITLOG_${uf}_${codigoSeguro(cidadeNormalizada)}`,
       uf,
       cidade,
@@ -914,7 +977,9 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
       cep_inicio: numeroCep(celula(linha, 'AE')),
       cep_fim: numeroCep(celula(linha, 'AF')),
       regiao: celula(linha, 'G') || null
-    });
+    };
+    item.prazo = escolherPrazo(item);
+    cidades.set(chave, item);
   }
 
   const coberturaDados = [...cidades.values()].map((item) => ({
@@ -922,25 +987,43 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
     uf: item.uf,
     cidade: item.cidade,
     cidade_normalizada: item.cidade_normalizada,
-    cep_inicio: item.cep_inicio,
-    cep_fim: item.cep_fim,
+    codigo_ibge: item.prazo?.codigo_ibge || null,
+    cep_inicio: item.cep_inicio || item.prazo?.cep_inicio || null,
+    cep_fim: item.cep_fim || item.prazo?.cep_fim || null,
+    prazo_min_dias: item.prazo?.prazo || null,
+    prazo_max_dias: item.prazo?.prazo || null,
+    frequencia: item.prazo?.frequencia || null,
     metadados: {
       fonte: 'TARIFA POR CIDADE',
       linha: item.linha,
       origem_praca: 'FLNP/FLNR',
-      regiao: item.regiao
+      regiao: item.regiao,
+      ...(item.prazo ? {
+        fonte_prazo: item.prazo.arquivo,
+        linha_prazo: item.prazo.linha,
+        estrategia_correspondencia_prazo: item.prazo.estrategia_correspondencia,
+        unidade_origem_prazo: 'FLN',
+        cidade_origem_prazo: 'PALHOCA',
+        distancia_km: item.prazo.distancia_km,
+        prazo_dificil_entrega_dias: item.prazo.prazo_dificil_entrega,
+        tda_referencia: item.prazo.tda_referencia,
+        praca_comercial: item.prazo.praca_comercial,
+        classificacao_praca: item.prazo.classificacao,
+        regiao_prazo: item.prazo.regiao
+      } : {})
     }
   }));
   if (coberturaDados.length) await client.query(`
     INSERT INTO frete.cobertura (
-      tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada,
-      cep_inicio, cep_fim, metadados
+      tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada, codigo_ibge,
+      cep_inicio, cep_fim, prazo_min_dias, prazo_max_dias, frequencia, metadados
     )
-    SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada,
-           x.cep_inicio, x.cep_fim, x.metadados
+    SELECT $1, x.codigo_regiao, x.uf, x.cidade, x.cidade_normalizada, x.codigo_ibge,
+           x.cep_inicio, x.cep_fim, x.prazo_min_dias, x.prazo_max_dias, x.frequencia, x.metadados
     FROM jsonb_to_recordset($2::jsonb) AS x(
-      codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT,
-      cep_inicio INTEGER, cep_fim INTEGER, metadados JSONB
+      codigo_regiao TEXT, uf CHAR(2), cidade TEXT, cidade_normalizada TEXT, codigo_ibge BIGINT,
+      cep_inicio INTEGER, cep_fim INTEGER, prazo_min_dias INTEGER,
+      prazo_max_dias INTEGER, frequencia TEXT, metadados JSONB
     )
   `, [tabelaId, JSON.stringify(coberturaDados)]);
 
@@ -1032,11 +1115,16 @@ async function normalizarFitlogPorCidade(client, tabelaId, grupos) {
     diagnostico_chaves: {
       cidades_destino: cidades.size,
       cidades_com_cep: coberturaDados.filter((item) => item.cep_inicio && item.cep_fim).length,
+      cidades_com_prazo: coberturaDados.filter((item) => item.prazo_min_dias).length,
+      cidades_sem_prazo: coberturaDados.filter((item) => !item.prazo_min_dias).length,
+      linhas_prazo_origem_fln_palhoca: [...prazosPorDestino.values()].reduce((total, itens) => total + itens.length, 0),
+      linhas_prazo_ignoradas_outras_origens: linhasPrazoOutraOrigem,
       linhas_sem_tarifa: linhasSemTarifa,
       conflitos_tarifarios: 0
     },
     alertas: [
       'Previa Fitlog baseada nas tarifas consolidadas por municipio e CEP da aba TARIFA POR CIDADE.',
+      'Prazos e frequencias conciliados exclusivamente com a unidade FLN/Palhoca-SC.',
       'TDE, TRT, EMEX, reentrega e devolucao nao sao aplicados automaticamente sem o gatilho operacional correspondente.'
     ]
   };
@@ -1563,7 +1651,7 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
   let normalizacao = { alertas: ['Fonte preservada em staging; regras ainda não normalizadas.'] };
   if (fonte.slug === 'expresso-sao-miguel' && !fonte.sufixo) normalizacao = await normalizarSaoMiguel(client, tabela.rows[0].id, grupos, fontesAuxiliares);
   if (fonte.slug === 'expresso-ejl' && !fonte.sufixo) normalizacao = await normalizarEjl(client, tabela.rows[0].id, grupos, fontesAuxiliares);
-  if (fonte.slug === 'fitlog') normalizacao = await normalizarFitlogPorCidade(client, tabela.rows[0].id, grupos);
+  if (fonte.slug === 'fitlog' && !fonte.sufixo) normalizacao = await normalizarFitlogPorCidade(client, tabela.rows[0].id, grupos, fontesAuxiliares);
   if (fonte.slug === 'bristot-rocha') normalizacao = await normalizarBristot(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'mengue-express') normalizacao = await normalizarMengueCobertura(client, tabela.rows[0].id, grupos);
   if (fonte.slug === 'rodonaves' && fonte.tipo !== 'pdf') normalizacao = await normalizarRodonaves(client, tabela.rows[0].id, grupos, fontesAuxiliares);
