@@ -13,6 +13,7 @@ let activeAcimaEstoqueMin = false;
 let activeProximoEstoqueMin = false;
 let activeProximoEstoqueMinPercent = 10;
 let activeEstoqueNegativo = false;
+let activeExpedicaoNegativa = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
 let activeLocalValues     = [];
@@ -46,7 +47,7 @@ async function getLocaisInventario() {
 
 let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel, filterCompraSel;
 let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterAcimaEstoqueMinCb;
-let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterHideObsoleteCb, filterHideEngineeringCb;
+let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterExpedicaoNegativaCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
 function getSelectedValues(select) {
@@ -155,6 +156,7 @@ export function initFiltros({
   filterProximoEstoqueMinCb = document.getElementById('filterProximoEstoqueMin');
   filterProximoEstoqueMinPercentInput = document.getElementById('filterProximoEstoqueMinPercent');
   filterEstoqueNegativoCb = document.getElementById('filterEstoqueNegativo');
+  filterExpedicaoNegativaCb = document.getElementById('filterExpedicaoNegativa');
   filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
   filterHideEngineeringCb = document.getElementById('filterHideEngineering');
   filterLocalSel           = document.getElementById('filterLocalSelect');
@@ -216,6 +218,7 @@ export function initFiltros({
       activeProximoEstoqueMin = false;
       activeProximoEstoqueMinPercent = 10;
       activeEstoqueNegativo = false;
+      activeExpedicaoNegativa = false;
       activeHideObsolete    = false;
       activeHideEngineering = false;
       if (filterShowInactiveCb)    filterShowInactiveCb.checked    = false;
@@ -229,6 +232,7 @@ export function initFiltros({
         filterProximoEstoqueMinPercentInput.style.opacity = '.55';
       }
       if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = false;
+      if (filterExpedicaoNegativaCb) filterExpedicaoNegativaCb.checked = false;
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
       setSelectedValues(filterLocalSel, []);
@@ -261,6 +265,7 @@ export function initFiltros({
         filterProximoEstoqueMinPercentInput.value = String(activeProximoEstoqueMinPercent);
       }
       activeEstoqueNegativo = filterEstoqueNegativoCb?.checked || false;
+      activeExpedicaoNegativa = filterExpedicaoNegativaCb?.checked || false;
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
       activeLocalValues     = getSelectedValues(filterLocalSel);
@@ -287,6 +292,7 @@ function abrirModalFiltro() {
     filterProximoEstoqueMinPercentInput.style.opacity = activeProximoEstoqueMin ? '1' : '.55';
   }
   if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = activeEstoqueNegativo;
+  if (filterExpedicaoNegativaCb) filterExpedicaoNegativaCb.checked = activeExpedicaoNegativa;
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
   setSelectedValues(filterLocalSel, activeLocalValues);
@@ -514,6 +520,10 @@ function applyFilters() {
 
   if (activeEstoqueNegativo) {
     filtered = filtered.filter(i => i.estoque_negativo === true || i.estoque_negativo === 'true');
+  }
+
+  if (activeExpedicaoNegativa) {
+    filtered = filtered.filter(i => i.expedicao_negativa === true || i.expedicao_negativa === 'true');
   }
 
   // Ocultar produtos com prefixo OBSOLETO
