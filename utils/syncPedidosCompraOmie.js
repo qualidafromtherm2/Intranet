@@ -73,6 +73,8 @@ async function atualizarFlagsRecebimentoPedido(clientOrPool, nCodPed) {
              updated_at = NOW()
        WHERE n_cod_ped = $1
          AND COALESCE(inativo, FALSE) = FALSE
+         -- Nao reabra um pedido que a reconciliacao da Omie ja fechou.
+         AND pendente_omie IS NOT FALSE
       `,
       [nCodPed]
     );
