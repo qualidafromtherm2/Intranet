@@ -12541,14 +12541,31 @@ qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
   // Qualidade: registra inspeção na tabela qualidade.produtos_liberado
   const frequenciaRaw = qualidadeFrequencia?.value?.trim() || '';
   const frequenciaFormatada = frequenciaRaw && !frequenciaRaw.includes('%') ? `${frequenciaRaw}%` : frequenciaRaw;
-  const quantidadeOkRaw = qualidadeQuantidadeOk?.value;
+  const quantidadeOkRaw = String(qualidadeQuantidadeOk?.value ?? '').trim();
+  const quantidadeNokRaw = String(qualidadeQuantidadeNok?.value ?? '').trim();
+  const parseQuantidadePir = (valor) => {
+    const texto = String(valor ?? '').trim().replace(/\s+/g, '');
+    if (!texto) return null;
+    let normalizado = texto;
+    if (texto.includes(',') && texto.includes('.')) {
+      normalizado = texto.lastIndexOf(',') > texto.lastIndexOf('.')
+        ? texto.replace(/\./g, '').replace(',', '.')
+        : texto.replace(/,/g, '');
+    } else if (texto.includes(',')) {
+      normalizado = texto.replace(',', '.');
+    }
+    const numero = Number(normalizado);
+    return Number.isFinite(numero) ? numero : null;
+  };
+  const quantidadeOkNumero = parseQuantidadePir(quantidadeOkRaw);
+  const quantidadeNokNumero = parseQuantidadePir(quantidadeNokRaw);
   const etqId = Number(qualidadeEtqRecebimentoId?.value || qualidadePirEtqAtualId || 0) || null;
   const payload = {
     cod_produto: qualidadeCodProduto?.value?.trim() || '',
     nfe: qualidadeNfe?.value?.trim() || '',
     frequencia: frequenciaFormatada,
-    quantidade_ok: Number(qualidadeQuantidadeOk?.value || 0),
-    quantidade_nok: qualidadeQuantidadeNok?.value === '' ? null : Number(qualidadeQuantidadeNok?.value || 0)
+    quantidade_ok: quantidadeOkNumero,
+    quantidade_nok: quantidadeNokRaw === '' ? null : quantidadeNokNumero
   };
 
   if (!payload.cod_produto) {
@@ -12559,8 +12576,12 @@ qualidadeInspecaoRegistrarBtn?.addEventListener('click', (e) => {
     alert('NFe é obrigatória.');
     return;
   }
-  if (quantidadeOkRaw === '' || Number.isNaN(payload.quantidade_ok)) {
+  if (quantidadeOkNumero === null || quantidadeOkNumero < 0) {
     alert('Quantidade ok é obrigatória.');
+    return;
+  }
+  if (quantidadeNokRaw !== '' && (quantidadeNokNumero === null || quantidadeNokNumero < 0)) {
+    alert('Quantidade nok é inválida.');
     return;
   }
 
