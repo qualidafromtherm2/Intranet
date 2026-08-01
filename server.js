@@ -3,6 +3,7 @@
 // no topo do intranet/server.js
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
 const { pool, sessionPool, dbQuery, isDbEnabled, warmupPgPool, warmupSessionPool, ensureSessionTableReady } = require('./src/db');
+const { normalizarNumeroDecimal } = require('./utils/numeroDecimal');
 const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
 const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
 if (IS_CHAT_SERVICE) {
@@ -1890,9 +1891,33 @@ app.post('/api/produtos/busca', express.json(), async (req, res) => {
   }
 });
 
+let qualidadeQuantidadesDecimaisReady = false;
+async function ensureQualidadeQuantidadesDecimais() {
+  if (qualidadeQuantidadesDecimaisReady) return;
+
+  const { rows } = await pool.query(`
+    SELECT column_name, data_type
+      FROM information_schema.columns
+     WHERE table_schema = 'qualidade'
+       AND table_name = 'produtos_liberado'
+       AND column_name IN ('quantidade_ok', 'quantidade_nok')
+  `);
+  const precisaMigrar = rows.some((row) => row.data_type !== 'numeric');
+  if (precisaMigrar) {
+    await pool.query(`
+      ALTER TABLE qualidade.produtos_liberado
+        ALTER COLUMN quantidade_ok TYPE NUMERIC(18,4) USING quantidade_ok::numeric,
+        ALTER COLUMN quantidade_nok TYPE NUMERIC(18,4) USING quantidade_nok::numeric
+    `);
+  }
+
+  qualidadeQuantidadesDecimaisReady = true;
+}
+
 // Qualidade: registra inspeção em qualidade.produtos_liberado
 app.post('/api/qualidade/produtos-liberado', express.json(), async (req, res) => {
   try {
+    await ensureQualidadeQuantidadesDecimais();
     const cod_produto = String(req.body?.cod_produto || '').trim();
     const nfe = String(req.body?.nfe || '').trim();
     const frequencia = String(req.body?.frequencia || '').trim();
@@ -1905,16 +1930,19 @@ app.post('/api/qualidade/produtos-liberado', express.json(), async (req, res) =>
     if (!nfe) {
       return res.status(400).json({ ok: false, error: 'nfe é obrigatória' });
     }
-    if (quantidadeOk === undefined || quantidadeOk === null || Number.isNaN(Number(quantidadeOk))) {
+    const quantidadeOkNum = normalizarNumeroDecimal(quantidadeOk);
+    if (quantidadeOkNum === null || quantidadeOkNum < 0) {
       return res.status(400).json({ ok: false, error: 'quantidade_ok é obrigatória' });
     }
 
-    const quantidadeOkNum = Number(quantidadeOk);
-    const quantidadeNokNum = quantidadeNok === null || quantidadeNok === undefined || quantidadeNok === ''
-      ? null
-      : Number(quantidadeNok);
+    const quantidadeNokInformada = quantidadeNok !== null
+      && quantidadeNok !== undefined
+      && String(quantidadeNok).trim() !== '';
+    const quantidadeNokNum = quantidadeNokInformada
+      ? normalizarNumeroDecimal(quantidadeNok)
+      : null;
 
-    if (quantidadeNokNum !== null && Number.isNaN(quantidadeNokNum)) {
+    if (quantidadeNokInformada && (quantidadeNokNum === null || quantidadeNokNum < 0)) {
       return res.status(400).json({ ok: false, error: 'quantidade_nok inválida' });
     }
 

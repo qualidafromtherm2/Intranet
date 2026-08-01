@@ -16,6 +16,7 @@ const omieCall = require('../utils/omieCall');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
+const { agendarReconciliacaoEstoqueOmie } = require('../utils/reconciliarEstoqueOmie');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_EXECUTADO  = 'Executado';
@@ -837,6 +838,12 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
                   solicitante, status, aprovado_por, aprovado_em`,
       [STATUS_EXECUTADO, aprovadoPor, id]
     );
+
+    agendarReconciliacaoEstoqueOmie({
+      codigoProduto: registro.codigo_produto,
+      codigo: registro.codigo,
+      localCodigo: registro.local_estoque
+    });
 
     res.json({
       ok: true,

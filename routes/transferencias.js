@@ -6,6 +6,7 @@ const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
+const { resolverProdutoOmieAtivo } = require('../utils/produtoOmieAtivo');
 
 const EXPEDICAO_LOCAL = '10440426539';
 
@@ -55,56 +56,8 @@ async function ensureTransferenciasSchema() {
   schemaTransferenciasOk = true;
 }
 
-// Resolve o identificador numérico do produto (codigo_produto) usando o código Omie textual ou numérico.
-async function buscarProdutoPorCodigoProduto(codigoProduto) {
-  const id = Number(codigoProduto);
-  if (!Number.isFinite(id)) return null;
-  const { rows } = await dbQuery(
-    `SELECT codigo_produto
-       FROM public.produtos_omie
-      WHERE codigo_produto = $1
-      LIMIT 1`,
-    [id]
-  );
-  return rows.length ? Number(rows[0].codigo_produto) : null;
-}
-
-async function resolveCodigoProduto(codigoParam) {
-  const raw = String(codigoParam || '').trim();
-  if (!raw) {
-    const err = new Error('Código do produto ausente.');
-    err.status = 400;
-    throw err;
-  }
-
-  if (/^\d+$/.test(raw)) {
-    const existente = await buscarProdutoPorCodigoProduto(raw);
-    if (existente) return existente;
-  }
-
-  const sql = `
-    SELECT codigo_produto
-      FROM public.produtos_omie
-     WHERE codigo = $1
-     LIMIT 1
-  `;
-  const { rows } = await dbQuery(sql, [raw]);
-  if (!rows.length) {
-    const err = new Error(`Produto "${raw}" não encontrado.`);
-    err.status = 404;
-    throw err;
-  }
-  return Number(rows[0].codigo_produto);
-}
-
 async function resolverCodigoProdutoTransferencia(candidatos, codigo) {
-  for (const candidato of candidatos) {
-    const str = candidato !== undefined && candidato !== null ? String(candidato).trim() : '';
-    if (!str || !/^\d+$/.test(str)) continue;
-    const existente = await buscarProdutoPorCodigoProduto(str);
-    if (existente) return existente;
-  }
-  return resolveCodigoProduto(codigo);
+  return resolverProdutoOmieAtivo({ dbQuery, candidatos, codigo });
 }
 
 function normalizaNumeroParaOmie(value) {
@@ -515,15 +468,7 @@ router.post('/', express.json(), async (req, res) => {
       const chave = codigo;
       let codigoProduto = cache.get(chave);
       if (!codigoProduto) {
-        try {
-          codigoProduto = await resolverCodigoProdutoTransferencia(candidatos, codigo);
-        } catch (resolveErr) {
-          const fallbackNumerico = candidatos
-            .map(candidato => String(candidato ?? '').trim())
-            .find(str => /^\d+$/.test(str));
-          if (!fallbackNumerico) throw resolveErr;
-          codigoProduto = Number(fallbackNumerico);
-        }
+        codigoProduto = await resolverCodigoProdutoTransferencia(candidatos, codigo);
         cache.set(chave, codigoProduto);
       }
 
