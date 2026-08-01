@@ -4,6 +4,7 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
 const { pool, sessionPool, dbQuery, isDbEnabled, warmupPgPool, warmupSessionPool, ensureSessionTableReady } = require('./src/db');
 const { normalizarNumeroDecimal } = require('./utils/numeroDecimal');
+const { resolverProdutoOmieAtivo } = require('./utils/produtoOmieAtivo');
 const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
 const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
 if (IS_CHAT_SERVICE) {
@@ -11936,21 +11937,18 @@ function _friendlyLprError(msg) {
 async function _resolveProdutoOmieCodigoProduto(db, codigoOuId) {
   const raw = String(codigoOuId || '').trim();
   if (!raw) return null;
-  const { rows } = await (db || pool).query(
-    `SELECT codigo_produto::text AS id_omie
-       FROM public.produtos_omie
-      WHERE TRIM(codigo_produto::text) = TRIM($1)
-         OR TRIM(codigo) = TRIM($1)
-         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
-      ORDER BY CASE
-        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
-        WHEN TRIM(codigo) = TRIM($1) THEN 1
-        ELSE 2
-      END
-      LIMIT 1`,
-    [raw]
-  );
-  return rows[0]?.id_omie || null;
+  const query = (sql, params) => (db || pool).query(sql, params);
+  try {
+    const idOmie = await resolverProdutoOmieAtivo({
+      dbQuery: query,
+      candidatos: [raw],
+      codigo: raw
+    });
+    return idOmie ? String(idOmie) : null;
+  } catch (err) {
+    if (err?.status === 404) return null;
+    throw err;
+  }
 }
 
 /** Código legível do produto (produtos_omie.codigo) para ZPL e exibição. */
