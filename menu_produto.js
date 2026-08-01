@@ -36078,10 +36078,19 @@ async function salvarLinkRapido() {
   const chamadoDescricaoEl = document.getElementById('chamadoDescricao');
   const chamadoFotoEl = document.getElementById('chamadoFoto');
   const chamadoVideoEl = document.getElementById('chamadoVideo');
+  const chamadoColarZonaEl = document.getElementById('chamadoColarZona');
+  const chamadoAnexosPreviewEl = document.getElementById('chamadoAnexosPreview');
+  const chamadoAnexosContadorEl = document.getElementById('chamadoAnexosContador');
   const chamadoEnviarBtn = document.getElementById('chamadoEnviarBtn');
 
   let chamadoEhAdmin = false;
   let chamadoCache = [];
+  let chamadoAnexosPendentes = [];
+  let chamadoAnexoSeq = 0;
+
+  const CHAMADO_LIMITE_FOTOS = 10;
+  const CHAMADO_LIMITE_VIDEOS = 5;
+  const CHAMADO_LIMITE_BYTES = 50 * 1024 * 1024;
 
   function chamadoEsc(txt) {
     if (typeof escapeHtml === 'function') return escapeHtml(String(txt ?? ''));
@@ -36104,6 +36113,116 @@ async function salvarLinkRapido() {
     if (v === 'fechado') return { txt: 'Fechado', cor: '#94a3b8' };
     if (v === 'em_andamento') return { txt: 'Em andamento', cor: '#fbbf24' };
     return { txt: 'Aberto', cor: '#34d399' };
+  }
+
+  function chamadoFormatarTamanho(bytes) {
+    const total = Number(bytes || 0);
+    if (total < 1024) return `${total} B`;
+    if (total < 1024 * 1024) return `${(total / 1024).toFixed(1)} KB`;
+    return `${(total / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function chamadoTipoArquivo(file) {
+    const mime = String(file?.type || '').toLowerCase();
+    if (mime.startsWith('image/')) return 'foto';
+    if (mime.startsWith('video/')) return 'video';
+    return '';
+  }
+
+  function chamadoLiberarPreviews() {
+    chamadoAnexosPendentes.forEach((item) => {
+      if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+    });
+  }
+
+  function renderAnexosPendentes() {
+    if (chamadoAnexosContadorEl) {
+      const total = chamadoAnexosPendentes.length;
+      chamadoAnexosContadorEl.textContent = `${total} ${total === 1 ? 'anexo' : 'anexos'}`;
+    }
+    if (!chamadoAnexosPreviewEl) return;
+
+    chamadoAnexosPreviewEl.innerHTML = chamadoAnexosPendentes.map((item) => {
+      const miniatura = item.tipo === 'foto'
+        ? `<img src="${chamadoEsc(item.previewUrl)}" alt="Prévia de ${chamadoEsc(item.file.name)}">`
+        : `<video src="${chamadoEsc(item.previewUrl)}" muted preload="metadata" aria-label="Prévia de ${chamadoEsc(item.file.name)}"></video>`;
+      return `<div class="chamado-anexo-item" data-anexo-id="${item.id}">
+        <div class="chamado-anexo-miniatura">${miniatura}</div>
+        <div class="chamado-anexo-info">
+          <strong title="${chamadoEsc(item.file.name)}">${chamadoEsc(item.file.name)}</strong>
+          <span>${item.tipo === 'foto' ? 'Foto' : 'Vídeo'} · ${chamadoFormatarTamanho(item.file.size)}</span>
+        </div>
+        <button type="button" class="chamado-anexo-remover" data-anexo-id="${item.id}" aria-label="Remover ${chamadoEsc(item.file.name)}" title="Remover">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>`;
+    }).join('');
+  }
+
+  function adicionarAnexosChamado(files) {
+    const avisos = [];
+    const recebidos = Array.from(files || []);
+    recebidos.forEach((file) => {
+      const tipo = chamadoTipoArquivo(file);
+      if (!tipo) {
+        avisos.push(`${file.name || 'Arquivo'} não é foto nem vídeo.`);
+        return;
+      }
+      if (Number(file.size || 0) > CHAMADO_LIMITE_BYTES) {
+        avisos.push(`${file.name} ultrapassa 50 MB.`);
+        return;
+      }
+      const repetido = chamadoAnexosPendentes.some((item) =>
+        item.file.name === file.name && item.file.size === file.size && item.file.lastModified === file.lastModified
+      );
+      if (repetido) return;
+
+      const atualTipo = chamadoAnexosPendentes.filter((item) => item.tipo === tipo).length;
+      const limite = tipo === 'foto' ? CHAMADO_LIMITE_FOTOS : CHAMADO_LIMITE_VIDEOS;
+      if (atualTipo >= limite) {
+        avisos.push(`Limite de ${limite} ${tipo === 'foto' ? 'fotos' : 'vídeos'} por chamado.`);
+        return;
+      }
+
+      chamadoAnexosPendentes.push({
+        id: ++chamadoAnexoSeq,
+        tipo,
+        file,
+        previewUrl: URL.createObjectURL(file)
+      });
+    });
+    renderAnexosPendentes();
+    if (avisos.length) alert(avisos.join('\n'));
+  }
+
+  function removerAnexoChamado(id) {
+    const indice = chamadoAnexosPendentes.findIndex((item) => item.id === Number(id));
+    if (indice < 0) return;
+    const [removido] = chamadoAnexosPendentes.splice(indice, 1);
+    if (removido.previewUrl) URL.revokeObjectURL(removido.previewUrl);
+    renderAnexosPendentes();
+  }
+
+  function processarColagemChamado(event) {
+    if (!chamadoModal || chamadoModal.style.display === 'none') return;
+    const itens = Array.from(event.clipboardData?.items || []);
+    const arquivos = itens
+      .filter((item) => item.kind === 'file' && /^(image|video)\//i.test(item.type || ''))
+      .map((item, index) => {
+        const original = item.getAsFile();
+        if (!original) return null;
+        const extensao = String(original.type || '').split('/')[1]?.replace('jpeg', 'jpg') || 'bin';
+        const nome = original.name && original.name !== 'image.png'
+          ? original.name
+          : `captura-${Date.now()}-${index + 1}.${extensao}`;
+        return new File([original], nome, { type: original.type, lastModified: Date.now() });
+      })
+      .filter(Boolean);
+    if (!arquivos.length) return;
+    event.preventDefault();
+    adicionarAnexosChamado(arquivos);
+    chamadoColarZonaEl?.classList.add('is-pasting');
+    window.setTimeout(() => chamadoColarZonaEl?.classList.remove('is-pasting'), 700);
   }
 
   function formatarPrazoChamado(prazo) {
@@ -36230,6 +36349,9 @@ async function salvarLinkRapido() {
     if (chamadoDescricaoEl) chamadoDescricaoEl.value = '';
     if (chamadoFotoEl) chamadoFotoEl.value = '';
     if (chamadoVideoEl) chamadoVideoEl.value = '';
+    chamadoLiberarPreviews();
+    chamadoAnexosPendentes = [];
+    renderAnexosPendentes();
     const radioNormal = document.querySelector('input[name="chamadoCriticidade"][value="normal"]');
     if (radioNormal) radioNormal.checked = true;
   }
@@ -36262,8 +36384,8 @@ async function salvarLinkRapido() {
     fd.append('descricao', descricao);
     fd.append('criticidade', criticidade);
 
-    const fotos = chamadoFotoEl?.files ? Array.from(chamadoFotoEl.files) : [];
-    const videos = chamadoVideoEl?.files ? Array.from(chamadoVideoEl.files) : [];
+    const fotos = chamadoAnexosPendentes.filter((item) => item.tipo === 'foto').map((item) => item.file);
+    const videos = chamadoAnexosPendentes.filter((item) => item.tipo === 'video').map((item) => item.file);
     fotos.forEach((f) => fd.append('foto', f));
     videos.forEach((f) => fd.append('video', f));
 
@@ -36319,6 +36441,20 @@ async function salvarLinkRapido() {
     await carregarChamados();
   });
   chamadoEnviarBtn?.addEventListener('click', enviarChamado);
+  chamadoFotoEl?.addEventListener('change', () => {
+    adicionarAnexosChamado(chamadoFotoEl.files);
+    chamadoFotoEl.value = '';
+  });
+  chamadoVideoEl?.addEventListener('change', () => {
+    adicionarAnexosChamado(chamadoVideoEl.files);
+    chamadoVideoEl.value = '';
+  });
+  chamadoAnexosPreviewEl?.addEventListener('click', (event) => {
+    const removerBtn = event.target.closest('.chamado-anexo-remover');
+    if (removerBtn) removerAnexoChamado(removerBtn.dataset.anexoId);
+  });
+  chamadoColarZonaEl?.addEventListener('click', () => chamadoColarZonaEl.focus());
+  chamadoModal?.addEventListener('paste', processarColagemChamado);
 
   if (chamadoModal) {
     chamadoModal.addEventListener('click', (event) => {

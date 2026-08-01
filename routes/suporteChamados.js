@@ -46,6 +46,10 @@ function getNomeUsuario(req) {
   return String(u.nome || u.name || u.displayName || u.username || u.id || '').trim();
 }
 
+function textoUtf8(value) {
+  return String(value ?? '').normalize('NFC').trim();
+}
+
 function sanitizePathPart(str) {
   return String(str || '')
     .replace(/[^a-zA-Z0-9_.-]/g, '_')
@@ -205,15 +209,15 @@ router.post(
   '/chamados',
   requireAuth,
   upload.fields([
-    { name: 'foto', maxCount: 5 },
-    { name: 'video', maxCount: 3 },
+    { name: 'foto', maxCount: 10 },
+    { name: 'video', maxCount: 5 },
     { name: 'anexo', maxCount: 5 },
   ]),
   async (req, res) => {
     try {
       await ensureSchema();
 
-      const descricao = String(req.body?.descricao || '').trim();
+      const descricao = textoUtf8(req.body?.descricao);
       let criticidade = String(req.body?.criticidade || 'normal').trim().toLowerCase();
       if (!CRITICIDADES.has(criticidade)) criticidade = 'normal';
 
