@@ -2951,6 +2951,10 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
   }
 });
 
+// O painel de compras entrou em operação com a base Omie atual em 01/01/2026.
+// Pedidos anteriores são legado histórico e não participam das colunas do kanban.
+const COMPRAS_DATA_INICIO_PAINEL = '2026-01-01';
+
 // Códigos de produto com compra em andamento — usado pela badge "Em compra"
 // na Lista de produtos / Estoque mínimo. Considera "em andamento" qualquer
 // solicitação cujo status ainda não é final (recebido/concluído) nem negativo
@@ -2981,6 +2985,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
               WHERE COALESCE(po_requisicao_ativa.inativo, FALSE) = FALSE
                 AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
                 AND po_requisicao_ativa.pendente_omie IS TRUE
+                AND po_requisicao_ativa.d_inc_data >= $1::date
                 AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
                   OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
                   OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
@@ -3004,6 +3009,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
                 AND COALESCE(po_ativo.inativo, FALSE) = FALSE
                 AND COALESCE(po_ativo."Pedido recebido", FALSE) = FALSE
                 AND po_ativo.pendente_omie IS TRUE
+                AND po_ativo.d_inc_data >= $1::date
             )
           )
 
@@ -3024,6 +3030,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
           AND COALESCE(po.inativo, FALSE) = FALSE
           AND COALESCE(po."Pedido recebido", FALSE) = FALSE
           AND po.pendente_omie IS TRUE
+          AND po.d_inc_data >= $1::date
           AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
 
         UNION ALL
@@ -3059,7 +3066,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
              status
       FROM compras_ativas
       ORDER BY UPPER(TRIM(codigo)), prioridade, ordem DESC
-    `);
+    `, [COMPRAS_DATA_INICIO_PAINEL]);
     res.json({ ok: true, total: rows.length, itens: rows });
   } catch (err) {
     console.error('[API] /api/compras/produtos-em-compra erro:', err);
@@ -3126,6 +3133,7 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
             WHERE COALESCE(po_requisicao_ativa.inativo, FALSE) = FALSE
               AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
               AND po_requisicao_ativa.pendente_omie IS TRUE
+              AND po_requisicao_ativa.d_inc_data >= $2::date
               AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
                 OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
                 OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
@@ -3135,11 +3143,21 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
             ('carrinho', 'recebido', 'concluído', 'concluido', 'cancelado', 'reprovado', 'excluido', 'excluído')
         AND (
           LOWER(TRIM(COALESCE(sc.status, ''))) NOT IN ('compra realizada', 'faturada pelo fornecedor')
-          OR po.n_cod_ped IS NULL
-          OR (
-            COALESCE(po.inativo, FALSE) = FALSE
-            AND COALESCE(po."Pedido recebido", FALSE) = FALSE
-            AND po.pendente_omie IS TRUE
+          OR NOT EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po_existente
+            WHERE (po_existente.n_cod_ped::text = TRIM(sc.ncodped::text)
+                OR po_existente.c_numero::text = TRIM(sc.cnumero::text))
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM compras.pedidos_omie po_ativo
+            WHERE (po_ativo.n_cod_ped::text = TRIM(sc.ncodped::text)
+                OR po_ativo.c_numero::text = TRIM(sc.cnumero::text))
+              AND COALESCE(po_ativo.inativo, FALSE) = FALSE
+              AND COALESCE(po_ativo."Pedido recebido", FALSE) = FALSE
+              AND po_ativo.pendente_omie IS TRUE
+              AND po_ativo.d_inc_data >= $2::date
           )
         )
       ORDER BY
@@ -3181,6 +3199,7 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
           AND COALESCE(po.inativo, FALSE) = FALSE
           AND COALESCE(po."Pedido recebido", FALSE) = FALSE
           AND po.pendente_omie IS TRUE
+          AND po.d_inc_data >= $2::date
           AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
           AND NOT EXISTS (
             SELECT 1
@@ -3235,7 +3254,7 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
       UNION ALL
       SELECT * FROM requisicoes_omie_diretas
       ORDER BY id DESC
-    `, [codigo]);
+    `, [codigo, COMPRAS_DATA_INICIO_PAINEL]);
 
     res.json({ ok: true, codigo, total: rows.length, compras: rows });
   } catch (err) {
@@ -35415,12 +35434,11 @@ async function varrerFaturadasOmieKanban() {
     lExibirPedidosRecParciais: true,
     lExibirPedidosFatParciais: true
   });
-  // "Abertos" = mesma regra das colunas da tela da Omie: pendentes + faturados sem
-  // recebimento + parcialmente faturados/recebidos. Só sai da coluna quando é
-  // recebido por completo, cancelado ou encerrado.
+  // "Abertos" = pedidos pendentes ou com processamento parcial na Omie.
   const pedidosPendentesOmie = await pesquisarPedCompraOmie({
+    // "Faturados" puros incluem historico na pesquisa da Omie; somente
+    // pendentes e processamentos parciais continuam como pedidos abertos.
     lExibirPedidosPendentes: true,
-    lExibirPedidosFaturados: true,
     lExibirPedidosFatParciais: true,
     lExibirPedidosRecParciais: true
   });
