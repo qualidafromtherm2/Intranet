@@ -119,7 +119,8 @@ app.get('/api/version', async (_req, res) => {
   let mensagem = null;
   let data = null;
   const acharPr = (msg) => {
-    const m = /PR\s*#(\d+)/i.exec(String(msg || ''));
+    // Aceita "Merge PR #87" e "Merge pull request #90" (padrão do GitHub)
+    const m = /(?:pull\s+request|PR)\s*#(\d+)/i.exec(String(msg || ''));
     return m ? Number(m[1]) : null;
   };
   try {
@@ -132,7 +133,7 @@ app.get('/api/version', async (_req, res) => {
       data = iso || null;
       mensagem = resto.join('|') || null;
     }
-    // Procura o merge de PR mais recente (padrão "PR #NN" na mensagem)
+    // Procura o merge de PR mais recente ("PR #NN" ou "pull request #NN")
     for (const linha of linhas) {
       pr = acharPr(linha.split('|').slice(2).join('|'));
       if (pr) break;

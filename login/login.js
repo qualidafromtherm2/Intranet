@@ -274,7 +274,7 @@ document.addEventListener('DOMContentLoaded', async () => {
           if (v.sha && shaMain) atualizado = shaMain.startsWith(String(v.sha));
           if (!pr) {
             for (const c of commits) {
-              const m = /PR\s*#(\d+)/i.exec(c?.commit?.message || '');
+              const m = /(?:pull\s+request|PR)\s*#(\d+)/i.exec(c?.commit?.message || '');
               if (m) { pr = Number(m[1]); break; }
             }
           }
