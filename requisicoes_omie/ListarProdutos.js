@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260718-faixa-minimo';
+} from './filtro_produto.js?v=20260730-filtro-expedicao';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -231,6 +231,8 @@ function normalizeCatalogoProdutos(produtos = []) {
     compra_status: p.compra_status || '',
     saldo_estoque: p.saldo_estoque ?? p.quantidade_estoque,
     saldo_almox: p.saldo_almox ?? 0,
+    saldo_expedicao: p.saldo_expedicao ?? 0,
+    expedicao_negativa: p.expedicao_negativa || false,
     estoque_minimo: p.estoque_minimo
   }));
 }

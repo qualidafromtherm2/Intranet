@@ -20,6 +20,7 @@ const OMIE_PROD_URL      = 'https://app.omie.com.br/api/v1/geral/produtos/';
 // Ctrl+F: require('express')  (cole logo abaixo dos requires)
 const INTERNAL_TOKEN = String(process.env.INTERNAL_TOKEN || '').trim();
 const INTERNAL_BASE = `http://localhost:${process.env.PORT || 5001}`;
+const CODIGO_LOCAL_EXPEDICAO = '10440426539';
 
 // Utilzinho pra ocultar chaves em logs
 const mask = s => (s ? String(s).slice(0, 4) + '…' : '');
@@ -375,6 +376,9 @@ router.get('/lista', async (req, res) => {
             WHERE local_codigo::text = '10717096386'
                OR local_nome ILIKE '%PORTA PALLET%'
           ) AS saldo_almox,
+          MAX(COALESCE(saldo, 0)) FILTER (
+            WHERE local_codigo::text = '${CODIGO_LOCAL_EXPEDICAO}'
+          ) AS saldo_expedicao,
           BOOL_OR(COALESCE(saldo, 0) < 0) AS estoque_negativo
         FROM logistica.estoque_atual
         GROUP BY codigo
@@ -385,9 +389,11 @@ router.get('/lista', async (req, res) => {
           COALESCE(p.item_limitado, false) AS item_limitado_local,
           COALESCE(er.estoque_minimo, 0) AS estoque_minimo_local,
           COALESCE(er.saldo_almox, 0) AS saldo_almox_local,
+          COALESCE(er.saldo_expedicao, 0) AS saldo_expedicao_local,
           COALESCE(er.estoque_minimo, 0) > 0
             AND COALESCE(er.saldo_almox, 0) < COALESCE(er.estoque_minimo, 0) AS abaixo_minimo_local,
-          COALESCE(er.estoque_negativo, false) AS estoque_negativo_local
+          COALESCE(er.estoque_negativo, false) AS estoque_negativo_local,
+          COALESCE(er.saldo_expedicao, 0) < 0 AS expedicao_negativa_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
         LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
@@ -416,8 +422,10 @@ router.get('/lista', async (req, res) => {
           quantidade_estoque,
           estoque_minimo_local AS estoque_minimo,
           saldo_almox_local AS saldo_almox,
+          saldo_expedicao_local AS saldo_expedicao,
           abaixo_minimo_local AS abaixo_minimo,
           estoque_negativo_local AS estoque_negativo,
+          expedicao_negativa_local AS expedicao_negativa,
           item_limitado_local AS item_limitado,
           inativo,
           bloqueado,
