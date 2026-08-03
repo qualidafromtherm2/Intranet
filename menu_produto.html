@@ -13081,6 +13081,31 @@
 </div>
 
 <!-- Sub-modal câmera: Armazenar produto (QR → barcode) -->
+<!-- Escolha do formato antes de reimprimir uma etiqueta já identificada -->
+<div id="etqReimpressaoFormatoModal" class="etq-reprint-format-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="etqReimpressaoFormatoTitulo">
+  <div class="etq-reprint-format-box">
+    <div class="etq-reprint-format-header">
+      <div>
+        <small>REIMPRESSÃO</small>
+        <h3 id="etqReimpressaoFormatoTitulo">Qual etiqueta deseja imprimir?</h3>
+      </div>
+      <button id="etqReimpressaoFormatoFechar" type="button" aria-label="Cancelar reimpressão">&times;</button>
+    </div>
+    <p>O sistema vai gerar um ZPL novo com o layout atual e preservar o mesmo número da ETQ.</p>
+    <div class="etq-reprint-format-options">
+      <button type="button" data-etq-formato="pequena">
+        <i class="fa-solid fa-tag"></i>
+        <span><strong>Pequena</strong><small>50 × 30 mm · Zebra P</small></span>
+      </button>
+      <button type="button" data-etq-formato="grande">
+        <i class="fa-solid fa-receipt"></i>
+        <span><strong>Grande</strong><small>70 × 115 mm · Zebra G</small></span>
+      </button>
+    </div>
+    <button id="etqReimpressaoFormatoCancelar" class="etq-reprint-format-cancel" type="button">Cancelar</button>
+  </div>
+</div>
+
 <div id="etqArmazenarModal" class="etq-scan-modal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
   <div class="etq-scan-box" style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:92vw;max-width:460px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
     <!-- Cabeçalho -->
