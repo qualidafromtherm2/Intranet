@@ -7818,76 +7818,105 @@
           </div>
         </div>
 
-        <div id="chamadoSuporteModal" class="agenda-modal-overlay" style="display:none;">
-          <div class="agenda-modal-card" style="max-width:720px;max-height:90vh;overflow:auto;">
-            <button id="chamadoSuporteFecharModal" type="button" class="agenda-modal-close" aria-label="Fechar">×</button>
-            <h3 style="margin:0 0 14px 0;color:var(--content-title-color);font-size:18px;">
-              <i class="fa-solid fa-headset" style="margin-right:8px;color:#38bdf8;"></i>Chamado de suporte
-            </h3>
-
-            <div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap;">
-              <button type="button" id="chamadoTabNovo" class="content-button chamado-tab-btn chamado-tab-active" style="border:none;">
-                Novo chamado
-              </button>
-              <button type="button" id="chamadoTabAberto" class="content-button chamado-tab-btn" style="border:none;">
-                Aberto
-              </button>
-              <button type="button" id="chamadoTabAguardando" class="content-button chamado-tab-btn" style="border:none;">
-                Aguardando aprovação
-              </button>
-              <button type="button" id="chamadoTabMeus" class="content-button chamado-tab-btn" style="border:none;">
-                Meus chamados
-              </button>
-              <button type="button" id="chamadoTabFechado" class="content-button chamado-tab-btn" style="border:none;">
-                Fechado
-              </button>
-            </div>
-
-            <div id="chamadoPainelNovo">
-              <label style="display:block;margin-bottom:12px;">
-                <span style="display:block;font-size:12px;margin-bottom:6px;color:var(--inactive-color);">Descreva o chamado</span>
-                <textarea id="chamadoDescricao" rows="5" placeholder="Conte o que aconteceu, em qual tela, e o que precisa de ajuda..."
-                  style="width:100%;resize:vertical;padding:10px;border-radius:8px;border:1px solid rgba(148,163,184,.35);background:transparent;color:inherit;box-sizing:border-box;"></textarea>
-              </label>
-
-              <div style="margin-bottom:14px;">
-                <div style="font-size:12px;margin-bottom:8px;color:var(--inactive-color);">Prioridade</div>
-                <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(239,68,68,.45);cursor:pointer;">
-                    <input type="radio" name="chamadoCriticidade" value="urgente" />
-                    <span style="color:#f87171;font-weight:600;">Urgente</span>
-                  </label>
-                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(59,130,246,.45);cursor:pointer;">
-                    <input type="radio" name="chamadoCriticidade" value="normal" checked />
-                    <span style="color:#60a5fa;font-weight:600;">Normal</span>
-                  </label>
-                  <label class="chamado-prio-opt" style="display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:8px;border:1px solid rgba(148,163,184,.45);cursor:pointer;">
-                    <input type="radio" name="chamadoCriticidade" value="baixa" />
-                    <span style="color:#94a3b8;font-weight:600;">Baixa</span>
-                  </label>
+        <div id="chamadoSuporteModal" class="agenda-modal-overlay chamado-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="chamadoSuporteTitulo">
+          <div class="agenda-modal-card chamado-modal-card">
+            <header class="chamado-modal-header">
+              <div class="chamado-modal-heading">
+                <span class="chamado-modal-icon" aria-hidden="true"><i class="fa-solid fa-headset"></i></span>
+                <div>
+                  <h3 id="chamadoSuporteTitulo">Chamado de suporte</h3>
+                  <p>Conte o problema e anexe as evidências.</p>
                 </div>
               </div>
+              <button id="chamadoSuporteFecharModal" type="button" class="agenda-modal-close chamado-modal-close" aria-label="Fechar chamado de suporte">×</button>
+            </header>
 
-              <div class="agenda-form-grid" style="margin-bottom:14px;">
-                <label>
-                  <span>Anexar foto</span>
-                  <input id="chamadoFoto" type="file" accept="image/*" multiple />
+            <nav class="chamado-tabs" aria-label="Seções do chamado">
+              <button type="button" id="chamadoTabNovo" class="chamado-tab-btn chamado-tab-active">
+                <i class="fa-solid fa-plus" aria-hidden="true"></i> Novo chamado
+              </button>
+              <button type="button" id="chamadoTabAberto" class="chamado-tab-btn">
+                <i class="fa-regular fa-folder-open" aria-hidden="true"></i> Aberto
+              </button>
+              <button type="button" id="chamadoTabAguardando" class="chamado-tab-btn">
+                <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Aguardando aprovação
+              </button>
+              <button type="button" id="chamadoTabMeus" class="chamado-tab-btn">
+                <i class="fa-regular fa-user" aria-hidden="true"></i> Meus chamados
+              </button>
+              <button type="button" id="chamadoTabFechado" class="chamado-tab-btn">
+                <i class="fa-solid fa-check" aria-hidden="true"></i> Fechado
+              </button>
+            </nav>
+
+            <div class="chamado-modal-body">
+              <div id="chamadoPainelNovo">
+                <label class="chamado-field" for="chamadoDescricao">
+                  <span>O que aconteceu?</span>
+                  <textarea id="chamadoDescricao" rows="4" maxlength="4000" lang="pt-BR" spellcheck="true"
+                    placeholder="Informe a tela, o que você tentou fazer e o resultado apresentado..."></textarea>
+                  <small>Você pode escrever normalmente com acentos.</small>
                 </label>
-                <label>
-                  <span>Anexar vídeo</span>
-                  <input id="chamadoVideo" type="file" accept="video/*" multiple />
-                </label>
+
+                <fieldset class="chamado-prioridade">
+                  <legend>Prioridade</legend>
+                  <div class="chamado-prioridade-opcoes">
+                    <label class="chamado-prio-opt chamado-prio-urgente">
+                      <input type="radio" name="chamadoCriticidade" value="urgente" />
+                      <span><i class="fa-solid fa-circle-exclamation"></i> Urgente</span>
+                    </label>
+                    <label class="chamado-prio-opt chamado-prio-normal">
+                      <input type="radio" name="chamadoCriticidade" value="normal" checked />
+                      <span><i class="fa-solid fa-circle"></i> Normal</span>
+                    </label>
+                    <label class="chamado-prio-opt chamado-prio-baixa">
+                      <input type="radio" name="chamadoCriticidade" value="baixa" />
+                      <span><i class="fa-solid fa-circle-down"></i> Baixa</span>
+                    </label>
+                  </div>
+                </fieldset>
+
+                <section class="chamado-anexos" aria-labelledby="chamadoAnexosTitulo">
+                  <div class="chamado-anexos-cabecalho">
+                    <div>
+                      <strong id="chamadoAnexosTitulo">Fotos e vídeos</strong>
+                      <span>Selecione vários arquivos ou cole uma captura com Ctrl+V.</span>
+                    </div>
+                    <span id="chamadoAnexosContador" class="chamado-anexos-contador">0 anexos</span>
+                  </div>
+
+                  <div id="chamadoColarZona" class="chamado-colar-zona" tabindex="0" role="button" aria-label="Cole fotos ou vídeos aqui com Control V">
+                    <i class="fa-regular fa-clipboard"></i>
+                    <span><strong>Cole aqui com Ctrl+V</strong> ou escolha os arquivos abaixo</span>
+                  </div>
+
+                  <div class="chamado-anexo-botoes">
+                    <label class="chamado-anexo-botao" for="chamadoFoto">
+                      <i class="fa-regular fa-images"></i>
+                      <span>Escolher fotos</span>
+                      <input id="chamadoFoto" type="file" accept="image/*" multiple />
+                    </label>
+                    <label class="chamado-anexo-botao" for="chamadoVideo">
+                      <i class="fa-solid fa-video"></i>
+                      <span>Escolher vídeos</span>
+                      <input id="chamadoVideo" type="file" accept="video/*" multiple />
+                    </label>
+                  </div>
+
+                  <div id="chamadoAnexosPreview" class="chamado-anexos-preview" aria-live="polite"></div>
+                </section>
+
+                <footer class="chamado-form-footer">
+                  <span><i class="fa-solid fa-lock"></i> Visível para você e para o suporte.</span>
+                  <button id="chamadoEnviarBtn" type="button" class="content-button chamado-enviar-btn">
+                    <i class="fa-solid fa-paper-plane"></i>Abrir chamado
+                  </button>
+                </footer>
               </div>
 
-              <div style="display:flex;justify-content:flex-end;gap:10px;">
-                <button id="chamadoEnviarBtn" type="button" class="content-button" style="background:#2563eb;color:#fff;border:none;">
-                  <i class="fa-solid fa-paper-plane" style="margin-right:6px;"></i>Abrir chamado
-                </button>
+              <div id="chamadoPainelLista" style="display:none;">
+                <div id="chamadoLista" class="chamado-lista"></div>
               </div>
-            </div>
-
-            <div id="chamadoPainelLista" style="display:none;">
-              <div id="chamadoLista" style="display:flex;flex-direction:column;gap:10px;"></div>
             </div>
           </div>
         </div>
