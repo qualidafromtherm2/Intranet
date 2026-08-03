@@ -11652,6 +11652,10 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS campos JSONB NOT NULL DEFAULT '[]'`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS dpi INT DEFAULT 203`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS amostra JSONB NOT NULL DEFAULT '{}'`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS tipo_base TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS perfil BOOLEAN NOT NULL DEFAULT false`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT true`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ NOT NULL DEFAULT now()`);
     await pool.query(`
       INSERT INTO etiqueta."ETQ_layout_config"
         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y)
@@ -11675,6 +11679,12 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         ELSE nome
       END
       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+    `).catch(() => {});
+    await pool.query(`
+      UPDATE etiqueta."ETQ_layout_config"
+         SET tipo_base = chave, perfil = false
+       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+         AND (tipo_base IS NULL OR tipo_base = '')
     `).catch(() => {});
     // Preferências de impressora do usuário (antes ficava em localStorage)
     await pool.query(`
@@ -12106,6 +12116,71 @@ app.get('/api/etiquetas/layout-config', async (req, res) => {
   }
 });
 
+// POST /api/etiquetas/layout-config — cria um perfil independente a partir de um layout existente
+app.post('/api/etiquetas/layout-config', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const b = req.body || {};
+    const nome = String(b.nome || '').trim();
+    const origem = String(b.cloneFrom || b.origem || 'impressao').trim() || 'impressao';
+    if (!nome) return res.status(400).json({ error: 'Informe o nome do perfil.' });
+    const usuario = String(
+      req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
+    ).trim() || 'intranet';
+    const chave = `perfil_${crypto.randomUUID()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO etiqueta."ETQ_layout_config"
+         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y,
+          zpl_template, campos, dpi, amostra, tipo_base, perfil, ativo,
+          criado_em, atualizado_em, atualizado_por)
+       SELECT $1, $2,
+              COALESCE($4::numeric, label_width), COALESCE($5::numeric, label_height),
+              darkness, speed, offset_x, offset_y, zpl_template, campos, dpi, amostra,
+              COALESCE(NULLIF(tipo_base, ''), chave), true, true, now(), now(), $3
+         FROM etiqueta."ETQ_layout_config"
+        WHERE chave = $6
+       RETURNING *`,
+      [chave, nome, usuario, b.labelWidth || null, b.labelHeight || null, origem]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Layout de origem não encontrado.' });
+    _etqInvalidarLayoutCache();
+    res.status(201).json({ ok: true, layout: _etqLayoutRowToClient(rows[0]) });
+  } catch (err) {
+    console.error('[etiquetas/layout-config POST]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// DELETE /api/etiquetas/layout-config/:chave — remove somente perfis personalizados não vinculados
+app.delete('/api/etiquetas/layout-config/:chave', async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const chave = String(req.params.chave || '').trim();
+    const { rows: vinculados } = await pool.query(
+      `SELECT pc_name, key AS impressora
+         FROM etiqueta."ETQ_agente_config",
+              LATERAL jsonb_each(COALESCE(printer_configs, '{}'::jsonb))
+        WHERE value->>'layoutProfile' = $1
+        LIMIT 10`,
+      [chave]
+    );
+    if (vinculados.length) {
+      const destinos = vinculados.map((v) => `${v.pc_name} / ${v.impressora}`).join(', ');
+      return res.status(409).json({ error: `Este perfil está em uso por: ${destinos}. Troque o perfil dessas impressoras antes de excluir.` });
+    }
+    const result = await pool.query(
+      `DELETE FROM etiqueta."ETQ_layout_config" WHERE chave = $1 AND perfil = true RETURNING chave`,
+      [chave]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Perfil personalizado não encontrado.' });
+    _etqInvalidarLayoutCache();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[etiquetas/layout-config DELETE]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
 function _checkAgentTokenOptional(req) {
   return !!(AGENTE_TOKEN && req.headers['x-agent-token'] === AGENTE_TOKEN);
 }
@@ -12147,6 +12222,7 @@ app.put('/api/etiquetas/layout-config/:chave', express.json({ limit: '1mb' }), a
         campos,
         _etqMontarVariaveisAmostra(amostra || ETQ_LAYOUT_SAMPLE_DEFAULT),
         {
+          chave,
           widthMm: tmpLayout.label_width || 50,
           heightMm: tmpLayout.label_height || 30,
           dpi: tmpLayout.dpi,
@@ -12221,6 +12297,7 @@ app.post('/api/etiquetas/layout-config/preview', express.json({ limit: '1mb' }),
     const amostra = Object.assign({}, ETQ_LAYOUT_SAMPLE_DEFAULT, layout?.amostra || {}, b.amostra || {});
 
     const tmp = {
+      chave: chave || layout?.chave || '',
       label_width: widthMm,
       label_height: heightMm,
       dpi,
@@ -12356,6 +12433,9 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
 
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres   = String(req.body?.impressora      || '').trim() || null;
+    const layoutImpressao = await _etqResolverLayoutDaImpressora(destiAg, impres, 'impressao');
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const zplBlocks = [];
 
@@ -12377,7 +12457,8 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
           codProd,
           descProd,
           loteTxt,
-          dataExibir
+          dataExibir,
+          layout: layoutImpressao
         });
         zplBlocks.push(...gerado.zplBlocks);
       } else {
@@ -12390,7 +12471,7 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
           codProd,
           descProd
         });
-        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir, layout: layoutImpressao });
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
           [zpl, idImpresso]
@@ -12404,8 +12485,6 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       [ids]
     );
 
-    const destiAg = String(req.body?.destino_agente || '').trim() || null;
-    const impres   = String(req.body?.impressora      || '').trim() || null;
     const filaIns = await pool.query(
       `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -12748,7 +12827,7 @@ const ETQ_LAYOUT_CAMPOS_DEFAULT = {
     { id: 'lote_lbl', tipo: 'texto', x: 178, y: 32, fonteH: 20, fonteW: 20, conteudo: 'Lote:' },
     { id: 'lote', tipo: 'texto', x: 178, y: 56, fonteH: 20, fonteW: 20, conteudo: '{{lote}}' },
     { id: 'data', tipo: 'texto', x: 178, y: 80, fonteH: 20, fonteW: 20, conteudo: 'Emissao: {{data}}' },
-    { id: 'desc', tipo: 'bloco', x: 5, y: 190, fonteH: 20, fonteW: 20, largura: 385, maxLinhas: 2, conteudo: '{{descricao}}' },
+    { id: 'desc', tipo: 'bloco', x: 5, y: 160, fonteH: 20, fonteW: 20, largura: 385, maxLinhas: 4, conteudo: '{{descricao}}' },
   ],
   impressao: [
     { id: 'qr', tipo: 'qr', x: 10, y: 10, magnificacao: 4, conteudo: '{{qr}}' },
@@ -12826,7 +12905,7 @@ function _etqDotsPorMm(dpi = 203) {
 }
 
 /** Converte lista de campos visuais → ZPL (modo fácil). */
-function _etqCamposParaZpl(campos, vars, { widthMm, heightMm, dpi = 203, offsetX = 0, offsetY = 0 } = {}) {
+function _etqCamposParaZpl(campos, vars, { chave = '', widthMm, heightMm, dpi = 203, offsetX = 0, offsetY = 0 } = {}) {
   const dpm = _etqDotsPorMm(dpi);
   const pw = Math.max(1, Math.round((Number(widthMm) || 50) * dpm));
   const ll = Math.max(1, Math.round((Number(heightMm) || 30) * dpm));
@@ -12851,7 +12930,15 @@ function _etqCamposParaZpl(campos, vars, { widthMm, heightMm, dpi = 203, offsetX
       lines.push(`^FO${x},${y}^BQ${ori},2,${mag}^FDLA,${conteudo}^FS`);
     } else if (tipo === 'bloco') {
       const largura = Math.round(Number(c.largura) || Math.max(100, pw - x - 10));
-      const maxLinhas = Math.max(1, Math.round(Number(c.maxLinhas) || 2));
+      const maxLinhasConfiguradas = Math.max(1, Math.round(Number(c.maxLinhas) || 2));
+      const ehDescricaoRecebimento = String(chave).toLowerCase() === 'recebimento'
+        && (c.id === 'desc' || /\{\{\s*descricao\s*\}\}/i.test(String(c.conteudo || '')));
+      // A descrição é o último bloco da etiqueta de recebimento. Ela pode usar todas
+      // as linhas que ainda cabem até o rodapé, em vez de parar artificialmente na 2ª.
+      const linhasAteRodape = Math.max(1, Math.floor((ll - y) / Math.max(1, fh)));
+      const maxLinhas = ehDescricaoRecebimento
+        ? Math.max(maxLinhasConfiguradas, linhasAteRodape)
+        : maxLinhasConfiguradas;
       lines.push(`^FO${x},${y}^A0${ori},${fh},${fw}^FB${largura},${maxLinhas},0,L,0^FD${conteudo}^FS`);
     } else if (tipo === 'texto_rot') {
       lines.push(`^FO${x},${y}^A0R,${fh},${fw}^FD${conteudo}^FS`);
@@ -12892,7 +12979,14 @@ function _etqGerarZplDoLayout(layout, varsIn) {
   const template = String(layout?.zpl_template || '').trim();
 
   if (campos.length) {
-    return _etqCamposParaZpl(campos, vars, { widthMm, heightMm, dpi, offsetX, offsetY });
+    return _etqCamposParaZpl(campos, vars, {
+      chave: layout?.chave,
+      widthMm,
+      heightMm,
+      dpi,
+      offsetX,
+      offsetY,
+    });
   }
   if (template) {
     return _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi });
@@ -12916,10 +13010,35 @@ function _etqLayoutRowToClient(r) {
     zplTemplate: r.zpl_template || null,
     campos: Array.isArray(campos) ? campos : [],
     amostra: r.amostra && typeof r.amostra === 'object' ? r.amostra : {},
+    tipoBase: r.tipo_base || r.chave,
+    isProfile: r.perfil === true,
+    ativo: r.ativo !== false,
     placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco'],
     atualizadoEm: r.atualizado_em,
     atualizadoPor: r.atualizado_por || null,
   };
+}
+
+async function _etqResolverLayoutDaImpressora(pcName, printerName, tipoBase = 'impressao') {
+  const fallback = await _carregarLayoutEtiqueta(tipoBase);
+  const pc = String(pcName || '').trim();
+  const printer = String(printerName || '').trim();
+  if (!pc || !printer) return fallback;
+  try {
+    const { rows } = await pool.query(
+      `SELECT printer_configs FROM etiqueta."ETQ_agente_config" WHERE pc_name = $1`,
+      [pc]
+    );
+    const configs = rows[0]?.printer_configs || {};
+    const chave = String(configs?.[printer]?.layoutProfile || '').trim();
+    if (!chave) return fallback;
+    const perfil = await _carregarLayoutEtiqueta(chave);
+    if (!perfil || perfil.ativo === false || (perfil.tipo_base && perfil.tipo_base !== tipoBase)) return fallback;
+    return perfil;
+  } catch (err) {
+    console.warn('[etiqueta] falha ao resolver perfil da impressora:', err.message);
+    return fallback;
+  }
 }
 
 async function _etqSeedLayoutDefaultsSeVazio() {
@@ -12950,7 +13069,7 @@ setTimeout(() => { _etqSeedLayoutDefaultsSeVazio().catch(() => {}); }, 2500);
 function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq, layout }) {
   const vars = {
     codigo: String(codProd || ''),
-    descricao: String(descProd || '').slice(0, 60),
+    descricao: String(descProd || ''),
     lote: String(loteTxt || ''),
     data: String(dataExibir || ''),
     id: String(idEtq || ''),
@@ -12977,7 +13096,7 @@ function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idE
     `^FO178,32^A0N,20,20^FDLote:^FS`,
     `^FO178,56^A0N,20,20^FD${vars.lote}^FS`,
     `^FO178,80^A0N,20,20^FDEmissao: ${vars.data}^FS`,
-    `^FO5,190^A0N,20,20^FB${Math.max(100, pw - 14)},2,0,L,0^FD${vars.descricao}^FS`,
+    `^FO5,160^A0N,20,20^FB${Math.max(100, pw - 14)},4,0,L,0^FD${vars.descricao}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -13211,7 +13330,7 @@ function _calcularLotesVolumes(qtdTotal, multiplo) {
  */
 async function _gerarVolumesComMesmoId(db, {
   origemId, qtdTotal, multiplo, unidade, dataEmissao, usuario,
-  codProd, descProd, loteTxt, dataExibir
+  codProd, descProd, loteTxt, dataExibir, layout
 }) {
   const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
   const qtdGravar = Number(qtdTotal) || lotes.reduce((acc, v) => acc + Number(v || 0), 0);
@@ -13224,7 +13343,7 @@ async function _gerarVolumesComMesmoId(db, {
     codProd,
     descProd
   });
-  const layoutImpressao = await _carregarLayoutEtiqueta('impressao');
+  const layoutImpressao = layout || await _carregarLayoutEtiqueta('impressao');
   const zpl = _gerarZplParaImpressao({
     codProd, descProd, idImpresso, loteTxt, dataExibir, layout: layoutImpressao,
   });
@@ -24912,6 +25031,11 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           p.codigo,
           p.descricao,
           p.lead_time,
+          p.altura,
+          p.largura,
+          p.profundidade,
+          p.peso_bruto,
+          p.peso_liq,
           COALESCE(e.minimo, p.estoque_minimo, 0) AS estoque_minimo,
           COALESCE((to_jsonb(p)->>'item_limitado')::boolean, FALSE) AS item_limitado,
           COALESCE(
@@ -24958,7 +25082,33 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         'Seu usuário não possui permissão para editar produtos.'
       )) return;
       const codigo = req.params.codigo;
-      const { descricao, lead_time, estoque_minimo, url_imagem } = req.body;
+      const {
+        descricao,
+        lead_time,
+        estoque_minimo,
+        url_imagem,
+        altura,
+        largura,
+        profundidade,
+        peso_bruto
+      } = req.body;
+
+      const validarNumeroNaoNegativo = (valor, campo, maximo = null) => {
+        if (valor === undefined) return null;
+        const numero = Number(valor);
+        if (!Number.isFinite(numero) || numero < 0 || (maximo !== null && numero > maximo)) {
+          const limite = maximo === null ? '' : ` entre 0 e ${maximo}`;
+          const erro = new Error(`${campo} deve ser um número${limite}.`);
+          erro.status = 400;
+          throw erro;
+        }
+        return numero;
+      };
+
+      const alturaNormalizada = validarNumeroNaoNegativo(altura, 'Altura', 500);
+      const larguraNormalizada = validarNumeroNaoNegativo(largura, 'Largura', 500);
+      const profundidadeNormalizada = validarNumeroNaoNegativo(profundidade, 'Comprimento', 500);
+      const pesoBrutoNormalizado = validarNumeroNaoNegativo(peso_bruto, 'Peso');
 
       // Valida se o produto existe
       const checkResult = await pool.query(
@@ -24990,11 +25140,23 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         ? imageColumnRaw
         : null;
 
-      const params = [descricao, lead_time, estoque_minimo];
+      const params = [
+        descricao,
+        lead_time,
+        estoque_minimo,
+        alturaNormalizada,
+        larguraNormalizada,
+        profundidadeNormalizada,
+        pesoBrutoNormalizado
+      ];
       let sql = `UPDATE public.produtos_omie
                  SET descricao = COALESCE($1, descricao),
                      lead_time = $2,
-                     estoque_minimo = $3`;
+                     estoque_minimo = $3,
+                     altura = COALESCE($4, altura),
+                     largura = COALESCE($5, largura),
+                     profundidade = COALESCE($6, profundidade),
+                     peso_bruto = COALESCE($7, peso_bruto)`;
 
       if (imageColumn) {
         params.push(url_imagem);
@@ -25026,6 +25188,10 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         if (descricao) campos.push(`Descrição: ${descricao}`);
         if (lead_time !== undefined) campos.push(`Lead time: ${lead_time}`);
         if (estoque_minimo !== undefined) campos.push(`Estoque mínimo: ${estoque_minimo}`);
+        if (altura !== undefined) campos.push(`Altura: ${alturaNormalizada} cm`);
+        if (largura !== undefined) campos.push(`Largura: ${larguraNormalizada} cm`);
+        if (profundidade !== undefined) campos.push(`Comprimento: ${profundidadeNormalizada} cm`);
+        if (peso_bruto !== undefined) campos.push(`Peso: ${pesoBrutoNormalizado} kg`);
         if (url_imagem !== undefined) campos.push('URL imagem atualizada');
 
         await registrarModificacao({
@@ -25048,7 +25214,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
       });
     } catch (err) {
       console.error('[API] PUT /api/produtos/:codigo erro:', err);
-      res.status(500).json({ error: err.message });
+      res.status(err.status || 500).json({ error: err.message });
     }
   });
 

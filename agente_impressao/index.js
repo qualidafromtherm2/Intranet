@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.9';
+const AGENT_VERSION = '3.0';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -237,8 +237,11 @@ function injectLH(zpl, cfg) {
   const dpm = DPI / 25.4; // ~7.99 dots/mm
   let result = zpl;
 
+  // Perfis personalizados já levam ^PW/^LL definidos no ZPL central.
+  // O agente mantém apenas o offset/calibração e não deforma o perfil escolhido.
+  const perfilGerenciado = !!String(cfg.layoutProfile || '').trim();
   // ── Substituir ^PW e ^LL pelos valores configurados ─────────────────────
-  if (cfg.labelWidth && Number(cfg.labelWidth) > 0) {
+  if (!perfilGerenciado && cfg.labelWidth && Number(cfg.labelWidth) > 0) {
     const pw = Math.round(Number(cfg.labelWidth) * dpm);
     if (/\^PW\d+/i.test(result)) {
       result = result.replace(/\^PW\d+/gi, `^PW${pw}`);
@@ -246,7 +249,7 @@ function injectLH(zpl, cfg) {
       result = result.replace(/(\^XA)/i, `$1\n^PW${pw}`);
     }
   }
-  if (cfg.labelHeight && Number(cfg.labelHeight) > 0) {
+  if (!perfilGerenciado && cfg.labelHeight && Number(cfg.labelHeight) > 0) {
     const ll = Math.round(Number(cfg.labelHeight) * dpm);
     if (/\^LL\d+/i.test(result)) {
       result = result.replace(/\^LL\d+/gi, `^LL${ll}`);
@@ -1068,6 +1071,8 @@ function runService() {
     const c = readConfig();
     if (c.printer) syncConfigToServer(c);
   });
+  // Alterações feitas no configurador central passam a valer sem reiniciar o agente.
+  setInterval(() => pullConfigFromServer(), 60000);
 
   // Carrega lista de impressoras na inicialização
   listarImpressoras(list => {
