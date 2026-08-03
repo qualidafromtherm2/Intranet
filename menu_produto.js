@@ -13111,6 +13111,225 @@ if (chatbotConfigMenuLink) {
     carregarChatbotConfig();
   });
 }
+
+// ─── Conf. sistema → Configurar agente ───────────────────────────────────────
+const confAgenteMenuLink = document.getElementById('menu-configurar-agente');
+const confAgentePane = document.getElementById('confAgentePane');
+const confAgenteAviso = document.getElementById('confAgenteAviso');
+
+function setConfAgenteAviso(msg, tipo = 'info') {
+  if (!confAgenteAviso) return;
+  if (!msg) { confAgenteAviso.style.display = 'none'; return; }
+  const cores = {
+    info:    { bg: 'rgba(8,145,178,0.12)', color: '#0e7490', border: 'rgba(8,145,178,0.22)' },
+    success: { bg: 'rgba(34,197,94,0.12)',  color: '#15803d', border: 'rgba(34,197,94,0.22)' },
+    error:   { bg: 'rgba(239,68,68,0.12)',  color: '#b91c1c', border: 'rgba(239,68,68,0.22)' },
+    warn:    { bg: 'rgba(245,158,11,0.12)', color: '#b45309', border: 'rgba(245,158,11,0.22)' },
+  };
+  const c = cores[tipo] || cores.info;
+  Object.assign(confAgenteAviso.style, { display: 'block', background: c.bg, color: c.color, border: `1px solid ${c.border}` });
+  confAgenteAviso.textContent = msg;
+}
+
+async function confAgenteBaixarInstalador() {
+  const EXE_FALLBACK = window.storagePublicUrl
+    ? window.storagePublicUrl('agente-impressao/agente-impressao-setup.exe')
+    : '/agente-impressao/agente-impressao-setup.exe';
+  let exeUrl = EXE_FALLBACK;
+  try {
+    const r = await fetch('/api/etiquetas/agente-url', { credentials: 'include' });
+    if (r.ok) { const j = await r.json(); if (j?.url) exeUrl = j.url; }
+  } catch {}
+  const a = document.createElement('a');
+  a.href = exeUrl;
+  a.download = 'agente-impressao-setup.exe';
+  a.rel = 'noopener';
+  document.body.appendChild(a); a.click();
+  setTimeout(() => a.remove(), 1500);
+  setConfAgenteAviso('Baixando instalador... Execute no PC da impressora e depois abra a configuração do agente.', 'success');
+}
+
+function confAgenteAbrirLocal() {
+  const win = window.open('http://localhost:9200', '_blank', 'noopener');
+  if (!win) {
+    setConfAgenteAviso('Permita pop-ups ou acesse manualmente http://localhost:9200 (só funciona no PC onde o agente está instalado).', 'warn');
+  } else {
+    setConfAgenteAviso('Abrindo painel do agente em http://localhost:9200', 'info');
+  }
+}
+
+function _confAgenteFmtNum(v) {
+  if (v === null || v === undefined || v === '') return '';
+  return String(v);
+}
+
+async function carregarConfAgenteConfigs() {
+  const lista = document.getElementById('confAgenteConfigsLista');
+  if (!lista) return;
+  lista.innerHTML = '<div style="color:var(--inactive-color);padding:16px;text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+  try {
+    const r = await fetch('/api/etiquetas/agente/configs', { credentials: 'include' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Erro ${r.status}`);
+    const configs = d.configs || [];
+    if (!configs.length) {
+      lista.innerHTML = '<div style="color:var(--inactive-color);padding:16px;text-align:center;">Nenhuma configuração salva ainda. Configure o agente no PC da impressora — a 1ª gravação vai para o SQL automaticamente.</div>';
+      return;
+    }
+    lista.innerHTML = configs.map((c) => {
+      const pc = escapeHtml(c.pcName || '');
+      const online = c.lastSeen && (Date.now() - new Date(c.lastSeen).getTime() < 180000);
+      return `
+        <div class="content-section" style="padding:14px 16px;border:1px solid rgba(148,163,184,.25);border-radius:12px;" data-pc="${pc}">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;">
+            <strong style="color:var(--theme-color);">${pc}</strong>
+            <span style="font-size:12px;padding:2px 8px;border-radius:999px;background:${online ? 'rgba(34,197,94,.15)' : 'rgba(148,163,184,.15)'};color:${online ? '#15803d' : '#64748b'};">
+              ${online ? 'online' : 'offline'}
+            </span>
+            ${c.version ? `<span style="font-size:12px;color:var(--inactive-color);">v${escapeHtml(c.version)}</span>` : ''}
+            <span style="font-size:12px;color:var(--inactive-color);margin-left:auto;">Impressora: ${escapeHtml(c.printer || '—')}</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;">
+            <label style="font-size:12px;">Largura (mm)<input type="number" data-field="labelWidth" value="${_confAgenteFmtNum(c.labelWidth)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Altura (mm)<input type="number" data-field="labelHeight" value="${_confAgenteFmtNum(c.labelHeight)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Escuridão<input type="number" data-field="darkness" value="${_confAgenteFmtNum(c.darkness)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Velocidade<input type="number" data-field="speed" value="${_confAgenteFmtNum(c.speed)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Offset X<input type="number" data-field="labelOffsetX" value="${_confAgenteFmtNum(c.labelOffsetX)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Offset Y<input type="number" data-field="labelOffsetY" value="${_confAgenteFmtNum(c.labelOffsetY)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+          </div>
+          <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
+            <button type="button" class="content-button conf-agente-salvar-pc" data-pc="${pc}" style="background:#7c3aed;color:#fff;">
+              <i class="fa-solid fa-floppy-disk"></i> Salvar no SQL
+            </button>
+            <span style="font-size:11px;color:var(--inactive-color);">Última atualização: ${c.atualizadoEm ? escapeHtml(new Date(c.atualizadoEm).toLocaleString('pt-BR')) : '—'}</span>
+          </div>
+        </div>`;
+    }).join('');
+
+    lista.querySelectorAll('.conf-agente-salvar-pc').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const pc = btn.dataset.pc;
+        const box = btn.closest('[data-pc]');
+        if (!box || !pc) return;
+        const body = {};
+        box.querySelectorAll('input[data-field]').forEach((inp) => {
+          body[inp.dataset.field] = Number(inp.value);
+        });
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/agente/config/${encodeURIComponent(pc)}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const j = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(j.error || `Erro ${resp.status}`);
+          setConfAgenteAviso(`Configuração do PC "${pc}" salva no SQL.`, 'success');
+        } catch (err) {
+          setConfAgenteAviso(err.message, 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    lista.innerHTML = `<div style="color:#b91c1c;padding:16px;">Erro: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function carregarConfAgenteLayouts() {
+  const lista = document.getElementById('confAgenteLayoutsLista');
+  if (!lista) return;
+  lista.innerHTML = '<div style="color:var(--inactive-color);padding:16px;text-align:center;"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>';
+  try {
+    const r = await fetch('/api/etiquetas/layout-config', { credentials: 'include' });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || `Erro ${r.status}`);
+    const layouts = d.layouts || [];
+    if (!layouts.length) {
+      lista.innerHTML = '<div style="color:var(--inactive-color);padding:16px;text-align:center;">Nenhum layout cadastrado.</div>';
+      return;
+    }
+    lista.innerHTML = layouts.map((L) => {
+      const chave = escapeHtml(L.chave || '');
+      return `
+        <div class="content-section" style="padding:14px 16px;border:1px solid rgba(148,163,184,.25);border-radius:12px;" data-layout="${chave}">
+          <div style="margin-bottom:10px;">
+            <strong style="color:var(--theme-color);">${escapeHtml(L.nome || L.chave)}</strong>
+            <span style="font-size:12px;color:var(--inactive-color);margin-left:8px;">(${chave})</span>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;">
+            <label style="font-size:12px;">Largura (mm)<input type="number" data-field="labelWidth" value="${_confAgenteFmtNum(L.labelWidth)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Altura (mm)<input type="number" data-field="labelHeight" value="${_confAgenteFmtNum(L.labelHeight)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Escuridão<input type="number" data-field="darkness" value="${_confAgenteFmtNum(L.darkness)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Velocidade<input type="number" data-field="speed" value="${_confAgenteFmtNum(L.speed)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Offset X<input type="number" data-field="offsetX" value="${_confAgenteFmtNum(L.offsetX)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+            <label style="font-size:12px;">Offset Y<input type="number" data-field="offsetY" value="${_confAgenteFmtNum(L.offsetY)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
+          </div>
+          <div style="margin-top:10px;">
+            <button type="button" class="content-button conf-agente-salvar-layout" data-chave="${chave}" style="background:#0891b2;color:#fff;">
+              <i class="fa-solid fa-floppy-disk"></i> Salvar layout
+            </button>
+          </div>
+        </div>`;
+    }).join('');
+
+    lista.querySelectorAll('.conf-agente-salvar-layout').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const chave = btn.dataset.chave;
+        const box = btn.closest('[data-layout]');
+        if (!box || !chave) return;
+        const body = {};
+        box.querySelectorAll('input[data-field]').forEach((inp) => {
+          body[inp.dataset.field] = Number(inp.value);
+        });
+        btn.disabled = true;
+        try {
+          const resp = await fetch(`/api/etiquetas/layout-config/${encodeURIComponent(chave)}`, {
+            method: 'PUT',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          const j = await resp.json().catch(() => ({}));
+          if (!resp.ok) throw new Error(j.error || `Erro ${resp.status}`);
+          setConfAgenteAviso(`Layout "${chave}" salvo no SQL.`, 'success');
+        } catch (err) {
+          setConfAgenteAviso(err.message, 'error');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  } catch (err) {
+    lista.innerHTML = `<div style="color:#b91c1c;padding:16px;">Erro: ${escapeHtml(err.message)}</div>`;
+  }
+}
+
+async function abrirPainelConfAgente() {
+  showMainTab('confAgentePane');
+  setConfAgenteAviso('');
+  await Promise.all([carregarConfAgenteConfigs(), carregarConfAgenteLayouts()]);
+}
+
+if (confAgenteMenuLink) {
+  confAgenteMenuLink.addEventListener('click', (e) => {
+    e.preventDefault();
+    document.querySelectorAll('.left-side .side-menu a').forEach(a => a.classList.remove('is-active'));
+    confAgenteMenuLink.classList.add('is-active');
+    abrirPainelConfAgente();
+  });
+}
+document.getElementById('confAgenteBtnBaixar')?.addEventListener('click', () => confAgenteBaixarInstalador());
+document.getElementById('confAgenteBtnAbrir')?.addEventListener('click', () => confAgenteAbrirLocal());
+document.getElementById('confAgenteBtnImpressoras')?.addEventListener('click', () => {
+  if (typeof window._etqAbrirConfigImpressoras === 'function') window._etqAbrirConfigImpressoras();
+});
+document.getElementById('confAgenteBtnRefresh')?.addEventListener('click', () => {
+  carregarConfAgenteConfigs();
+  carregarConfAgenteLayouts();
+});
 // ─────────────────────────────────────────────────────────────────────────────
 let chatbotMonitorCacheAt = 0;
 let chatbotMonitorPendingPromise = null;
@@ -36813,9 +37032,7 @@ window.openRegistros = async function() {
   });
 
   // Fechar dropdown após ações (não após os toggles lista/grade/ocultos)
-  ['etqBtnBaixarAgente', 'etqBtnConfigAgente', 'etqBtnConfigImpressoras'].forEach(id => {
-    document.getElementById(id)?.addEventListener('click', () => setTimeout(_etqFecharDropdown, 80), true);
-  });
+  // (ações do agente foram movidas para Conf. sistema → Configurar agente)
 
   function _etqAtualizarBotaoSel() {
     if (!etqBtnSel || !etqSelCount) return;
@@ -37311,8 +37528,9 @@ window.openRegistros = async function() {
     });
   });
 
-  // Botão: Baixar instalador do agente (.exe)
+  // Botão: Baixar instalador do agente (.exe) — mantido se o elemento existir
   document.getElementById('etqBtnBaixarAgente')?.addEventListener('click', async () => {
+    if (typeof confAgenteBaixarInstalador === 'function') return confAgenteBaixarInstalador();
     const EXE_FALLBACK = window.storagePublicUrl('agente-impressao/agente-impressao-setup.exe');
     let exeUrl = EXE_FALLBACK;
     try {
@@ -37325,27 +37543,20 @@ window.openRegistros = async function() {
     a.rel = 'noopener';
     document.body.appendChild(a); a.click();
     setTimeout(() => a.remove(), 1500);
-    if (etqStatus) {
-      etqStatus.innerHTML = '<i class="fa-solid fa-download"></i> Baixando agente... Execute o arquivo no PC da impressora. Depois clique no botão <b>⚙️</b> para configurar.';
-      etqStatus.style.color = '#4ade80';
-      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 8000);
-    }
   });
 
   // Botão: Abrir UI de configuração do agente local (localhost:9200)
   document.getElementById('etqBtnConfigAgente')?.addEventListener('click', () => {
-    const win = window.open('http://localhost:9200', '_blank', 'noopener');
-    if (!win && etqStatus) {
-      etqStatus.innerHTML = 'Permita pop-ups ou acesse manualmente <a href="http://localhost:9200" target="_blank" style="color:#60a5fa;">http://localhost:9200</a>';
-      etqStatus.style.color = '#facc15';
-      setTimeout(() => { if (etqStatus) { etqStatus.textContent = ''; etqStatus.style.color = ''; } }, 7000);
-    }
+    if (typeof confAgenteAbrirLocal === 'function') return confAgenteAbrirLocal();
+    window.open('http://localhost:9200', '_blank', 'noopener');
   });
 
-  // ── Configuração de impressoras por usuário ─────────────────────────────────
+  // ── Configuração de impressoras por usuário (SQL + cache localStorage) ──────
+  function _etqCfgImprUsuario() {
+    return (document.getElementById('userNameDisplay')?.textContent || 'user').trim();
+  }
   function _etqCfgImprKey() {
-    const u = (document.getElementById('userNameDisplay')?.textContent || 'user').trim().replace(/\s+/g, '_');
-    return `etq_impr_cfg_${u}`;
+    return `etq_impr_cfg_${_etqCfgImprUsuario().replace(/\s+/g, '_')}`;
   }
   function _etqCarregarCfgImpr() {
     try { return JSON.parse(localStorage.getItem(_etqCfgImprKey()) || '{}'); }
@@ -37353,7 +37564,42 @@ window.openRegistros = async function() {
   }
   function _etqSalvarCfgImpr(cfg) {
     localStorage.setItem(_etqCfgImprKey(), JSON.stringify(cfg));
+    // Espelha no SQL (não bloqueia a UI)
+    const usuario = _etqCfgImprUsuario();
+    fetch('/api/etiquetas/usuario-impressoras', {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        usuario,
+        padrao: cfg.padrao || null,
+        enabled: Array.isArray(cfg.enabled) ? cfg.enabled : [],
+      }),
+    }).catch(() => {});
   }
+  async function _etqHidratrarCfgImprDoSql() {
+    try {
+      const usuario = _etqCfgImprUsuario();
+      const r = await fetch(`/api/etiquetas/usuario-impressoras?usuario=${encodeURIComponent(usuario)}`, { credentials: 'include' });
+      if (!r.ok) return;
+      const d = await r.json();
+      const cfg = d.config || {};
+      if ((Array.isArray(cfg.enabled) && cfg.enabled.length) || cfg.padrao) {
+        localStorage.setItem(_etqCfgImprKey(), JSON.stringify({
+          padrao: cfg.padrao || null,
+          enabled: Array.isArray(cfg.enabled) ? cfg.enabled : [],
+        }));
+      } else {
+        // Se SQL vazio e localStorage tem dados, sobe a 1ª vez
+        const local = _etqCarregarCfgImpr();
+        if ((Array.isArray(local.enabled) && local.enabled.length) || local.padrao) {
+          _etqSalvarCfgImpr(local);
+        }
+      }
+    } catch (_) {}
+  }
+  // Hidrata do SQL ao carregar a página de etiquetas
+  _etqHidratrarCfgImprDoSql();
 
   // Monta o valor de impressora no formato usado por _etqSalvarPref
   function _etqImpressoraParaVal(ag, imp) {
@@ -37488,6 +37734,8 @@ window.openRegistros = async function() {
     const lista = document.getElementById('etqCfgImprLista');
     if (!modal || !lista) return;
 
+    await _etqHidratrarCfgImprDoSql();
+
     _etqCfgImprPadraoTemp = null;
     modal.style.display = 'flex';
     lista.innerHTML = '<div style="color:#64748b;text-align:center;padding:24px;"><i class="fa-solid fa-spinner fa-spin"></i> Buscando impressoras online...</div>';
@@ -37578,6 +37826,8 @@ window.openRegistros = async function() {
   document.getElementById('etqBtnConfigImpressoras')?.addEventListener('click', () => {
     _etqAbrirConfigImpressoras();
   });
+  // Expõe para Conf. sistema e outros módulos (envio de mercadoria, etc.)
+  window._etqAbrirConfigImpressoras = _etqAbrirConfigImpressoras;
 
   document.getElementById('etqCfgImprSalvar')?.addEventListener('click', () => {
     const lista = document.getElementById('etqCfgImprLista');
@@ -80475,6 +80725,10 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function movimAbrirConfigImpressoras() {
+    if (typeof window._etqAbrirConfigImpressoras === 'function') {
+      window._etqAbrirConfigImpressoras();
+      return;
+    }
     document.getElementById('etqBtnConfigImpressoras')?.click();
   }
 
@@ -89300,8 +89554,10 @@ window.verOperacao = function(osId) {
     return { via_fila: true };
   }
 
-  async function _producaoImprimirOpEtiquetas(items, statusEl, btnRef, onSuccess) {
+  async function _producaoImprimirOpEtiquetas(items, statusEl, btnRef, onSuccess, opts) {
     if (!items?.length) return;
+    const options = opts || {};
+    const somenteReimpressao = !!options.somenteReimpressao;
     const orig = btnRef ? btnRef.innerHTML : '';
     if (btnRef) { btnRef.disabled = true; btnRef.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Imprimindo...'; }
     const showSt = (msg, cor = '#94a3b8') => {
@@ -89313,6 +89569,7 @@ window.verOperacao = function(osId) {
       const usuario = (document.getElementById('userNameDisplay')?.textContent || '').trim();
       const prefs = _producaoObterPrefsImpressora();
       const body = { items, usuario };
+      if (somenteReimpressao) body.somente_reimpressao = true;
       if (prefs.pdf) {
         body.modo = 'pdf';
       } else if (prefs.destino_agente) {
@@ -89346,11 +89603,21 @@ window.verOperacao = function(osId) {
           document.body.removeChild(a);
         }
         setTimeout(() => URL.revokeObjectURL(url), 60000);
-        showSt(`${items.length} etiqueta(s) gerada(s) em PDF. OP movida(s) para Montagem hermetica.`, '#4ade80');
+        showSt(
+          somenteReimpressao
+            ? `${items.length} etiqueta(s) reimpressa(s) em PDF.`
+            : `${items.length} etiqueta(s) gerada(s) em PDF. OP movida(s) para Montagem hermetica.`,
+          '#4ade80'
+        );
       } else {
         const data = await resp.json().catch(() => ({}));
         if (!resp.ok || !data.ok) throw new Error(data.error || `Erro ${resp.status}`);
-        showSt(`${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`, '#4ade80');
+        showSt(
+          somenteReimpressao
+            ? `${data.quantidade || items.length} etiqueta(s) enfileirada(s) (reimpressão).`
+            : `${data.quantidade || items.length} etiqueta(s) enfileirada(s). OP movida(s) para Montagem hermetica.`,
+          '#4ade80'
+        );
       }
       if (typeof onSuccess === 'function') await onSuccess();
     } catch (err) {
@@ -89363,6 +89630,7 @@ window.verOperacao = function(osId) {
   function openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, opts) {
     const options = opts || {};
     const fromProgramado = !!options.fromProgramado;
+    const somenteReimpressao = !!options.somenteReimpressao || !fromProgramado;
     const linhas = _producaoColetarLinhasOp(ops);
     const overlay = document.createElement('div');
     overlay.className = 'kanban-modal-overlay';
@@ -89564,7 +89832,7 @@ window.verOperacao = function(osId) {
         if (typeof options.onSuccess === 'function') {
           await options.onSuccess();
         }
-      });
+      }, { somenteReimpressao });
     });
   }
 
@@ -91042,14 +91310,16 @@ window.verOperacao = function(osId) {
     const nomeKanbanAnterior = mostrarRetrocederOp && (typeof window._producaoAnteriorKanbanPorKey === 'function')
       ? (window._producaoAnteriorKanbanPorKey(colKeyMonta)?.nome || 'Programado')
       : '';
-    const mostrarImprimirOpMonta = modoMontagem && colKeyMonta === 'programado';
+    const colsImprimirOp = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
+    const mostrarImprimirOpMonta = modoMontagem
+      && colsImprimirOp.includes(colKeyMonta);
     const mostrarFinalizarMonta = modoMontagem
       && colKeyMonta !== 'programado'
       && colKeyMonta !== 'finalizado'
       && colKeyMonta !== 'embalagem';
     const mostrarParadaMonta = mostrarFinalizarMonta;
-    const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colKeyMonta === 'programado';
-    const colsFichaTecnica = ['programado', 'solicitado', 'produzindo', 'teste', 'inspecao_final', 'embalagem'];
+    const mostrarImprimirOp = !modoMontagem && !modoRiRegistro && colsImprimirOp.includes(colKeyMonta);
+    const colsFichaTecnica = colsImprimirOp;
     const mostrarImprimirFicha = modoRegistrarProducao
       && !modoMontagem
       && !modoRiRegistro
@@ -91165,7 +91435,11 @@ window.verOperacao = function(osId) {
       });
       modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
         close();
-        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, { fromProgramado: true });
+        const fromProgramado = colKeyMonta === 'programado';
+        openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, {
+          fromProgramado,
+          somenteReimpressao: !fromProgramado,
+        });
       });
       modal.querySelector('#open-imprimir-ficha-btn')?.addEventListener('click', () => {
         close();
@@ -91207,8 +91481,10 @@ window.verOperacao = function(osId) {
     if (modoMontagem) {
       modal.querySelector('#open-imprimir-op-btn')?.addEventListener('click', () => {
         close();
+        const fromProgramado = colKeyMonta === 'programado';
         openProducaoImprimirOpModal(produtoCodigo, groupKey, ops, {
-          fromProgramado: true,
+          fromProgramado,
+          somenteReimpressao: !fromProgramado,
           onSuccess: async () => {
             if (typeof window._montaRecarregarOrdens === 'function') {
               await window._montaRecarregarOrdens();

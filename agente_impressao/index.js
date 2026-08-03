@@ -7,7 +7,7 @@
  *   --service    → Serviço: polling da fila no servidor + UI de config em localhost:9200
  *   --config     → Abre http://localhost:9200 no browser padrão
  *
- * v2.7 — Histórico local de etiquetas impressas + reimpressão com quantidade
+ * v2.8 — Sync da configuração (impressora + etiqueta) com SQL no servidor
  */
 
 const http   = require('http');
@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.7';
+const AGENT_VERSION = '2.8';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -152,7 +152,74 @@ function saveConfig(data) {
   }
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  // Espelha no SQL do servidor (não bloqueia se offline)
+  syncConfigToServer(merged);
   return merged;
+}
+
+// Envia a configuração local para o SQL (primeira gravação ou alteração)
+function syncConfigToServer(cfg) {
+  try {
+    const c = cfg || readConfig();
+    const pc = c.pcName || os.hostname();
+    const payload = {
+      pcName: pc,
+      printer: c.printer || '',
+      labelWidth: c.labelWidth,
+      labelHeight: c.labelHeight,
+      darkness: c.darkness,
+      speed: c.speed,
+      labelOffsetX: c.labelOffsetX,
+      labelOffsetY: c.labelOffsetY,
+      pollInterval: c.pollInterval,
+      printerConfigs: c.printerConfigs || {},
+      printerAliases: c.printerAliases || {},
+      serverUrl: c.serverUrl || '',
+    };
+    apiRequest('POST', '/api/etiquetas/agente/config', payload, c.agentToken, (err, status) => {
+      if (err) log(`[config-sql] Falha ao sincronizar: ${err.message}`);
+      else if (status >= 400) log(`[config-sql] Servidor recusou sync (HTTP ${status})`);
+      else log(`[config-sql] Configuração salva no SQL para PC "${pc}"`);
+    });
+  } catch (e) {
+    log(`[config-sql] Erro: ${e.message}`);
+  }
+}
+
+// Na inicialização: se o SQL já tem config deste PC, aplica em cima do local
+function pullConfigFromServer(cb) {
+  const cfg = readConfig();
+  const pc = cfg.pcName || os.hostname();
+  apiRequest('GET', `/api/etiquetas/agente/config?pcName=${encodeURIComponent(pc)}`, null, cfg.agentToken, (err, status, body) => {
+    if (err || status !== 200 || !body?.config) {
+      if (typeof cb === 'function') cb(false);
+      return;
+    }
+    const remote = body.config;
+    const patch = {};
+    if (remote.printer) patch.printer = remote.printer;
+    for (const k of PRINTER_CFG_FIELDS) {
+      if (remote[k] !== undefined && remote[k] !== null) patch[k] = remote[k];
+    }
+    if (remote.pollInterval) patch.pollInterval = remote.pollInterval;
+    if (remote.printerConfigs && typeof remote.printerConfigs === 'object') {
+      patch.printerConfigs = Object.assign({}, cfg.printerConfigs || {}, remote.printerConfigs);
+    }
+    if (remote.printerAliases && typeof remote.printerAliases === 'object') {
+      patch.printerAliases = Object.assign({}, cfg.printerAliases || {}, remote.printerAliases);
+    }
+    // Salva só local (sem re-sync imediato) para não loop
+    try {
+      fs.mkdirSync(INSTALL_DIR, { recursive: true });
+      const merged = Object.assign({}, cfg, patch);
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf8');
+      log(`[config-sql] Configuração carregada do SQL para PC "${pc}"`);
+      if (typeof cb === 'function') cb(true);
+    } catch (e) {
+      log(`[config-sql] Falha ao aplicar config remota: ${e.message}`);
+      if (typeof cb === 'function') cb(false);
+    }
+  });
 }
 
 function log(msg) {
@@ -966,6 +1033,13 @@ function runService() {
   sendHeartbeat();                          // imediato ao iniciar
   setInterval(sendHeartbeat, 30000);        // a cada 30s
 
+  // Carrega config do SQL (se já existir) e depois lista impressoras
+  pullConfigFromServer(() => {
+    // Se ainda não há config no SQL, envia a local (primeira gravação)
+    const c = readConfig();
+    if (c.printer) syncConfigToServer(c);
+  });
+
   // Carrega lista de impressoras na inicialização
   listarImpressoras(list => {
     state.printers = list;
@@ -1327,7 +1401,7 @@ function runService() {
 async function install() {
   const LINE = '═'.repeat(52);
   console.log(`\n╔${LINE}╗`);
-  console.log('║  Agente de Impressão SGF v2.7 — Instalador          ║');
+  console.log('║  Agente de Impressão SGF v2.8 — Instalador          ║');
   console.log(`╚${LINE}╝\n`);
 
   const step = msg => process.stdout.write(`  ► ${msg}... `);

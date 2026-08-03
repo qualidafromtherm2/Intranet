@@ -361,11 +361,72 @@ async function refrescarPedidoFechadoDaOmie({
   }
 }
 
+/**
+ * Alinha pendente_omie em lote com a lista de pedidos "abertos" da Omie
+ * (Pendentes + Faturados + Fat/Rec parciais — mesma regra da coluna Compra realizada).
+ *
+ * Importante: faz UPDATE em lote, sem ConsultarPedCompra por pedido.
+ * A versão antiga fechava 1 a 1 com refresh e o cron estourava tempo,
+ * deixando dezenas de fantasmas na coluna (ex.: 54 vs 25 na Omie).
+ */
+async function aplicarPendenciaOmieLote(pool, abertosIds, log = console.log) {
+  const ids = [...(abertosIds || [])].map((id) => String(id)).filter(Boolean);
+
+  const fechados = await pool.query(
+    `
+    UPDATE compras.pedidos_omie po
+       SET pendente_omie = FALSE,
+           updated_at = NOW()
+     WHERE COALESCE(po.inativo, FALSE) = FALSE
+       AND po.d_inc_data >= '2026-01-01'
+       AND po.pendente_omie IS DISTINCT FROM FALSE
+       AND (
+         $1::text[] = '{}'
+         OR NOT (po.n_cod_ped::text = ANY($1::text[]))
+       )
+     RETURNING po.n_cod_ped, po.c_numero
+    `,
+    [ids]
+  );
+
+  let reabertos = { rows: [] };
+  if (ids.length > 0) {
+    reabertos = await pool.query(
+      `
+      UPDATE compras.pedidos_omie po
+         SET pendente_omie = TRUE,
+             updated_at = NOW()
+       WHERE COALESCE(po.inativo, FALSE) = FALSE
+         AND po.d_inc_data >= '2026-01-01'
+         AND po.n_cod_ped::text = ANY($1::text[])
+         AND po.pendente_omie IS DISTINCT FROM TRUE
+       RETURNING po.n_cod_ped, po.c_numero
+      `,
+      [ids]
+    );
+  }
+
+  const nFechados = fechados.rows.length;
+  const nReabertos = reabertos.rows.length;
+  if (nFechados || nReabertos) {
+    log(
+      `[syncPedidosCompra] pendente_omie lote: fechados=${nFechados} reabertos=${nReabertos} (omie_abertos=${ids.length})`
+    );
+  }
+
+  return {
+    fechados: fechados.rows,
+    reabertos: reabertos.rows,
+    omie_abertos: ids.length
+  };
+}
+
 module.exports = {
   STATUS_FINAIS,
   atualizarFlagsRecebimentoPedido,
   fecharSolicitacoesDePedidosFechados,
   sincronizarSolicitacaoPorPedido,
   substituirItensPedido,
-  refrescarPedidoFechadoDaOmie
+  refrescarPedidoFechadoDaOmie,
+  aplicarPendenciaOmieLote
 };

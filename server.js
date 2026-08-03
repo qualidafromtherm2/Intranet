@@ -25,7 +25,8 @@ const {
   atualizarFlagsRecebimentoPedido,
   fecharSolicitacoesDePedidosFechados,
   sincronizarSolicitacaoPorPedido,
-  refrescarPedidoFechadoDaOmie
+  refrescarPedidoFechadoDaOmie,
+  aplicarPendenciaOmieLote
 } = require('./utils/syncPedidosCompraOmie');
 const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
@@ -315,6 +316,7 @@ const API_PUBLIC_PREFIXES = [
   '/api/sac/whatsapp/webhook',        // webhook Meta WhatsApp Cloud (verificação GET + POST de mensagens)
   // ── Agente de impressão (auth própria via x-agent-token) ──
   '/api/etiquetas/agente/heartbeat',      // agente anuncia presença
+  '/api/etiquetas/agente/config',         // agente lê/grava config no SQL
   '/api/etiquetas/agentes-disponiveis',   // frontend busca agentes online
   '/api/etiquetas/fila/pendentes',        // agente busca fila para imprimir
   '/api/etiquetas/fila/confirmar',        // agente confirma impressão
@@ -11563,6 +11565,59 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         last_seen       TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    // Configuração persistente do agente (impressora + dimensões de etiqueta por PC)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_agente_config" (
+        pc_name          TEXT        PRIMARY KEY,
+        printer          TEXT,
+        label_width      NUMERIC     DEFAULT 110,
+        label_height     NUMERIC     DEFAULT 70,
+        darkness         INT         DEFAULT 20,
+        speed            INT         DEFAULT 4,
+        label_offset_x   INT         DEFAULT 0,
+        label_offset_y   INT         DEFAULT 0,
+        poll_interval    INT         DEFAULT 5000,
+        printer_configs  JSONB       NOT NULL DEFAULT '{}',
+        printer_aliases  JSONB       NOT NULL DEFAULT '{}',
+        server_url       TEXT,
+        atualizado_em    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        atualizado_por   TEXT
+      )
+    `);
+    // Layout/configuração de etiquetas editável (substitui hardcode no servidor)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_layout_config" (
+        chave            TEXT        PRIMARY KEY,
+        nome             TEXT        NOT NULL,
+        label_width      NUMERIC,
+        label_height     NUMERIC,
+        darkness         INT,
+        speed            INT,
+        offset_x         INT         DEFAULT 0,
+        offset_y         INT         DEFAULT 0,
+        zpl_template     TEXT,
+        atualizado_em    TIMESTAMPTZ NOT NULL DEFAULT now(),
+        atualizado_por   TEXT
+      )
+    `);
+    await pool.query(`
+      INSERT INTO etiqueta."ETQ_layout_config"
+        (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y)
+      VALUES
+        ('recebimento', 'Etiqueta de recebimento', 50, 30, 20, 4, 0, 0),
+        ('produto',     'Etiqueta de produto',     110, 70, 20, 4, 0, 0),
+        ('endereco',    'Etiqueta de endereço',    70, 110, 20, 4, 0, 0)
+      ON CONFLICT (chave) DO NOTHING
+    `);
+    // Preferências de impressora do usuário (antes ficava em localStorage)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_usuario_impressoras" (
+        usuario        TEXT        PRIMARY KEY,
+        padrao         TEXT,
+        enabled        JSONB       NOT NULL DEFAULT '[]',
+        atualizado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
     // Corrige codigo_produto gravado como produtos_omie.codigo → produtos_omie.codigo_produto
     const fixCodigoEtq = await pool.query(`
       UPDATE etiqueta."ETQ_rec_impresso" i
@@ -11641,7 +11696,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });
 
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes garantidos');
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes / ETQ_agente_config / ETQ_layout_config / ETQ_usuario_impressoras garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -11735,6 +11790,363 @@ app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
     }
   }
   res.json({ ok: true, agentes: disponiveis });
+});
+
+// ── Helper: autenticação do agente via x-agent-token ──────────────────────────
+function _exigeTokenAgente(req, res) {
+  if (!AGENTE_TOKEN) {
+    res.status(503).json({ error: 'AGENTE_TOKEN não configurado' });
+    return false;
+  }
+  if (req.headers['x-agent-token'] !== AGENTE_TOKEN) {
+    res.status(401).json({ error: 'Token inválido' });
+    return false;
+  }
+  return true;
+}
+
+function _normalizarAgenteConfigBody(body = {}) {
+  const num = (v, def) => {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : def;
+  };
+  return {
+    printer: String(body.printer || '').trim() || null,
+    label_width: num(body.labelWidth ?? body.label_width, 110),
+    label_height: num(body.labelHeight ?? body.label_height, 70),
+    darkness: Math.round(num(body.darkness, 20)),
+    speed: Math.round(num(body.speed, 4)),
+    label_offset_x: Math.round(num(body.labelOffsetX ?? body.label_offset_x, 0)),
+    label_offset_y: Math.round(num(body.labelOffsetY ?? body.label_offset_y, 0)),
+    poll_interval: Math.round(num(body.pollInterval ?? body.poll_interval, 5000)),
+    printer_configs: (body.printerConfigs || body.printer_configs || {}),
+    printer_aliases: (body.printerAliases || body.printer_aliases || {}),
+    server_url: String(body.serverUrl || body.server_url || '').trim() || null,
+  };
+}
+
+function _agenteConfigRowToClient(row) {
+  if (!row) return null;
+  return {
+    pcName: row.pc_name,
+    printer: row.printer || '',
+    labelWidth: Number(row.label_width) || 110,
+    labelHeight: Number(row.label_height) || 70,
+    darkness: Number(row.darkness) || 20,
+    speed: Number(row.speed) || 4,
+    labelOffsetX: Number(row.label_offset_x) || 0,
+    labelOffsetY: Number(row.label_offset_y) || 0,
+    pollInterval: Number(row.poll_interval) || 5000,
+    printerConfigs: row.printer_configs || {},
+    printerAliases: row.printer_aliases || {},
+    serverUrl: row.server_url || '',
+    atualizadoEm: row.atualizado_em,
+    atualizadoPor: row.atualizado_por || null,
+  };
+}
+
+// GET /api/etiquetas/agente/config?pcName=XXX — agente (ou sessão) lê config do SQL
+app.get('/api/etiquetas/agente/config', async (req, res) => {
+  const viaAgente = !!req.headers['x-agent-token'];
+  if (viaAgente) {
+    if (!_exigeTokenAgente(req, res)) return;
+  } else if (!req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  try {
+    const pcName = String(req.query.pcName || req.query.pc_name || '').trim();
+    if (!pcName) return res.status(400).json({ error: 'pcName obrigatório' });
+    const { rows } = await pool.query(
+      `SELECT * FROM etiqueta."ETQ_agente_config" WHERE pc_name = $1`,
+      [pcName]
+    );
+    if (!rows[0]) return res.json({ ok: true, config: null });
+    res.json({ ok: true, config: _agenteConfigRowToClient(rows[0]) });
+  } catch (err) {
+    console.error('[etiquetas/agente/config GET]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// POST /api/etiquetas/agente/config — agente grava/atualiza config no SQL
+app.post('/api/etiquetas/agente/config', express.json(), async (req, res) => {
+  if (!_exigeTokenAgente(req, res)) return;
+  try {
+    const pcName = String(req.body?.pcName || req.body?.pc_name || '').trim();
+    if (!pcName) return res.status(400).json({ error: 'pcName obrigatório' });
+    const c = _normalizarAgenteConfigBody(req.body || {});
+    const { rows } = await pool.query(
+      `INSERT INTO etiqueta."ETQ_agente_config"
+         (pc_name, printer, label_width, label_height, darkness, speed,
+          label_offset_x, label_offset_y, poll_interval,
+          printer_configs, printer_aliases, server_url, atualizado_em, atualizado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12, now(), $13)
+       ON CONFLICT (pc_name) DO UPDATE SET
+         printer         = EXCLUDED.printer,
+         label_width     = EXCLUDED.label_width,
+         label_height    = EXCLUDED.label_height,
+         darkness        = EXCLUDED.darkness,
+         speed           = EXCLUDED.speed,
+         label_offset_x  = EXCLUDED.label_offset_x,
+         label_offset_y  = EXCLUDED.label_offset_y,
+         poll_interval   = EXCLUDED.poll_interval,
+         printer_configs = EXCLUDED.printer_configs,
+         printer_aliases = EXCLUDED.printer_aliases,
+         server_url      = COALESCE(EXCLUDED.server_url, etiqueta."ETQ_agente_config".server_url),
+         atualizado_em   = now(),
+         atualizado_por  = EXCLUDED.atualizado_por
+       RETURNING *`,
+      [
+        pcName, c.printer, c.label_width, c.label_height, c.darkness, c.speed,
+        c.label_offset_x, c.label_offset_y, c.poll_interval,
+        JSON.stringify(c.printer_configs || {}),
+        JSON.stringify(c.printer_aliases || {}),
+        c.server_url,
+        'agente',
+      ]
+    );
+    res.json({ ok: true, config: _agenteConfigRowToClient(rows[0]) });
+  } catch (err) {
+    console.error('[etiquetas/agente/config POST]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/etiquetas/agente/configs — lista configs salvas (painel Conf. sistema)
+app.get('/api/etiquetas/agente/configs', async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const { rows } = await pool.query(
+      `SELECT c.*, a.last_seen, a.version, a.printers AS printers_online
+         FROM etiqueta."ETQ_agente_config" c
+         LEFT JOIN etiqueta."ETQ_agentes" a ON a.pc_name = c.pc_name
+        ORDER BY c.atualizado_em DESC NULLS LAST, c.pc_name`
+    );
+    res.json({
+      ok: true,
+      configs: rows.map((r) => ({
+        ..._agenteConfigRowToClient(r),
+        lastSeen: r.last_seen,
+        version: r.version || null,
+        printersOnline: Array.isArray(r.printers_online) ? r.printers_online : [],
+      })),
+    });
+  } catch (err) {
+    console.error('[etiquetas/agente/configs]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// PUT /api/etiquetas/agente/config/:pcName — painel intranet edita config de um PC
+app.put('/api/etiquetas/agente/config/:pcName', express.json(), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const pcName = String(req.params.pcName || '').trim();
+    if (!pcName) return res.status(400).json({ error: 'pcName obrigatório' });
+    const c = _normalizarAgenteConfigBody(req.body || {});
+    const usuario = String(
+      req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
+    ).trim() || 'intranet';
+    const { rows } = await pool.query(
+      `INSERT INTO etiqueta."ETQ_agente_config"
+         (pc_name, printer, label_width, label_height, darkness, speed,
+          label_offset_x, label_offset_y, poll_interval,
+          printer_configs, printer_aliases, server_url, atualizado_em, atualizado_por)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,$12, now(), $13)
+       ON CONFLICT (pc_name) DO UPDATE SET
+         printer         = COALESCE(EXCLUDED.printer, etiqueta."ETQ_agente_config".printer),
+         label_width     = EXCLUDED.label_width,
+         label_height    = EXCLUDED.label_height,
+         darkness        = EXCLUDED.darkness,
+         speed           = EXCLUDED.speed,
+         label_offset_x  = EXCLUDED.label_offset_x,
+         label_offset_y  = EXCLUDED.label_offset_y,
+         poll_interval   = EXCLUDED.poll_interval,
+         printer_configs = CASE
+           WHEN EXCLUDED.printer_configs = '{}'::jsonb THEN etiqueta."ETQ_agente_config".printer_configs
+           ELSE EXCLUDED.printer_configs END,
+         printer_aliases = CASE
+           WHEN EXCLUDED.printer_aliases = '{}'::jsonb THEN etiqueta."ETQ_agente_config".printer_aliases
+           ELSE EXCLUDED.printer_aliases END,
+         atualizado_em   = now(),
+         atualizado_por  = EXCLUDED.atualizado_por
+       RETURNING *`,
+      [
+        pcName, c.printer, c.label_width, c.label_height, c.darkness, c.speed,
+        c.label_offset_x, c.label_offset_y, c.poll_interval,
+        JSON.stringify(c.printer_configs || {}),
+        JSON.stringify(c.printer_aliases || {}),
+        c.server_url,
+        usuario,
+      ]
+    );
+    res.json({ ok: true, config: _agenteConfigRowToClient(rows[0]) });
+  } catch (err) {
+    console.error('[etiquetas/agente/config PUT]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/etiquetas/layout-config — lista layouts de etiqueta
+app.get('/api/etiquetas/layout-config', async (req, res) => {
+  if (!req.session?.user?.id && !_checkAgentTokenOptional(req)) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  try {
+    const { rows } = await pool.query(
+      `SELECT * FROM etiqueta."ETQ_layout_config" ORDER BY chave`
+    );
+    res.json({
+      ok: true,
+      layouts: rows.map((r) => ({
+        chave: r.chave,
+        nome: r.nome,
+        labelWidth: r.label_width != null ? Number(r.label_width) : null,
+        labelHeight: r.label_height != null ? Number(r.label_height) : null,
+        darkness: r.darkness != null ? Number(r.darkness) : null,
+        speed: r.speed != null ? Number(r.speed) : null,
+        offsetX: Number(r.offset_x) || 0,
+        offsetY: Number(r.offset_y) || 0,
+        zplTemplate: r.zpl_template || null,
+        atualizadoEm: r.atualizado_em,
+        atualizadoPor: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[etiquetas/layout-config GET]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+function _checkAgentTokenOptional(req) {
+  return !!(AGENTE_TOKEN && req.headers['x-agent-token'] === AGENTE_TOKEN);
+}
+
+// PUT /api/etiquetas/layout-config/:chave — edita layout de etiqueta
+app.put('/api/etiquetas/layout-config/:chave', express.json(), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const chave = String(req.params.chave || '').trim();
+    if (!chave) return res.status(400).json({ error: 'chave obrigatória' });
+    const b = req.body || {};
+    const numOrNull = (v) => {
+      if (v === undefined || v === null || v === '') return null;
+      const n = Number(v);
+      return Number.isFinite(n) ? n : null;
+    };
+    const usuario = String(
+      req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
+    ).trim() || 'intranet';
+    const { rows } = await pool.query(
+      `INSERT INTO etiqueta."ETQ_layout_config"
+         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y, zpl_template, atualizado_em, atualizado_por)
+       VALUES ($1, COALESCE($2, $1), $3, $4, $5, $6, $7, $8, $9, now(), $10)
+       ON CONFLICT (chave) DO UPDATE SET
+         nome          = COALESCE(EXCLUDED.nome, etiqueta."ETQ_layout_config".nome),
+         label_width   = COALESCE(EXCLUDED.label_width, etiqueta."ETQ_layout_config".label_width),
+         label_height  = COALESCE(EXCLUDED.label_height, etiqueta."ETQ_layout_config".label_height),
+         darkness      = COALESCE(EXCLUDED.darkness, etiqueta."ETQ_layout_config".darkness),
+         speed         = COALESCE(EXCLUDED.speed, etiqueta."ETQ_layout_config".speed),
+         offset_x      = COALESCE(EXCLUDED.offset_x, etiqueta."ETQ_layout_config".offset_x),
+         offset_y      = COALESCE(EXCLUDED.offset_y, etiqueta."ETQ_layout_config".offset_y),
+         zpl_template  = CASE WHEN $9 IS NULL THEN etiqueta."ETQ_layout_config".zpl_template ELSE EXCLUDED.zpl_template END,
+         atualizado_em = now(),
+         atualizado_por = EXCLUDED.atualizado_por
+       RETURNING *`,
+      [
+        chave,
+        String(b.nome || '').trim() || null,
+        numOrNull(b.labelWidth ?? b.label_width),
+        numOrNull(b.labelHeight ?? b.label_height),
+        numOrNull(b.darkness) != null ? Math.round(numOrNull(b.darkness)) : null,
+        numOrNull(b.speed) != null ? Math.round(numOrNull(b.speed)) : null,
+        Math.round(numOrNull(b.offsetX ?? b.offset_x) ?? 0),
+        Math.round(numOrNull(b.offsetY ?? b.offset_y) ?? 0),
+        b.zplTemplate !== undefined ? (b.zplTemplate || null) : (b.zpl_template !== undefined ? (b.zpl_template || null) : null),
+        usuario,
+      ]
+    );
+    const r = rows[0];
+    res.json({
+      ok: true,
+      layout: {
+        chave: r.chave,
+        nome: r.nome,
+        labelWidth: r.label_width != null ? Number(r.label_width) : null,
+        labelHeight: r.label_height != null ? Number(r.label_height) : null,
+        darkness: r.darkness != null ? Number(r.darkness) : null,
+        speed: r.speed != null ? Number(r.speed) : null,
+        offsetX: Number(r.offset_x) || 0,
+        offsetY: Number(r.offset_y) || 0,
+        zplTemplate: r.zpl_template || null,
+        atualizadoEm: r.atualizado_em,
+        atualizadoPor: r.atualizado_por,
+      },
+    });
+  } catch (err) {
+    console.error('[etiquetas/layout-config PUT]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/etiquetas/usuario-impressoras — preferências do usuário (listbox)
+app.get('/api/etiquetas/usuario-impressoras', async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const usuario = String(
+      req.query.usuario ||
+      req.session?.user?.nome ||
+      req.session?.user?.login ||
+      req.session?.usuario ||
+      ''
+    ).trim();
+    if (!usuario) return res.json({ ok: true, config: { padrao: null, enabled: [] } });
+    const { rows } = await pool.query(
+      `SELECT padrao, enabled FROM etiqueta."ETQ_usuario_impressoras" WHERE usuario = $1`,
+      [usuario]
+    );
+    if (!rows[0]) return res.json({ ok: true, config: { padrao: null, enabled: [] } });
+    res.json({
+      ok: true,
+      config: {
+        padrao: rows[0].padrao || null,
+        enabled: Array.isArray(rows[0].enabled) ? rows[0].enabled : [],
+      },
+    });
+  } catch (err) {
+    console.error('[etiquetas/usuario-impressoras GET]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// PUT /api/etiquetas/usuario-impressoras — salva preferências do usuário
+app.put('/api/etiquetas/usuario-impressoras', express.json(), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const usuario = String(
+      req.body?.usuario ||
+      req.session?.user?.nome ||
+      req.session?.user?.login ||
+      req.session?.usuario ||
+      ''
+    ).trim();
+    if (!usuario) return res.status(400).json({ error: 'usuario obrigatório' });
+    const padrao = req.body?.padrao != null ? String(req.body.padrao) : null;
+    const enabled = Array.isArray(req.body?.enabled) ? req.body.enabled.map(String) : [];
+    await pool.query(
+      `INSERT INTO etiqueta."ETQ_usuario_impressoras" (usuario, padrao, enabled, atualizado_em)
+       VALUES ($1, $2, $3::jsonb, now())
+       ON CONFLICT (usuario) DO UPDATE SET
+         padrao = EXCLUDED.padrao,
+         enabled = EXCLUDED.enabled,
+         atualizado_em = now()`,
+      [usuario, padrao, JSON.stringify(enabled)]
+    );
+    res.json({ ok: true, config: { padrao, enabled } });
+  } catch (err) {
+    console.error('[etiquetas/usuario-impressoras PUT]', err);
+    res.status(500).json({ error: err?.message });
+  }
 });
 
 // GET /api/etiquetas/agente/online — frontend verifica se há agente ativo
@@ -11899,15 +12311,38 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
 });
 
 // ── Helper: gera um bloco ZPL para salvar no banco (ETQ_recebimento) ─────────
-// Layout p/ etiqueta 5×3 cm (50×30 mm, 203 dpi → 399×240 dots)
+// Layout p/ etiqueta 5×3 cm (50×30 mm, 203 dpi → 399×240 dots) — sobrescrito por ETQ_layout_config
 // O agente sobrescreve ^PW/^LL conforme as dimensões configuradas na UI dele.
-function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq }) {
+let _etqLayoutCache = null;
+let _etqLayoutCacheAt = 0;
+async function _carregarLayoutEtiqueta(chave) {
+  const agora = Date.now();
+  if (!_etqLayoutCache || (agora - _etqLayoutCacheAt) > 60000) {
+    try {
+      const { rows } = await pool.query(`SELECT * FROM etiqueta."ETQ_layout_config"`);
+      _etqLayoutCache = {};
+      for (const r of rows) _etqLayoutCache[r.chave] = r;
+      _etqLayoutCacheAt = agora;
+    } catch {
+      _etqLayoutCache = _etqLayoutCache || {};
+    }
+  }
+  return _etqLayoutCache[chave] || null;
+}
+
+function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq, layout }) {
+  const DPI = 203;
+  const dpm = DPI / 25.4;
+  const wMm = Number(layout?.label_width) > 0 ? Number(layout.label_width) : 50;
+  const hMm = Number(layout?.label_height) > 0 ? Number(layout.label_height) : 30;
+  const pw = Math.round(wMm * dpm);
+  const ll = Math.round(hMm * dpm);
   const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idEtq}`;
   return [
     '^XA',
     '^CI28',
-    '^PW399',          // 50 mm @ 203 dpi — sobrescrito pelo agente
-    '^LL240',          // 30 mm @ 203 dpi — sobrescrito pelo agente
+    `^PW${pw}`,
+    `^LL${ll}`,
     // QR code — canto superior esquerdo, escala 5 (~165×165 dots)
     `^FO5,5^BQN,2,5^FDLA,${qrContent}^FS`,
     // Código do produto — só o valor, sem rótulo
@@ -11917,7 +12352,7 @@ function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idE
     `^FO178,56^A0N,20,20^FD${loteTxt}^FS`,
     `^FO178,80^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
     // Descrição abaixo do QR — até 2 linhas, sem rótulo
-    `^FO5,190^A0N,20,20^FB385,2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
+    `^FO5,190^A0N,20,20^FB${Math.max(100, pw - 14)},2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -12199,6 +12634,8 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       return res.status(400).json({ error: 'Nenhum item informado.' });
     }
 
+    const layoutRecebimento = await _carregarLayoutEtiqueta('recebimento');
+
     // Lote = Pedido + "-" + NF-e (igual para todos os itens)
     const lote = `${String(pedido)}-${String(nfe)}`;
 
@@ -12277,7 +12714,8 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
             descProd,
             loteTxt,
             dataExibir,
-            idEtq: rowExist.id
+            idEtq: rowExist.id,
+            layout: layoutRecebimento,
           });
           await pool.query(
             `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
@@ -12330,7 +12768,9 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       }
 
       // ── Gera ZPL com o ID já conhecido ────────────────────────────────────
-      const zpl = _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq });
+      const zpl = _gerarZplRecebimentoBloco({
+        codProd, descProd, loteTxt, dataExibir, idEtq, layout: layoutRecebimento,
+      });
 
       // ── Atualiza conteudo_zpl com o ZPL final ─────────────────────────────
       try {
@@ -15045,8 +15485,9 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
 });
 
 // POST /api/etiquetas/iapp-op/imprimir
-// Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario? }
-// lote = número da OP. Atualiza kanban para Montagem hermetica e registra RI_Check no mesmo posto.
+// Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario?, somente_reimpressao? }
+// lote = número da OP. Na 1ª impressão: atualiza kanban para Montagem hermetica e registra RI_Check.
+// somente_reimpressao=true: só gera/enfileira etiqueta (não move OP nem altera RI/tempo).
 app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -15057,6 +15498,9 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const destiAg = String(req.body?.destino_agente || '').trim() || null;
     const impres  = String(req.body?.impressora || '').trim() || null;
+    const somenteReimpressao = req.body?.somente_reimpressao === true
+      || req.body?.somente_reimpressao === 1
+      || String(req.body?.somente_reimpressao || '').toLowerCase() === 'true';
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
 
     const hoje = new Date();
@@ -15133,6 +15577,24 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         : { rows: [] };
       const opIappId = Number(item.op_iapp_id) || Number(opIappRow.rows[0]?.op_iapp_id) || 0;
 
+      try {
+        await registrarControleOperacaoImpressaoOp({
+          opProducaoId,
+          opIappId,
+          numeroOp: loteRaw,
+          usuario,
+          operacao: somenteReimpressao ? 'Reimprimir OP' : 'Imprimir OP',
+        });
+      } catch (ctrlErr) {
+        console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
+      }
+
+      if (somenteReimpressao) {
+        if (osId > 0) osAtualizadas.push(osId);
+        else if (opProducaoId > 0) osAtualizadas.push(opProducaoId);
+        continue;
+      }
+
       if (opProducaoId > 0) {
         const codigoProdutoNum = idOmie ? Number(idOmie) : null;
         const numeroOpTxt = loteRaw;
@@ -15208,18 +15670,6 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         );
       }
 
-      try {
-        await registrarControleOperacaoImpressaoOp({
-          opProducaoId,
-          opIappId,
-          numeroOp: loteRaw,
-          usuario,
-          operacao: 'Imprimir OP',
-        });
-      } catch (ctrlErr) {
-        console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
-      }
-
       if (opProducaoId > 0 || opIappId > 0) {
         try {
           await registrarRiCheckImpressaoOp({
@@ -15284,6 +15734,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       fila_id: filaIns.rows[0].id,
       quantidade: zplBlocks.length,
       os_atualizadas: osAtualizadas,
+      somente_reimpressao: somenteReimpressao,
     });
   } catch (err) {
     console.error('[etiquetas/iapp-op/imprimir]', err);
@@ -15579,7 +16030,7 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 }));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.7';
+const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.8';
 const _agenteUrlFromVer = agenteExeUrl(_AGENTE_VERSAO_ATUAL);
 // Preferir URL da versão atual no R2. AGENTE_EXE_URL só vale se já apontar para essa versão
 // (evita ficar preso em URL antiga tipo v2.6 no env do Render).
@@ -28144,7 +28595,52 @@ async function syncPedidosCompraOmie(filtros = {}) {
     }
 
     console.log(`[PedidosCompra] ✓✓✓ Sincronização concluída: ${totalSincronizados} pedidos sincronizados com sucesso!`);
-    return { ok: true, total: totalSincronizados };
+
+    // Após o sync completo (inclui recebidos), realinha pendente_omie com a
+    // lista "aberta" da Omie — senão a coluna Compra realizada fica com fantasmas.
+    let reconcile = { fechados: 0, reabertos: 0, omie_abertos: 0 };
+    try {
+      const pendentesOmie = await (async () => {
+        const mapa = new Map();
+        let paginaPed = 1;
+        let totalPaginasPed = 1;
+        while (paginaPed <= totalPaginasPed) {
+          const pesquisaAbertos = await chamarOmieComRetry('PesquisarPedCompra', {
+            nPagina: paginaPed,
+            nRegsPorPagina: 50,
+            dDataInicial: '01/01/2026',
+            lExibirPedidosPendentes: true,
+            lExibirPedidosFaturados: true,
+            lExibirPedidosFatParciais: true,
+            lExibirPedidosRecParciais: true
+          }, 4);
+          if (!pesquisaAbertos.ok) {
+            if (pesquisaAbertos.noRecordsPage) break;
+            throw new Error(pesquisaAbertos.errorText || `Omie ${pesquisaAbertos.status}`);
+          }
+          const dataPed = pesquisaAbertos.data || {};
+          totalPaginasPed = Number(dataPed.nTotalPaginas) || 1;
+          for (const item of (dataPed.pedidos_pesquisa || [])) {
+            const cab = item?.cabecalho_consulta || item?.cabecalho || {};
+            if (cab.nCodPed) mapa.set(String(cab.nCodPed), true);
+          }
+          paginaPed += 1;
+        }
+        return mapa;
+      })();
+
+      const lote = await aplicarPendenciaOmieLote(pool, pendentesOmie.keys(), (...a) => console.log(...a));
+      await fecharSolicitacoesDePedidosFechados(pool, (...a) => console.log(...a));
+      reconcile = {
+        fechados: lote.fechados.length,
+        reabertos: lote.reabertos.length,
+        omie_abertos: lote.omie_abertos
+      };
+    } catch (errRec) {
+      console.error('[PedidosCompra] Reconciliação pendente_omie falhou:', errRec.message || errRec);
+    }
+
+    return { ok: true, total: totalSincronizados, reconcile };
   } catch (e) {
     console.error('[PedidosCompra] ✗ Erro na sincronização:', e);
     return { ok: false, error: e.message };
@@ -35463,11 +35959,11 @@ async function varrerFaturadasOmieKanban() {
     lExibirPedidosRecParciais: true,
     lExibirPedidosFatParciais: true
   });
-  // "Abertos" = pedidos pendentes ou com processamento parcial na Omie.
+  // "Abertos" = mesma regra da tela Omie (Pedido de Compra + Aprovação):
+  // pendentes, faturados sem recebimento total e processamentos parciais.
   const pedidosPendentesOmie = await pesquisarPedCompraOmie({
-    // "Faturados" puros incluem historico na pesquisa da Omie; somente
-    // pendentes e processamentos parciais continuam como pedidos abertos.
     lExibirPedidosPendentes: true,
+    lExibirPedidosFaturados: true,
     lExibirPedidosFatParciais: true,
     lExibirPedidosRecParciais: true
   });
@@ -35515,43 +36011,40 @@ async function varrerFaturadasOmieKanban() {
       pedidosEtapaAtualizada += 1;
       console.log(`[VarrerFaturadas] Pedido ${ped.c_numero}: etapa ${ped.c_etapa} → ${etapaOmie}`);
     }
+  }
 
-    const pendenteAgora = pedidosPendentesOmie.has(idPed);
-    if (ped.pendente_omie !== pendenteAgora) {
-      await pool.query(
-        `UPDATE compras.pedidos_omie
-            SET pendente_omie = $2, updated_at = NOW()
-          WHERE n_cod_ped = $1`,
-        [ped.n_cod_ped, pendenteAgora]
-      );
-      if (!pendenteAgora) {
-        pedidosFaturadosMarcados += 1;
-        console.log(`[VarrerFaturadas] Pedido ${ped.c_numero} fechado na Omie (recebido/cancelado/encerrado — sai de Compra realizada)`);
-        // Atualiza itens (n_qtde_rec) + solicitações para o banco refletir a Omie
-        await refrescarPedidoFechadoDaOmie({
-          pool,
-          nCodPed: ped.n_cod_ped,
-          cNumero: ped.c_numero,
-          delayMs: OMIE_REQUEST_DELAY_MS,
-          log: (...a) => console.log(...a),
-          omieConsultarPedCompra: async (nCod) => {
-            const respostaPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                call: 'ConsultarPedCompra',
-                app_key: OMIE_APP_KEY,
-                app_secret: OMIE_APP_SECRET,
-                param: [{ nCodPed: Number(nCod) }]
-              })
-            });
-            return respostaPed.json().catch(() => ({}));
-          }
+  // Fecha/reabre em lote (sem Consultar 1 a 1) para não estourar tempo/API.
+  const lotePendencia = await aplicarPendenciaOmieLote(
+    pool,
+    pedidosPendentesOmie.keys(),
+    (...a) => console.log(...a)
+  );
+  pedidosFaturadosMarcados = lotePendencia.fechados.length;
+  const MAX_REFRESH_FECHADOS = 8;
+  for (const ped of lotePendencia.fechados.slice(0, MAX_REFRESH_FECHADOS)) {
+    await refrescarPedidoFechadoDaOmie({
+      pool,
+      nCodPed: ped.n_cod_ped,
+      cNumero: ped.c_numero,
+      delayMs: OMIE_REQUEST_DELAY_MS,
+      log: (...a) => console.log(...a),
+      omieConsultarPedCompra: async (nCod) => {
+        const respostaPed = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            call: 'ConsultarPedCompra',
+            app_key: OMIE_APP_KEY,
+            app_secret: OMIE_APP_SECRET,
+            param: [{ nCodPed: Number(nCod) }]
+          })
         });
-      } else {
-        await sincronizarPedidoComSolicitacao(ped.n_cod_ped);
+        return respostaPed.json().catch(() => ({}));
       }
-    }
+    });
+  }
+  for (const ped of lotePendencia.reabertos) {
+    await sincronizarPedidoComSolicitacao(ped.n_cod_ped);
   }
 
   // ── Pedidos abertos na Omie que ainda NÃO existem localmente → importa ──
