@@ -45,3 +45,27 @@ test('continua fechando pedido quando todos os itens foram recebidos', async () 
   assert.match(queries[1].sql, /pendente_omie = FALSE/);
   assert.match(queries[1].sql, /"Pedido recebido" = TRUE/);
 });
+
+test('aplicarPendenciaOmieLote fecha quem nao esta na lista aberta da Omie', async () => {
+  const { aplicarPendenciaOmieLote } = require('../utils/syncPedidosCompraOmie');
+  const queries = [];
+  const db = {
+    async query(sql, params) {
+      queries.push({ sql, params });
+      if (/pendente_omie = FALSE/.test(sql)) {
+        return { rows: [{ n_cod_ped: 1, c_numero: '100' }] };
+      }
+      if (/pendente_omie = TRUE/.test(sql)) {
+        return { rows: [{ n_cod_ped: 2, c_numero: '200' }] };
+      }
+      return { rows: [] };
+    }
+  };
+
+  const logs = [];
+  const out = await aplicarPendenciaOmieLote(db, ['2', '3'], (msg) => logs.push(msg));
+  assert.equal(out.fechados.length, 1);
+  assert.equal(out.reabertos.length, 1);
+  assert.equal(out.omie_abertos, 2);
+  assert.match(logs[0], /fechados=1/);
+});

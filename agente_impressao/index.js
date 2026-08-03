@@ -7,7 +7,7 @@
  *   --service    → Serviço: polling da fila no servidor + UI de config em localhost:9200
  *   --config     → Abre http://localhost:9200 no browser padrão
  *
- * v2.7 — Histórico local de etiquetas impressas + reimpressão com quantidade
+ * v2.9 — Histórico global de etiquetas no SQL (qualquer PC) + busca e reimpressão
  */
 
 const http   = require('http');
@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '2.7';
+const AGENT_VERSION = '2.9';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -152,7 +152,74 @@ function saveConfig(data) {
   }
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf8');
+  // Espelha no SQL do servidor (não bloqueia se offline)
+  syncConfigToServer(merged);
   return merged;
+}
+
+// Envia a configuração local para o SQL (primeira gravação ou alteração)
+function syncConfigToServer(cfg) {
+  try {
+    const c = cfg || readConfig();
+    const pc = c.pcName || os.hostname();
+    const payload = {
+      pcName: pc,
+      printer: c.printer || '',
+      labelWidth: c.labelWidth,
+      labelHeight: c.labelHeight,
+      darkness: c.darkness,
+      speed: c.speed,
+      labelOffsetX: c.labelOffsetX,
+      labelOffsetY: c.labelOffsetY,
+      pollInterval: c.pollInterval,
+      printerConfigs: c.printerConfigs || {},
+      printerAliases: c.printerAliases || {},
+      serverUrl: c.serverUrl || '',
+    };
+    apiRequest('POST', '/api/etiquetas/agente/config', payload, c.agentToken, (err, status) => {
+      if (err) log(`[config-sql] Falha ao sincronizar: ${err.message}`);
+      else if (status >= 400) log(`[config-sql] Servidor recusou sync (HTTP ${status})`);
+      else log(`[config-sql] Configuração salva no SQL para PC "${pc}"`);
+    });
+  } catch (e) {
+    log(`[config-sql] Erro: ${e.message}`);
+  }
+}
+
+// Na inicialização: se o SQL já tem config deste PC, aplica em cima do local
+function pullConfigFromServer(cb) {
+  const cfg = readConfig();
+  const pc = cfg.pcName || os.hostname();
+  apiRequest('GET', `/api/etiquetas/agente/config?pcName=${encodeURIComponent(pc)}`, null, cfg.agentToken, (err, status, body) => {
+    if (err || status !== 200 || !body?.config) {
+      if (typeof cb === 'function') cb(false);
+      return;
+    }
+    const remote = body.config;
+    const patch = {};
+    if (remote.printer) patch.printer = remote.printer;
+    for (const k of PRINTER_CFG_FIELDS) {
+      if (remote[k] !== undefined && remote[k] !== null) patch[k] = remote[k];
+    }
+    if (remote.pollInterval) patch.pollInterval = remote.pollInterval;
+    if (remote.printerConfigs && typeof remote.printerConfigs === 'object') {
+      patch.printerConfigs = Object.assign({}, cfg.printerConfigs || {}, remote.printerConfigs);
+    }
+    if (remote.printerAliases && typeof remote.printerAliases === 'object') {
+      patch.printerAliases = Object.assign({}, cfg.printerAliases || {}, remote.printerAliases);
+    }
+    // Salva só local (sem re-sync imediato) para não loop
+    try {
+      fs.mkdirSync(INSTALL_DIR, { recursive: true });
+      const merged = Object.assign({}, cfg, patch);
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(merged, null, 2), 'utf8');
+      log(`[config-sql] Configuração carregada do SQL para PC "${pc}"`);
+      if (typeof cb === 'function') cb(true);
+    } catch (e) {
+      log(`[config-sql] Falha ao aplicar config remota: ${e.message}`);
+      if (typeof cb === 'function') cb(false);
+    }
+  });
 }
 
 function log(msg) {
@@ -519,7 +586,7 @@ function buildConfigHtml(cfg, printers, status) {
       </div>
       <div class="status-row" id="rowLastPrint">
         <div class="dot dot-${status.lastPrintOk === null ? 'yellow' : status.lastPrintOk ? 'green' : 'red'}"></div>
-        <span><b>Última impressão:</b> ${status.lastPrint || 'Nenhuma ainda'}</span>
+        <span><b>Histórico SQL:</b> <span id="histStatusHint">carregando…</span></span>
       </div>
       <div class="status-row">
         <span><b>Impressora ativa:</b> ${cfg.printer || '<span style="color:var(--yellow)">Não configurada</span>'}</span>
@@ -557,16 +624,23 @@ function buildConfigHtml(cfg, printers, status) {
       </div>
     </div>
 
-    <!-- Histórico de etiquetas (reimpressão) -->
+    <!-- Histórico global de etiquetas (SQL) -->
     <div class="card">
-      <h2>🏷️ Histórico de etiquetas</h2>
+      <h2>🏷️ Histórico de etiquetas (todos os PCs)</h2>
       <p style="font-size:.78rem;color:var(--muted);margin-bottom:10px">
-        Etiquetas já enviadas para impressão neste PC. Escolha a quantidade e reimprima.
+        Cada impressão é gravada no servidor. Busque por código, lote, ID, PC ou qualquer texto da etiqueta e reimprima.
       </p>
-      <div id="historyBox" style="max-height:380px;overflow-y:auto">
+      <div style="display:flex;gap:8px;margin-bottom:10px;align-items:center">
+        <input id="histSearch" type="search" placeholder="Pesquisar texto ou número…"
+          style="flex:1;padding:8px 10px;border-radius:6px;border:1px solid var(--border);background:#1a1929;color:var(--text);font-size:.85rem;outline:none"
+          onkeydown="if(event.key==='Enter'){refreshHistory();}">
+        <button class="btn btn-secondary" style="font-size:.78rem" onclick="refreshHistory()">🔍 Buscar</button>
+      </div>
+      <div id="historyBox" style="max-height:420px;overflow-y:auto">
         <div style="color:var(--muted);font-size:.82rem;padding:6px 0">Carregando...</div>
       </div>
       <div class="btn-row" style="margin-top:10px">
+        <button class="btn btn-secondary" style="font-size:.78rem" onclick="document.getElementById('histSearch').value='';refreshHistory()">Limpar busca</button>
         <button class="btn btn-secondary" style="font-size:.78rem" onclick="refreshHistory()">🔄 Atualizar</button>
         <span id="histCount" style="font-size:.75rem;color:var(--muted);align-self:center"></span>
       </div>
@@ -779,6 +853,7 @@ async function reprintLast() {
 }
 
 // ── Reimprimir item do histórico (com quantidade) ─────────────────────────────
+// ── Reimprimir item do histórico SQL (com quantidade) ─────────────────────────
 async function reprintHistory(id, btn) {
   const row = btn && btn.closest ? btn.closest('.hist-row') : null;
   const qtyInp = row ? row.querySelector('.hist-qty') : null;
@@ -788,7 +863,7 @@ async function reprintHistory(id, btn) {
     const r = await fetch('/api/reprint', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: id, quantidade: quantidade })
+      body: JSON.stringify({ id: id, quantidade: quantidade, source: 'sql' })
     });
     const j = await r.json();
     toast(j.ok ? ('Reimpresso: ' + quantidade + ' cópia(s)') : (j.error || 'Erro'), j.ok);
@@ -808,7 +883,7 @@ async function toggleHistPreview(id, btn) {
     return;
   }
   btn.textContent = '⏳...';
-  box.innerHTML = '<img alt="preview" src="/api/label-preview?id=' + encodeURIComponent(id) + '&t=' + Date.now() + '">' +
+  box.innerHTML = '<img alt="preview" src="/api/label-preview?id=' + encodeURIComponent(id) + '&source=sql&t=' + Date.now() + '">' +
     '<div style="font-size:.7rem;color:var(--muted);margin-top:4px">Clique em Preview de novo para fechar</div>';
   box.classList.add('show');
   btn.textContent = '👁 Fechar';
@@ -853,17 +928,35 @@ async function reloadQueue() {
   } catch {}
 }
 
-// ── Histórico de etiquetas (persistente) ──────────────────────────────────────
+// ── Histórico global (SQL no servidor) + busca ────────────────────────────────
+let _histSearchTimer = null;
+document.getElementById('histSearch')?.addEventListener('input', () => {
+  clearTimeout(_histSearchTimer);
+  _histSearchTimer = setTimeout(() => refreshHistory(), 350);
+});
+
 async function refreshHistory() {
   try {
-    const r = await fetch('/api/history');
+    const q = (document.getElementById('histSearch')?.value || '').trim();
+    const r = await fetch('/api/history?q=' + encodeURIComponent(q) + '&limit=80');
     const j = await r.json();
     const box   = document.getElementById('historyBox');
     const count = document.getElementById('histCount');
+    const hint  = document.getElementById('histStatusHint');
     const prints = j.prints || [];
-    if (count) count.textContent = prints.length + ' no histórico (máx. ' + (j.max || 80) + ')';
+    if (count) {
+      count.textContent = q
+        ? (prints.length + ' resultado(s) para "' + q + '"')
+        : (prints.length + ' no histórico' + (j.source === 'sql' ? ' (SQL)' : ' (local)'));
+    }
+    if (hint) {
+      if (prints[0]) hint.textContent = (prints[0].titulo || 'Etiqueta') + ' · ' + (prints[0].date || '') + ' ' + (prints[0].time || '');
+      else hint.textContent = q ? 'nenhum resultado' : 'vazio';
+    }
     if (!prints.length) {
-      box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">Nenhuma etiqueta no histórico ainda.<br><span style="font-size:.75rem">Quando a intranet enviar etiquetas, elas aparecem aqui para reimprimir.</span></div>';
+      box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">' +
+        (q ? ('Nenhuma etiqueta com "' + q.replace(/</g,'&lt;') + '".') : 'Nenhuma etiqueta no histórico ainda.') +
+        '<br><span style="font-size:.75rem">Impressões de qualquer PC aparecem aqui automaticamente.</span></div>';
       return;
     }
     box.innerHTML = prints.map(function(p) {
@@ -871,14 +964,18 @@ async function refreshHistory() {
       const okColor = p.ok ? 'var(--green)' : 'var(--red)';
       const titulo = (p.titulo || 'Etiqueta').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const idAttr = String(p.id).replace(/"/g, '&quot;');
+      const pc = (p.pcName || p.pc_name || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+      const impr = (p.impressora || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return '<div class="hist-row" data-id="' + idAttr + '">' +
         '<div class="hist-meta">' +
           '<span style="color:' + okColor + ';font-size:.9rem">' + okIcon + '</span>' +
           '<span style="color:var(--muted)">' + (p.date || '') + ' ' + (p.time || '') + '</span>' +
-          (p.jobId ? '<span>Job <b>#' + p.jobId + '</b></span>' : '') +
-          '<span style="margin-left:auto;color:var(--muted)">' + (p.quantidade || 1) + ' etq. orig.</span>' +
+          (p.jobId ? '<span>Fila <b>#' + p.jobId + '</b></span>' : '<span>ID <b>#' + p.id + '</b></span>') +
+          (pc ? '<span style="color:var(--muted)">PC: ' + pc + '</span>' : '') +
+          '<span style="margin-left:auto;color:var(--muted)">' + (p.quantidade || 1) + ' etq.</span>' +
         '</div>' +
         '<div class="hist-title">' + titulo + '</div>' +
+        (impr ? '<div style="font-size:.72rem;color:var(--muted);margin:2px 0 6px">🖨 ' + impr + '</div>' : '') +
         '<div class="hist-actions">' +
           '<label style="font-size:.72rem;color:var(--muted)">Qtd</label>' +
           '<input type="number" class="hist-qty" min="1" max="99" value="1" title="Quantidade de cópias">' +
@@ -888,7 +985,10 @@ async function refreshHistory() {
         '<div class="hist-preview-box"></div>' +
       '</div>';
     }).join('');
-  } catch {}
+  } catch (e) {
+    const box = document.getElementById('historyBox');
+    if (box) box.innerHTML = '<div style="color:var(--red);font-size:.82rem">Falha ao carregar histórico.</div>';
+  }
 }
 
 // ── Auto-refresh ──────────────────────────────────────────────────────────────
@@ -896,10 +996,6 @@ setInterval(async () => {
   try {
     const r = await fetch('/api/status');
     const j = await r.json();
-    if (j.lastPrint) {
-      const row = document.getElementById('rowLastPrint');
-      if (row) row.querySelector('span').innerHTML = '<b>Última impressão:</b> ' + j.lastPrint;
-    }
     const cp = document.getElementById('cntPrinted'); if (cp) cp.textContent = j.totalPrinted;
     const ce = document.getElementById('cntErrors');  if (ce) ce.textContent = j.totalErrors;
   } catch {}
@@ -911,7 +1007,7 @@ refreshHistory();
 refreshPreview();
 updateHandlePosition();
 setInterval(reloadQueue, 5000);
-setInterval(refreshHistory, 15000);
+setInterval(refreshHistory, 20000);
 </script>
 </body>
 </html>`;
@@ -965,6 +1061,13 @@ function runService() {
   }
   sendHeartbeat();                          // imediato ao iniciar
   setInterval(sendHeartbeat, 30000);        // a cada 30s
+
+  // Carrega config do SQL (se já existir) e depois lista impressoras
+  pullConfigFromServer(() => {
+    // Se ainda não há config no SQL, envia a local (primeira gravação)
+    const c = readConfig();
+    if (c.printer) syncConfigToServer(c);
+  });
 
   // Carrega lista de impressoras na inicialização
   listarImpressoras(list => {
@@ -1054,6 +1157,9 @@ function runService() {
             apiRequest('POST', '/api/etiquetas/fila/confirmar', {
               id: job.id, success: ok, error: erroMsg,
               agent_host: os.hostname(),
+              pc_name: cfg.pcName || os.hostname(),
+              impressora: targetPrinter,
+              quantidade: job.quantidade,
             }, cfg.agentToken, () => {});
 
             pending--;
@@ -1221,7 +1327,7 @@ function runService() {
       return;
     }
 
-    // POST /api/reprint — reimprime etiqueta do histórico { id, quantidade }
+    // POST /api/reprint — reimprime do histórico SQL (ou local legado)
     if (req.method === 'POST' && req.url === '/api/reprint') {
       let body = '';
       req.on('data', c => (body += c));
@@ -1232,23 +1338,39 @@ function runService() {
           const quantidade = Math.max(1, Math.min(99, Number(data.quantidade) || 1));
           const cfg = readConfig();
           if (!cfg.printer) return respJson(res, 400, { error: 'Nenhuma impressora configurada' });
-          const entry = findHistoryEntry(id);
-          if (!entry || !entry.zpl) return respJson(res, 404, { error: 'Etiqueta não encontrada no histórico' });
-          const pcfg = getPrinterConfig(cfg, cfg.printer);
-          const one = injectLH(entry.zpl, pcfg);
-          const zplToUse = Array(quantidade).fill(one).join('\n');
-          printZpl(zplToUse, cfg.printer, (err2) => {
-            if (err2) return respJson(res, 500, { error: err2.message });
-            log(`[reprint] Histórico ${entry.id} (job #${entry.jobId}) ×${quantidade} em "${cfg.printer}"`);
-            const today = new Date().toDateString();
-            if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
-            state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: entry.jobId, quantidade: quantidade + ' (reimpressão)', ok: true });
-            state.lastZpl = entry.zpl;
-            state.lastJobId = entry.jobId;
-            state.lastPrint = new Date().toLocaleString('pt-BR');
-            state.lastPrintOk = true;
-            state.totalPrinted += quantidade;
-            respJson(res, 200, { ok: true, quantidade, id: entry.id });
+
+          const finishPrint = (zplSrc, meta = {}) => {
+            if (!zplSrc) return respJson(res, 404, { error: 'Etiqueta não encontrada no histórico' });
+            const pcfg = getPrinterConfig(cfg, cfg.printer);
+            const one = injectLH(zplSrc, pcfg);
+            const zplToUse = Array(quantidade).fill(one).join('\n');
+            printZpl(zplToUse, cfg.printer, (err2) => {
+              if (err2) return respJson(res, 500, { error: err2.message });
+              log(`[reprint] Histórico ${meta.id || id} ×${quantidade} em "${cfg.printer}"`);
+              const today = new Date().toDateString();
+              if (state.todayDate !== today) { state.todayPrints = []; state.todayDate = today; }
+              state.todayPrints.push({ time: new Date().toLocaleTimeString('pt-BR'), jobId: meta.jobId || null, quantidade: quantidade + ' (reimpressão)', ok: true });
+              state.lastZpl = zplSrc;
+              state.lastJobId = meta.jobId || null;
+              state.lastPrint = new Date().toLocaleString('pt-BR');
+              state.lastPrintOk = true;
+              state.totalPrinted += quantidade;
+              respJson(res, 200, { ok: true, quantidade, id: meta.id || id });
+            });
+          };
+
+          // Prefere SQL (histórico global)
+          apiRequest('GET', `/api/etiquetas/historico/${encodeURIComponent(id)}`, null, cfg.agentToken, (err, status, bodyJ) => {
+            if (!err && status === 200 && bodyJ?.print?.zpl) {
+              return finishPrint(bodyJ.print.zpl, {
+                id: bodyJ.print.id,
+                jobId: bodyJ.print.filaId || bodyJ.print.jobId || null,
+              });
+            }
+            // Fallback: histórico local antigo
+            const entry = findHistoryEntry(id);
+            if (entry?.zpl) return finishPrint(entry.zpl, { id: entry.id, jobId: entry.jobId });
+            return respJson(res, 404, { error: 'Etiqueta não encontrada no histórico' });
           });
         } catch (e) {
           return respJson(res, 400, { error: e.message });
@@ -1257,56 +1379,93 @@ function runService() {
       return;
     }
 
-    // GET /api/history — histórico persistente (sem ZPL; use /api/reprint e preview por id)
-    if (req.method === 'GET' && req.url === '/api/history') {
-      return respJson(res, 200, {
-        ok: true,
-        prints: historyForApi(),
-        max: HISTORY_MAX,
-        // compat: também envia resumo do dia em memória
-        todayPrints: state.todayPrints,
-        date: state.todayDate,
+    // GET /api/history?q= — histórico SQL global (fallback local)
+    if (req.method === 'GET' && (req.url === '/api/history' || req.url.startsWith('/api/history?'))) {
+      const cfg = readConfig();
+      const urlObj = new URL('http://localhost' + req.url);
+      const q = urlObj.searchParams.get('q') || '';
+      const limit = urlObj.searchParams.get('limit') || '80';
+      const pathQ = `/api/etiquetas/historico?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(limit)}`;
+      apiRequest('GET', pathQ, null, cfg.agentToken, (err, status, bodyJ) => {
+        if (!err && status === 200 && Array.isArray(bodyJ?.prints)) {
+          return respJson(res, 200, {
+            ok: true,
+            source: 'sql',
+            q,
+            prints: bodyJ.prints,
+            todayPrints: state.todayPrints,
+            date: state.todayDate,
+          });
+        }
+        // Fallback local se SQL indisponível
+        let prints = historyForApi();
+        if (q) {
+          const qq = q.toLowerCase();
+          prints = prints.filter((p) =>
+            String(p.titulo || '').toLowerCase().includes(qq) ||
+            String(p.id || '').includes(q) ||
+            String(p.jobId || '').includes(q) ||
+            String(p.printer || '').toLowerCase().includes(qq)
+          );
+        }
+        return respJson(res, 200, {
+          ok: true,
+          source: 'local',
+          q,
+          prints,
+          max: HISTORY_MAX,
+          todayPrints: state.todayPrints,
+          date: state.todayDate,
+          warning: err ? err.message : (status ? `HTTP ${status}` : null),
+        });
       });
+      return;
     }
 
-    // GET /api/label-preview — proxy Labelary (última etiqueta ou ?id= do histórico)
+    // GET /api/label-preview — proxy Labelary (SQL ou local)
     if (req.method === 'GET' && req.url.startsWith('/api/label-preview')) {
       const cfg = readConfig();
       const urlObj = new URL('http://localhost' + req.url);
       const histId = urlObj.searchParams.get('id');
-      let zpl = state.lastZpl;
+      const sendPreview = (zpl) => {
+        if (!zpl) {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          return res.end('no-label');
+        }
+        const pcfgPrev = getPrinterConfig(cfg, cfg.printer);
+        const wIn = (pcfgPrev.labelWidth  / 25.4).toFixed(2);
+        const hIn = (pcfgPrev.labelHeight / 25.4).toFixed(2);
+        const zplToPreview = injectLH(zpl, pcfgPrev);
+        const postReq = http.request({
+          hostname: 'api.labelary.com',
+          path: `/v1/printers/8dpmm/labels/${wIn}x${hIn}/0/`,
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Accept': 'image/png',
+            'Content-Length': Buffer.byteLength(zplToPreview),
+          },
+          timeout: 12000,
+        }, (lr) => {
+          res.writeHead(lr.statusCode || 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
+          lr.pipe(res);
+        });
+        postReq.on('error', (e) => {
+          if (!res.headersSent) { res.writeHead(502); res.end('Labelary error: ' + e.message); }
+        });
+        postReq.write(zplToPreview);
+        postReq.end();
+      };
+
       if (histId) {
-        const entry = findHistoryEntry(histId);
-        zpl = entry ? entry.zpl : null;
+        apiRequest('GET', `/api/etiquetas/historico/${encodeURIComponent(histId)}`, null, cfg.agentToken, (err, status, bodyJ) => {
+          if (!err && status === 200 && bodyJ?.print?.zpl) return sendPreview(bodyJ.print.zpl);
+          const entry = findHistoryEntry(histId);
+          return sendPreview(entry ? entry.zpl : null);
+        });
+        return;
       }
-      if (!zpl) {
-        res.writeHead(404, { 'Content-Type': 'text/plain' });
-        return res.end('no-label');
-      }
-      const pcfgPrev = getPrinterConfig(cfg, cfg.printer);
-      const wIn = (pcfgPrev.labelWidth  / 25.4).toFixed(2);
-      const hIn = (pcfgPrev.labelHeight / 25.4).toFixed(2);
-      const zplToPreview = injectLH(zpl, pcfgPrev);
-      const postReq = http.request({
-        hostname: 'api.labelary.com',
-        path: `/v1/printers/8dpmm/labels/${wIn}x${hIn}/0/`,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'image/png',
-          'Content-Length': Buffer.byteLength(zplToPreview),
-        },
-        timeout: 12000,
-      }, (lr) => {
-        res.writeHead(lr.statusCode || 200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-cache' });
-        lr.pipe(res);
-      });
-      postReq.on('error', (e) => {
-        if (!res.headersSent) { res.writeHead(502); res.end('Labelary error: ' + e.message); }
-      });
-      postReq.write(zplToPreview);
-      postReq.end();
-      return;
+      return sendPreview(state.lastZpl);
     }
 
     // Catch-all: GET desconhecido → redireciona para a UI
@@ -1327,7 +1486,7 @@ function runService() {
 async function install() {
   const LINE = '═'.repeat(52);
   console.log(`\n╔${LINE}╗`);
-  console.log('║  Agente de Impressão SGF v2.7 — Instalador          ║');
+  console.log('║  Agente de Impressão SGF v2.9 — Instalador          ║');
   console.log(`╚${LINE}╝\n`);
 
   const step = msg => process.stdout.write(`  ► ${msg}... `);

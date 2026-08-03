@@ -10,7 +10,10 @@ const {
 const {
   marcarProdutosOmieInativos,
   reconciliarProdutosOmieAusentes,
+  limparDuplicatasAtivasLocais,
 } = require('../utils/produtosOmieFantasmas');
+const fs = require('fs');
+const path = require('path');
 
 // === Config Omie (para fallback ConsultarProduto) ============================
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || '';
@@ -80,7 +83,20 @@ async function upsertProdutoOmieComSource(item, source = 'omie_sync') {
   }
 }
 
+/** Garante omie_upsert_produto com dedupe de SKU (inativa ID antigo do mesmo código). */
+async function ensureOmieUpsertProdutoDedupSku() {
+  try {
+    const sqlPath = path.join(__dirname, '..', 'sql', 'omie_upsert_produto_dedup_sku.sql');
+    const sql = fs.readFileSync(sqlPath, 'utf8');
+    await dbQuery(sql);
+    console.log('[produtos] omie_upsert_produto com dedupe de SKU instalado');
+  } catch (err) {
+    console.error('[produtos] Falha ao instalar omie_upsert_produto (dedupe SKU):', String(err?.message || err));
+  }
+}
+
 ensureProdutosOmieWebhookOnlyGuard();
+ensureOmieUpsertProdutoDedupSku();
 
 // === Helpers =================================================================
 function ensureIntegrationKey(item) {
@@ -178,12 +194,15 @@ router.get('/detalhe', async (req, res) => {
     }
     const r = rows[0];
 
-    // 2) Busca imagens (se houverem)
+    // 2) Busca imagens ativas (se houverem)
     const imgSql = `
       SELECT url_imagem, pos
       FROM public.produtos_omie_imagens
       WHERE codigo_produto = $1
-      ORDER BY pos ASC
+        AND COALESCE(ativo, TRUE) = TRUE
+        AND url_imagem IS NOT NULL
+        AND TRIM(url_imagem) <> ''
+      ORDER BY pos ASC NULLS LAST, id DESC
     `;
     const { rows: imgs } = await dbQuery(imgSql, [r.codigo_produto]);
     const imagens = (imgs || []).map(i => ({
@@ -360,6 +379,7 @@ router.post('/locais', async (req, res) => {
 router.get('/lista', async (req, res) => {
   try {
     await ensureProdutosOmieItemLimitadoColumn();
+    await ensureVwListaProdutos();
     const q        = (req.query.q || '').trim() || null;
     const tipoitem = (req.query.tipoitem || '').trim() || null;
     const inativo  = (req.query.inativo  || '').trim() || null;
@@ -782,6 +802,7 @@ router.post('/sincronizar-completo', async (req, res) => {
     sucesso: 0,
     erros: 0,
     fantasmas_inativos: 0,
+    duplicatas_inativadas: 0,
     inicio: Date.now()
   };
   const idsVistosNaOmie = new Set();
@@ -961,6 +982,22 @@ router.post('/sincronizar-completo', async (req, res) => {
             nivel: 'success'
           });
         }
+        const dedup = await limparDuplicatasAtivasLocais(client, 'omie_sync');
+        stats.duplicatas_inativadas = dedup.marcados;
+        if (dedup.marcados > 0) {
+          enviarEvento('log', {
+            mensagem: `✓ ${dedup.marcados} duplicata(s) de SKU inativada(s)`,
+            nivel: 'success'
+          });
+        }
+      } finally {
+        client.release();
+      }
+    } else {
+      const client = await dbGetClient();
+      try {
+        const dedup = await limparDuplicatasAtivasLocais(client, 'omie_sync');
+        stats.duplicatas_inativadas = dedup.marcados;
       } finally {
         client.release();
       }
@@ -971,12 +1008,14 @@ router.post('/sincronizar-completo', async (req, res) => {
 
     enviarEvento('concluido', {
       mensagem: `Sincronização concluída! ${stats.sucesso} produtos sincronizados em ${duracao} minutos.` +
-        (stats.fantasmas_inativos ? ` ${stats.fantasmas_inativos} fantasma(s) inativado(s).` : ''),
+        (stats.fantasmas_inativos ? ` ${stats.fantasmas_inativos} fantasma(s) inativado(s).` : '') +
+        (stats.duplicatas_inativadas ? ` ${stats.duplicatas_inativadas} duplicata(s) de SKU inativada(s).` : ''),
       total: stats.total,
       processados: stats.processados,
       sucesso: stats.sucesso,
       erros: stats.erros,
       fantasmas_inativos: stats.fantasmas_inativos,
+      duplicatas_inativadas: stats.duplicatas_inativadas,
       duracao_minutos: duracao
     });
 
@@ -993,10 +1032,90 @@ router.post('/sincronizar-completo', async (req, res) => {
   }
 });
 
+// ============================================================================
+// POST /api/produtos/limpar-duplicatas-sku
+// Inativa IDs antigos quando o mesmo código (SKU) tem mais de um ativo local.
+// Não chama a Omie — só corrige o SQL local. Use após recriação de produto na Omie.
+// ============================================================================
+router.post('/limpar-duplicatas-sku', express.json(), async (req, res) => {
+  try {
+    if (!await exigirPermissaoNav(
+      req,
+      res,
+      'side:sincronizacao-produtos',
+      'Seu usuário não possui permissão para sincronizar produtos.'
+    )) return;
+
+    const client = await dbGetClient();
+    try {
+      const result = await limparDuplicatasAtivasLocais(client, 'omie_manual');
+      return res.json({
+        ok: true,
+        marcados: result.marcados,
+        grupos: result.grupos,
+        detalhes: result.detalhes
+      });
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[POST /api/produtos/limpar-duplicatas-sku]', err);
+    return res.status(500).json({ ok: false, error: err?.message || String(err) });
+  }
+});
+
 // ── Múltiplo de separação (coluna manual em produtos_omie) ─────────────────
 let ensureProdutosOmieMultiploColumnPromise = null;
 let ensureProdutosOmieCustomizadoColumnPromise = null;
 let ensureProdutosOmieItemLimitadoColumnPromise = null;
+let ensureVwListaProdutosPromise = null;
+
+/** Lista de produtos: só foto ativa mais recente (evita mostrar histórico inativo após upload). */
+async function ensureVwListaProdutos() {
+  if (!ensureVwListaProdutosPromise) {
+    ensureVwListaProdutosPromise = dbQuery(`
+      CREATE OR REPLACE VIEW public.vw_lista_produtos AS
+      SELECT
+        p.codigo_produto,
+        p.codigo_produto_integracao,
+        p.codigo,
+        p.descricao,
+        p.unidade,
+        p.tipoitem,
+        p.ncm,
+        p.valor_unitario,
+        p.quantidade_estoque,
+        p.inativo,
+        p.bloqueado,
+        p.marca,
+        p.modelo,
+        p.dalt,
+        p.halt,
+        p.dinc,
+        p.hinc,
+        img.url_imagem AS primeira_imagem
+      FROM public.produtos_omie p
+      LEFT JOIN LATERAL (
+        SELECT i.url_imagem
+          FROM public.produtos_omie_imagens i
+         WHERE i.codigo_produto = p.codigo_produto
+           AND COALESCE(i.ativo, TRUE) = TRUE
+           AND i.url_imagem IS NOT NULL
+           AND TRIM(i.url_imagem) <> ''
+         ORDER BY i.pos NULLS LAST, i.id DESC
+         LIMIT 1
+      ) img ON TRUE
+    `).catch((err) => {
+      ensureVwListaProdutosPromise = null;
+      throw err;
+    });
+  }
+  await ensureVwListaProdutosPromise;
+}
+
+ensureVwListaProdutos().catch((err) => {
+  console.warn('[produtos] falha ao atualizar vw_lista_produtos:', err?.message || err);
+});
 
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {
