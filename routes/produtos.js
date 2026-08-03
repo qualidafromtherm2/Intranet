@@ -194,12 +194,15 @@ router.get('/detalhe', async (req, res) => {
     }
     const r = rows[0];
 
-    // 2) Busca imagens (se houverem)
+    // 2) Busca imagens ativas (se houverem)
     const imgSql = `
       SELECT url_imagem, pos
       FROM public.produtos_omie_imagens
       WHERE codigo_produto = $1
-      ORDER BY pos ASC
+        AND COALESCE(ativo, TRUE) = TRUE
+        AND url_imagem IS NOT NULL
+        AND TRIM(url_imagem) <> ''
+      ORDER BY pos ASC NULLS LAST, id DESC
     `;
     const { rows: imgs } = await dbQuery(imgSql, [r.codigo_produto]);
     const imagens = (imgs || []).map(i => ({
@@ -376,6 +379,7 @@ router.post('/locais', async (req, res) => {
 router.get('/lista', async (req, res) => {
   try {
     await ensureProdutosOmieItemLimitadoColumn();
+    await ensureVwListaProdutos();
     const q        = (req.query.q || '').trim() || null;
     const tipoitem = (req.query.tipoitem || '').trim() || null;
     const inativo  = (req.query.inativo  || '').trim() || null;
@@ -1064,6 +1068,54 @@ router.post('/limpar-duplicatas-sku', express.json(), async (req, res) => {
 let ensureProdutosOmieMultiploColumnPromise = null;
 let ensureProdutosOmieCustomizadoColumnPromise = null;
 let ensureProdutosOmieItemLimitadoColumnPromise = null;
+let ensureVwListaProdutosPromise = null;
+
+/** Lista de produtos: só foto ativa mais recente (evita mostrar histórico inativo após upload). */
+async function ensureVwListaProdutos() {
+  if (!ensureVwListaProdutosPromise) {
+    ensureVwListaProdutosPromise = dbQuery(`
+      CREATE OR REPLACE VIEW public.vw_lista_produtos AS
+      SELECT
+        p.codigo_produto,
+        p.codigo_produto_integracao,
+        p.codigo,
+        p.descricao,
+        p.unidade,
+        p.tipoitem,
+        p.ncm,
+        p.valor_unitario,
+        p.quantidade_estoque,
+        p.inativo,
+        p.bloqueado,
+        p.marca,
+        p.modelo,
+        p.dalt,
+        p.halt,
+        p.dinc,
+        p.hinc,
+        img.url_imagem AS primeira_imagem
+      FROM public.produtos_omie p
+      LEFT JOIN LATERAL (
+        SELECT i.url_imagem
+          FROM public.produtos_omie_imagens i
+         WHERE i.codigo_produto = p.codigo_produto
+           AND COALESCE(i.ativo, TRUE) = TRUE
+           AND i.url_imagem IS NOT NULL
+           AND TRIM(i.url_imagem) <> ''
+         ORDER BY i.pos NULLS LAST, i.id DESC
+         LIMIT 1
+      ) img ON TRUE
+    `).catch((err) => {
+      ensureVwListaProdutosPromise = null;
+      throw err;
+    });
+  }
+  await ensureVwListaProdutosPromise;
+}
+
+ensureVwListaProdutos().catch((err) => {
+  console.warn('[produtos] falha ao atualizar vw_lista_produtos:', err?.message || err);
+});
 
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {

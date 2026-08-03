@@ -2061,11 +2061,15 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
                 TRIM(p.codigo),
                 COALESCE(p.codigo_produto_integracao, '')
               )
-        WHERE img.codigo_produto::text = $1
-           OR TRIM(p.codigo) = $1
-           OR p.codigo_produto::text = $1
-           OR COALESCE(p.codigo_produto_integracao, '') = $1
-        ORDER BY img.pos NULLS LAST, img.id ASC
+        WHERE COALESCE(img.ativo, TRUE) = TRUE
+          AND TRIM(COALESCE(img.url_imagem, '')) <> ''
+          AND (
+            img.codigo_produto::text = $1
+            OR TRIM(p.codigo) = $1
+            OR p.codigo_produto::text = $1
+            OR COALESCE(p.codigo_produto_integracao, '') = $1
+          )
+        ORDER BY img.pos NULLS LAST, img.id DESC
         LIMIT 1`,
       [codigoProduto]
     );
@@ -2992,11 +2996,15 @@ app.get('/api/compras/solicitacoes', async (_req, res) => {
 // O painel de compras entrou em operação com a base Omie atual em 01/01/2026.
 // Pedidos anteriores são legado histórico e não participam das colunas do kanban.
 const COMPRAS_DATA_INICIO_PAINEL = '2026-01-01';
+// Números (c_numero / ncodped / numero pedido) que não afetam badge "Em compra" / estoque mínimo.
+// Dados permanecem no SQL e na Omie; só somem do controle visual.
+const COMPRAS_EXCLUIR_EM_COMPRA = ['3032'];
 
 // Códigos de produto com compra em andamento — usado pela badge "Em compra"
 // na Lista de produtos / Estoque mínimo. Considera "em andamento" qualquer
 // solicitação cujo status ainda não é final (recebido/concluído) nem negativo
 // (cancelado/reprovado/excluído). Itens só no carrinho ainda não contam.
+// Regra: só a partir de COMPRAS_DATA_INICIO_PAINEL, exceto COMPRAS_EXCLUIR_EM_COMPRA.
 app.get('/api/compras/produtos-em-compra', async (_req, res) => {
   try {
     const { rows } = await pool.query(`
@@ -3008,12 +3016,17 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
           1 AS prioridade
         FROM compras.solicitacao_compras sc
         WHERE TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+          AND COALESCE(sc.created_at::date, DATE '1900-01-01') >= $1::date
+          AND TRIM(COALESCE(sc.cnumero::text, '')) <> ALL($2::text[])
+          AND TRIM(COALESCE(sc.ncodped::text, '')) <> ALL($2::text[])
+          AND TRIM(COALESCE(sc.numero_pedido, '')) <> ALL($2::text[])
           AND (
             LOWER(TRIM(COALESCE(sc.status, ''))) NOT LIKE 'requisi%'
             OR EXISTS (
               SELECT 1 FROM compras.requisicoes_omie r_ativa
               WHERE COALESCE(r_ativa.inativo, FALSE) = FALSE
                 AND TRIM(COALESCE(r_ativa.numero, '')) <> ''
+                AND TRIM(COALESCE(r_ativa.numero, '')) <> ALL($2::text[])
                 AND (r_ativa.cod_req_compra::text = TRIM(sc.ncodped::text)
                   OR TRIM(r_ativa.cod_int_req_compra) = TRIM(sc.numero_pedido)
                   OR TRIM(r_ativa.numero) = TRIM(sc.cnumero::text))
@@ -3024,6 +3037,8 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
                 AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
                 AND po_requisicao_ativa.pendente_omie IS TRUE
                 AND po_requisicao_ativa.d_inc_data >= $1::date
+                AND TRIM(COALESCE(po_requisicao_ativa.c_numero, '')) <> ALL($2::text[])
+                AND TRIM(COALESCE(po_requisicao_ativa.n_cod_ped::text, '')) <> ALL($2::text[])
                 AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
                   OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
                   OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
@@ -3048,6 +3063,8 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
                 AND COALESCE(po_ativo."Pedido recebido", FALSE) = FALSE
                 AND po_ativo.pendente_omie IS TRUE
                 AND po_ativo.d_inc_data >= $1::date
+                AND TRIM(COALESCE(po_ativo.c_numero, '')) <> ALL($2::text[])
+                AND TRIM(COALESCE(po_ativo.n_cod_ped::text, '')) <> ALL($2::text[])
             )
           )
 
@@ -3069,6 +3086,8 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
           AND COALESCE(po."Pedido recebido", FALSE) = FALSE
           AND po.pendente_omie IS TRUE
           AND po.d_inc_data >= $1::date
+          AND TRIM(COALESCE(po.c_numero, '')) <> ALL($2::text[])
+          AND TRIM(COALESCE(po.n_cod_ped::text, '')) <> ALL($2::text[])
           AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
 
         UNION ALL
@@ -3084,6 +3103,9 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
         WHERE TRIM(COALESCE(p.codigo, '')) <> ''
           AND COALESCE(r.inativo, FALSE) = FALSE
           AND TRIM(COALESCE(r.numero, '')) <> ''
+          AND COALESCE(r.created_at::date, DATE '1900-01-01') >= $1::date
+          AND TRIM(COALESCE(r.numero, '')) <> ALL($2::text[])
+          AND TRIM(COALESCE(r.cod_req_compra::text, '')) <> ALL($2::text[])
           AND NOT EXISTS (
             SELECT 1
             FROM compras.pedidos_omie po_convertido
@@ -3104,7 +3126,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
              status
       FROM compras_ativas
       ORDER BY UPPER(TRIM(codigo)), prioridade, ordem DESC
-    `, [COMPRAS_DATA_INICIO_PAINEL]);
+    `, [COMPRAS_DATA_INICIO_PAINEL, COMPRAS_EXCLUIR_EM_COMPRA]);
     res.json({ ok: true, total: rows.length, itens: rows });
   } catch (err) {
     console.error('[API] /api/compras/produtos-em-compra erro:', err);
@@ -3156,12 +3178,17 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
         )
       WHERE UPPER(TRIM(sc.produto_codigo)) = UPPER($1)
         AND TRIM(COALESCE(sc.produto_codigo, '')) <> ''
+        AND COALESCE(sc.created_at::date, DATE '1900-01-01') >= $2::date
+        AND TRIM(COALESCE(sc.cnumero::text, '')) <> ALL($3::text[])
+        AND TRIM(COALESCE(sc.ncodped::text, '')) <> ALL($3::text[])
+        AND TRIM(COALESCE(sc.numero_pedido, '')) <> ALL($3::text[])
         AND (
           LOWER(TRIM(COALESCE(sc.status, ''))) NOT LIKE 'requisi%'
           OR EXISTS (
             SELECT 1 FROM compras.requisicoes_omie r_ativa
             WHERE COALESCE(r_ativa.inativo, FALSE) = FALSE
               AND TRIM(COALESCE(r_ativa.numero, '')) <> ''
+              AND TRIM(COALESCE(r_ativa.numero, '')) <> ALL($3::text[])
               AND (r_ativa.cod_req_compra::text = TRIM(sc.ncodped::text)
                 OR TRIM(r_ativa.cod_int_req_compra) = TRIM(sc.numero_pedido)
                 OR TRIM(r_ativa.numero) = TRIM(sc.cnumero::text))
@@ -3172,6 +3199,8 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
               AND COALESCE(po_requisicao_ativa."Pedido recebido", FALSE) = FALSE
               AND po_requisicao_ativa.pendente_omie IS TRUE
               AND po_requisicao_ativa.d_inc_data >= $2::date
+              AND TRIM(COALESCE(po_requisicao_ativa.c_numero, '')) <> ALL($3::text[])
+              AND TRIM(COALESCE(po_requisicao_ativa.n_cod_ped::text, '')) <> ALL($3::text[])
               AND (po_requisicao_ativa.n_cod_ped::text = TRIM(sc.ncodped::text)
                 OR TRIM(po_requisicao_ativa.c_cod_int_ped) = TRIM(sc.numero_pedido)
                 OR TRIM(po_requisicao_ativa.c_numero) = TRIM(sc.cnumero::text))
@@ -3196,6 +3225,8 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
               AND COALESCE(po_ativo."Pedido recebido", FALSE) = FALSE
               AND po_ativo.pendente_omie IS TRUE
               AND po_ativo.d_inc_data >= $2::date
+              AND TRIM(COALESCE(po_ativo.c_numero, '')) <> ALL($3::text[])
+              AND TRIM(COALESCE(po_ativo.n_cod_ped::text, '')) <> ALL($3::text[])
           )
         )
       ORDER BY
@@ -3238,6 +3269,8 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
           AND COALESCE(po."Pedido recebido", FALSE) = FALSE
           AND po.pendente_omie IS TRUE
           AND po.d_inc_data >= $2::date
+          AND TRIM(COALESCE(po.c_numero, '')) <> ALL($3::text[])
+          AND TRIM(COALESCE(po.n_cod_ped::text, '')) <> ALL($3::text[])
           AND COALESCE(pi.n_qtde, 0) > COALESCE(pi.n_qtde_rec, 0)
           AND NOT EXISTS (
             SELECT 1
@@ -3271,6 +3304,9 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
         WHERE UPPER(TRIM(p.codigo)) = UPPER($1)
           AND COALESCE(r.inativo, FALSE) = FALSE
           AND TRIM(COALESCE(r.numero, '')) <> ''
+          AND COALESCE(r.created_at::date, DATE '1900-01-01') >= $2::date
+          AND TRIM(COALESCE(r.numero, '')) <> ALL($3::text[])
+          AND TRIM(COALESCE(r.cod_req_compra::text, '')) <> ALL($3::text[])
           AND NOT EXISTS (
             SELECT 1
             FROM compras.pedidos_omie po_convertido
@@ -3292,7 +3328,7 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
       UNION ALL
       SELECT * FROM requisicoes_omie_diretas
       ORDER BY id DESC
-    `, [codigo, COMPRAS_DATA_INICIO_PAINEL]);
+    `, [codigo, COMPRAS_DATA_INICIO_PAINEL, COMPRAS_EXCLUIR_EM_COMPRA]);
 
     res.json({ ok: true, codigo, total: rows.length, compras: rows });
   } catch (err) {
@@ -13609,7 +13645,9 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                    TRIM(COALESCE(p.codigo, '')),
                    COALESCE(p.codigo_produto_integracao, '')
                  )
-                 ORDER BY pi.pos NULLS LAST, pi.id ASC
+                   AND COALESCE(pi.ativo, TRUE) = TRUE
+                   AND TRIM(COALESCE(pi.url_imagem, '')) <> ''
+                 ORDER BY pi.pos NULLS LAST, pi.id DESC
                  LIMIT 1
               ) img ON TRUE
              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
@@ -33851,7 +33889,8 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
          FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1
           AND COALESCE(ativo, true) = true
-        ORDER BY pos NULLS LAST, id ASC
+          AND TRIM(COALESCE(url_imagem, '')) <> ''
+        ORDER BY pos NULLS LAST, id DESC
         LIMIT 1`,
       [codigoProduto]
     );

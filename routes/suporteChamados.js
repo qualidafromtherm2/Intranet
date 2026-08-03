@@ -50,6 +50,14 @@ function textoUtf8(value) {
   return String(value ?? '').normalize('NFC').trim();
 }
 
+/** Status canônico: minúsculo + espaços → underline (ex.: "em andamento" → "em_andamento"). */
+function normalizarStatusChamado(value) {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '_');
+}
+
 function sanitizePathPart(str) {
   return String(str || '')
     .replace(/[^a-zA-Z0-9_.-]/g, '_')
@@ -101,6 +109,13 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_em
       ON "Suporte_tecnico"."Chamado" (criado_em DESC)
   `);
+  // Corrige status legado com espaço ("em andamento" → "em_andamento")
+  await dbQuery(`
+    UPDATE "Suporte_tecnico"."Chamado"
+       SET status = REPLACE(TRIM(status), ' ', '_'),
+           atualizado_em = NOW()
+     WHERE status LIKE '% %'
+  `);
   schemaReady = true;
 }
 
@@ -148,20 +163,22 @@ router.get('/chamados', requireAuth, async (req, res) => {
     }
 
     if (statusFiltro === 'aberto') {
-      where.push(`status IN ('aberto', 'em_andamento')`);
-    } else if (statusFiltro && STATUS_VALIDOS.has(statusFiltro)) {
-      params.push(statusFiltro);
-      where.push(`status = $${params.length}`);
+      where.push(`LOWER(REPLACE(TRIM(status), ' ', '_')) IN ('aberto', 'em_andamento')`);
+    } else if (statusFiltro && STATUS_VALIDOS.has(normalizarStatusChamado(statusFiltro))) {
+      params.push(normalizarStatusChamado(statusFiltro));
+      where.push(`LOWER(REPLACE(TRIM(status), ' ', '_')) = $${params.length}`);
     }
 
     const sql = `
-      SELECT id, descricao, criticidade, status, prazo, anexos,
+      SELECT id, descricao, criticidade,
+             LOWER(REPLACE(TRIM(status), ' ', '_')) AS status,
+             prazo, anexos,
              criado_por, criado_por_nome, criado_em, atualizado_em,
              fechado_em, fechado_por, fechado_por_nome, observacao_admin
         FROM "Suporte_tecnico"."Chamado"
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY
-         CASE status
+         CASE LOWER(REPLACE(TRIM(status), ' ', '_'))
            WHEN 'aberto' THEN 0
            WHEN 'em_andamento' THEN 1
            WHEN 'aguardando_aprovacao' THEN 2
@@ -190,7 +207,9 @@ router.get('/chamados/:id', requireAuth, async (req, res) => {
     }
 
     const { rows } = await dbQuery(
-      `SELECT id, descricao, criticidade, status, prazo, anexos,
+      `SELECT id, descricao, criticidade,
+              LOWER(REPLACE(TRIM(status), ' ', '_')) AS status,
+              prazo, anexos,
               criado_por, criado_por_nome, criado_em, atualizado_em,
               fechado_em, fechado_por, fechado_por_nome, observacao_admin
          FROM "Suporte_tecnico"."Chamado"
@@ -307,7 +326,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
       if (!isAuthor) {
         return res.status(403).json({ error: 'Somente quem abriu o chamado pode aprovar.' });
       }
-      if (String(existing.status || '').toLowerCase() !== 'aguardando_aprovacao') {
+      if (normalizarStatusChamado(existing.status) !== 'aguardando_aprovacao') {
         return res.status(400).json({ error: 'Chamado não está aguardando aprovação.' });
       }
 
@@ -353,7 +372,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
       sets.push(`observacao_admin = $${params.length}`);
     }
 
-    let status = body.status != null ? String(body.status).trim().toLowerCase() : null;
+    let status = body.status != null ? normalizarStatusChamado(body.status) : null;
     if (body.fechar === true || body.fechar === 'true') {
       status = 'fechado';
     }
