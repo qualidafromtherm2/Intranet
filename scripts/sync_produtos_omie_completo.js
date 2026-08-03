@@ -16,7 +16,7 @@
 // ============================================================================
 
 const { dbQuery, dbGetClient } = require('../src/db');
-const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
+const { reconciliarProdutosOmieAusentes, limparDuplicatasAtivasLocais } = require('../utils/produtosOmieFantasmas');
 
 // Configurações
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY || '';
@@ -290,6 +290,9 @@ async function main() {
         const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_manual');
         stats.fantasmas = rec.marcados;
         console.log(`   ✓ ${rec.marcados} fantasma(s) marcado(s) como inativo`);
+        const dedup = await limparDuplicatasAtivasLocais(client, 'omie_manual');
+        stats.duplicatas = dedup.marcados;
+        console.log(`   ✓ ${dedup.marcados} duplicata(s) de SKU inativada(s)`);
       } finally {
         client.release();
       }

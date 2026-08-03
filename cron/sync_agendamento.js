@@ -23,7 +23,8 @@ const {
   sincronizarSolicitacaoPorPedido,
   refrescarPedidoFechadoDaOmie,
   substituirItensPedido,
-  atualizarFlagsRecebimentoPedido
+  atualizarFlagsRecebimentoPedido,
+  aplicarPendenciaOmieLote
 } = require('../utils/syncPedidosCompraOmie');
 
 // ─── Credenciais ──────────────────────────────────────────────────────────────
@@ -331,29 +332,27 @@ async function reconciliarPedidosCompraAbertos() {
       etapaAjustada++;
       log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero}: etapa ${ped.c_etapa} → ${etapaOmie}`);
     }
+  }
 
-    const pendenteAgora = pendentesOmie.has(idPed);
-    if (ped.pendente_omie !== pendenteAgora) {
-      await pool.query(
-        `UPDATE compras.pedidos_omie SET pendente_omie = $2, updated_at = NOW() WHERE n_cod_ped = $1`,
-        [ped.n_cod_ped, pendenteAgora]
-      );
-      if (!pendenteAgora) {
-        faturadosMarcados++;
-        log(`  ✓ [pedidos_omie] Pedido ${ped.c_numero} fechado na Omie (sai de Compra realizada)`);
-        await refrescarPedidoFechadoDaOmie({
-          pool,
-          nCodPed: ped.n_cod_ped,
-          cNumero: ped.c_numero,
-          delayMs: DELAY_MS,
-          log,
-          omieConsultarPedCompra: async (nCod) =>
-            omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(nCod) })
-        });
-      } else {
-        await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, { log });
-      }
-    }
+  // Fecha/reabre em lote (sem ConsultarPedCompra 1 a 1 — evita timeout do cron).
+  const lotePendencia = await aplicarPendenciaOmieLote(pool, pendentesOmie.keys(), log);
+  faturadosMarcados = lotePendencia.fechados.length;
+
+  // Refresh leve só dos primeiros fechados (itens/solicitações), sem bloquear o job.
+  const MAX_REFRESH_FECHADOS = 8;
+  for (const ped of lotePendencia.fechados.slice(0, MAX_REFRESH_FECHADOS)) {
+    await refrescarPedidoFechadoDaOmie({
+      pool,
+      nCodPed: ped.n_cod_ped,
+      cNumero: ped.c_numero,
+      delayMs: DELAY_MS,
+      log,
+      omieConsultarPedCompra: async (nCod) =>
+        omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(nCod) })
+    });
+  }
+  for (const ped of lotePendencia.reabertos) {
+    await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, { log });
   }
 
   // Pedidos abertos na Omie que ainda não existem localmente → importa
@@ -846,7 +845,7 @@ async function syncProdutosOmie() {
   }
 
   if (idsVistosNaOmie.size > 0) {
-    const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
+    const { reconciliarProdutosOmieAusentes, limparDuplicatasAtivasLocais } = require('../utils/produtosOmieFantasmas');
     const client = await pool.connect();
     try {
       const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_cron');
@@ -856,6 +855,20 @@ async function syncProdutosOmie() {
         rec.detalhes.slice(0, 10).forEach((d) => {
           log(`    - ${d.codigo} (${d.codigo_produto}) ${d.descricao || ''}`);
         });
+      }
+      const dedup = await limparDuplicatasAtivasLocais(client, 'omie_cron');
+      if (dedup.marcados > 0) {
+        log(`  Duplicatas de SKU inativadas: ${dedup.marcados} (grupos=${dedup.grupos})`);
+      }
+    } finally { client.release(); }
+  } else {
+    // Mesmo sem lista Omie, limpa SKUs com 2+ ativos locais (defesa extra).
+    const { limparDuplicatasAtivasLocais } = require('../utils/produtosOmieFantasmas');
+    const client = await pool.connect();
+    try {
+      const dedup = await limparDuplicatasAtivasLocais(client, 'omie_cron');
+      if (dedup.marcados > 0) {
+        log(`  Duplicatas de SKU inativadas: ${dedup.marcados}`);
       }
     } finally { client.release(); }
   }
@@ -971,10 +984,20 @@ async function main() {
     }
   }
 
+  // Sempre reconcilia Compra realizada no final (rápido, em lote).
+  // Cobre o caso em que recebimentos_nfe não está nas tabelas ou falhou,
+  // e garante o alinhamento mesmo após outros syncs no mesmo job.
+  try {
+    resumo.pedidos_omie_reconcile = await reconciliarPedidosCompraAbertos();
+  } catch (e) {
+    log(`✗ Erro na reconciliação final de pedidos_omie: ${e.message}`);
+    resumo.pedidos_omie_reconcile = { erros: 1, erro: e.message };
+  }
+
   log('═'.repeat(65));
   log('RESUMO FINAL:');
   for (const [t, r] of Object.entries(resumo)) {
-    log(`  ${t}: ${r.sincronizados} sincronizados, ${r.erros} erros`);
+    log(`  ${t}: ${r.sincronizados ?? r.pedidos_faturados ?? 0} sincronizados, ${r.erros || 0} erros`);
   }
   log('═'.repeat(65));
 

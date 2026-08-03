@@ -10,7 +10,8 @@ const {
   sincronizarSolicitacaoPorPedido,
   refrescarPedidoFechadoDaOmie,
   substituirItensPedido,
-  atualizarFlagsRecebimentoPedido
+  atualizarFlagsRecebimentoPedido,
+  aplicarPendenciaOmieLote
 } = require('../utils/syncPedidosCompraOmie');
 
 const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
@@ -117,30 +118,26 @@ async function pesquisar(filtros) {
       );
       etapaAjustada++;
     }
+  }
 
-    const pendenteAgora = pendentesOmie.has(idPed);
-    if (ped.pendente_omie !== pendenteAgora) {
-      await pool.query(
-        `UPDATE compras.pedidos_omie SET pendente_omie = $2, updated_at = NOW() WHERE n_cod_ped = $1`,
-        [ped.n_cod_ped, pendenteAgora]
-      );
-      if (!pendenteAgora) {
-        fechados++;
-        log(`  ✓ fechando ${ped.c_numero}...`);
-        await refrescarPedidoFechadoDaOmie({
-          pool,
-          nCodPed: ped.n_cod_ped,
-          cNumero: ped.c_numero,
-          delayMs: DELAY_MS,
-          log,
-          omieConsultarPedCompra: (nCod) =>
-            omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(nCod) })
-        });
-      } else {
-        reabertos++;
-        await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, { log });
-      }
-    }
+  const lote = await aplicarPendenciaOmieLote(pool, pendentesOmie.keys(), log);
+  fechados = lote.fechados.length;
+  reabertos = lote.reabertos.length;
+
+  for (const ped of lote.fechados.slice(0, 8)) {
+    log(`  ✓ fechando refresh ${ped.c_numero}...`);
+    await refrescarPedidoFechadoDaOmie({
+      pool,
+      nCodPed: ped.n_cod_ped,
+      cNumero: ped.c_numero,
+      delayMs: DELAY_MS,
+      log,
+      omieConsultarPedCompra: (nCod) =>
+        omiePost('produtos/pedidocompra', 'ConsultarPedCompra', { nCodPed: Number(nCod) })
+    });
+  }
+  for (const ped of lote.reabertos) {
+    await sincronizarSolicitacaoPorPedido(pool, ped.n_cod_ped, { log });
   }
 
   const { rows: idsLocais } = await pool.query(`SELECT n_cod_ped FROM compras.pedidos_omie`);
