@@ -11600,15 +11600,33 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         atualizado_por   TEXT
       )
     `);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS campos JSONB NOT NULL DEFAULT '[]'`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS dpi INT DEFAULT 203`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS amostra JSONB NOT NULL DEFAULT '{}'`);
     await pool.query(`
       INSERT INTO etiqueta."ETQ_layout_config"
         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y)
       VALUES
-        ('recebimento', 'Etiqueta de recebimento', 50, 30, 20, 4, 0, 0),
-        ('produto',     'Etiqueta de produto',     110, 70, 20, 4, 0, 0),
-        ('endereco',    'Etiqueta de endereço',    70, 110, 20, 4, 0, 0)
+        ('recebimento',      'Etiqueta de recebimento (preview NF-e)', 50, 30, 20, 4, 0, 0),
+        ('impressao',        'Etiqueta impressão (Identificação)',      102, 23, 20, 4, 0, 0),
+        ('produto',          'Produto grande (impressão rápida)',       70, 110, 20, 4, 0, 0),
+        ('produto_pequena',  'Produto pequena (impressão rápida)',      50, 30, 20, 4, 0, 0),
+        ('contagem',         'Contagem (impressão rápida)',             50, 30, 20, 4, 0, 0),
+        ('endereco',         'Etiqueta de endereço',                    70, 110, 20, 4, 0, 0)
       ON CONFLICT (chave) DO NOTHING
     `);
+    await pool.query(`
+      UPDATE etiqueta."ETQ_layout_config" SET nome = CASE chave
+        WHEN 'recebimento' THEN 'Etiqueta de recebimento (preview NF-e)'
+        WHEN 'impressao' THEN 'Etiqueta impressão (Identificação)'
+        WHEN 'produto' THEN 'Produto grande (impressão rápida)'
+        WHEN 'produto_pequena' THEN 'Produto pequena (impressão rápida)'
+        WHEN 'contagem' THEN 'Contagem (impressão rápida)'
+        WHEN 'endereco' THEN 'Etiqueta de endereço'
+        ELSE nome
+      END
+      WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+    `).catch(() => {});
     // Preferências de impressora do usuário (antes ficava em localStorage)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS etiqueta."ETQ_usuario_impressoras" (
@@ -11993,24 +12011,20 @@ app.get('/api/etiquetas/layout-config', async (req, res) => {
     return res.status(401).json({ error: 'Não autenticado' });
   }
   try {
+    await _etqSeedLayoutDefaultsSeVazio();
     const { rows } = await pool.query(
-      `SELECT * FROM etiqueta."ETQ_layout_config" ORDER BY chave`
+      `SELECT * FROM etiqueta."ETQ_layout_config" ORDER BY nome, chave`
     );
     res.json({
       ok: true,
-      layouts: rows.map((r) => ({
-        chave: r.chave,
-        nome: r.nome,
-        labelWidth: r.label_width != null ? Number(r.label_width) : null,
-        labelHeight: r.label_height != null ? Number(r.label_height) : null,
-        darkness: r.darkness != null ? Number(r.darkness) : null,
-        speed: r.speed != null ? Number(r.speed) : null,
-        offsetX: Number(r.offset_x) || 0,
-        offsetY: Number(r.offset_y) || 0,
-        zplTemplate: r.zpl_template || null,
-        atualizadoEm: r.atualizado_em,
-        atualizadoPor: r.atualizado_por || null,
-      })),
+      layouts: rows.map(_etqLayoutRowToClient),
+      sampleDefaults: ETQ_LAYOUT_SAMPLE_DEFAULT,
+      fieldTypes: [
+        { value: 'texto', label: 'Texto' },
+        { value: 'bloco', label: 'Texto em bloco (quebra linha)' },
+        { value: 'texto_rot', label: 'Texto rotacionado' },
+        { value: 'qr', label: 'QR Code' },
+      ],
     });
   } catch (err) {
     console.error('[etiquetas/layout-config GET]', err);
@@ -12022,8 +12036,8 @@ function _checkAgentTokenOptional(req) {
   return !!(AGENTE_TOKEN && req.headers['x-agent-token'] === AGENTE_TOKEN);
 }
 
-// PUT /api/etiquetas/layout-config/:chave — edita layout de etiqueta
-app.put('/api/etiquetas/layout-config/:chave', express.json(), async (req, res) => {
+// PUT /api/etiquetas/layout-config/:chave — edita layout de etiqueta (dims + campos + ZPL)
+app.put('/api/etiquetas/layout-config/:chave', express.json({ limit: '1mb' }), async (req, res) => {
   if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
   try {
     const chave = String(req.params.chave || '').trim();
@@ -12037,10 +12051,43 @@ app.put('/api/etiquetas/layout-config/:chave', express.json(), async (req, res) 
     const usuario = String(
       req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
     ).trim() || 'intranet';
+
+    const campos = Array.isArray(b.campos) ? b.campos : null;
+    const amostra = (b.amostra && typeof b.amostra === 'object') ? b.amostra : null;
+    const zplTemplate = b.zplTemplate !== undefined
+      ? (b.zplTemplate || null)
+      : (b.zpl_template !== undefined ? (b.zpl_template || null) : undefined);
+
+    // Se veio campos no modo fácil e não veio template, gera template a partir dos campos
+    let zplToSave = zplTemplate;
+    if (campos && zplTemplate === undefined) {
+      const tmpLayout = {
+        label_width: numOrNull(b.labelWidth ?? b.label_width),
+        label_height: numOrNull(b.labelHeight ?? b.label_height),
+        dpi: numOrNull(b.dpi) || 203,
+        offset_x: Math.round(numOrNull(b.offsetX ?? b.offset_x) ?? 0),
+        offset_y: Math.round(numOrNull(b.offsetY ?? b.offset_y) ?? 0),
+        campos,
+      };
+      zplToSave = _etqCamposParaZpl(
+        campos,
+        _etqMontarVariaveisAmostra(amostra || ETQ_LAYOUT_SAMPLE_DEFAULT),
+        {
+          widthMm: tmpLayout.label_width || 50,
+          heightMm: tmpLayout.label_height || 30,
+          dpi: tmpLayout.dpi,
+          offsetX: tmpLayout.offset_x,
+          offsetY: tmpLayout.offset_y,
+        }
+      );
+    }
+
     const { rows } = await pool.query(
       `INSERT INTO etiqueta."ETQ_layout_config"
-         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y, zpl_template, atualizado_em, atualizado_por)
-       VALUES ($1, COALESCE($2, $1), $3, $4, $5, $6, $7, $8, $9, now(), $10)
+         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y,
+          dpi, zpl_template, campos, amostra, atualizado_em, atualizado_por)
+       VALUES ($1, COALESCE($2, $1), $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::jsonb, '[]'::jsonb),
+               COALESCE($12::jsonb, '{}'::jsonb), now(), $13)
        ON CONFLICT (chave) DO UPDATE SET
          nome          = COALESCE(EXCLUDED.nome, etiqueta."ETQ_layout_config".nome),
          label_width   = COALESCE(EXCLUDED.label_width, etiqueta."ETQ_layout_config".label_width),
@@ -12049,7 +12096,10 @@ app.put('/api/etiquetas/layout-config/:chave', express.json(), async (req, res) 
          speed         = COALESCE(EXCLUDED.speed, etiqueta."ETQ_layout_config".speed),
          offset_x      = COALESCE(EXCLUDED.offset_x, etiqueta."ETQ_layout_config".offset_x),
          offset_y      = COALESCE(EXCLUDED.offset_y, etiqueta."ETQ_layout_config".offset_y),
-         zpl_template  = CASE WHEN $9 IS NULL THEN etiqueta."ETQ_layout_config".zpl_template ELSE EXCLUDED.zpl_template END,
+         dpi           = COALESCE(EXCLUDED.dpi, etiqueta."ETQ_layout_config".dpi),
+         zpl_template  = CASE WHEN $10 IS NULL AND $14 = false THEN etiqueta."ETQ_layout_config".zpl_template ELSE EXCLUDED.zpl_template END,
+         campos        = CASE WHEN $11 IS NULL THEN etiqueta."ETQ_layout_config".campos ELSE EXCLUDED.campos END,
+         amostra       = CASE WHEN $12 IS NULL THEN etiqueta."ETQ_layout_config".amostra ELSE EXCLUDED.amostra END,
          atualizado_em = now(),
          atualizado_por = EXCLUDED.atualizado_por
        RETURNING *`,
@@ -12062,29 +12112,84 @@ app.put('/api/etiquetas/layout-config/:chave', express.json(), async (req, res) 
         numOrNull(b.speed) != null ? Math.round(numOrNull(b.speed)) : null,
         Math.round(numOrNull(b.offsetX ?? b.offset_x) ?? 0),
         Math.round(numOrNull(b.offsetY ?? b.offset_y) ?? 0),
-        b.zplTemplate !== undefined ? (b.zplTemplate || null) : (b.zpl_template !== undefined ? (b.zpl_template || null) : null),
+        numOrNull(b.dpi) != null ? Math.round(numOrNull(b.dpi)) : 203,
+        zplToSave === undefined ? null : zplToSave,
+        campos ? JSON.stringify(campos) : null,
+        amostra ? JSON.stringify(amostra) : null,
         usuario,
+        zplToSave !== undefined, // $14: se true, grava zpl mesmo quando null (limpar)
       ]
     );
-    const r = rows[0];
-    res.json({
-      ok: true,
-      layout: {
-        chave: r.chave,
-        nome: r.nome,
-        labelWidth: r.label_width != null ? Number(r.label_width) : null,
-        labelHeight: r.label_height != null ? Number(r.label_height) : null,
-        darkness: r.darkness != null ? Number(r.darkness) : null,
-        speed: r.speed != null ? Number(r.speed) : null,
-        offsetX: Number(r.offset_x) || 0,
-        offsetY: Number(r.offset_y) || 0,
-        zplTemplate: r.zpl_template || null,
-        atualizadoEm: r.atualizado_em,
-        atualizadoPor: r.atualizado_por,
-      },
-    });
+    _etqInvalidarLayoutCache();
+    res.json({ ok: true, layout: _etqLayoutRowToClient(rows[0]) });
   } catch (err) {
     console.error('[etiquetas/layout-config PUT]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// POST /api/etiquetas/layout-config/preview — gera preview PNG (Labelary) sem salvar
+app.post('/api/etiquetas/layout-config/preview', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const b = req.body || {};
+    const chave = String(b.chave || '').trim();
+    let layout = null;
+    if (chave) layout = await _carregarLayoutEtiqueta(chave);
+
+    const widthMm = Number(b.labelWidth ?? b.label_width ?? layout?.label_width) || 50;
+    const heightMm = Number(b.labelHeight ?? b.label_height ?? layout?.label_height) || 30;
+    const dpi = Number(b.dpi ?? layout?.dpi) || 203;
+    const offsetX = Number(b.offsetX ?? b.offset_x ?? layout?.offset_x) || 0;
+    const offsetY = Number(b.offsetY ?? b.offset_y ?? layout?.offset_y) || 0;
+    const campos = Array.isArray(b.campos) ? b.campos : (Array.isArray(layout?.campos) ? layout.campos : []);
+    const template = (b.zplTemplate != null ? b.zplTemplate : (b.zpl_template != null ? b.zpl_template : layout?.zpl_template)) || '';
+    const amostra = Object.assign({}, ETQ_LAYOUT_SAMPLE_DEFAULT, layout?.amostra || {}, b.amostra || {});
+
+    const tmp = {
+      label_width: widthMm,
+      label_height: heightMm,
+      dpi,
+      offset_x: offsetX,
+      offset_y: offsetY,
+      campos,
+      zpl_template: template,
+    };
+    let zpl = _etqGerarZplDoLayout(tmp, amostra);
+    if (!zpl && String(b.zpl || '').trim()) zpl = String(b.zpl).trim();
+    if (!zpl) return res.status(400).json({ error: 'Informe campos ou template ZPL para pré-visualizar.' });
+
+    // Labelary espera polegadas (ex.: 2x1.2)
+    const wIn = Math.max(0.2, Math.round((widthMm / 25.4) * 100) / 100);
+    const hIn = Math.max(0.2, Math.round((heightMm / 25.4) * 100) / 100);
+    const dpmm = dpi >= 300 ? 12 : 8; // 203dpi≈8dpmm, 300dpi≈12dpmm
+    const labelaryUrl = `http://api.labelary.com/v1/printers/${dpmm}dpmm/labels/${wIn}x${hIn}/0/`;
+
+    const labelaryResp = await fetch(labelaryUrl, {
+      method: 'POST',
+      headers: {
+        Accept: 'image/png',
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: zpl,
+    });
+    if (!labelaryResp.ok) {
+      const txt = await labelaryResp.text().catch(() => '');
+      return res.status(502).json({
+        error: `Falha no preview Labelary (${labelaryResp.status}): ${txt.slice(0, 180)}`,
+        zpl,
+      });
+    }
+    const buf = Buffer.from(await labelaryResp.arrayBuffer());
+    res.json({
+      ok: true,
+      zpl,
+      widthMm,
+      heightMm,
+      imageBase64: `data:image/png;base64,${buf.toString('base64')}`,
+    });
+  } catch (err) {
+    console.error('[etiquetas/layout-config/preview]', err);
     res.status(500).json({ error: err?.message });
   }
 });
@@ -12315,6 +12420,68 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
 // O agente sobrescreve ^PW/^LL conforme as dimensões configuradas na UI dele.
 let _etqLayoutCache = null;
 let _etqLayoutCacheAt = 0;
+
+const ETQ_LAYOUT_SAMPLE_DEFAULT = {
+  codigo: '04.MP.N.71040',
+  descricao: 'PARAFUSO SEXTAVADO M6x20 INOX A2',
+  lote: '3030-000776823',
+  data: '03/08/2026',
+  id: '12345',
+  quantidade: '100',
+  unidade: 'UN',
+  seq: '1',
+  endereco: '01-02-03-001',
+};
+
+/** Defaults de campos visuais por tipo de etiqueta (modo fácil). */
+const ETQ_LAYOUT_CAMPOS_DEFAULT = {
+  recebimento: [
+    { id: 'qr', tipo: 'qr', x: 5, y: 5, magnificacao: 5, conteudo: '{{qr}}' },
+    { id: 'codigo', tipo: 'texto', x: 178, y: 8, fonteH: 20, fonteW: 20, conteudo: '{{codigo}}' },
+    { id: 'lote_lbl', tipo: 'texto', x: 178, y: 32, fonteH: 20, fonteW: 20, conteudo: 'Lote:' },
+    { id: 'lote', tipo: 'texto', x: 178, y: 56, fonteH: 20, fonteW: 20, conteudo: '{{lote}}' },
+    { id: 'data', tipo: 'texto', x: 178, y: 80, fonteH: 20, fonteW: 20, conteudo: 'Emissao: {{data}}' },
+    { id: 'desc', tipo: 'bloco', x: 5, y: 190, fonteH: 20, fonteW: 20, largura: 385, maxLinhas: 2, conteudo: '{{descricao}}' },
+  ],
+  impressao: [
+    { id: 'qr', tipo: 'qr', x: 10, y: 10, magnificacao: 4, conteudo: '{{qr}}' },
+    { id: 'codigo', tipo: 'texto', x: 150, y: 22, fonteH: 20, fonteW: 20, conteudo: 'Cod. Produto: {{codigo}}' },
+    { id: 'id', tipo: 'texto', x: 150, y: 46, fonteH: 20, fonteW: 20, conteudo: 'ID: {{id}}' },
+    { id: 'lote', tipo: 'texto', x: 150, y: 70, fonteH: 20, fonteW: 20, conteudo: 'Lote: {{lote}}' },
+    { id: 'data', tipo: 'texto', x: 150, y: 94, fonteH: 20, fonteW: 20, conteudo: 'Emissao: {{data}}' },
+    { id: 'desc', tipo: 'texto', x: 10, y: 158, fonteH: 18, fonteW: 18, conteudo: '{{descricao}}' },
+  ],
+  produto: [
+    { id: 'codigo', tipo: 'texto_rot', x: 25, y: 70, fonteH: 90, fonteW: 90, conteudo: '{{codigo}}' },
+    { id: 'qr', tipo: 'qr', x: 20, y: 700, magnificacao: 5, conteudo: '{{codigo}}' },
+    { id: 'lote', tipo: 'texto_rot', x: 150, y: 650, fonteH: 40, fonteW: 40, conteudo: 'L: {{lote}}' },
+    { id: 'desc', tipo: 'texto_rot', x: 190, y: 60, fonteH: 40, fonteW: 40, conteudo: '{{descricao}}' },
+  ],
+  produto_pequena: [
+    { id: 'qr', tipo: 'qr', x: 7, y: 10, magnificacao: 4, conteudo: '{{codigo}}-{{lote}}-{{seq}}', orientacao: 'B' },
+    { id: 'codigo', tipo: 'texto', x: 135, y: 10, fonteH: 40, fonteW: 35, conteudo: '{{codigo}}', orientacao: 'B' },
+    { id: 'data', tipo: 'texto', x: 170, y: 50, fonteH: 20, fonteW: 20, conteudo: '{{data}}', orientacao: 'B' },
+    { id: 'lote', tipo: 'bloco', x: 20, y: 0, fonteH: 20, fonteW: 20, largura: 230, maxLinhas: 2, conteudo: 'L: {{lote}}', orientacao: 'B' },
+    { id: 'desc', tipo: 'bloco', x: 210, y: 10, fonteH: 23, fonteW: 23, largura: 220, maxLinhas: 8, conteudo: '{{descricao}}', orientacao: 'B' },
+  ],
+  contagem: [
+    { id: 'data', tipo: 'texto_rot', x: 20, y: 200, fonteH: 50, fonteW: 50, conteudo: '{{data}}' },
+    { id: 'qtd', tipo: 'texto_rot', x: 0, y: 100, fonteH: 200, fonteW: 200, conteudo: '{{quantidade}} {{unidade}}' },
+    { id: 'codigo', tipo: 'texto_rot', x: 450, y: 200, fonteH: 50, fonteW: 50, conteudo: '{{codigo}}' },
+  ],
+  endereco: [
+    { id: 'endereco', tipo: 'texto', x: 40, y: 40, fonteH: 50, fonteW: 50, conteudo: '{{endereco}}' },
+    { id: 'qr', tipo: 'qr', x: 40, y: 120, magnificacao: 6, conteudo: '{{endereco}}' },
+    { id: 'codigo', tipo: 'texto', x: 40, y: 400, fonteH: 30, fonteW: 30, conteudo: '{{codigo}}' },
+    { id: 'desc', tipo: 'bloco', x: 40, y: 450, fonteH: 24, fonteW: 24, largura: 480, maxLinhas: 3, conteudo: '{{descricao}}' },
+  ],
+};
+
+function _etqInvalidarLayoutCache() {
+  _etqLayoutCache = null;
+  _etqLayoutCacheAt = 0;
+}
+
 async function _carregarLayoutEtiqueta(chave) {
   const agora = Date.now();
   if (!_etqLayoutCache || (agora - _etqLayoutCacheAt) > 60000) {
@@ -12330,29 +12497,180 @@ async function _carregarLayoutEtiqueta(chave) {
   return _etqLayoutCache[chave] || null;
 }
 
+function _etqMontarVariaveisAmostra(amostra = {}) {
+  const base = Object.assign({}, ETQ_LAYOUT_SAMPLE_DEFAULT, amostra || {});
+  const codigo = String(base.codigo || '');
+  const descricao = String(base.descricao || '');
+  const lote = String(base.lote || '');
+  const id = String(base.id || '');
+  base.qr = base.qr || `${codigo}|${descricao.slice(0, 40)}|${lote}|ID${id}`;
+  return base;
+}
+
+function _etqSubstituirPlaceholders(txt, vars) {
+  return String(txt || '').replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+    if (vars[key] == null) return '';
+    return String(vars[key]).replace(/[\\^~]/g, ' ');
+  });
+}
+
+function _etqDotsPorMm(dpi = 203) {
+  return (Number(dpi) || 203) / 25.4;
+}
+
+/** Converte lista de campos visuais → ZPL (modo fácil). */
+function _etqCamposParaZpl(campos, vars, { widthMm, heightMm, dpi = 203, offsetX = 0, offsetY = 0 } = {}) {
+  const dpm = _etqDotsPorMm(dpi);
+  const pw = Math.max(1, Math.round((Number(widthMm) || 50) * dpm));
+  const ll = Math.max(1, Math.round((Number(heightMm) || 30) * dpm));
+  const ox = Math.round(Number(offsetX) || 0);
+  const oy = Math.round(Number(offsetY) || 0);
+  const lines = ['^XA', '^CI28', `^PW${pw}`, `^LL${ll}`];
+  if (ox || oy) lines.push(`^LH${ox},${oy}`);
+
+  const lista = Array.isArray(campos) ? campos : [];
+  for (const c of lista) {
+    if (!c || c.ativo === false) continue;
+    const x = Math.round(Number(c.x) || 0);
+    const y = Math.round(Number(c.y) || 0);
+    const conteudo = _etqSubstituirPlaceholders(c.conteudo, vars);
+    const tipo = String(c.tipo || 'texto').toLowerCase();
+    const ori = String(c.orientacao || 'N').toUpperCase(); // N/R/I/B
+    const fh = Math.round(Number(c.fonteH) || 20);
+    const fw = Math.round(Number(c.fonteW) || fh);
+
+    if (tipo === 'qr') {
+      const mag = Math.max(1, Math.min(10, Math.round(Number(c.magnificacao) || 4)));
+      lines.push(`^FO${x},${y}^BQ${ori},2,${mag}^FDLA,${conteudo}^FS`);
+    } else if (tipo === 'bloco') {
+      const largura = Math.round(Number(c.largura) || Math.max(100, pw - x - 10));
+      const maxLinhas = Math.max(1, Math.round(Number(c.maxLinhas) || 2));
+      lines.push(`^FO${x},${y}^A0${ori},${fh},${fw}^FB${largura},${maxLinhas},0,L,0^FD${conteudo}^FS`);
+    } else if (tipo === 'texto_rot') {
+      lines.push(`^FO${x},${y}^A0R,${fh},${fw}^FD${conteudo}^FS`);
+    } else {
+      lines.push(`^FO${x},${y}^A0${ori},${fh},${fw}^FD${conteudo}^FS`);
+    }
+  }
+  lines.push('^XZ');
+  return lines.join('\n');
+}
+
+/** Aplica template ZPL com placeholders {{campo}}. */
+function _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi = 203 } = {}) {
+  let zpl = _etqSubstituirPlaceholders(template, vars);
+  const dpm = _etqDotsPorMm(dpi);
+  if (Number(widthMm) > 0) {
+    const pw = Math.round(Number(widthMm) * dpm);
+    if (/\^PW\d+/i.test(zpl)) zpl = zpl.replace(/\^PW\d+/gi, `^PW${pw}`);
+    else zpl = zpl.replace(/(\^XA)/i, `$1\n^PW${pw}`);
+  }
+  if (Number(heightMm) > 0) {
+    const ll = Math.round(Number(heightMm) * dpm);
+    if (/\^LL\d+/i.test(zpl)) zpl = zpl.replace(/\^LL\d+/gi, `^LL${ll}`);
+    else zpl = zpl.replace(/(\^XA)/i, `$1\n^LL${ll}`);
+  }
+  return zpl;
+}
+
+/** Gera ZPL a partir do layout SQL (campos fáceis OU template bruto). */
+function _etqGerarZplDoLayout(layout, varsIn) {
+  const vars = _etqMontarVariaveisAmostra(varsIn);
+  const widthMm = Number(layout?.label_width) || 50;
+  const heightMm = Number(layout?.label_height) || 30;
+  const dpi = Number(layout?.dpi) || 203;
+  const offsetX = Number(layout?.offset_x) || 0;
+  const offsetY = Number(layout?.offset_y) || 0;
+  const campos = Array.isArray(layout?.campos) ? layout.campos : [];
+  const template = String(layout?.zpl_template || '').trim();
+
+  if (campos.length) {
+    return _etqCamposParaZpl(campos, vars, { widthMm, heightMm, dpi, offsetX, offsetY });
+  }
+  if (template) {
+    return _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi });
+  }
+  return null;
+}
+
+function _etqLayoutRowToClient(r) {
+  if (!r) return null;
+  const campos = Array.isArray(r.campos) ? r.campos : (r.campos ? r.campos : []);
+  return {
+    chave: r.chave,
+    nome: r.nome,
+    labelWidth: r.label_width != null ? Number(r.label_width) : null,
+    labelHeight: r.label_height != null ? Number(r.label_height) : null,
+    darkness: r.darkness != null ? Number(r.darkness) : null,
+    speed: r.speed != null ? Number(r.speed) : null,
+    offsetX: Number(r.offset_x) || 0,
+    offsetY: Number(r.offset_y) || 0,
+    dpi: Number(r.dpi) || 203,
+    zplTemplate: r.zpl_template || null,
+    campos: Array.isArray(campos) ? campos : [],
+    amostra: r.amostra && typeof r.amostra === 'object' ? r.amostra : {},
+    placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco'],
+    atualizadoEm: r.atualizado_em,
+    atualizadoPor: r.atualizado_por || null,
+  };
+}
+
+async function _etqSeedLayoutDefaultsSeVazio() {
+  try {
+    const { rows } = await pool.query(
+      `SELECT chave, campos, zpl_template FROM etiqueta."ETQ_layout_config"`
+    );
+    for (const row of rows) {
+      const campos = Array.isArray(row.campos) ? row.campos : [];
+      if (campos.length || (row.zpl_template && String(row.zpl_template).trim())) continue;
+      const def = ETQ_LAYOUT_CAMPOS_DEFAULT[row.chave];
+      if (!def) continue;
+      await pool.query(
+        `UPDATE etiqueta."ETQ_layout_config"
+            SET campos = $2::jsonb, amostra = $3::jsonb
+          WHERE chave = $1`,
+        [row.chave, JSON.stringify(def), JSON.stringify(ETQ_LAYOUT_SAMPLE_DEFAULT)]
+      );
+    }
+    _etqInvalidarLayoutCache();
+  } catch (e) {
+    console.warn('[etiqueta] seed layout defaults:', e.message);
+  }
+}
+// Seed assíncrono após boot (não bloqueia)
+setTimeout(() => { _etqSeedLayoutDefaultsSeVazio().catch(() => {}); }, 2500);
+
 function _gerarZplRecebimentoBloco({ codProd, descProd, loteTxt, dataExibir, idEtq, layout }) {
+  const vars = {
+    codigo: String(codProd || ''),
+    descricao: String(descProd || '').slice(0, 60),
+    lote: String(loteTxt || ''),
+    data: String(dataExibir || ''),
+    id: String(idEtq || ''),
+  };
+  vars.qr = `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${vars.lote}|ID${vars.id}`;
+
+  const fromLayout = layout ? _etqGerarZplDoLayout(layout, vars) : null;
+  if (fromLayout) return fromLayout;
+
+  // Fallback hardcode (se layout SQL ainda não tiver campos/template)
   const DPI = 203;
   const dpm = DPI / 25.4;
   const wMm = Number(layout?.label_width) > 0 ? Number(layout.label_width) : 50;
   const hMm = Number(layout?.label_height) > 0 ? Number(layout.label_height) : 30;
   const pw = Math.round(wMm * dpm);
   const ll = Math.round(hMm * dpm);
-  const qrContent = `${codProd}|${descProd.slice(0, 40)}|${loteTxt}|ID${idEtq}`;
   return [
     '^XA',
     '^CI28',
     `^PW${pw}`,
     `^LL${ll}`,
-    // QR code — canto superior esquerdo, escala 5 (~165×165 dots)
-    `^FO5,5^BQN,2,5^FDLA,${qrContent}^FS`,
-    // Código do produto — só o valor, sem rótulo
-    `^FO178,8^A0N,20,20^FD${codProd}^FS`,
-    // Lote e data na coluna direita
+    `^FO5,5^BQN,2,5^FDLA,${vars.qr}^FS`,
+    `^FO178,8^A0N,20,20^FD${vars.codigo}^FS`,
     `^FO178,32^A0N,20,20^FDLote:^FS`,
-    `^FO178,56^A0N,20,20^FD${loteTxt}^FS`,
-    `^FO178,80^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
-    // Descrição abaixo do QR — até 2 linhas, sem rótulo
-    `^FO5,190^A0N,20,20^FB${Math.max(100, pw - 14)},2,0,L,0^FD${descProd.slice(0, 60)}^FS`,
+    `^FO178,56^A0N,20,20^FD${vars.lote}^FS`,
+    `^FO178,80^A0N,20,20^FDEmissao: ${vars.data}^FS`,
+    `^FO5,190^A0N,20,20^FB${Math.max(100, pw - 14)},2,0,L,0^FD${vars.descricao}^FS`,
     '^XZ',
   ].join('\n');
 }
@@ -12526,13 +12844,25 @@ function _descricaoParaZpl(descProd) {
 }
 
 // ── Helper: gera ZPL para IMPRESSÃO física (layout Etiquetas disponíveis) ──
-function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir }) {
-  const qr = `${codProd}|${String(descProd || '').slice(0, 40)}|${loteTxt}|ID${idImpresso}`;
+function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir, layout }) {
+  const lay = layout || (_etqLayoutCache && _etqLayoutCache.impressao) || null;
+  const vars = {
+    codigo: String(codProd || ''),
+    descricao: String(descProd || '').slice(0, 160).replace(/[\\^~]/g, ' '),
+    lote: String(loteTxt || ''),
+    data: String(dataExibir || ''),
+    id: String(idImpresso || ''),
+  };
+  vars.qr = `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${vars.lote}|ID${vars.id}`;
+
+  const fromLayout = lay ? _etqGerarZplDoLayout(lay, vars) : null;
+  if (fromLayout) return fromLayout;
+
   const { texto: descTxt, linhas: numLinhasDesc } = _descricaoParaZpl(descProd);
-  const dadosX = 150; // à direita do QR sem sobrepor (132 encostava no QR)
-  const dadosY = 22;  // margem superior — alinha com o topo visual do QR
-  const descX = 10;   // alinhado à esquerda com o QR
-  const descY = 158;  // abaixo do QR, com folga (era 150 e encostava)
+  const dadosX = 150;
+  const dadosY = 22;
+  const descX = 10;
+  const descY = 158;
   const alturaLinhaDesc = 22;
   const labelLen = Math.max(183, descY + numLinhasDesc * alturaLinhaDesc + 6);
   return [
@@ -12540,11 +12870,11 @@ function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataEx
     '^CI28',
     '^PW812',
     `^LL${labelLen}`,
-    `^FO10,10^BQN,2,4^FDLA,${qr}^FS`,
-    `^FO${dadosX},${dadosY}^A0N,20,20^FDCod. Produto: ${codProd}^FS`,
-    `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${idImpresso}^FS`,
-    `^FO${dadosX},${dadosY + 48}^A0N,20,20^FDLote: ${loteTxt}^FS`,
-    `^FO${dadosX},${dadosY + 72}^A0N,20,20^FDEmissao: ${dataExibir}^FS`,
+    `^FO10,10^BQN,2,4^FDLA,${vars.qr}^FS`,
+    `^FO${dadosX},${dadosY}^A0N,20,20^FDCod. Produto: ${vars.codigo}^FS`,
+    `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${vars.id}^FS`,
+    `^FO${dadosX},${dadosY + 48}^A0N,20,20^FDLote: ${vars.lote}^FS`,
+    `^FO${dadosX},${dadosY + 72}^A0N,20,20^FDEmissao: ${vars.data}^FS`,
     `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
     '^XZ',
   ].join('\n');
@@ -12585,7 +12915,10 @@ async function _gerarVolumesComMesmoId(db, {
     codProd,
     descProd
   });
-  const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+  const layoutImpressao = await _carregarLayoutEtiqueta('impressao');
+  const zpl = _gerarZplParaImpressao({
+    codProd, descProd, idImpresso, loteTxt, dataExibir, layout: layoutImpressao,
+  });
   await db.query(
     `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
     [zpl, idImpresso]
@@ -15200,11 +15533,24 @@ function _impressaoRapidaQuebrarDescricao(descricao, limite = 25, maxLinhas = 8)
   return linhas.slice(0, maxLinhas);
 }
 
-function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias }) {
+function _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote, copias, layout }) {
   const code = _impressaoRapidaSanitize(codigo, 40);
   const desc = _impressaoRapidaSanitize(descricao, 180) || '(sem descricao)';
   const lot = _impressaoRapidaSanitize(lote, 40) || '---';
   const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  if (layout) {
+    return Array.from({ length: total }, (_, index) => {
+      const z = _etqGerarZplDoLayout(layout, {
+        codigo: code,
+        descricao: desc,
+        lote: lot === '---' ? '' : lot,
+        data: _impressaoRapidaData(),
+        seq: String(index + 1),
+        qr: `${code}-${lot}-${index + 1}`,
+      });
+      return z || '';
+    }).filter(Boolean).join('\n');
+  }
   if (tipo === 'pequena') {
     const data = _impressaoRapidaData();
     return Array.from({ length: total }, (_, index) => `^XA
@@ -15240,11 +15586,20 @@ ${descricaoZpl}
   return Array.from({ length: total }, () => bloco).join('\n');
 }
 
-function _gerarZplImpressaoRapidaContagem({ quantidade, unidade, copias, codigo = '' }) {
+function _gerarZplImpressaoRapidaContagem({ quantidade, unidade, copias, codigo = '', layout }) {
   const qtd = Math.max(1, Number(quantidade) || 1);
   const un = _impressaoRapidaSanitize(unidade, 3).toUpperCase() || 'UN';
   const code = _impressaoRapidaSanitize(codigo, 40);
   const total = Math.max(1, Math.min(100, Number(copias) || 1));
+  if (layout) {
+    const z = _etqGerarZplDoLayout(layout, {
+      codigo: code,
+      quantidade: String(qtd),
+      unidade: un,
+      data: _impressaoRapidaData(),
+    });
+    if (z) return Array.from({ length: total }, () => z).join('\n');
+  }
   const codeLine = code ? `^FO450,200^FB1500,1,0,L,0^A0R,50,50^FD${code}^FS\n` : '';
   const bloco = `^XA
 ^CI28
@@ -15270,18 +15625,28 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
       const tipo = String(req.body?.tipo || 'grande').toLowerCase();
       if (!codigo || !descricao) return res.status(400).json({ error: 'Codigo e descricao sao obrigatorios.' });
       if (!['grande', 'pequena'].includes(tipo)) return res.status(400).json({ error: 'Tipo de etiqueta invalido.' });
-      zpl = _gerarZplImpressaoRapidaProduto({ codigo, descricao, tipo, lote: req.body?.lote, copias });
+      const layoutKey = tipo === 'pequena' ? 'produto_pequena' : 'produto';
+      const layoutProd = await _carregarLayoutEtiqueta(layoutKey);
+      zpl = _gerarZplImpressaoRapidaProduto({
+        codigo, descricao, tipo, lote: req.body?.lote, copias, layout: layoutProd,
+      });
       const quickQtd = Math.floor(Number(req.body?.quick_qtd) || 0);
       if (quickQtd > 0) {
         const quickCopias = Math.floor(Number(req.body?.quick_copias) || 1);
         if (quickCopias < 1 || quickCopias > 100) return res.status(400).json({ error: 'Copias da contagem rapida invalidas.' });
-        zpl += '\n' + _gerarZplImpressaoRapidaContagem({ quantidade: quickQtd, unidade: req.body?.quick_unidade, copias: quickCopias, codigo });
+        const layoutCont = await _carregarLayoutEtiqueta('contagem');
+        zpl += '\n' + _gerarZplImpressaoRapidaContagem({
+          quantidade: quickQtd, unidade: req.body?.quick_unidade, copias: quickCopias, codigo, layout: layoutCont,
+        });
         quantidade += quickCopias;
       }
     } else {
       const qtd = Math.floor(Number(req.body?.quantidade) || 0);
       if (qtd < 1) return res.status(400).json({ error: 'Quantidade de contagem invalida.' });
-      zpl = _gerarZplImpressaoRapidaContagem({ quantidade: qtd, unidade: req.body?.unidade, copias });
+      const layoutCont = await _carregarLayoutEtiqueta('contagem');
+      zpl = _gerarZplImpressaoRapidaContagem({
+        quantidade: qtd, unidade: req.body?.unidade, copias, codigo, layout: layoutCont,
+      });
     }
 
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();

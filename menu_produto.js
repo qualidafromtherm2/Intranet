@@ -13247,65 +13247,328 @@ async function carregarConfAgenteLayouts() {
     const d = await r.json().catch(() => ({}));
     if (!r.ok) throw new Error(d.error || `Erro ${r.status}`);
     const layouts = d.layouts || [];
+    window._confZplMeta = {
+      sampleDefaults: d.sampleDefaults || {},
+      fieldTypes: d.fieldTypes || [],
+      layouts,
+    };
     if (!layouts.length) {
       lista.innerHTML = '<div style="color:var(--inactive-color);padding:16px;text-align:center;">Nenhum layout cadastrado.</div>';
       return;
     }
     lista.innerHTML = layouts.map((L) => {
       const chave = escapeHtml(L.chave || '');
+      const nCampos = Array.isArray(L.campos) ? L.campos.length : 0;
+      const temZpl = !!(L.zplTemplate && String(L.zplTemplate).trim());
       return `
-        <div class="content-section" style="padding:14px 16px;border:1px solid rgba(148,163,184,.25);border-radius:12px;" data-layout="${chave}">
-          <div style="margin-bottom:10px;">
+        <div class="content-section" style="padding:14px 16px;border:1px solid rgba(148,163,184,.25);border-radius:12px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="flex:1;min-width:200px;">
             <strong style="color:var(--theme-color);">${escapeHtml(L.nome || L.chave)}</strong>
-            <span style="font-size:12px;color:var(--inactive-color);margin-left:8px;">(${chave})</span>
+            <div style="font-size:12px;color:var(--inactive-color);margin-top:4px;">
+              ${chave} · ${escapeHtml(String(L.labelWidth || '?'))}×${escapeHtml(String(L.labelHeight || '?'))} mm
+              · ${nCampos} campo(s)${temZpl ? ' · ZPL salvo' : ''}
+            </div>
           </div>
-          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;">
-            <label style="font-size:12px;">Largura (mm)<input type="number" data-field="labelWidth" value="${_confAgenteFmtNum(L.labelWidth)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-            <label style="font-size:12px;">Altura (mm)<input type="number" data-field="labelHeight" value="${_confAgenteFmtNum(L.labelHeight)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-            <label style="font-size:12px;">Escuridão<input type="number" data-field="darkness" value="${_confAgenteFmtNum(L.darkness)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-            <label style="font-size:12px;">Velocidade<input type="number" data-field="speed" value="${_confAgenteFmtNum(L.speed)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-            <label style="font-size:12px;">Offset X<input type="number" data-field="offsetX" value="${_confAgenteFmtNum(L.offsetX)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-            <label style="font-size:12px;">Offset Y<input type="number" data-field="offsetY" value="${_confAgenteFmtNum(L.offsetY)}" style="width:100%;margin-top:4px;padding:6px 8px;border-radius:8px;border:1px solid rgba(148,163,184,.3);"></label>
-          </div>
-          <div style="margin-top:10px;">
-            <button type="button" class="content-button conf-agente-salvar-layout" data-chave="${chave}" style="background:#0891b2;color:#fff;">
-              <i class="fa-solid fa-floppy-disk"></i> Salvar layout
-            </button>
-          </div>
+          <button type="button" class="content-button conf-zpl-editar" data-chave="${chave}" style="background:#7c3aed;color:#fff;">
+            <i class="fa-solid fa-pen-to-square"></i> Editar formato
+          </button>
         </div>`;
     }).join('');
 
-    lista.querySelectorAll('.conf-agente-salvar-layout').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const chave = btn.dataset.chave;
-        const box = btn.closest('[data-layout]');
-        if (!box || !chave) return;
-        const body = {};
-        box.querySelectorAll('input[data-field]').forEach((inp) => {
-          body[inp.dataset.field] = Number(inp.value);
-        });
-        btn.disabled = true;
-        try {
-          const resp = await fetch(`/api/etiquetas/layout-config/${encodeURIComponent(chave)}`, {
-            method: 'PUT',
-            credentials: 'include',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          const j = await resp.json().catch(() => ({}));
-          if (!resp.ok) throw new Error(j.error || `Erro ${resp.status}`);
-          setConfAgenteAviso(`Layout "${chave}" salvo no SQL.`, 'success');
-        } catch (err) {
-          setConfAgenteAviso(err.message, 'error');
-        } finally {
-          btn.disabled = false;
-        }
-      });
+    lista.querySelectorAll('.conf-zpl-editar').forEach((btn) => {
+      btn.addEventListener('click', () => abrirConfZplEditor(btn.dataset.chave));
     });
   } catch (err) {
     lista.innerHTML = `<div style="color:#b91c1c;padding:16px;">Erro: ${escapeHtml(err.message)}</div>`;
   }
 }
+
+let _confZplState = null;
+
+function _confZplFecharEditor() {
+  const modal = document.getElementById('confZplEditorModal');
+  if (modal) modal.style.display = 'none';
+  _confZplState = null;
+}
+
+function _confZplSetTab(modo) {
+  const facil = document.getElementById('confZplPainelFacil');
+  const avanc = document.getElementById('confZplPainelAvancado');
+  const btnF = document.getElementById('confZplTabFacil');
+  const btnA = document.getElementById('confZplTabAvancado');
+  const addBtn = document.getElementById('confZplBtnAddCampo');
+  if (!facil || !avanc) return;
+  const isFacil = modo !== 'avancado';
+  facil.style.display = isFacil ? '' : 'none';
+  avanc.style.display = isFacil ? 'none' : '';
+  if (btnF) btnF.style.background = isFacil ? '#7c3aed' : '#334155';
+  if (btnA) btnA.style.background = isFacil ? '#334155' : '#7c3aed';
+  if (addBtn) addBtn.style.display = isFacil ? '' : 'none';
+  if (_confZplState) _confZplState.modo = isFacil ? 'facil' : 'avancado';
+}
+
+function _confZplRenderCampos() {
+  const tbody = document.getElementById('confZplCamposTbody');
+  if (!tbody || !_confZplState) return;
+  const tipos = (window._confZplMeta?.fieldTypes || [
+    { value: 'texto', label: 'Texto' },
+    { value: 'bloco', label: 'Bloco' },
+    { value: 'texto_rot', label: 'Rotacionado' },
+    { value: 'qr', label: 'QR' },
+  ]);
+  const campos = _confZplState.campos || [];
+  if (!campos.length) {
+    tbody.innerHTML = '<tr><td colspan="6" style="padding:16px;text-align:center;color:#64748b;">Nenhum campo. Clique em + Campo.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = campos.map((c, idx) => {
+    const opts = tipos.map((t) =>
+      `<option value="${escapeHtml(t.value)}" ${c.tipo === t.value ? 'selected' : ''}>${escapeHtml(t.label)}</option>`
+    ).join('');
+    const tam = c.tipo === 'qr'
+      ? (c.magnificacao != null ? c.magnificacao : 4)
+      : (c.fonteH != null ? c.fonteH : 20);
+    return `<tr data-idx="${idx}" style="border-top:1px solid #1e293b;">
+      <td style="padding:6px;"><select data-k="tipo" style="width:100%;padding:4px;border-radius:6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;">${opts}</select></td>
+      <td style="padding:6px;"><input data-k="x" type="number" value="${Number(c.x) || 0}" style="width:58px;padding:4px;border-radius:6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;"></td>
+      <td style="padding:6px;"><input data-k="y" type="number" value="${Number(c.y) || 0}" style="width:58px;padding:4px;border-radius:6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;"></td>
+      <td style="padding:6px;"><input data-k="tam" type="number" value="${tam}" style="width:58px;padding:4px;border-radius:6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;" title="Fonte ou magnificação do QR"></td>
+      <td style="padding:6px;"><input data-k="conteudo" type="text" value="${escapeHtml(c.conteudo || '')}" style="width:100%;min-width:140px;padding:4px;border-radius:6px;background:#1e293b;color:#e2e8f0;border:1px solid #334155;"></td>
+      <td style="padding:6px;"><button type="button" data-del="${idx}" style="background:transparent;border:none;color:#f87171;cursor:pointer;" title="Remover"><i class="fa-solid fa-trash"></i></button></td>
+    </tr>`;
+  }).join('');
+
+  tbody.querySelectorAll('tr[data-idx]').forEach((tr) => {
+    const idx = Number(tr.dataset.idx);
+    tr.querySelectorAll('[data-k]').forEach((el) => {
+      el.addEventListener('change', () => {
+        _confZplSyncCampoFromRow(idx, tr);
+        _confZplMarcarPendente();
+      });
+      el.addEventListener('input', () => {
+        _confZplSyncCampoFromRow(idx, tr);
+        _confZplMarcarPendente();
+      });
+    });
+    tr.querySelector('[data-del]')?.addEventListener('click', () => {
+      _confZplState.campos.splice(idx, 1);
+      _confZplRenderCampos();
+      _confZplMarcarPendente();
+    });
+  });
+}
+
+function _confZplSyncCampoFromRow(idx, tr) {
+  if (!_confZplState?.campos?.[idx]) return;
+  const get = (k) => tr.querySelector(`[data-k="${k}"]`)?.value;
+  const tipo = get('tipo') || 'texto';
+  const campo = Object.assign({}, _confZplState.campos[idx], {
+    tipo,
+    x: Number(get('x')) || 0,
+    y: Number(get('y')) || 0,
+    conteudo: get('conteudo') || '',
+  });
+  const tam = Number(get('tam')) || 20;
+  if (tipo === 'qr') {
+    campo.magnificacao = tam;
+  } else {
+    campo.fonteH = tam;
+    campo.fonteW = tam;
+  }
+  if (tipo === 'bloco' && !campo.largura) campo.largura = 300;
+  if (tipo === 'bloco' && !campo.maxLinhas) campo.maxLinhas = 2;
+  _confZplState.campos[idx] = campo;
+}
+
+function _confZplMarcarPendente() {
+  if (!_confZplState) return;
+  _confZplState.previewOk = false;
+  const btn = document.getElementById('confZplBtnSalvar');
+  if (btn) {
+    btn.disabled = true;
+    btn.title = 'Gere o preview antes de salvar';
+  }
+  const box = document.getElementById('confZplPreviewBox');
+  if (box && !box.querySelector('img')) {
+    box.innerHTML = '<span style="color:#64748b;font-size:13px;text-align:center;">Configuração alterada — clique em “Ver como fica”.</span>';
+  }
+}
+
+function _confZplColetarPayload() {
+  if (!_confZplState) return null;
+  const amostra = {};
+  document.querySelectorAll('#confZplAmostraGrid input[data-amostra]').forEach((inp) => {
+    amostra[inp.dataset.amostra] = inp.value;
+  });
+  return {
+    chave: _confZplState.chave,
+    nome: _confZplState.nome,
+    labelWidth: Number(document.getElementById('confZplW')?.value) || 50,
+    labelHeight: Number(document.getElementById('confZplH')?.value) || 30,
+    dpi: Number(document.getElementById('confZplDpi')?.value) || 203,
+    offsetX: Number(_confZplState.offsetX) || 0,
+    offsetY: Number(_confZplState.offsetY) || 0,
+    darkness: _confZplState.darkness,
+    speed: _confZplState.speed,
+    campos: _confZplState.modo === 'avancado' && !( _confZplState.campos || []).length
+      ? []
+      : (_confZplState.campos || []),
+    zplTemplate: document.getElementById('confZplTemplate')?.value || '',
+    amostra,
+  };
+}
+
+function _confZplRenderAmostra(amostra) {
+  const grid = document.getElementById('confZplAmostraGrid');
+  if (!grid) return;
+  const keys = ['codigo', 'descricao', 'lote', 'data', 'id', 'quantidade', 'unidade', 'endereco', 'seq'];
+  const base = Object.assign({}, window._confZplMeta?.sampleDefaults || {}, amostra || {});
+  grid.innerHTML = keys.map((k) => `
+    <label style="font-size:11px;color:#94a3b8;">${k}
+      <input data-amostra="${k}" value="${escapeHtml(base[k] != null ? String(base[k]) : '')}"
+        style="width:100%;margin-top:3px;padding:5px 6px;border-radius:6px;border:1px solid #334155;background:#1e293b;color:#e2e8f0;font-size:12px;">
+    </label>
+  `).join('');
+  grid.querySelectorAll('input').forEach((inp) => {
+    inp.addEventListener('input', () => _confZplMarcarPendente());
+  });
+}
+
+function abrirConfZplEditor(chave) {
+  const layouts = window._confZplMeta?.layouts || [];
+  const L = layouts.find((x) => x.chave === chave);
+  if (!L) {
+    setConfAgenteAviso('Layout não encontrado.', 'error');
+    return;
+  }
+  _confZplState = {
+    chave: L.chave,
+    nome: L.nome,
+    campos: JSON.parse(JSON.stringify(Array.isArray(L.campos) ? L.campos : [])),
+    offsetX: L.offsetX || 0,
+    offsetY: L.offsetY || 0,
+    darkness: L.darkness,
+    speed: L.speed,
+    modo: 'facil',
+    previewOk: false,
+  };
+  document.getElementById('confZplEditorTitulo').textContent = `Editar: ${L.nome || L.chave}`;
+  document.getElementById('confZplEditorSub').textContent = `chave: ${L.chave}`;
+  document.getElementById('confZplW').value = L.labelWidth || 50;
+  document.getElementById('confZplH').value = L.labelHeight || 30;
+  document.getElementById('confZplDpi').value = L.dpi || 203;
+  document.getElementById('confZplTemplate').value = L.zplTemplate || '';
+  _confZplRenderAmostra(L.amostra || {});
+  _confZplRenderCampos();
+  _confZplSetTab('facil');
+  document.getElementById('confZplPreviewBox').innerHTML =
+    '<span style="color:#64748b;font-size:13px;text-align:center;">Clique em “Ver como fica” para gerar a imagem da etiqueta.</span>';
+  document.getElementById('confZplPreviewZpl').style.display = 'none';
+  const btnSalvar = document.getElementById('confZplBtnSalvar');
+  if (btnSalvar) { btnSalvar.disabled = true; btnSalvar.title = 'Gere o preview antes de salvar'; }
+  const modal = document.getElementById('confZplEditorModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+async function confZplGerarPreview() {
+  const payload = _confZplColetarPayload();
+  if (!payload) return;
+  const box = document.getElementById('confZplPreviewBox');
+  const pre = document.getElementById('confZplPreviewZpl');
+  if (box) box.innerHTML = '<span style="color:#94a3b8;"><i class="fa-solid fa-spinner fa-spin"></i> Gerando preview...</span>';
+  try {
+    // No modo avançado com template preenchido, prioriza template (campos vazios)
+    const body = Object.assign({}, payload);
+    if (_confZplState?.modo === 'avancado' && body.zplTemplate.trim()) {
+      body.campos = [];
+    } else if (_confZplState?.modo === 'facil') {
+      body.zplTemplate = undefined; // deixa o servidor gerar a partir dos campos
+    }
+    const resp = await fetch('/api/etiquetas/layout-config/preview', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok || !j.ok) throw new Error(j.error || `Erro ${resp.status}`);
+    if (box) {
+      box.innerHTML = `<img src="${j.imageBase64}" alt="Preview etiqueta" style="max-width:100%;max-height:360px;image-rendering:pixelated;background:#fff;border-radius:6px;">`;
+    }
+    if (pre) {
+      pre.style.display = 'block';
+      pre.textContent = j.zpl || '';
+    }
+    if (_confZplState) {
+      _confZplState.previewOk = true;
+      _confZplState.lastZpl = j.zpl || '';
+    }
+    const btn = document.getElementById('confZplBtnSalvar');
+    if (btn) { btn.disabled = false; btn.title = 'Salvar configuração no SQL'; }
+    setConfAgenteAviso('Preview gerado. Confira a imagem e clique em Salvar se estiver ok.', 'success');
+  } catch (err) {
+    if (box) box.innerHTML = `<span style="color:#f87171;font-size:13px;text-align:center;">${escapeHtml(err.message)}</span>`;
+    setConfAgenteAviso(err.message, 'error');
+  }
+}
+
+async function confZplSalvar() {
+  if (!_confZplState?.previewOk) {
+    setConfAgenteAviso('Gere o preview (“Ver como fica”) antes de salvar.', 'warn');
+    return;
+  }
+  const payload = _confZplColetarPayload();
+  if (!payload) return;
+  const btn = document.getElementById('confZplBtnSalvar');
+  if (btn) btn.disabled = true;
+  try {
+    const body = Object.assign({}, payload);
+    if (_confZplState.modo === 'avancado' && body.zplTemplate.trim()) {
+      body.campos = [];
+    } else if (_confZplState.modo === 'facil') {
+      // Garante que o ZPL salvo reflete o último preview
+      if (_confZplState.lastZpl) body.zplTemplate = _confZplState.lastZpl;
+    }
+    const resp = await fetch(`/api/etiquetas/layout-config/${encodeURIComponent(payload.chave)}`, {
+      method: 'PUT',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await resp.json().catch(() => ({}));
+    if (!resp.ok) throw new Error(j.error || `Erro ${resp.status}`);
+    setConfAgenteAviso(`Formato "${payload.chave}" salvo no SQL.`, 'success');
+    _confZplFecharEditor();
+    await carregarConfAgenteLayouts();
+  } catch (err) {
+    setConfAgenteAviso(err.message, 'error');
+    if (btn) btn.disabled = false;
+  }
+}
+
+document.getElementById('confZplEditorFechar')?.addEventListener('click', _confZplFecharEditor);
+document.getElementById('confZplBtnCancelar')?.addEventListener('click', _confZplFecharEditor);
+document.getElementById('confZplTabFacil')?.addEventListener('click', () => _confZplSetTab('facil'));
+document.getElementById('confZplTabAvancado')?.addEventListener('click', () => _confZplSetTab('avancado'));
+document.getElementById('confZplBtnAddCampo')?.addEventListener('click', () => {
+  if (!_confZplState) return;
+  _confZplState.campos.push({
+    id: `campo_${Date.now()}`,
+    tipo: 'texto',
+    x: 10,
+    y: 10,
+    fonteH: 20,
+    fonteW: 20,
+    conteudo: '{{codigo}}',
+  });
+  _confZplRenderCampos();
+  _confZplMarcarPendente();
+});
+document.getElementById('confZplBtnPreview')?.addEventListener('click', () => confZplGerarPreview());
+document.getElementById('confZplBtnSalvar')?.addEventListener('click', () => confZplSalvar());
+['confZplW', 'confZplH', 'confZplDpi', 'confZplTemplate'].forEach((id) => {
+  document.getElementById(id)?.addEventListener('input', () => _confZplMarcarPendente());
+});
 
 async function abrirPainelConfAgente() {
   showMainTab('confAgentePane');
