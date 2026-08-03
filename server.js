@@ -11652,6 +11652,10 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS campos JSONB NOT NULL DEFAULT '[]'`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS dpi INT DEFAULT 203`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS amostra JSONB NOT NULL DEFAULT '{}'`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS tipo_base TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS perfil BOOLEAN NOT NULL DEFAULT false`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS ativo BOOLEAN NOT NULL DEFAULT true`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_layout_config" ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ NOT NULL DEFAULT now()`);
     await pool.query(`
       INSERT INTO etiqueta."ETQ_layout_config"
         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y)
@@ -11675,6 +11679,12 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         ELSE nome
       END
       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+    `).catch(() => {});
+    await pool.query(`
+      UPDATE etiqueta."ETQ_layout_config"
+         SET tipo_base = chave, perfil = false
+       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+         AND (tipo_base IS NULL OR tipo_base = '')
     `).catch(() => {});
     // Preferências de impressora do usuário (antes ficava em localStorage)
     await pool.query(`
@@ -12106,6 +12116,71 @@ app.get('/api/etiquetas/layout-config', async (req, res) => {
   }
 });
 
+// POST /api/etiquetas/layout-config — cria um perfil independente a partir de um layout existente
+app.post('/api/etiquetas/layout-config', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const b = req.body || {};
+    const nome = String(b.nome || '').trim();
+    const origem = String(b.cloneFrom || b.origem || 'impressao').trim() || 'impressao';
+    if (!nome) return res.status(400).json({ error: 'Informe o nome do perfil.' });
+    const usuario = String(
+      req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
+    ).trim() || 'intranet';
+    const chave = `perfil_${crypto.randomUUID()}`;
+    const { rows } = await pool.query(
+      `INSERT INTO etiqueta."ETQ_layout_config"
+         (chave, nome, label_width, label_height, darkness, speed, offset_x, offset_y,
+          zpl_template, campos, dpi, amostra, tipo_base, perfil, ativo,
+          criado_em, atualizado_em, atualizado_por)
+       SELECT $1, $2,
+              COALESCE($4::numeric, label_width), COALESCE($5::numeric, label_height),
+              darkness, speed, offset_x, offset_y, zpl_template, campos, dpi, amostra,
+              COALESCE(NULLIF(tipo_base, ''), chave), true, true, now(), now(), $3
+         FROM etiqueta."ETQ_layout_config"
+        WHERE chave = $6
+       RETURNING *`,
+      [chave, nome, usuario, b.labelWidth || null, b.labelHeight || null, origem]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Layout de origem não encontrado.' });
+    _etqInvalidarLayoutCache();
+    res.status(201).json({ ok: true, layout: _etqLayoutRowToClient(rows[0]) });
+  } catch (err) {
+    console.error('[etiquetas/layout-config POST]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// DELETE /api/etiquetas/layout-config/:chave — remove somente perfis personalizados não vinculados
+app.delete('/api/etiquetas/layout-config/:chave', async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const chave = String(req.params.chave || '').trim();
+    const { rows: vinculados } = await pool.query(
+      `SELECT pc_name, key AS impressora
+         FROM etiqueta."ETQ_agente_config",
+              LATERAL jsonb_each(COALESCE(printer_configs, '{}'::jsonb))
+        WHERE value->>'layoutProfile' = $1
+        LIMIT 10`,
+      [chave]
+    );
+    if (vinculados.length) {
+      const destinos = vinculados.map((v) => `${v.pc_name} / ${v.impressora}`).join(', ');
+      return res.status(409).json({ error: `Este perfil está em uso por: ${destinos}. Troque o perfil dessas impressoras antes de excluir.` });
+    }
+    const result = await pool.query(
+      `DELETE FROM etiqueta."ETQ_layout_config" WHERE chave = $1 AND perfil = true RETURNING chave`,
+      [chave]
+    );
+    if (!result.rowCount) return res.status(404).json({ error: 'Perfil personalizado não encontrado.' });
+    _etqInvalidarLayoutCache();
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[etiquetas/layout-config DELETE]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
 function _checkAgentTokenOptional(req) {
   return !!(AGENTE_TOKEN && req.headers['x-agent-token'] === AGENTE_TOKEN);
 }
@@ -12358,6 +12433,9 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
 
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres   = String(req.body?.impressora      || '').trim() || null;
+    const layoutImpressao = await _etqResolverLayoutDaImpressora(destiAg, impres, 'impressao');
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const zplBlocks = [];
 
@@ -12379,7 +12457,8 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
           codProd,
           descProd,
           loteTxt,
-          dataExibir
+          dataExibir,
+          layout: layoutImpressao
         });
         zplBlocks.push(...gerado.zplBlocks);
       } else {
@@ -12392,7 +12471,7 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
           codProd,
           descProd
         });
-        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir });
+        const zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir, layout: layoutImpressao });
         await pool.query(
           `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
           [zpl, idImpresso]
@@ -12406,8 +12485,6 @@ app.post('/api/etiquetas/fila', express.json(), async (req, res) => {
       [ids]
     );
 
-    const destiAg = String(req.body?.destino_agente || '').trim() || null;
-    const impres   = String(req.body?.impressora      || '').trim() || null;
     const filaIns = await pool.query(
       `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
@@ -12933,10 +13010,35 @@ function _etqLayoutRowToClient(r) {
     zplTemplate: r.zpl_template || null,
     campos: Array.isArray(campos) ? campos : [],
     amostra: r.amostra && typeof r.amostra === 'object' ? r.amostra : {},
+    tipoBase: r.tipo_base || r.chave,
+    isProfile: r.perfil === true,
+    ativo: r.ativo !== false,
     placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco'],
     atualizadoEm: r.atualizado_em,
     atualizadoPor: r.atualizado_por || null,
   };
+}
+
+async function _etqResolverLayoutDaImpressora(pcName, printerName, tipoBase = 'impressao') {
+  const fallback = await _carregarLayoutEtiqueta(tipoBase);
+  const pc = String(pcName || '').trim();
+  const printer = String(printerName || '').trim();
+  if (!pc || !printer) return fallback;
+  try {
+    const { rows } = await pool.query(
+      `SELECT printer_configs FROM etiqueta."ETQ_agente_config" WHERE pc_name = $1`,
+      [pc]
+    );
+    const configs = rows[0]?.printer_configs || {};
+    const chave = String(configs?.[printer]?.layoutProfile || '').trim();
+    if (!chave) return fallback;
+    const perfil = await _carregarLayoutEtiqueta(chave);
+    if (!perfil || perfil.ativo === false || (perfil.tipo_base && perfil.tipo_base !== tipoBase)) return fallback;
+    return perfil;
+  } catch (err) {
+    console.warn('[etiqueta] falha ao resolver perfil da impressora:', err.message);
+    return fallback;
+  }
 }
 
 async function _etqSeedLayoutDefaultsSeVazio() {
@@ -13228,7 +13330,7 @@ function _calcularLotesVolumes(qtdTotal, multiplo) {
  */
 async function _gerarVolumesComMesmoId(db, {
   origemId, qtdTotal, multiplo, unidade, dataEmissao, usuario,
-  codProd, descProd, loteTxt, dataExibir
+  codProd, descProd, loteTxt, dataExibir, layout
 }) {
   const lotes = _calcularLotesVolumes(qtdTotal, multiplo);
   const qtdGravar = Number(qtdTotal) || lotes.reduce((acc, v) => acc + Number(v || 0), 0);
@@ -13241,7 +13343,7 @@ async function _gerarVolumesComMesmoId(db, {
     codProd,
     descProd
   });
-  const layoutImpressao = await _carregarLayoutEtiqueta('impressao');
+  const layoutImpressao = layout || await _carregarLayoutEtiqueta('impressao');
   const zpl = _gerarZplParaImpressao({
     codProd, descProd, idImpresso, loteTxt, dataExibir, layout: layoutImpressao,
   });
