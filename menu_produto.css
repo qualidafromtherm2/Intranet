@@ -9965,7 +9965,49 @@ table.tabela td.num {
 }
 .chamado-enviar-btn:hover { background: #0f766e !important; }
 .chamado-enviar-btn:disabled { opacity: .65; cursor: wait; }
-.chamado-lista { display: flex; flex-direction: column; gap: 9px; }
+.chamado-lista {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  color: #1e293b;
+}
+.chamado-lista-vazia {
+  font-size: 13px;
+  color: #64748b !important;
+  padding: 12px 0;
+}
+.chamado-card {
+  padding: 12px;
+  border-radius: 10px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #1e293b !important;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+.chamado-card strong { color: #0f172a !important; }
+.chamado-card-meta,
+.chamado-card-autor,
+.chamado-card-prazo,
+.chamado-card-fechado {
+  color: #475569 !important;
+}
+.chamado-card-desc {
+  font-size: 13px;
+  white-space: pre-wrap;
+  line-height: 1.45;
+  margin-bottom: 8px;
+  color: #1e293b !important;
+}
+.chamado-card .chamado-prazo-input {
+  width: 100%;
+  padding: 8px;
+  border-radius: 8px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a !important;
+  box-sizing: border-box;
+}
+.chamado-card a { color: #0f766e !important; }
 
 @media (max-width: 760px) {
   .chamado-modal-overlay { padding: max(8px, env(safe-area-inset-top)) 8px max(8px, env(safe-area-inset-bottom)); }
