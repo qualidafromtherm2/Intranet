@@ -21103,6 +21103,7 @@ async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
     `SELECT DISTINCT TRIM(usuario_separando) AS usuario_separando
        FROM solicitacao_produto.itens_solicitados
       WHERE id = ANY($1::bigint[])
+        AND status IN ('Separação', 'Em Separação', 'Separado')
         AND usuario_separando IS NOT NULL
         AND TRIM(usuario_separando) <> ''`,
     [ids]
@@ -21657,7 +21658,8 @@ async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
       `UPDATE solicitacao_produto.itens_solicitados
           SET status = 'Concluído',
               quantidade_solicitada = NULL,
-              quantidade_separada = NULL
+              quantidade_separada = NULL,
+              usuario_separando = NULL
         WHERE id = ANY($1::bigint[])`,
       [idsVipp]
     );
@@ -22462,7 +22464,9 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
         COUNT(*)::int                          AS total_itens,
         MIN(c.criado_em)                       AS criado_em_min,
         MIN(i.criado_em)                       AS item_criado_em,
-        MAX(NULLIF(TRIM(i.usuario_separando), '')) AS usuario_separando,
+        MAX(NULLIF(TRIM(i.usuario_separando), '')) FILTER (
+          WHERE i.status IN ('Separação', 'Em Separação', 'Separado')
+        ) AS usuario_separando,
         STRING_AGG(
           DISTINCT CONCAT_WS(' ', COALESCE(c.codigo_produto, ''), COALESCE(c.descricao, '')),
           ' '
@@ -22669,14 +22673,20 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (idsNormal.length) {
       await registrarMovimentacaoKanbanItens(pool, idsNormal, 'Aguardando retirada', req);
       await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Aguardando retirada' WHERE id = ANY($1::bigint[])`,
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET status = 'Aguardando retirada',
+                usuario_separando = NULL
+          WHERE id = ANY($1::bigint[])`,
         [idsNormal]
       );
     }
     if (idsSkip.length) {
       await registrarMovimentacaoKanbanItens(pool, idsSkip, 'Concluído', req);
       await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`,
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET status = 'Concluído',
+                usuario_separando = NULL
+          WHERE id = ANY($1::bigint[])`,
         [idsSkip]
       );
     }
@@ -22737,7 +22747,10 @@ app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
     if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Concluído', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'Concluído' WHERE id = ANY($1::bigint[])`, [ids]
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET status = 'Concluído',
+              usuario_separando = NULL
+        WHERE id = ANY($1::bigint[])`, [ids]
     );
     res.json({ ok: true });
   } catch (err) {
