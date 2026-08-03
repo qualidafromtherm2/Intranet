@@ -5,6 +5,10 @@
  * Estratégia: marcar inativo = 'S' (não DELETE), para:
  * - sumir da Lista de produtos (filtro padrão oculta inativos)
  * - preservar imagens/anexos e histórico local
+ *
+ * Também trata o caso "mesmo SKU, ID novo": quando a Omie recria o produto
+ * com outro codigo_produto, o ID antigo precisa ficar inativo para a
+ * separação/transferência não mandarem o ID fantasma.
  */
 
 async function comSourceOmie(client, source, fn) {
@@ -54,6 +58,115 @@ async function marcarProdutosOmieInativos(client, ids, source = 'omie_sync') {
 }
 
 /**
+ * Após upsert de um produto ATIVO, inativa outros registros com o mesmo
+ * codigo / codigo_produto_integracao (IDs antigos do mesmo SKU).
+ *
+ * @param {object} client
+ * @param {{ codigoProduto: string|number, codigo?: string, integracao?: string }} opts
+ * @param {string} [source='omie_sync']
+ * @param {{ alreadyInTx?: boolean }} [flags] — se true, não abre BEGIN (já está em tx com source)
+ */
+async function desativarDuplicatasMesmoCodigo(client, opts, source = 'omie_sync', flags = {}) {
+  const codigoProduto = String(opts?.codigoProduto ?? '').trim();
+  if (!/^\d+$/.test(codigoProduto)) {
+    return { marcados: 0, ids: [], detalhes: [] };
+  }
+
+  const codigo = String(opts?.codigo || '').trim();
+  const integracao = String(opts?.integracao || '').trim();
+
+  const run = async () => {
+    // Garante códigos do próprio registro se o caller não passou.
+    let cod = codigo;
+    let integ = integracao;
+    if (!cod || !integ) {
+      const { rows } = await client.query(
+        `SELECT TRIM(codigo) AS codigo,
+                TRIM(COALESCE(codigo_produto_integracao, '')) AS integracao,
+                COALESCE(NULLIF(UPPER(TRIM(inativo)), ''), 'N') AS inativo
+           FROM public.produtos_omie
+          WHERE codigo_produto = $1
+          LIMIT 1`,
+        [codigoProduto]
+      );
+      if (!rows[0]) return { marcados: 0, ids: [], detalhes: [] };
+      if (rows[0].inativo === 'S' || rows[0].inativo === 'SIM') {
+        return { marcados: 0, ids: [], detalhes: [] };
+      }
+      cod = cod || rows[0].codigo || '';
+      integ = integ || rows[0].integracao || '';
+    }
+
+    if (!cod && !integ) return { marcados: 0, ids: [], detalhes: [] };
+
+    const { rows } = await client.query(
+      `UPDATE public.produtos_omie
+          SET inativo = 'S',
+              updated_at = NOW()
+        WHERE codigo_produto <> $1::bigint
+          AND COALESCE(UPPER(TRIM(inativo)), 'N') <> 'S'
+          AND (
+            ($2 <> '' AND TRIM(codigo) = $2)
+            OR ($3 <> '' AND TRIM(COALESCE(codigo_produto_integracao, '')) = $3)
+          )
+        RETURNING codigo_produto::text AS codigo_produto, codigo, LEFT(descricao, 80) AS descricao`,
+      [codigoProduto, cod, integ]
+    );
+
+    return {
+      marcados: rows.length,
+      ids: rows.map((r) => r.codigo_produto),
+      detalhes: rows
+    };
+  };
+
+  if (flags.alreadyInTx) return run();
+  return comSourceOmie(client, source, run);
+}
+
+/**
+ * Limpa SKUs com mais de um cadastro ainda "ativo" localmente.
+ * Mantém o de maior codigo_produto (em geral o mais novo na Omie).
+ */
+async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
+  return comSourceOmie(client, source, async () => {
+    const { rows: grupos } = await client.query(
+      `SELECT TRIM(codigo) AS codigo,
+              array_agg(codigo_produto ORDER BY codigo_produto DESC) AS ids
+         FROM public.produtos_omie
+        WHERE TRIM(COALESCE(codigo, '')) <> ''
+          AND COALESCE(UPPER(TRIM(inativo)), 'N') NOT IN ('S', 'SIM')
+        GROUP BY TRIM(codigo)
+       HAVING COUNT(*) > 1`
+    );
+
+    let marcados = 0;
+    const detalhes = [];
+    for (const g of grupos) {
+      const ids = (g.ids || []).map(String);
+      const manter = ids[0];
+      const inativar = ids.slice(1);
+      if (!inativar.length) continue;
+      const { rows } = await client.query(
+        `UPDATE public.produtos_omie
+            SET inativo = 'S',
+                updated_at = NOW()
+          WHERE codigo_produto = ANY($1::bigint[])
+            AND COALESCE(UPPER(TRIM(inativo)), 'N') <> 'S'
+          RETURNING codigo_produto::text AS codigo_produto, codigo, LEFT(descricao, 80) AS descricao`,
+        [inativar]
+      );
+      marcados += rows.length;
+      for (const r of rows) {
+        detalhes.push({ ...r, mantido: manter, motivo: 'duplicata_ativa_local' });
+      }
+    }
+
+    return { marcados, detalhes, grupos: grupos.length };
+  });
+}
+
+/**
  * Após uma sync completa (lista de IDs vistos na Omie),
  * marca como inativos os locais ativos que não apareceram.
  *
@@ -96,5 +209,7 @@ async function reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, source =
 
 module.exports = {
   marcarProdutosOmieInativos,
+  desativarDuplicatasMesmoCodigo,
+  limparDuplicatasAtivasLocais,
   reconciliarProdutosOmieAusentes,
 };

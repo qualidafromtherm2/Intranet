@@ -845,7 +845,7 @@ async function syncProdutosOmie() {
   }
 
   if (idsVistosNaOmie.size > 0) {
-    const { reconciliarProdutosOmieAusentes } = require('../utils/produtosOmieFantasmas');
+    const { reconciliarProdutosOmieAusentes, limparDuplicatasAtivasLocais } = require('../utils/produtosOmieFantasmas');
     const client = await pool.connect();
     try {
       const rec = await reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, 'omie_cron');
@@ -855,6 +855,20 @@ async function syncProdutosOmie() {
         rec.detalhes.slice(0, 10).forEach((d) => {
           log(`    - ${d.codigo} (${d.codigo_produto}) ${d.descricao || ''}`);
         });
+      }
+      const dedup = await limparDuplicatasAtivasLocais(client, 'omie_cron');
+      if (dedup.marcados > 0) {
+        log(`  Duplicatas de SKU inativadas: ${dedup.marcados} (grupos=${dedup.grupos})`);
+      }
+    } finally { client.release(); }
+  } else {
+    // Mesmo sem lista Omie, limpa SKUs com 2+ ativos locais (defesa extra).
+    const { limparDuplicatasAtivasLocais } = require('../utils/produtosOmieFantasmas');
+    const client = await pool.connect();
+    try {
+      const dedup = await limparDuplicatasAtivasLocais(client, 'omie_cron');
+      if (dedup.marcados > 0) {
+        log(`  Duplicatas de SKU inativadas: ${dedup.marcados}`);
       }
     } finally { client.release(); }
   }

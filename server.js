@@ -4,6 +4,12 @@
 require('dotenv').config({ path: require('path').resolve(__dirname, '.env'), override: true });
 const { pool, sessionPool, dbQuery, isDbEnabled, warmupPgPool, warmupSessionPool, ensureSessionTableReady } = require('./src/db');
 const { normalizarNumeroDecimal } = require('./utils/numeroDecimal');
+const {
+  resolverCodigoProdutoPreferindoAtivo,
+  resolverCodigoTextoPreferindoAtivo,
+  mensagemErroOmieProduto,
+  omieErroProdutoNaoLocalizado
+} = require('./utils/produtoOmieAtivo');
 const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
 const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
 if (IS_CHAT_SERVICE) {
@@ -317,6 +323,7 @@ const API_PUBLIC_PREFIXES = [
   // ── Agente de impressão (auth própria via x-agent-token) ──
   '/api/etiquetas/agente/heartbeat',      // agente anuncia presença
   '/api/etiquetas/agente/config',         // agente lê/grava config no SQL
+  '/api/etiquetas/historico',             // histórico global de impressões
   '/api/etiquetas/agentes-disponiveis',   // frontend busca agentes online
   '/api/etiquetas/fila/pendentes',        // agente busca fila para imprimir
   '/api/etiquetas/fila/confirmar',        // agente confirma impressão
@@ -5957,6 +5964,12 @@ async function sincronizarProdutoParaPostgres(produto) {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_sync', true)");
     await client.query(sql, valores);
+    const { desativarDuplicatasMesmoCodigo } = require('./utils/produtosOmieFantasmas');
+    await desativarDuplicatasMesmoCodigo(client, {
+      codigoProduto: produto.codigo_produto,
+      codigo: produto.codigo,
+      integracao: produto.codigo_produto_integracao || produto.codigo
+    }, 'omie_sync', { alreadyInTx: true });
     await client.query('COMMIT');
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
@@ -11636,6 +11649,31 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         atualizado_em  TIMESTAMPTZ NOT NULL DEFAULT now()
       )
     `);
+    // Histórico global de etiquetas impressas (qualquer PC) — reimpressão + busca
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS etiqueta."ETQ_historico_impressao" (
+        id            SERIAL PRIMARY KEY,
+        fila_id       INT,
+        zpl           TEXT        NOT NULL,
+        titulo        TEXT,
+        texto_busca   TEXT,
+        quantidade    INT         NOT NULL DEFAULT 1,
+        ok            BOOLEAN     NOT NULL DEFAULT TRUE,
+        pc_name       TEXT,
+        impressora    TEXT,
+        usuario       TEXT,
+        origem        TEXT        DEFAULT 'fila',
+        impresso_em   TIMESTAMPTZ NOT NULL DEFAULT now()
+      )
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_etq_hist_impresso_em
+        ON etiqueta."ETQ_historico_impressao" (impresso_em DESC)
+    `).catch(() => {});
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS idx_etq_hist_texto_busca
+        ON etiqueta."ETQ_historico_impressao" (texto_busca)
+    `).catch(() => {});
     // Corrige codigo_produto gravado como produtos_omie.codigo → produtos_omie.codigo_produto
     const fixCodigoEtq = await pool.query(`
       UPDATE etiqueta."ETQ_rec_impresso" i
@@ -11714,7 +11752,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       console.error('[etiqueta] backfill seguro ETQ_rec_impresso:', err?.message || err);
     });
 
-    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes / ETQ_agente_config / ETQ_layout_config / ETQ_usuario_impressoras garantidos');
+    console.log('[etiqueta] Schema e tabelas ETQ_recebimento / ETQ_rec_impresso / ETQ_fila_impressao / ETQ_auto_oculto / ETQ_agentes / ETQ_agente_config / ETQ_layout_config / ETQ_usuario_impressoras / ETQ_historico_impressao garantidos');
   } catch (err) {
     console.error('[etiqueta] Falha ao garantir schema/tabela:', err?.message || err);
   }
@@ -12391,7 +12429,10 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
   const token = req.headers['x-agent-token'] || req.query.token;
   if (token !== AGENTE_TOKEN) return res.status(401).json({ error: 'Token inválido' });
   try {
-    const { id, success, error: erroMsg, agent_host } = req.body || {};
+    const {
+      id, success, error: erroMsg, agent_host,
+      pc_name, impressora, quantidade,
+    } = req.body || {};
     if (!id) return res.status(400).json({ error: 'id obrigatório' });
     if (success) {
       await pool.query(
@@ -12400,6 +12441,29 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
          WHERE id = $1`,
         [id, agent_host || null]
       );
+      // Grava no histórico global (qualquer PC pode buscar/reimprimir)
+      try {
+        const fila = await pool.query(
+          `SELECT id, zpl, quantidade, impressora, usuario, destino_agente
+             FROM etiqueta."ETQ_fila_impressao" WHERE id = $1`,
+          [id]
+        );
+        const row = fila.rows[0];
+        if (row?.zpl) {
+          await _etqHistoricoInserir({
+            filaId: row.id,
+            zpl: row.zpl,
+            quantidade: Number(quantidade) || Number(row.quantidade) || 1,
+            ok: true,
+            pcName: String(pc_name || row.destino_agente || agent_host || '').trim() || null,
+            impressora: String(impressora || row.impressora || '').trim() || null,
+            usuario: row.usuario || null,
+            origem: 'fila',
+          });
+        }
+      } catch (histErr) {
+        console.warn('[fila/confirmar] histórico:', histErr.message);
+      }
     } else {
       await pool.query(
         `UPDATE etiqueta."ETQ_fila_impressao"
@@ -12411,6 +12475,213 @@ app.post('/api/etiquetas/fila/confirmar', express.json(), async (req, res) => {
     res.json({ ok: true });
   } catch (err) {
     console.error('[etiquetas/fila/confirmar]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+function _etqExtractTituloZpl(zpl) {
+  const matches = String(zpl || '').match(/\^FD([^^\r\n]+)\^FS/gi) || [];
+  const texts = matches
+    .map((m) => m.replace(/^\^FD/i, '').replace(/\^FS$/i, '').trim())
+    .filter((t) => t && t.length > 1 && !/^Agente SGF/i.test(t) && !/impressao funcionando/i.test(t));
+  return texts.slice(0, 4).join(' · ').slice(0, 120) || 'Etiqueta';
+}
+
+function _etqExtractTextoBuscaZpl(zpl) {
+  const matches = String(zpl || '').match(/\^FD([^^\r\n]+)\^FS/gi) || [];
+  return matches
+    .map((m) => m.replace(/^\^FD/i, '').replace(/\^FS$/i, '').trim())
+    .filter(Boolean)
+    .join(' ')
+    .slice(0, 4000);
+}
+
+async function _etqHistoricoInserir({
+  filaId = null, zpl, quantidade = 1, ok = true,
+  pcName = null, impressora = null, usuario = null, origem = 'fila',
+}) {
+  const z = String(zpl || '').trim();
+  if (!z) return null;
+  const titulo = _etqExtractTituloZpl(z);
+  const textoBusca = [
+    titulo,
+    _etqExtractTextoBuscaZpl(z),
+    pcName || '',
+    impressora || '',
+    usuario || '',
+    filaId != null ? String(filaId) : '',
+  ].join(' ').replace(/\s+/g, ' ').trim().slice(0, 4500);
+
+  const { rows } = await pool.query(
+    `INSERT INTO etiqueta."ETQ_historico_impressao"
+       (fila_id, zpl, titulo, texto_busca, quantidade, ok, pc_name, impressora, usuario, origem, impresso_em)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10, now())
+     RETURNING id, titulo, impresso_em`,
+    [
+      filaId != null ? Number(filaId) : null,
+      z,
+      titulo,
+      textoBusca,
+      Math.max(1, Number(quantidade) || 1),
+      !!ok,
+      pcName || null,
+      impressora || null,
+      usuario || null,
+      origem || 'fila',
+    ]
+  );
+  return rows[0] || null;
+}
+
+function _etqHistoricoRowToClient(r, { includeZpl = false } = {}) {
+  if (!r) return null;
+  const dt = r.impresso_em ? new Date(r.impresso_em) : null;
+  const out = {
+    id: r.id,
+    filaId: r.fila_id || null,
+    titulo: r.titulo || 'Etiqueta',
+    quantidade: Number(r.quantidade) || 1,
+    ok: r.ok !== false,
+    pcName: r.pc_name || null,
+    impressora: r.impressora || null,
+    usuario: r.usuario || null,
+    origem: r.origem || null,
+    impressoEm: r.impresso_em,
+    date: dt ? dt.toLocaleDateString('pt-BR') : '',
+    time: dt ? dt.toLocaleTimeString('pt-BR') : '',
+    jobId: r.fila_id || null,
+  };
+  if (includeZpl) out.zpl = r.zpl || '';
+  return out;
+}
+
+// GET /api/etiquetas/historico?q=&limit=80 — lista histórico global (com busca)
+app.get('/api/etiquetas/historico', async (req, res) => {
+  const viaAgente = !!req.headers['x-agent-token'];
+  if (viaAgente) {
+    if (!_exigeTokenAgente(req, res)) return;
+  } else if (!req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  try {
+    const q = String(req.query.q || req.query.busca || '').trim();
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 80));
+    let rows;
+    if (q) {
+      const like = `%${q.replace(/[%_]/g, '')}%`;
+      ({ rows } = await pool.query(
+        `SELECT id, fila_id, titulo, quantidade, ok, pc_name, impressora, usuario, origem, impresso_em
+           FROM etiqueta."ETQ_historico_impressao"
+          WHERE texto_busca ILIKE $1
+             OR titulo ILIKE $1
+             OR pc_name ILIKE $1
+             OR impressora ILIKE $1
+             OR CAST(id AS TEXT) = $2
+             OR CAST(fila_id AS TEXT) = $2
+          ORDER BY impresso_em DESC
+          LIMIT $3`,
+        [like, q, limit]
+      ));
+    } else {
+      ({ rows } = await pool.query(
+        `SELECT id, fila_id, titulo, quantidade, ok, pc_name, impressora, usuario, origem, impresso_em
+           FROM etiqueta."ETQ_historico_impressao"
+          ORDER BY impresso_em DESC
+          LIMIT $1`,
+        [limit]
+      ));
+    }
+    res.json({
+      ok: true,
+      q,
+      total: rows.length,
+      prints: rows.map((r) => _etqHistoricoRowToClient(r)),
+    });
+  } catch (err) {
+    console.error('[etiquetas/historico GET]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/etiquetas/historico/:id — detalhe com ZPL (reimpressão / preview)
+app.get('/api/etiquetas/historico/:id', async (req, res) => {
+  const viaAgente = !!req.headers['x-agent-token'];
+  if (viaAgente) {
+    if (!_exigeTokenAgente(req, res)) return;
+  } else if (!req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  try {
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'id inválido' });
+    const { rows } = await pool.query(
+      `SELECT * FROM etiqueta."ETQ_historico_impressao" WHERE id = $1`,
+      [id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Etiqueta não encontrada no histórico' });
+    res.json({ ok: true, print: _etqHistoricoRowToClient(rows[0], { includeZpl: true }) });
+  } catch (err) {
+    console.error('[etiquetas/historico/:id]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// GET /api/etiquetas/historico/:id/preview.png — preview PNG via Labelary
+app.get('/api/etiquetas/historico/:id/preview.png', async (req, res) => {
+  const viaAgente = !!req.headers['x-agent-token'];
+  if (viaAgente) {
+    if (!_exigeTokenAgente(req, res)) return;
+  } else if (!req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
+  try {
+    const id = Number(req.params.id);
+    const { rows } = await pool.query(
+      `SELECT zpl FROM etiqueta."ETQ_historico_impressao" WHERE id = $1`,
+      [id]
+    );
+    if (!rows[0]?.zpl) return res.status(404).json({ error: 'ZPL não encontrado' });
+    const labelaryResp = await fetch(
+      'http://api.labelary.com/v1/printers/8dpmm/labels/4x2/0/',
+      {
+        method: 'POST',
+        headers: { Accept: 'image/png', 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: rows[0].zpl,
+      }
+    );
+    if (!labelaryResp.ok) {
+      const txt = await labelaryResp.text().catch(() => '');
+      return res.status(502).json({ error: `Labelary ${labelaryResp.status}: ${txt.slice(0, 120)}` });
+    }
+    const buf = Buffer.from(await labelaryResp.arrayBuffer());
+    res.setHeader('Content-Type', 'image/png');
+    res.setHeader('Cache-Control', 'private, max-age=120');
+    res.send(buf);
+  } catch (err) {
+    console.error('[etiquetas/historico preview]', err);
+    res.status(500).json({ error: err?.message });
+  }
+});
+
+// POST /api/etiquetas/historico — agente/intranet registra impressão manual (reimpressão local)
+app.post('/api/etiquetas/historico', express.json({ limit: '2mb' }), async (req, res) => {
+  if (!_exigeTokenAgente(req, res)) return;
+  try {
+    const b = req.body || {};
+    const inserted = await _etqHistoricoInserir({
+      filaId: b.filaId || b.fila_id || null,
+      zpl: b.zpl,
+      quantidade: b.quantidade,
+      ok: b.ok !== false,
+      pcName: b.pcName || b.pc_name,
+      impressora: b.impressora,
+      usuario: b.usuario,
+      origem: b.origem || 'agente',
+    });
+    if (!inserted) return res.status(400).json({ error: 'zpl obrigatório' });
+    res.json({ ok: true, id: inserted.id, titulo: inserted.titulo });
+  } catch (err) {
+    console.error('[etiquetas/historico POST]', err);
     res.status(500).json({ error: err?.message });
   }
 });
@@ -12685,46 +12956,48 @@ function _friendlyLprError(msg) {
   return 'Falha na comunicação com a impressora. Verifique se ela está ligada e configurada corretamente.';
 }
 
-/** Resolve public.produtos_omie.codigo_produto (id Omie) a partir de codigo, id ou integracao. */
+/** Resolve public.produtos_omie.codigo_produto (id Omie) a partir de codigo, id ou integracao.
+ * Preferência: ativo/desbloqueado (evita ID fantasma de cadastro recriado na Omie). */
 async function _resolveProdutoOmieCodigoProduto(db, codigoOuId) {
-  const raw = String(codigoOuId || '').trim();
-  if (!raw) return null;
-  const { rows } = await (db || pool).query(
-    `SELECT codigo_produto::text AS id_omie
-       FROM public.produtos_omie
-      WHERE TRIM(codigo_produto::text) = TRIM($1)
-         OR TRIM(codigo) = TRIM($1)
-         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
-      ORDER BY CASE
-        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
-        WHEN TRIM(codigo) = TRIM($1) THEN 1
-        ELSE 2
-      END
-      LIMIT 1`,
-    [raw]
-  );
-  return rows[0]?.id_omie || null;
+  const q = (sql, params) => (db || pool).query(sql, params);
+  return resolverCodigoProdutoPreferindoAtivo(q, codigoOuId, { strictAtivo: false });
 }
 
-/** Código legível do produto (produtos_omie.codigo) para ZPL e exibição. */
+/** Código legível do produto (produtos_omie.codigo) para ZPL e exibição. Preferência: ativo. */
 async function _resolveProdutoOmieCodigoTexto(db, codigoOuId) {
-  const raw = String(codigoOuId || '').trim();
-  if (!raw) return null;
-  const { rows } = await (db || pool).query(
-    `SELECT codigo
-       FROM public.produtos_omie
-      WHERE TRIM(codigo_produto::text) = TRIM($1)
-         OR TRIM(codigo) = TRIM($1)
-         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
-      ORDER BY CASE
-        WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
-        WHEN TRIM(codigo) = TRIM($1) THEN 1
-        ELSE 2
-      END
-      LIMIT 1`,
-    [raw]
-  );
-  return rows[0]?.codigo || raw;
+  const q = (sql, params) => (db || pool).query(sql, params);
+  return resolverCodigoTextoPreferindoAtivo(q, codigoOuId);
+}
+
+/** Busca produto ativo na Omie pelo SKU e sincroniza em produtos_omie. */
+async function _sincronizarProdutoOmiePorCodigoTexto(codigoTexto) {
+  const codigo = String(codigoTexto || '').trim();
+  if (!codigo || !OMIE_APP_KEY || !OMIE_APP_SECRET) return null;
+  const tentativas = [
+    { codigo_produto_integracao: codigo },
+    { codigo }
+  ];
+  for (const param of tentativas) {
+    try {
+      const omie = await omieCall('https://app.omie.com.br/api/v1/geral/produtos/', {
+        call: 'ConsultarProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [param]
+      });
+      if (!omie?.codigo_produto || omie?.faultstring) continue;
+      if (String(omie.inativo || 'N').toUpperCase() === 'S') continue;
+      if (String(omie.bloqueado || 'N').toUpperCase() === 'S') continue;
+      await sincronizarProdutoParaPostgres(omie);
+      console.log(`[omie-prod-sync] ${codigo} → id ${omie.codigo_produto} (ativo)`);
+      return String(omie.codigo_produto);
+    } catch (e) {
+      if (!omieErroProdutoNaoLocalizado(e)) {
+        console.warn(`[omie-prod-sync] ${codigo}:`, mensagemErroOmieProduto(e));
+      }
+    }
+  }
+  return null;
 }
 
 let _etqRecImpressoColsReady = false;
@@ -14819,8 +15092,17 @@ async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codig
     }]
   };
 
-  console.log(`[logistica/omie-trf-sep] ${codigo_texto}: ${origemStr} → ${destinoStr} (${qtdNum})`);
-  const resp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', payload);
+  console.log(`[logistica/omie-trf-sep] ${codigo_texto}: ${origemStr} → ${destinoStr} (${qtdNum}) id_prod=${idProdNum}`);
+  let resp;
+  try {
+    resp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', payload);
+  } catch (e) {
+    const fault = mensagemErroOmieProduto(e);
+    const err = new Error(fault);
+    err.code = 'OMIE_TRF_SEPARACAO';
+    err.omieFault = fault;
+    throw err;
+  }
   if (resp?.faultstring) {
     const err = new Error(String(resp.faultstring));
     err.code = 'OMIE_TRF_SEPARACAO';
@@ -14935,29 +15217,61 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
 
   for (const g of grupos.values()) {
     if (g.qtd <= 0) continue;
-    const idProd = await _resolveProdutoOmieCodigoProduto(client, g.codigoTexto);
+    const q = (sql, params) => client.query(sql, params);
+    let idProd = await resolverCodigoProdutoPreferindoAtivo(q, g.codigoTexto, { strictAtivo: true });
     if (!idProd) {
-      const err = new Error(`Produto "${g.codigoTexto}" não encontrado em produtos_omie.`);
+      idProd = await _sincronizarProdutoOmiePorCodigoTexto(g.codigoTexto);
+    }
+    if (!idProd) {
+      const err = new Error(
+        `Produto ativo "${g.codigoTexto}" não encontrado na Omie/produtos_omie. ` +
+        `Verifique se o cadastro está ativo e sincronizado.`
+      );
       err.code = 'OMIE_TRF_SEPARACAO';
       throw err;
     }
     const nomeDest = rows.find(r => String(r.cod_local).trim() === g.destino)?.nome_local || g.destino;
-    await _omieIncluirTrfEstoqueSeparacao({
-      origem,
-      destino: g.destino,
-      id_prod: idProd,
-      codigo_texto: g.codigoTexto,
-      qtd: g.qtd,
-      obs: _omieObsTrfSeparacaoLogistica({
-        n_solic: g.n_solic,
-        codigo: g.codigoTexto,
+    try {
+      await _omieIncluirTrfEstoqueSeparacao({
         origem,
         destino: g.destino,
+        id_prod: idProd,
+        codigo_texto: g.codigoTexto,
         qtd: g.qtd,
-        nomeDest,
-        usuario: nome_user
-      })
-    });
+        obs: _omieObsTrfSeparacaoLogistica({
+          n_solic: g.n_solic,
+          codigo: g.codigoTexto,
+          origem,
+          destino: g.destino,
+          qtd: g.qtd,
+          nomeDest,
+          usuario: nome_user
+        })
+      });
+    } catch (trfErr) {
+      // ID local desatualizado vs Omie: reconsulta, sincroniza e tenta 1x.
+      if (!omieErroProdutoNaoLocalizado(trfErr)) throw trfErr;
+      console.warn(`[logistica/omie-trf-sep] produto ${g.codigoTexto} id=${idProd} rejeitado pela Omie — ressincronizando`);
+      const idNovo = await _sincronizarProdutoOmiePorCodigoTexto(g.codigoTexto);
+      if (!idNovo || String(idNovo) === String(idProd)) throw trfErr;
+      await _omieIncluirTrfEstoqueSeparacao({
+        origem,
+        destino: g.destino,
+        id_prod: idNovo,
+        codigo_texto: g.codigoTexto,
+        qtd: g.qtd,
+        obs: _omieObsTrfSeparacaoLogistica({
+          n_solic: g.n_solic,
+          codigo: g.codigoTexto,
+          origem,
+          destino: g.destino,
+          qtd: g.qtd,
+          nomeDest,
+          usuario: nome_user
+        })
+      });
+      idProd = idNovo;
+    }
     await _logisticaPersistirTrfOmieSeparacao(client, g.ids, {
       origem,
       destino: g.destino,
@@ -16395,7 +16709,7 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 }));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.8';
+const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '2.9';
 const _agenteUrlFromVer = agenteExeUrl(_AGENTE_VERSAO_ATUAL);
 // Preferir URL da versão atual no R2. AGENTE_EXE_URL só vale se já apontar para essa versão
 // (evita ficar preso em URL antiga tipo v2.6 no env do Render).

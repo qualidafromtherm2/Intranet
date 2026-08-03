@@ -38,6 +38,112 @@ async function buscarProdutoAtivoPorCodigo(dbQuery, codigo) {
   return rows.length ? Number(rows[0].codigo_produto) : null;
 }
 
+/**
+ * Resolve o id Omie (codigo_produto) preferindo cadastro ativo/desbloqueado.
+ * Cobre o caso de código duplicado (ex.: 01.MP.N.30100) em que o ID antigo
+ * ficou inativo/excluído na Omie e ainda existe localmente.
+ *
+ * @param {Function} dbQuery
+ * @param {string|number} codigoOuId
+ * @param {{ strictAtivo?: boolean }} [opts]
+ * @returns {Promise<string|null>}
+ */
+async function resolverCodigoProdutoPreferindoAtivo(dbQuery, codigoOuId, opts = {}) {
+  const strictAtivo = !!opts.strictAtivo;
+  const raw = String(codigoOuId || '').trim();
+  if (!raw) return null;
+
+  if (/^\d+$/.test(raw)) {
+    const ativoId = await buscarProdutoAtivoPorId(dbQuery, raw);
+    if (ativoId) return String(ativoId);
+  }
+
+  const ativoCod = await buscarProdutoAtivoPorCodigo(dbQuery, raw);
+  if (ativoCod) return String(ativoCod);
+
+  // ID fantasma/inativo: usa o código do registro e busca o ativo equivalente.
+  if (/^\d+$/.test(raw)) {
+    const { rows } = await dbQuery(
+      `SELECT TRIM(codigo) AS codigo,
+              TRIM(COALESCE(codigo_produto_integracao, '')) AS integracao
+         FROM public.produtos_omie
+        WHERE codigo_produto = $1
+        LIMIT 1`,
+      [Number(raw)]
+    );
+    const candidatos = [rows[0]?.codigo, rows[0]?.integracao].filter(Boolean);
+    for (const c of candidatos) {
+      const alt = await buscarProdutoAtivoPorCodigo(dbQuery, c);
+      if (alt) return String(alt);
+    }
+  }
+
+  if (strictAtivo) return null;
+
+  // Fallback legado (etiquetas / histórico): qualquer match, ativos primeiro.
+  const { rows } = await dbQuery(
+    `SELECT codigo_produto::text AS id_omie
+       FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+      ORDER BY
+        CASE
+          WHEN COALESCE(NULLIF(UPPER(TRIM(inativo)), ''), 'N') IN ('S', 'SIM') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN COALESCE(NULLIF(UPPER(TRIM(bloqueado)), ''), 'N') IN ('S', 'SIM') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
+          WHEN TRIM(codigo) = TRIM($1) THEN 1
+          ELSE 2
+        END,
+        updated_at DESC NULLS LAST,
+        codigo_produto DESC
+      LIMIT 1`,
+    [raw]
+  );
+  return rows[0]?.id_omie || null;
+}
+
+/**
+ * Resolve o código textual (SKU) preferindo cadastro ativo/desbloqueado.
+ */
+async function resolverCodigoTextoPreferindoAtivo(dbQuery, codigoOuId) {
+  const raw = String(codigoOuId || '').trim();
+  if (!raw) return null;
+
+  const { rows } = await dbQuery(
+    `SELECT codigo
+       FROM public.produtos_omie
+      WHERE TRIM(codigo_produto::text) = TRIM($1)
+         OR TRIM(codigo) = TRIM($1)
+         OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
+      ORDER BY
+        CASE
+          WHEN COALESCE(NULLIF(UPPER(TRIM(inativo)), ''), 'N') IN ('S', 'SIM') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN COALESCE(NULLIF(UPPER(TRIM(bloqueado)), ''), 'N') IN ('S', 'SIM') THEN 1
+          ELSE 0
+        END,
+        CASE
+          WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0
+          WHEN TRIM(codigo) = TRIM($1) THEN 1
+          ELSE 2
+        END,
+        updated_at DESC NULLS LAST,
+        codigo_produto DESC
+      LIMIT 1`,
+    [raw]
+  );
+  return rows[0]?.codigo || raw;
+}
+
 async function resolverProdutoOmieAtivo({ dbQuery, candidatos = [], codigo }) {
   if (typeof dbQuery !== 'function') throw new TypeError('dbQuery é obrigatória.');
 
@@ -46,6 +152,10 @@ async function resolverProdutoOmieAtivo({ dbQuery, candidatos = [], codigo }) {
     if (!/^\d+$/.test(raw)) continue;
     const ativo = await buscarProdutoAtivoPorId(dbQuery, raw);
     if (ativo) return ativo;
+
+    // Candidato numérico inativo/excluído: tenta o ativo pelo SKU do registro.
+    const viaPreferido = await resolverCodigoProdutoPreferindoAtivo(dbQuery, raw, { strictAtivo: true });
+    if (viaPreferido) return Number(viaPreferido);
   }
 
   const porCodigo = await buscarProdutoAtivoPorCodigo(dbQuery, codigo);
@@ -56,8 +166,30 @@ async function resolverProdutoOmieAtivo({ dbQuery, candidatos = [], codigo }) {
   throw err;
 }
 
+function mensagemErroOmieProduto(errOrText) {
+  const raw = typeof errOrText === 'string'
+    ? errOrText
+    : String(errOrText?.message || errOrText || '');
+  let fault = raw;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed?.faultstring) fault = String(parsed.faultstring);
+  } catch (_) { /* texto simples */ }
+  return fault;
+}
+
+function omieErroProdutoNaoLocalizado(errOrText) {
+  const fault = mensagemErroOmieProduto(errOrText);
+  return /nenhum produto foi localizado|produto n[aã]o cadastrado|produto.+n[aã]o encontrado|c[oó]digo de integra[cç][aã]o/i.test(fault);
+}
+
 module.exports = {
+  produtoAtivoSql,
   buscarProdutoAtivoPorId,
   buscarProdutoAtivoPorCodigo,
-  resolverProdutoOmieAtivo
+  resolverCodigoProdutoPreferindoAtivo,
+  resolverCodigoTextoPreferindoAtivo,
+  resolverProdutoOmieAtivo,
+  mensagemErroOmieProduto,
+  omieErroProdutoNaoLocalizado
 };
