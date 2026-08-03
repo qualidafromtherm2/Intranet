@@ -13,7 +13,7 @@ const BUCKET = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'pro
 const STORAGE_PREFIX = 'suporte_chamados';
 
 const CRITICIDADES = new Set(['urgente', 'normal', 'baixa']);
-const STATUS_VALIDOS = new Set(['aberto', 'em_andamento', 'fechado']);
+const STATUS_VALIDOS = new Set(['aberto', 'em_andamento', 'aguardando_aprovacao', 'fechado']);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -132,16 +132,20 @@ router.get('/chamados', requireAuth, async (req, res) => {
     const admin = isAdmin(req);
     const usuario = getUsuario(req);
     const statusFiltro = String(req.query.status || '').trim().toLowerCase();
+    const somenteMeus = ['1', 'true', 'sim'].includes(String(req.query.meus || '').trim().toLowerCase());
 
     const params = [];
     const where = [];
 
-    if (!admin) {
+    // Não-admin só vê os próprios; admin em "Meus chamados" também filtra por autor
+    if (!admin || somenteMeus) {
       params.push(usuario);
       where.push(`criado_por = $${params.length}`);
     }
 
-    if (statusFiltro && STATUS_VALIDOS.has(statusFiltro)) {
+    if (statusFiltro === 'aberto') {
+      where.push(`status IN ('aberto', 'em_andamento')`);
+    } else if (statusFiltro && STATUS_VALIDOS.has(statusFiltro)) {
       params.push(statusFiltro);
       where.push(`status = $${params.length}`);
     }
@@ -153,14 +157,19 @@ router.get('/chamados', requireAuth, async (req, res) => {
         FROM "Suporte_tecnico"."Chamado"
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY
-         CASE status WHEN 'aberto' THEN 0 WHEN 'em_andamento' THEN 1 ELSE 2 END,
+         CASE status
+           WHEN 'aberto' THEN 0
+           WHEN 'em_andamento' THEN 1
+           WHEN 'aguardando_aprovacao' THEN 2
+           ELSE 3
+         END,
          CASE criticidade WHEN 'urgente' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
          criado_em DESC
        LIMIT 200
     `;
 
     const { rows } = await dbQuery(sql, params);
-    res.json({ ok: true, admin, chamados: rows });
+    res.json({ ok: true, admin, usuario, chamados: rows });
   } catch (err) {
     console.error('[suporte/chamados] listar:', err);
     res.status(500).json({ error: err.message || 'Falha ao listar chamados' });
@@ -264,27 +273,60 @@ router.post(
   }
 );
 
-// PATCH /api/suporte/chamados/:id  (admin: prazo, status, fechar, observação)
+// PATCH /api/suporte/chamados/:id
+// - admin: prazo, status (incl. enviar p/ aguardando_aprovacao), observação
+// - autor: aprovar (fecha) quando status = aguardando_aprovacao
 router.patch('/chamados/:id', requireAuth, async (req, res) => {
   try {
     await ensureSchema();
-
-    if (!isAdmin(req)) {
-      return res.status(403).json({ error: 'Apenas admin pode alterar chamado.' });
-    }
 
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) {
       return res.status(400).json({ error: 'ID inválido.' });
     }
 
-    const { rows: existing } = await dbQuery(
-      `SELECT id, status FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+    const { rows: existingRows } = await dbQuery(
+      `SELECT id, status, criado_por FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
       [id]
     );
-    if (!existing[0]) return res.status(404).json({ error: 'Chamado não encontrado.' });
+    const existing = existingRows[0];
+    if (!existing) return res.status(404).json({ error: 'Chamado não encontrado.' });
 
     const body = req.body || {};
+    const admin = isAdmin(req);
+    const usuario = getUsuario(req);
+    const isAuthor = String(existing.criado_por || '') === usuario;
+    const querAprovar = body.aprovar === true || body.aprovar === 'true';
+
+    // Solicitante aprova o fechamento
+    if (querAprovar) {
+      if (!isAuthor) {
+        return res.status(403).json({ error: 'Somente quem abriu o chamado pode aprovar.' });
+      }
+      if (String(existing.status || '').toLowerCase() !== 'aguardando_aprovacao') {
+        return res.status(400).json({ error: 'Chamado não está aguardando aprovação.' });
+      }
+
+      const { rows } = await dbQuery(
+        `UPDATE "Suporte_tecnico"."Chamado"
+            SET status = 'fechado',
+                fechado_por = $1,
+                fechado_por_nome = $2,
+                fechado_em = NOW(),
+                atualizado_em = NOW()
+          WHERE id = $3
+          RETURNING id, descricao, criticidade, status, prazo, anexos,
+                    criado_por, criado_por_nome, criado_em, atualizado_em,
+                    fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+        [usuario, getNomeUsuario(req), id]
+      );
+      return res.json({ ok: true, chamado: rows[0] });
+    }
+
+    if (!admin) {
+      return res.status(403).json({ error: 'Apenas admin pode alterar chamado.' });
+    }
+
     const sets = ['atualizado_em = NOW()'];
     const params = [];
 
@@ -311,6 +353,9 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     if (body.fechar === true || body.fechar === 'true') {
       status = 'fechado';
     }
+    if (body.enviar_aprovacao === true || body.enviar_aprovacao === 'true') {
+      status = 'aguardando_aprovacao';
+    }
     if (status) {
       if (!STATUS_VALIDOS.has(status)) {
         return res.status(400).json({ error: 'Status inválido.' });
@@ -318,7 +363,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
       params.push(status);
       sets.push(`status = $${params.length}`);
       if (status === 'fechado') {
-        params.push(getUsuario(req));
+        params.push(usuario);
         sets.push(`fechado_por = $${params.length}`);
         params.push(getNomeUsuario(req));
         sets.push(`fechado_por_nome = $${params.length}`);
