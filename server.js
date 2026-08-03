@@ -13041,6 +13041,50 @@ async function _etqResolverLayoutDaImpressora(pcName, printerName, tipoBase = 'i
   }
 }
 
+async function _etqResolverLayoutPorFormato(formato, pcName, printerName) {
+  const valor = String(formato || '').trim().toLowerCase();
+  if (!valor) return _etqResolverLayoutDaImpressora(pcName, printerName, 'impressao');
+  if (!['pequena', 'grande'].includes(valor)) {
+    const err = new Error('Formato de etiqueta inválido. Escolha pequena ou grande.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const [largura, altura] = valor === 'grande' ? [70, 115] : [50, 30];
+  if (pcName && printerName) {
+    const vinculado = await _etqResolverLayoutDaImpressora(pcName, printerName, 'impressao');
+    const larguraVinculada = Number(vinculado?.label_width) || 0;
+    const alturaVinculada = Number(vinculado?.label_height) || 0;
+    if (Math.abs(larguraVinculada - largura) < 0.6 && Math.abs(alturaVinculada - altura) < 0.6) {
+      return vinculado;
+    }
+  }
+  const { rows } = await pool.query(
+    `SELECT chave
+       FROM etiqueta."ETQ_layout_config"
+      WHERE ativo = true
+        AND perfil = true
+        AND COALESCE(tipo_base, 'impressao') = 'impressao'
+        AND ABS(COALESCE(label_width, 0) - $1) < 0.6
+        AND ABS(COALESCE(label_height, 0) - $2) < 0.6
+      ORDER BY atualizado_em DESC
+      LIMIT 1`,
+    [largura, altura]
+  );
+  if (!rows[0]?.chave) {
+    const err = new Error(`Nenhum perfil ativo ${largura} × ${altura} mm foi encontrado.`);
+    err.statusCode = 422;
+    throw err;
+  }
+  const layout = await _carregarLayoutEtiqueta(rows[0].chave);
+  if (!layout) {
+    const err = new Error(`Não foi possível carregar o perfil ${largura} × ${altura} mm.`);
+    err.statusCode = 422;
+    throw err;
+  }
+  return layout;
+}
+
 async function _etqSeedLayoutDefaultsSeVazio() {
   try {
     const { rows } = await pool.query(
@@ -16136,45 +16180,57 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
 });
 
 // POST /api/etiquetas/rec-impresso/imprimir-ids
-// Body: { ids: [idImpresso,...], destino_agente?, impressora?, usuario? }
-// Enfileira ZPL já gravado em ETQ_rec_impresso (fonte movimentacao / armazenamento).
+// Body: { ids: [idImpresso,...], formato: 'pequena'|'grande', destino_agente?, impressora?, usuario? }
+// Regenera o ZPL no perfil atual e preserva o ID já atribuído à etiqueta.
 app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req, res) => {
   try {
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
     if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
 
     const result = await pool.query(
-      `SELECT id, codigo_produto, descricao_produto, endereco, data_emissao, conteudo_zpl
-         FROM etiqueta."ETQ_rec_impresso"
-        WHERE id = ANY($1::int[])
-        ORDER BY id`,
+      `SELECT i.id,
+              COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto) AS codigo_produto,
+              COALESCE(NULLIF(TRIM(i.descricao_produto), ''), r.descricao_produto) AS descricao_produto,
+              i.endereco,
+              COALESCE(NULLIF(TRIM(r.lote), ''), NULLIF(TRIM(i.endereco), ''), 'MOV') AS lote,
+              COALESCE(NULLIF(TRIM(i.data_emissao), ''), r.data_emissao) AS data_emissao
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+        WHERE i.id = ANY($1::int[])
+        ORDER BY i.id`,
       [ids]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Nenhuma etiqueta encontrada.' });
 
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const zplBlocks = [];
-
-    for (const row of result.rows) {
-      let zpl = String(row.conteudo_zpl || '').trim();
-      if (!zpl) {
-        const codigoTexto = await _resolveProdutoOmieCodigoTexto(pool, row.codigo_produto) || row.codigo_produto;
-        const codProd = sanitize(codigoTexto, 30);
-        const descProd = sanitize(row.descricao_produto, 70);
-        const loteTxt = sanitize(row.endereco || 'MOV', 40);
-        const dataExibir = sanitize(row.data_emissao, 10);
-        zpl = _gerarZplParaImpressao({ codProd, descProd, idImpresso: row.id, loteTxt, dataExibir });
-        await pool.query(
-          `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
-          [zpl, row.id]
-        );
-      }
-      zplBlocks.push(zpl);
-    }
-
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
     const destiAg = String(req.body?.destino_agente || '').trim() || null;
     const impres  = String(req.body?.impressora || '').trim() || null;
+    const formato = String(req.body?.formato || '').trim().toLowerCase();
+    const layoutReimpressao = await _etqResolverLayoutPorFormato(formato, destiAg, impres);
+
+    for (const row of result.rows) {
+      const codigoTexto = await _resolveProdutoOmieCodigoTexto(pool, row.codigo_produto) || row.codigo_produto;
+      const codProd = sanitize(codigoTexto, 30);
+      const descProd = sanitize(row.descricao_produto, 160);
+      const loteTxt = sanitize(row.lote, 40);
+      const dataExibir = sanitize(row.data_emissao, 10);
+      const zpl = _gerarZplParaImpressao({
+        codProd,
+        descProd,
+        idImpresso: row.id,
+        loteTxt,
+        dataExibir,
+        layout: layoutReimpressao,
+      });
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
+        [zpl, row.id]
+      );
+      zplBlocks.push(zpl);
+    }
+
     const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
 
     if (destiAg || impres || req.body?.via_fila !== false) {
@@ -16216,7 +16272,7 @@ app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req,
     });
   } catch (err) {
     console.error('[etiquetas/rec-impresso/imprimir-ids]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao imprimir etiqueta(s).' });
+    res.status(Number(err?.statusCode) || 500).json({ error: err?.message || 'Falha ao imprimir etiqueta(s).' });
   }
 });
 

@@ -12,6 +12,126 @@
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
 
+/* Guardar materiais: escolha do formato antes de regenerar a reimpressão. */
+.etq-reprint-format-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 2250;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, .72);
+  backdrop-filter: blur(5px);
+}
+
+.etq-reprint-format-box {
+  width: min(460px, 100%);
+  padding: 20px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .28);
+  color: #0f172a;
+}
+
+.etq-reprint-format-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.etq-reprint-format-header small {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .11em;
+}
+
+.etq-reprint-format-header h3 {
+  margin: 3px 0 0;
+  font-size: 18px;
+}
+
+.etq-reprint-format-header button {
+  border: 0;
+  background: transparent;
+  color: #64748b;
+  font-size: 26px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.etq-reprint-format-box > p {
+  margin: 12px 0 16px;
+  color: #475569;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.etq-reprint-format-options {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.etq-reprint-format-options button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 76px;
+  padding: 13px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.etq-reprint-format-options button:hover,
+.etq-reprint-format-options button:focus-visible {
+  border-color: #2563eb;
+  background: #eff6ff;
+  outline: 2px solid rgba(37, 99, 235, .18);
+}
+
+.etq-reprint-format-options i {
+  width: 34px;
+  color: #2563eb;
+  font-size: 22px;
+  text-align: center;
+}
+
+.etq-reprint-format-options span,
+.etq-reprint-format-options strong,
+.etq-reprint-format-options small {
+  display: block;
+}
+
+.etq-reprint-format-options small {
+  margin-top: 3px;
+  color: #64748b;
+  font-size: 11px;
+}
+
+.etq-reprint-format-cancel {
+  width: 100%;
+  margin-top: 12px;
+  padding: 9px 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+@media (max-width: 520px) {
+  .etq-reprint-format-options { grid-template-columns: 1fr; }
+  .etq-reprint-format-box { padding: 16px; }
+}
+
 /* PIR v2 — interior da inspeção alinhado às telas operacionais */
 #qualidadeInspecaoModal {
   padding: 24px !important;
