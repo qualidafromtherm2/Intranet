@@ -2061,11 +2061,15 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
                 TRIM(p.codigo),
                 COALESCE(p.codigo_produto_integracao, '')
               )
-        WHERE img.codigo_produto::text = $1
-           OR TRIM(p.codigo) = $1
-           OR p.codigo_produto::text = $1
-           OR COALESCE(p.codigo_produto_integracao, '') = $1
-        ORDER BY img.pos NULLS LAST, img.id ASC
+        WHERE COALESCE(img.ativo, TRUE) = TRUE
+          AND TRIM(COALESCE(img.url_imagem, '')) <> ''
+          AND (
+            img.codigo_produto::text = $1
+            OR TRIM(p.codigo) = $1
+            OR p.codigo_produto::text = $1
+            OR COALESCE(p.codigo_produto_integracao, '') = $1
+          )
+        ORDER BY img.pos NULLS LAST, img.id DESC
         LIMIT 1`,
       [codigoProduto]
     );
@@ -13624,7 +13628,9 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                    TRIM(COALESCE(p.codigo, '')),
                    COALESCE(p.codigo_produto_integracao, '')
                  )
-                 ORDER BY pi.pos NULLS LAST, pi.id ASC
+                   AND COALESCE(pi.ativo, TRUE) = TRUE
+                   AND TRIM(COALESCE(pi.url_imagem, '')) <> ''
+                 ORDER BY pi.pos NULLS LAST, pi.id DESC
                  LIMIT 1
               ) img ON TRUE
              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
@@ -33819,7 +33825,8 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
          FROM public.produtos_omie_imagens
         WHERE codigo_produto = $1
           AND COALESCE(ativo, true) = true
-        ORDER BY pos NULLS LAST, id ASC
+          AND TRIM(COALESCE(url_imagem, '')) <> ''
+        ORDER BY pos NULLS LAST, id DESC
         LIMIT 1`,
       [codigoProduto]
     );
