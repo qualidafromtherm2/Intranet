@@ -360,6 +360,7 @@ app.use('/api/sac', require('./routes/vendasRelatorio'));
 app.use('/api/sac', require('./routes/logisticaRelatorio'));
 app.use('/api/ai', require('./routes/ai_assistant'));
 app.use('/api/producao', require('./routes/producao'));
+app.use('/api/testes', require('./routes/testesProducao'));
 app.use('/api/estrutura', require('./routes/estrutura'));
 app.use('/api/transformacao-mp', require('./routes/transformacaoMp'));
 app.use('/api/vipp',    require('./routes/vipp'));
