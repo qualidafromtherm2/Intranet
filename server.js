@@ -13382,19 +13382,25 @@ function _descricaoParaZpl(descProd) {
 }
 
 // ── Helper: gera ZPL para IMPRESSÃO física (layout Etiquetas disponíveis) ──
-function _gerarZplParaImpressao({ codProd, descProd, idImpresso, loteTxt, dataExibir, layout }) {
+function _gerarZplParaImpressao({ codProd, descProd, idImpresso, idExibir, loteTxt, dataExibir, layout }) {
   const lay = layout || (_etqLayoutCache && _etqLayoutCache.impressao) || null;
+  const idQr = String(idImpresso || '');
+  const idShow = String(idExibir != null && String(idExibir).trim() !== '' ? idExibir : idImpresso || '');
   const vars = {
     codigo: String(codProd || ''),
     descricao: String(descProd || '').slice(0, 160).replace(/[\\^~]/g, ' '),
     lote: String(loteTxt || ''),
     data: String(dataExibir || ''),
-    id: String(idImpresso || ''),
+    id: idShow,
   };
-  vars.qr = `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${vars.lote}|ID${vars.id}`;
+  // QR sempre com id numérico (parser da SEP só aceita ID\d+)
+  vars.qr = `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${vars.lote}|ID${idQr}`;
 
   const fromLayout = lay ? _etqGerarZplDoLayout(lay, vars) : null;
-  if (fromLayout) return fromLayout;
+  if (fromLayout) {
+    // Layout usa {{id}} no texto e {{qr}} no QR — vars já estão corretos
+    return fromLayout;
+  }
 
   const { texto: descTxt, linhas: numLinhasDesc } = _descricaoParaZpl(descProd);
   const dadosX = 150;
@@ -15651,14 +15657,16 @@ async function _logisticaDevolverTrfOmieItem(client, item, qtdDevolver, { nome_u
   });
 }
 
-/** Credita ETQ proporcional à qtd devolvida; atualiza ou limpa metadados etq_sep_*. */
-async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver) {
+/** Credita ETQ proporcional à qtd devolvida; atualiza ou limpa metadados etq_sep_*.
+ *  modoEtq: 'mesmo_id' | 'novo_id' — nunca escolhe outro ID existente aleatório. */
+async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver, { modoEtq = 'mesmo_id', usuario = null } = {}) {
   const qtdDev = parseFloat(qtdDevolver);
-  if (!Number.isFinite(qtdDev) || qtdDev <= 0) return;
+  if (!Number.isFinite(qtdDev) || qtdDev <= 0) return { etiquetas_criadas: [], modo: modoEtq };
   await _ensureEtqSepColumns(client);
+  await _ensureEtqDevolucaoColumns(client);
 
   const cod = String(item.etq_sep_codigo || '').trim();
-  if (!cod) return;
+  if (!cod) return { etiquetas_criadas: [], modo: modoEtq };
 
   let parts = [];
   if (item.etq_sep_detalhes) {
@@ -15676,23 +15684,41 @@ async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver) {
       parts = [{ endereco: end, qtd: qFull }];
     }
   }
-  if (!parts.length) return;
+  if (!parts.length) return { etiquetas_criadas: [], modo: modoEtq };
 
   const qtdFull = parts.reduce((s, p) => s + (parseFloat(p.qtd) || 0), 0);
-  if (qtdFull <= 0) return;
+  if (qtdFull <= 0) return { etiquetas_criadas: [], modo: modoEtq };
   const fator = Math.min(1, qtdDev / qtdFull);
+  const modo = String(modoEtq || 'mesmo_id') === 'novo_id' ? 'novo_id' : 'mesmo_id';
+  const etiquetasCriadas = [];
 
   for (const p of parts) {
     const end = String(p.endereco || '').trim();
+    const etqId = parseInt(p.etq_id, 10);
     const qPart = (parseFloat(p.qtd) || 0) * fator;
-    if (!end || qPart <= 0) continue;
-    await _etqCreditarEndereco(client, {
-      codigo: cod,
-      endereco: end,
-      qtd: qPart,
-      usuario: null,
-      codigoTexto: cod
-    });
+    if (qPart <= 0) continue;
+
+    if (Number.isFinite(etqId) && etqId > 0) {
+      if (modo === 'novo_id') {
+        const criada = await _etqCriarEtiquetaFilhaDevolucao(client, {
+          idPai: etqId,
+          qtd: qPart,
+          usuario
+        });
+        if (criada) etiquetasCriadas.push(criada);
+      } else {
+        await _etqCreditarPorId(client, { id: etqId, qtd: qPart });
+      }
+    } else if (end) {
+      // Legado sem ID: só crédito por endereço (não dá para gerar 10.x)
+      await _etqCreditarEndereco(client, {
+        codigo: cod,
+        endereco: end,
+        qtd: qPart,
+        usuario: null,
+        codigoTexto: cod
+      });
+    }
   }
 
   if (fator >= 1 - 1e-9) {
@@ -15709,11 +15735,12 @@ async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver) {
     const restante = parts
       .map(p => ({
         endereco: String(p.endereco || '').trim(),
-        qtd: Math.max(0, (parseFloat(p.qtd) || 0) * (1 - fator))
+        qtd: Math.max(0, (parseFloat(p.qtd) || 0) * (1 - fator)),
+        etq_id: p.etq_id != null ? parseInt(p.etq_id, 10) || null : null
       }))
-      .filter(p => p.endereco && p.qtd > 1e-9);
+      .filter(p => (p.endereco || p.etq_id) && p.qtd > 1e-9);
     const qtdRest = restante.reduce((s, p) => s + p.qtd, 0);
-    const endResumo = restante.map(p => p.endereco).join(' + ');
+    const endResumo = restante.map(p => p.endereco).filter(Boolean).join(' + ');
     await client.query(
       `UPDATE solicitacao_produto.itens_solicitados
           SET etq_sep_endereco = $2,
@@ -15723,6 +15750,118 @@ async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver) {
       [item.id, endResumo || null, qtdRest || null, restante.length ? JSON.stringify(restante) : null]
     );
   }
+
+  return { etiquetas_criadas: etiquetasCriadas, modo };
+}
+
+async function _ensureEtqDevolucaoColumns(client) {
+  const db = client || pool;
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS id_pai INTEGER`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS id_rotulo TEXT`);
+}
+
+/** Credita quantidade de volta no mesmo ID da etiqueta (não cria linha nova). */
+async function _etqCreditarPorId(client, { id, qtd }) {
+  const etqId = parseInt(id, 10);
+  const qtdNum = parseFloat(qtd);
+  if (!etqId || !Number.isFinite(qtdNum) || qtdNum <= 0) return null;
+  const { rows } = await client.query(
+    `SELECT id, COALESCE(qtd, 0) AS qtd, TRIM(endereco) AS endereco
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE id = $1
+      FOR UPDATE`,
+    [etqId]
+  );
+  if (!rows[0]) {
+    const err = new Error(`Etiqueta ID ${etqId} não encontrada para devolver saldo.`);
+    err.code = 'ETQ_ID_NAO_ENCONTRADO';
+    throw err;
+  }
+  const novaQtd = Number(rows[0].qtd || 0) + qtdNum;
+  await client.query(
+    `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+    [novaQtd, etqId]
+  );
+  return { id: etqId, endereco: rows[0].endereco || null, qtd: novaQtd, delta: qtdNum };
+}
+
+/** Próximo rótulo filho: 10.1, 10.2, ... (não reutiliza outro ID existente). */
+async function _etqProximoRotuloFilho(client, idPai) {
+  const pai = parseInt(idPai, 10);
+  if (!pai) return null;
+  const prefix = `${pai}.`;
+  const { rows } = await client.query(
+    `SELECT id_rotulo
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE id_pai = $1
+         OR (id_rotulo IS NOT NULL AND id_rotulo LIKE $2)`,
+    [pai, `${prefix}%`]
+  );
+  let maxSeq = 0;
+  for (const r of rows) {
+    const rot = String(r.id_rotulo || '');
+    const m = rot.match(new RegExp(`^${pai}\\.(\\d+)$`));
+    if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10) || 0);
+  }
+  return `${pai}.${maxSeq + 1}`;
+}
+
+/** Cria etiqueta filha (ex.: 10.1) copiando dados do pai — sem enfileirar impressão. */
+async function _etqCriarEtiquetaFilhaDevolucao(client, { idPai, qtd, usuario }) {
+  await _ensureEtqDevolucaoColumns(client);
+  const pai = parseInt(idPai, 10);
+  const qtdNum = parseFloat(qtd);
+  if (!pai || !Number.isFinite(qtdNum) || qtdNum <= 0) return null;
+
+  const { rows } = await client.query(
+    `SELECT id, origem_id, unidade, data_emissao, endereco, complemento,
+            codigo_produto, descricao_produto, fonte
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE id = $1
+      FOR UPDATE`,
+    [pai]
+  );
+  const paiRow = rows[0];
+  if (!paiRow) {
+    const err = new Error(`Etiqueta ID ${pai} não encontrada para gerar devolução.`);
+    err.code = 'ETQ_ID_NAO_ENCONTRADO';
+    throw err;
+  }
+
+  const idRotulo = await _etqProximoRotuloFilho(client, pai);
+  const { rows: ins } = await client.query(
+    `INSERT INTO etiqueta."ETQ_rec_impresso"
+       (origem_id, qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao,
+        endereco, complemento, codigo_produto, descricao_produto, fonte, id_pai, id_rotulo)
+     VALUES ($1, $2, COALESCE($3, 'UN'), $4, '', $5, $6, $7, $8, $9, COALESCE($10, 'devolucao_sep'), $11, $12)
+     RETURNING id, id_rotulo, endereco, qtd, codigo_produto, descricao_produto, data_emissao`,
+    [
+      paiRow.origem_id,
+      qtdNum,
+      paiRow.unidade || 'UN',
+      paiRow.data_emissao,
+      usuario || null,
+      paiRow.endereco || null,
+      paiRow.complemento || null,
+      paiRow.codigo_produto || null,
+      paiRow.descricao_produto || null,
+      paiRow.fonte || 'devolucao_sep',
+      pai,
+      idRotulo
+    ]
+  );
+  const criada = ins[0];
+  console.log(`[etiqueta] Devolução SEP: criada etiqueta ${criada.id} rótulo ${idRotulo} (pai ${pai}) qtd=${qtdNum}`);
+  return {
+    id: criada.id,
+    id_rotulo: criada.id_rotulo,
+    id_pai: pai,
+    endereco: criada.endereco || null,
+    qtd: parseFloat(criada.qtd) || qtdNum,
+    codigo_produto: criada.codigo_produto || null,
+    descricao_produto: criada.descricao_produto || null,
+    data_emissao: criada.data_emissao || null
+  };
 }
 
 async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
@@ -16356,11 +16495,13 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
 // Regenera o ZPL no perfil atual e preserva o ID já atribuído à etiqueta.
 app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req, res) => {
   try {
+    await _ensureEtqDevolucaoColumns(pool);
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
     if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
 
     const result = await pool.query(
       `SELECT i.id,
+              NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo,
               COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto) AS codigo_produto,
               COALESCE(NULLIF(TRIM(i.descricao_produto), ''), r.descricao_produto) AS descricao_produto,
               i.endereco,
@@ -16392,6 +16533,7 @@ app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req,
         codProd,
         descProd,
         idImpresso: row.id,
+        idExibir: row.id_rotulo || row.id,
         loteTxt,
         dataExibir,
         layout: layoutReimpressao,
@@ -21276,6 +21418,7 @@ async function ensureSolicitacaoProdutoQtyColumns() {
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
   await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
@@ -22564,6 +22707,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                i.quantidade_solicitada::numeric AS quantidade_solicitada,
                i.quantidade_separada::numeric AS quantidade_separada,
                i.omie_sep_origem, i.omie_sep_destino, i.omie_sep_qtd::numeric AS omie_sep_qtd,
+               i.etq_sep_endereco, i.etq_sep_qtd::numeric AS etq_sep_qtd, i.etq_sep_detalhes,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
@@ -23007,6 +23151,7 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
     const solicId = parseInt(req.body?.solic_id, 10);
     const qtdReq = parseFloat(req.body?.quantidade);
     const motivo = String(req.body?.motivo || '').trim();
+    const etqModo = String(req.body?.etq_modo || 'mesmo_id').trim() === 'novo_id' ? 'novo_id' : 'mesmo_id';
     if (!solicId) return res.status(400).json({ ok: false, error: 'solic_id inválido.' });
     if (!Number.isFinite(qtdReq) || qtdReq <= 0) {
       return res.status(400).json({ ok: false, error: 'Informe a quantidade a devolver.' });
@@ -23068,10 +23213,37 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
     const qtdDev = Math.min(qtdReq, omieQtd);
     const total = qtdDev >= omieQtd - 1e-9;
 
-    await _logisticaDevolverTrfOmieItem(client, item, qtdDev, { nome_user: nomeUser });
-    await _etqDevolverDebitoSeparacaoQtd(client, item, qtdDev);
+    // IDs de etiqueta de origem (para resposta / auditoria)
+    let etqOrigemIds = [];
+    try {
+      const dets = item.etq_sep_detalhes
+        ? (typeof item.etq_sep_detalhes === 'string' ? JSON.parse(item.etq_sep_detalhes) : item.etq_sep_detalhes)
+        : [];
+      if (Array.isArray(dets)) {
+        etqOrigemIds = [...new Set(dets.map(d => parseInt(d.etq_id, 10)).filter(n => Number.isFinite(n) && n > 0))];
+      }
+    } catch (_) { etqOrigemIds = []; }
 
-    const obsMov = `Devolução ${total ? 'total' : 'parcial'}: ${qtdDev} — ${motivo}`.slice(0, 500);
+    if (etqModo === 'novo_id' && !etqOrigemIds.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        error: 'Não há ID de etiqueta na separação. Só é possível devolver no endereço (modo mesmo ID/endereço).'
+      });
+    }
+
+    await _logisticaDevolverTrfOmieItem(client, item, qtdDev, { nome_user: nomeUser });
+    const etqResult = await _etqDevolverDebitoSeparacaoQtd(client, item, qtdDev, {
+      modoEtq: etqModo,
+      usuario: nomeUser
+    });
+    const etiquetasCriadas = Array.isArray(etqResult?.etiquetas_criadas) ? etqResult.etiquetas_criadas : [];
+
+    const obsMov = (`Devolução ${total ? 'total' : 'parcial'}: ${qtdDev} — ${motivo}`
+      + (etqModo === 'novo_id' && etiquetasCriadas.length
+        ? ` · ETQ ${etiquetasCriadas.map(e => e.id_rotulo || e.id).join(', ')}`
+        : (etqOrigemIds.length ? ` · ETQ ${etqOrigemIds.join(', ')}` : ''))
+    ).slice(0, 500);
 
     if (total) {
       await registrarMovimentacaoKanbanItens(client, [solicId], 'Devolvido', req, obsMov);
@@ -23109,14 +23281,17 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
     }
 
     await client.query('COMMIT');
-    console.log(`[logistica/devolver] item ${solicId} qtd=${qtdDev} total=${total} por user ${id_user}`);
+    console.log(`[logistica/devolver] item ${solicId} qtd=${qtdDev} total=${total} etq=${etqModo} por user ${id_user}`);
     res.json({
       ok: true,
       solic_id: solicId,
       quantidade: qtdDev,
       total,
       status: total ? 'Devolvido' : 'Concluído',
-      omie_origem: orig
+      omie_origem: orig,
+      etq_modo: etqModo,
+      etq_ids_origem: etqOrigemIds,
+      etiquetas_criadas: etiquetasCriadas
     });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch (_) {}
