@@ -133,6 +133,9 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       rEtq,
       rEvolSep,
       rTopSep,
+      rTempoEnvio,
+      rTempoFaixas,
+      rTempoDetalhe,
     ] = await Promise.all([
       safeQuery(`
         SELECT
@@ -257,6 +260,129 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
           AND COALESCE(criado_em, NOW())::date < $2::date
         GROUP BY 1 ORDER BY total DESC, qtd_solicitada DESC LIMIT 15
       `, rangeParams),
+      safeQuery(`
+        WITH sep_fim AS (
+          SELECT i.n_solic,
+                 MAX(m.movimentado_em) AS separado_em
+            FROM solicitacao_produto.itens_solicitados i
+            JOIN solicitacao_produto.movimentacoes_kanban_itens m
+              ON m.solic_id = i.id
+           WHERE m.status_destino IN ('Concluído', 'Concluido')
+             AND NULLIF(TRIM(i.n_solic), '') IS NOT NULL
+           GROUP BY i.n_solic
+        ),
+        base AS (
+          SELECT e.id,
+                 e.numero_sep,
+                 e.usuario,
+                 e.created_at AS criado_em,
+                 sf.separado_em,
+                 COALESCE(e.rastreio_quando, e.finalizado_em) AS enviado_em,
+                 COALESCE(NULLIF(TRIM(e.rastreio_status), ''), 'Pendente') AS status
+            FROM envios.solicitacoes e
+            LEFT JOIN sep_fim sf ON sf.n_solic = e.numero_sep
+           WHERE COALESCE(e.created_at, NOW())::date >= $1::date
+             AND COALESCE(e.created_at, NOW())::date < $2::date
+             AND COALESCE(e.rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+        ),
+        calc AS (
+          SELECT *,
+                 CASE WHEN separado_em IS NOT NULL AND separado_em >= criado_em
+                      THEN EXTRACT(EPOCH FROM (separado_em - criado_em)) / 3600.0 END AS h_criado_sep,
+                 CASE WHEN enviado_em IS NOT NULL AND separado_em IS NOT NULL AND enviado_em >= separado_em
+                      THEN EXTRACT(EPOCH FROM (enviado_em - separado_em)) / 3600.0 END AS h_sep_envio,
+                 CASE WHEN enviado_em IS NOT NULL AND enviado_em >= criado_em
+                      THEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 END AS h_ciclo,
+                 CASE WHEN enviado_em IS NULL AND status NOT IN ('Enviado', 'Entregue', 'Finalizado')
+                      THEN EXTRACT(EPOCH FROM (NOW() - criado_em)) / 3600.0 END AS h_aberto
+            FROM base
+        )
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE enviado_em IS NOT NULL)::int AS enviados,
+          COUNT(*) FILTER (WHERE h_criado_sep IS NOT NULL)::int AS com_sep,
+          COUNT(*) FILTER (WHERE h_sep_envio IS NOT NULL)::int AS com_sep_envio,
+          COUNT(*) FILTER (WHERE h_ciclo IS NOT NULL)::int AS com_ciclo,
+          COUNT(*) FILTER (WHERE h_aberto IS NOT NULL)::int AS pendentes,
+          ROUND(AVG(h_criado_sep)::numeric, 1) AS media_h_criado_sep,
+          ROUND(AVG(h_sep_envio)::numeric, 1) AS media_h_sep_envio,
+          ROUND(AVG(h_ciclo)::numeric, 1) AS media_h_ciclo,
+          ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY h_ciclo)
+                 FILTER (WHERE h_ciclo IS NOT NULL))::numeric, 1) AS mediana_h_ciclo,
+          ROUND(AVG(h_aberto)::numeric, 1) AS media_h_pendente
+        FROM calc
+      `, rangeParams),
+      safeQuery(`
+        WITH base AS (
+          SELECT e.id,
+                 COALESCE(e.rastreio_quando, e.finalizado_em) AS enviado_em,
+                 e.created_at AS criado_em
+            FROM envios.solicitacoes e
+           WHERE COALESCE(e.created_at, NOW())::date >= $1::date
+             AND COALESCE(e.created_at, NOW())::date < $2::date
+             AND COALESCE(e.rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+             AND COALESCE(e.rastreio_quando, e.finalizado_em) IS NOT NULL
+             AND COALESCE(e.rastreio_quando, e.finalizado_em) >= e.created_at
+        ),
+        buckets AS (
+          SELECT CASE
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 24 THEN 'até 24h'
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 48 THEN '1–2 dias'
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 120 THEN '2–5 dias'
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 240 THEN '5–10 dias'
+                   ELSE 'mais de 10 dias'
+                 END AS faixa,
+                 CASE
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 24 THEN 1
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 48 THEN 2
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 120 THEN 3
+                   WHEN EXTRACT(EPOCH FROM (enviado_em - criado_em)) / 3600.0 < 240 THEN 4
+                   ELSE 5
+                 END AS ord
+            FROM base
+        )
+        SELECT faixa, COUNT(*)::int AS total
+          FROM buckets
+         GROUP BY faixa, ord
+         ORDER BY ord
+      `, rangeParams),
+      safeQuery(`
+        WITH sep_fim AS (
+          SELECT i.n_solic, MAX(m.movimentado_em) AS separado_em
+            FROM solicitacao_produto.itens_solicitados i
+            JOIN solicitacao_produto.movimentacoes_kanban_itens m ON m.solic_id = i.id
+           WHERE m.status_destino IN ('Concluído', 'Concluido')
+             AND NULLIF(TRIM(i.n_solic), '') IS NOT NULL
+           GROUP BY i.n_solic
+        )
+        SELECT e.id,
+               e.numero_sep,
+               e.usuario,
+               e.created_at AS criado_em,
+               sf.separado_em,
+               COALESCE(e.rastreio_quando, e.finalizado_em) AS enviado_em,
+               COALESCE(NULLIF(TRIM(e.rastreio_status), ''), 'Pendente') AS status,
+               CASE WHEN sf.separado_em IS NOT NULL AND sf.separado_em >= e.created_at
+                    THEN ROUND((EXTRACT(EPOCH FROM (sf.separado_em - e.created_at)) / 3600.0)::numeric, 1) END AS h_criado_sep,
+               CASE WHEN COALESCE(e.rastreio_quando, e.finalizado_em) IS NOT NULL
+                         AND sf.separado_em IS NOT NULL
+                         AND COALESCE(e.rastreio_quando, e.finalizado_em) >= sf.separado_em
+                    THEN ROUND((EXTRACT(EPOCH FROM (COALESCE(e.rastreio_quando, e.finalizado_em) - sf.separado_em)) / 3600.0)::numeric, 1) END AS h_sep_envio,
+               CASE WHEN COALESCE(e.rastreio_quando, e.finalizado_em) IS NOT NULL
+                         AND COALESCE(e.rastreio_quando, e.finalizado_em) >= e.created_at
+                    THEN ROUND((EXTRACT(EPOCH FROM (COALESCE(e.rastreio_quando, e.finalizado_em) - e.created_at)) / 3600.0)::numeric, 1)
+                    WHEN COALESCE(e.rastreio_quando, e.finalizado_em) IS NULL
+                         AND COALESCE(NULLIF(TRIM(e.rastreio_status), ''), 'Pendente') NOT IN ('Enviado', 'Entregue', 'Finalizado')
+                    THEN ROUND((EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 3600.0)::numeric, 1)
+               END AS h_ciclo_ou_aberto
+          FROM envios.solicitacoes e
+          LEFT JOIN sep_fim sf ON sf.n_solic = e.numero_sep
+         WHERE COALESCE(e.created_at, NOW())::date >= $1::date
+           AND COALESCE(e.created_at, NOW())::date < $2::date
+           AND COALESCE(e.rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+         ORDER BY e.created_at DESC
+         LIMIT 25
+      `, rangeParams),
     ]);
 
     const kpiSep = rKpiSep.rows[0] || {};
@@ -272,6 +398,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       .reduce((s, r) => s + (r.total || 0), 0);
     const recebTotal = (rRecebStatus.rows || []).reduce((s, r) => s + (r.total || 0), 0);
     const recebValor = (rRecebStatus.rows || []).reduce((s, r) => s + (r.valor_total || 0), 0);
+    const tempoRow = rTempoEnvio.rows[0] || {};
 
     const kpis = {
       separacao_total: kpiSep.total_itens || 0,
@@ -289,6 +416,38 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       estoque_deficit: Math.round((kpiEst.deficit_total || 0) * 100) / 100,
       etiquetas_pendentes: kpiEtq.etiquetas_pendentes || 0,
       materiais_sem_endereco: kpiEtq.sem_endereco || 0,
+      tempo_envio_media_ciclo_h: tempoRow.media_h_ciclo != null ? Number(tempoRow.media_h_ciclo) : null,
+      tempo_envio_mediana_ciclo_h: tempoRow.mediana_h_ciclo != null ? Number(tempoRow.mediana_h_ciclo) : null,
+      tempo_envio_media_criado_sep_h: tempoRow.media_h_criado_sep != null ? Number(tempoRow.media_h_criado_sep) : null,
+      tempo_envio_media_sep_envio_h: tempoRow.media_h_sep_envio != null ? Number(tempoRow.media_h_sep_envio) : null,
+      tempo_envio_media_pendente_h: tempoRow.media_h_pendente != null ? Number(tempoRow.media_h_pendente) : null,
+    };
+
+    const tempo_envio = {
+      total: tempoRow.total || 0,
+      enviados: tempoRow.enviados || 0,
+      com_sep: tempoRow.com_sep || 0,
+      com_sep_envio: tempoRow.com_sep_envio || 0,
+      com_ciclo: tempoRow.com_ciclo || 0,
+      pendentes: tempoRow.pendentes || 0,
+      media_h_criado_sep: tempoRow.media_h_criado_sep != null ? Number(tempoRow.media_h_criado_sep) : null,
+      media_h_sep_envio: tempoRow.media_h_sep_envio != null ? Number(tempoRow.media_h_sep_envio) : null,
+      media_h_ciclo: tempoRow.media_h_ciclo != null ? Number(tempoRow.media_h_ciclo) : null,
+      mediana_h_ciclo: tempoRow.mediana_h_ciclo != null ? Number(tempoRow.mediana_h_ciclo) : null,
+      media_h_pendente: tempoRow.media_h_pendente != null ? Number(tempoRow.media_h_pendente) : null,
+      faixas_ciclo: rTempoFaixas.rows || [],
+      detalhe: (rTempoDetalhe.rows || []).map((r) => ({
+        id: r.id,
+        numero_sep: r.numero_sep || null,
+        usuario: r.usuario || null,
+        criado_em: r.criado_em || null,
+        separado_em: r.separado_em || null,
+        enviado_em: r.enviado_em || null,
+        status: r.status || 'Pendente',
+        h_criado_sep: r.h_criado_sep != null ? Number(r.h_criado_sep) : null,
+        h_sep_envio: r.h_sep_envio != null ? Number(r.h_sep_envio) : null,
+        h_ciclo_ou_aberto: r.h_ciclo_ou_aberto != null ? Number(r.h_ciclo_ou_aberto) : null,
+      })),
     };
 
     const evolRows = rEvolSep.rows || [];
@@ -341,6 +500,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       por_status_envio: envioRows,
       por_metodo_envio: rEnvioMetodo.rows || [],
       top_produtos_separacao: rTopSep.rows || [],
+      tempo_envio,
       evolucao_semanal,
       evolucao_mensal,
       textos,

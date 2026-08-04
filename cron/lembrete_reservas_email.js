@@ -1,5 +1,6 @@
 /**
- * CRON — Lembrete de reuniões do dia por e-mail às 07:30 (America/Sao_Paulo).
+ * CRON — Lembrete de reuniões do dia por e-mail às 07:00 (America/Sao_Paulo).
+ * Inclui reuniões únicas e recorrentes que caem no dia (utils/reservasEmail.js).
  */
 const { dbQuery } = require('../src/db');
 const { enviarLembretesReservasDoDia } = require('../utils/reservasEmail');
@@ -7,6 +8,7 @@ const { enviarLembretesReservasDoDia } = require('../utils/reservasEmail');
 const TAG = '[ReservasEmailCron]';
 const CHAVE = 'lembrete_reservas_email_ultima_execucao';
 let _lastRunDate = '';
+let _executando = false;
 
 function dateKeyBrasilia(date = new Date()) {
   return new Intl.DateTimeFormat('en-CA', {
@@ -65,25 +67,30 @@ function verificarHorarioLembreteReservas() {
   const hora = Number(parts.find((p) => p.type === 'hour')?.value || 0);
   const minuto = Number(parts.find((p) => p.type === 'minute')?.value || 0);
 
-  // Janela 07:30–07:34 (timer a cada 1 min)
-  if (hora === 7 && minuto >= 30 && minuto < 35 && _lastRunDate !== hoje) {
-    _lastRunDate = hoje;
+  // Janela 07:00–07:04 (timer a cada 1 min)
+  if (hora === 7 && minuto >= 0 && minuto < 5 && !_executando && _lastRunDate !== hoje) {
+    _executando = true;
     jaRodouHoje(hoje)
       .then((jaRodou) => {
         if (jaRodou) {
+          _lastRunDate = hoje;
           console.log(TAG, `Já executado hoje (${hoje}) — ignorando.`);
           return;
         }
-        return marcarRodouHoje(hoje).then(() => executarLembreteDiario());
+        // Só marca após sucesso — se falhar, tenta de novo nos próximos minutos da janela.
+        return executarLembreteDiario().then(() => marcarRodouHoje(hoje));
       })
       .catch((err) => {
         console.error(TAG, 'Erro:', err?.message || err);
+      })
+      .finally(() => {
+        _executando = false;
       });
   }
 }
 
 function iniciarCronLembreteReservasEmail() {
-  console.log(TAG, 'Timer iniciado — verifica a cada 1 min (disparo 07:30 BRT).');
+  console.log(TAG, 'Timer iniciado — verifica a cada 1 min (disparo 07:00 BRT).');
   verificarHorarioLembreteReservas();
   setInterval(verificarHorarioLembreteReservas, 60 * 1000);
 }

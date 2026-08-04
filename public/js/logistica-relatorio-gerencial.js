@@ -88,6 +88,7 @@
       ].join('\n'),
       conclusao_oportunidades: [
         'Reduzir lead time de separação nos itens urgentes',
+        `Acelerar ciclo de envio (média atual: ${_fmtDuracaoHoras(k.tempo_envio_media_ciclo_h)})`,
         'Acompanhar envios pendentes na fila de expedição',
         'Revisar SKUs abaixo do estoque mínimo para reposição',
       ].join('\n'),
@@ -107,6 +108,22 @@
       };
     }
     return { ..._gerarTextosPadrao(data), editado_por: null, editado_em: null };
+  }
+
+  function _fmtDuracaoHoras(h) {
+    if (h == null || Number.isNaN(Number(h))) return '—';
+    const abs = Math.abs(Number(h));
+    if (abs < 1) return `${Math.max(1, Math.round(abs * 60))} min`;
+    if (abs < 48) return `${abs.toFixed(1).replace('.', ',')} h`;
+    const d = abs / 24;
+    return `${d.toFixed(1).replace('.', ',')} dias`;
+  }
+
+  function _fmtDataHora(raw) {
+    if (!raw) return '—';
+    const d = new Date(raw);
+    if (Number.isNaN(d.getTime())) return '—';
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
   function _headerHtml(periodo) {
@@ -189,9 +206,26 @@
           <div class="at-rel-ger-card"><h4>NF-e por Etapa</h4><div class="at-rel-ger-chart lg"><canvas id="logRelGerChartReceb"></canvas></div></div>
           <div style="overflow:auto;margin-top:14px;"><table class="at-rel-ger-tbl"><thead><tr><th>Etapa</th><th class="r">Qtd NF</th><th class="r">Valor</th></tr></thead><tbody id="logRelGerRecebBody"></tbody></table></div>`,
         envios: `
+          <div id="logRelGerTempoEnvioKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
+          <p style="font-size:12px;color:#64748b;margin:0 0 12px;">Acompanha o tempo desde a criação da solicitação/envio até a separação (SEP) e o envio da peça.</p>
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Envios por Status</h4><div class="at-rel-ger-chart"><canvas id="logRelGerChartEnvio"></canvas></div></div>
+            <div class="at-rel-ger-card"><h4>Tempo até enviar (faixas)</h4><div class="at-rel-ger-chart"><canvas id="logRelGerChartTempoFaixas"></canvas></div></div>
+          </div>
+          <div class="at-rel-ger-grid-2" style="margin-top:14px;">
             <div class="at-rel-ger-card"><h4>Por Método de Envio</h4><div class="at-rel-ger-chart"><canvas id="logRelGerChartEnvioMetodo"></canvas></div></div>
+            <div class="at-rel-ger-card"><h4>Etapas do ciclo</h4>
+              <div style="padding:8px 4px;font-size:13px;color:#334155;line-height:1.6;" id="logRelGerTempoEtapas"></div>
+            </div>
+          </div>
+          <div style="overflow:auto;margin-top:14px;max-height:340px;">
+            <table class="at-rel-ger-tbl">
+              <thead><tr>
+                <th>Envio</th><th>SEP</th><th>Criado</th><th>Separado</th><th>Enviado</th>
+                <th class="r">Criado→Sep</th><th class="r">Sep→Envio</th><th class="r">Ciclo / Aberto</th><th>Status</th>
+              </tr></thead>
+              <tbody id="logRelGerTempoEnvioBody"></tbody>
+            </table>
           </div>`,
         estoque: `
           <div id="logRelGerEstoqueKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
@@ -266,6 +300,7 @@
       { label: 'Recebimentos NF', value: kpis.recebimentos_total, cor: '#38bdf8' },
       { label: 'Valor recebido', value: MOEDA.format(kpis.recebimentos_valor || 0), cor: '#0ea5e9' },
       { label: 'Envios pendentes', value: kpis.envios_pendentes, cor: '#d97706' },
+      { label: 'Tempo médio envio', value: _fmtDuracaoHoras(kpis.tempo_envio_media_ciclo_h), cor: '#0284c7' },
       { label: 'Abaixo mínimo', value: kpis.estoque_abaixo_minimo, cor: '#dc2626' },
     ];
     wrap.innerHTML = cards.map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
@@ -332,7 +367,29 @@
       _renderBar('logRelGerChartReceb', 'receb', receb.map(r => r.etapa), receb.map(r => r.total), '#38bdf8');
     }
     if (sec === 'envios') {
+      const te = data.tempo_envio || {};
+      const kpisWrap = document.getElementById('logRelGerTempoEnvioKpis');
+      if (kpisWrap) {
+        kpisWrap.innerHTML = [
+          { label: 'Criado → Separação', value: _fmtDuracaoHoras(te.media_h_criado_sep), cor: '#065f46' },
+          { label: 'Separação → Envio', value: _fmtDuracaoHoras(te.media_h_sep_envio), cor: '#10b981' },
+          { label: 'Ciclo médio (criado→envio)', value: _fmtDuracaoHoras(te.media_h_ciclo), cor: '#0284c7' },
+          { label: 'Mediana do ciclo', value: _fmtDuracaoHoras(te.mediana_h_ciclo), cor: '#38bdf8' },
+          { label: 'Pendentes (tempo aberto)', value: _fmtDuracaoHoras(te.media_h_pendente), cor: '#d97706' },
+          { label: 'Envios no período', value: te.total || 0, cor: '#64748b' },
+        ].map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      }
+      const etapasEl = document.getElementById('logRelGerTempoEtapas');
+      if (etapasEl) {
+        etapasEl.innerHTML = `
+          <div><strong>1. Criação</strong> — solicitação / envio aberto (${te.total || 0} no período)</div>
+          <div><strong>2. Separação</strong> — SEP concluída no kanban (${te.com_sep || 0} com data de separação)</div>
+          <div><strong>3. Envio</strong> — marcado como enviado (${te.enviados || 0} com data de envio)</div>
+          <div style="margin-top:8px;color:#64748b;font-size:12px;">Médias usam só casos com datas válidas e na ordem correta (separação antes do envio).</div>`;
+      }
       _renderBar('logRelGerChartEnvio', 'envio', envio.map(r => r.status), envio.map(r => r.total), '#0ea5e9');
+      const faixas = te.faixas_ciclo || [];
+      _renderBar('logRelGerChartTempoFaixas', 'tempoFaixas', faixas.map(r => r.faixa), faixas.map(r => r.total), '#0284c7');
       _renderBar('logRelGerChartEnvioMetodo', 'envMet', envMet.map(r => r.metodo), envMet.map(r => r.total), '#06b6d4');
     }
     if (sec === 'estoque') {
@@ -385,6 +442,26 @@
       recebBody.innerHTML = rows.length
         ? rows.map(r => `<tr><td>${_esc(r.etapa)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
         : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Sem recebimentos no período.</td></tr>';
+    }
+    const tempoBody = document.getElementById('logRelGerTempoEnvioBody');
+    if (tempoBody) {
+      const rows = data.tempo_envio?.detalhe || [];
+      tempoBody.innerHTML = rows.length
+        ? rows.map(r => {
+          const aberto = !r.enviado_em && !['Enviado', 'Entregue', 'Finalizado'].includes(r.status);
+          return `<tr>
+            <td>#${r.id}</td>
+            <td>${_esc(r.numero_sep || '—')}</td>
+            <td>${_esc(_fmtDataHora(r.criado_em))}</td>
+            <td>${_esc(_fmtDataHora(r.separado_em))}</td>
+            <td>${_esc(_fmtDataHora(r.enviado_em))}</td>
+            <td class="r">${_esc(_fmtDuracaoHoras(r.h_criado_sep))}</td>
+            <td class="r">${_esc(_fmtDuracaoHoras(r.h_sep_envio))}</td>
+            <td class="r">${_esc(_fmtDuracaoHoras(r.h_ciclo_ou_aberto))}${aberto ? ' *' : ''}</td>
+            <td>${_esc(r.status)}</td>
+          </tr>`;
+        }).join('')
+        : '<tr><td colspan="9" style="text-align:center;color:#94a3b8;">Nenhum envio no período.</td></tr>';
     }
   }
 

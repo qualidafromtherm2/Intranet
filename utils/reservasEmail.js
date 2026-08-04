@@ -26,6 +26,16 @@ function formatarHora(hora) {
   return String(hora || '').slice(0, 5) || '-';
 }
 
+/** Sigla do dia da semana (dom..sab) em America/Sao_Paulo para YYYY-MM-DD. */
+function siglaDiaSemanaBrasilia(dataIso) {
+  const raw = String(dataIso || '').slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  // Meio-dia UTC evita virar o dia anterior/posterior em qualquer fuso do servidor.
+  const d = new Date(`${raw}T12:00:00Z`);
+  if (Number.isNaN(d.getTime())) return null;
+  return ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][d.getUTCDay()] || null;
+}
+
 async function obterEmailsParticipantes(usernames) {
   const usuarios = Array.from(
     new Set((usernames || []).map((u) => String(u || '').trim()).filter(Boolean))
@@ -130,7 +140,9 @@ async function notificarNovaReserva(reserva) {
 }
 
 /**
- * Lembrete matinal: todas as reservas do dia (ainda não realizadas) com participantes.
+ * Lembrete matinal: reservas do dia (únicas + recorrentes que caem hoje),
+ * ainda não realizadas, com participantes.
+ * Espelha a regra de conflito/listagem em server.js (existeConflitoReservaRh).
  */
 async function enviarLembretesReservasDoDia(dataIso) {
   if (!smtpConfigurado()) {
@@ -143,11 +155,16 @@ async function enviarLembretesReservasDoDia(dataIso) {
     throw new Error(`Data inválida para lembrete: ${dataIso}`);
   }
 
+  const siglaDia = siglaDiaSemanaBrasilia(dia);
+  if (!siglaDia) {
+    throw new Error(`Não foi possível obter o dia da semana para: ${dia}`);
+  }
+
   const { rows } = await dbQuery(
     `SELECT r.id,
             r.tipo_espaco AS tipo,
             r.tema_reuniao AS tema,
-            to_char(r.data_reserva, 'YYYY-MM-DD') AS data,
+            to_char(r.data_reserva, 'YYYY-MM-DD') AS data_base,
             to_char(r.hora_inicio, 'HH24:MI') AS inicio,
             to_char(r.hora_fim, 'HH24:MI') AS fim,
             r.cafe,
@@ -155,23 +172,52 @@ async function enviarLembretesReservasDoDia(dataIso) {
             r.visitantes,
             r.link_reuniao AS "linkReuniao",
             r.criado_por AS "criadoPor",
+            r.repetir,
             COALESCE(
               array_agg(DISTINCT p.username) FILTER (WHERE p.username IS NOT NULL),
               ARRAY[]::text[]
             ) AS participantes
        FROM rh.reservas_ambientes r
        LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
-      WHERE r.data_reserva = $1::date
-        AND COALESCE(r.realizada, false) = false
+      WHERE COALESCE(r.realizada, false) = false
+        AND (
+          (
+            r.repetir = false
+            AND r.data_reserva = $1::date
+          )
+          OR (
+            r.repetir = true
+            AND EXTRACT(YEAR FROM r.data_reserva) = EXTRACT(YEAR FROM $1::date)
+            AND (
+              r.repetir_todos_meses = true
+              OR EXTRACT(MONTH FROM r.data_reserva) = EXTRACT(MONTH FROM $1::date)
+            )
+            AND $2 = ANY(r.dias_semana)
+            AND NOT ($1::date = ANY(COALESCE(r.datas_excecao, ARRAY[]::date[])))
+          )
+        )
       GROUP BY r.id
-      ORDER BY r.hora_inicio ASC`,
-    [dia]
+      ORDER BY r.hora_inicio ASC, r.id ASC`,
+    [dia, siglaDia]
+  );
+
+  // Mesmo tema + mesmo horário: mantém o ID mais alto (séries recriadas).
+  const dedup = new Map();
+  for (const r of rows) {
+    const chave = `${String(r.tema || '').toLowerCase().trim()}|${String(r.inicio || '').slice(0, 5)}`;
+    const existente = dedup.get(chave);
+    if (!existente || Number(r.id) > Number(existente.id)) {
+      dedup.set(chave, r);
+    }
+  }
+  const reservasDoDia = Array.from(dedup.values()).sort((a, b) =>
+    String(a.inicio || '').localeCompare(String(b.inicio || ''))
   );
 
   let enviados = 0;
   const erros = [];
 
-  for (const r of rows) {
+  for (const r of reservasDoDia) {
     const participantes = Array.isArray(r.participantes) ? r.participantes : [];
     if (!participantes.length) continue;
 
@@ -182,7 +228,7 @@ async function enviarLembretesReservasDoDia(dataIso) {
       id: r.id,
       tipo: r.tipo,
       tema: r.tema,
-      data: r.data,
+      data: dia,
       inicio: r.inicio,
       fim: r.fim,
       cafe: !!r.cafe,
@@ -209,8 +255,11 @@ async function enviarLembretesReservasDoDia(dataIso) {
     }
   }
 
-  console.log(`[ReservasEmail] Lembrete ${dia}: ${enviados} reunião(ões) notificada(s), ${rows.length} no dia.`);
-  return { ok: true, dia, totalDia: rows.length, enviados, erros };
+  console.log(
+    `[ReservasEmail] Lembrete ${dia} (${siglaDia}): ${enviados} reunião(ões) notificada(s), ` +
+      `${reservasDoDia.length} no dia (bruto=${rows.length}).`
+  );
+  return { ok: true, dia, totalDia: reservasDoDia.length, enviados, erros };
 }
 
 module.exports = {
