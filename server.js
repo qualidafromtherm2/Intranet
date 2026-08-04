@@ -15228,14 +15228,16 @@ function _logisticaNomeUsuarioReq(req) {
   return String(req?.session?.user?.username || req?.session?.user?.nome || '').trim();
 }
 
-/** Texto enviado no campo obs do ajuste TRF Omie (separação / retificação). Evita caracteres não-ASCII (ex.: →). */
-function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, nomeDest, usuario, retificacao = false }) {
+/** Texto enviado no campo obs do ajuste TRF Omie (separação / retificação / devolução). Evita caracteres não-ASCII (ex.: →). */
+function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, nomeDest, usuario, retificacao = false, devolucao = false }) {
   const sepNum = String(n_solic || '').trim();
   const sepPart = sepNum ? `${sepNum} ` : '';
   const userPart = String(usuario || '').trim();
   const destPart = String(nomeDest || '').trim();
   let text;
-  if (retificacao) {
+  if (devolucao) {
+    text = `Devolucao SEP ${sepPart}logistica ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
+  } else if (retificacao) {
     text = `Retificar SEP ${sepPart}logística ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
   } else {
     text = `SEP ${sepPart}logística ${codigo}: ${origem} ${destino} (${qtd})${destPart ? ` ${destPart}` : ''}${userPart ? ` por ${userPart}` : ''}`;
@@ -15551,6 +15553,110 @@ async function _logisticaEstornarTrfOmieSeparacao(client, solicIds, { nome_user 
     [ids]
   );
   console.log(`[logistica/omie-trf-sep] Estorno Omie: ${grupos.size} transferência(s) revertida(s) em ${ids.length} item(ns)`);
+}
+
+/** Estorno Omie de um item (qtd parcial ou total) — usado na devolução pós-Concluído. */
+async function _logisticaDevolverTrfOmieItem(client, item, qtdDevolver, { nome_user } = {}) {
+  const orig = String(item.omie_sep_origem || '').trim();
+  const dest = String(item.omie_sep_destino || '').trim();
+  const cod = String(item.omie_sep_codigo || '').trim();
+  const idProd = String(item.omie_sep_codigo_produto || '').trim();
+  const qtdNum = parseFloat(qtdDevolver);
+  if (!orig || !dest || orig === dest || !Number.isFinite(qtdNum) || qtdNum <= 0) {
+    const err = new Error('Dados Omie insuficientes para devolução. Não é possível estornar sem origem/destino/quantidade gravados na separação.');
+    err.code = 'OMIE_DEVOLUCAO_SEM_META';
+    throw err;
+  }
+  await _omieIncluirTrfEstoqueSeparacao({
+    origem: dest,
+    destino: orig,
+    id_prod: idProd,
+    codigo_texto: cod,
+    qtd: qtdNum,
+    obs: _omieObsTrfSeparacaoLogistica({
+      n_solic: item.n_solic,
+      codigo: cod,
+      origem: orig,
+      destino: dest,
+      qtd: qtdNum,
+      usuario: nome_user,
+      devolucao: true
+    })
+  });
+}
+
+/** Credita ETQ proporcional à qtd devolvida; atualiza ou limpa metadados etq_sep_*. */
+async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver) {
+  const qtdDev = parseFloat(qtdDevolver);
+  if (!Number.isFinite(qtdDev) || qtdDev <= 0) return;
+  await _ensureEtqSepColumns(client);
+
+  const cod = String(item.etq_sep_codigo || '').trim();
+  if (!cod) return;
+
+  let parts = [];
+  if (item.etq_sep_detalhes) {
+    try {
+      const parsed = typeof item.etq_sep_detalhes === 'string'
+        ? JSON.parse(item.etq_sep_detalhes)
+        : item.etq_sep_detalhes;
+      if (Array.isArray(parsed)) parts = parsed;
+    } catch (_) { parts = []; }
+  }
+  if (!parts.length) {
+    const end = String(item.etq_sep_endereco || '').trim();
+    const qFull = parseFloat(item.etq_sep_qtd) || 0;
+    if (end && !end.includes(' + ') && qFull > 0) {
+      parts = [{ endereco: end, qtd: qFull }];
+    }
+  }
+  if (!parts.length) return;
+
+  const qtdFull = parts.reduce((s, p) => s + (parseFloat(p.qtd) || 0), 0);
+  if (qtdFull <= 0) return;
+  const fator = Math.min(1, qtdDev / qtdFull);
+
+  for (const p of parts) {
+    const end = String(p.endereco || '').trim();
+    const qPart = (parseFloat(p.qtd) || 0) * fator;
+    if (!end || qPart <= 0) continue;
+    await _etqCreditarEndereco(client, {
+      codigo: cod,
+      endereco: end,
+      qtd: qPart,
+      usuario: null,
+      codigoTexto: cod
+    });
+  }
+
+  if (fator >= 1 - 1e-9) {
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET etq_sep_endereco = NULL,
+              etq_sep_codigo = NULL,
+              etq_sep_qtd = NULL,
+              etq_sep_detalhes = NULL
+        WHERE id = $1`,
+      [item.id]
+    );
+  } else {
+    const restante = parts
+      .map(p => ({
+        endereco: String(p.endereco || '').trim(),
+        qtd: Math.max(0, (parseFloat(p.qtd) || 0) * (1 - fator))
+      }))
+      .filter(p => p.endereco && p.qtd > 1e-9);
+    const qtdRest = restante.reduce((s, p) => s + p.qtd, 0);
+    const endResumo = restante.map(p => p.endereco).join(' + ');
+    await client.query(
+      `UPDATE solicitacao_produto.itens_solicitados
+          SET etq_sep_endereco = $2,
+              etq_sep_qtd = $3,
+              etq_sep_detalhes = $4::jsonb
+        WHERE id = $1`,
+      [item.id, endResumo || null, qtdRest || null, restante.length ? JSON.stringify(restante) : null]
+    );
+  }
 }
 
 async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
@@ -22289,6 +22395,8 @@ app.get('/api/logistica/kanban', async (req, res) => {
           WHEN bool_or(i.status = 'Separação')           THEN 'Separação'
           WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
           WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+          WHEN bool_or(i.status = 'Concluído')           THEN 'Concluído'
+          WHEN bool_or(i.status = 'Devolvido')           THEN 'Devolvido'
           ELSE 'Concluído'
         END AS col
       FROM solicitacao_produto.itens_solicitados i
@@ -22308,6 +22416,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
       'Separado':            [],
       'Aguardando retirada': [],
       'Concluído':           [],
+      'Devolvido':           [],
     };
     [...carrinho, ...seps].forEach(r => {
       const key = r.col;
@@ -22388,6 +22497,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                c.quantidade::numeric AS quantidade,
                i.quantidade_solicitada::numeric AS quantidade_solicitada,
                i.quantidade_separada::numeric AS quantidade_separada,
+               i.omie_sep_origem, i.omie_sep_destino, i.omie_sep_qtd::numeric AS omie_sep_qtd,
                c.data_prevista::text, c.horario, c.criado_em::text,
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
@@ -22548,6 +22658,8 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
           WHEN bool_or(i.status = 'Separação')           THEN 'Em Separação'
           WHEN bool_or(i.status = 'Separado')            THEN 'Separado'
           WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+          WHEN bool_or(i.status = 'Concluído')           THEN 'Concluído'
+          WHEN bool_or(i.status = 'Devolvido')           THEN 'Devolvido'
           ELSE 'Concluído'
         END AS coluna
         FROM solicitacao_produto.itens_solicitados i
@@ -22574,7 +22686,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
        ORDER BY COALESCE(item_criado_em, criado_em_min) ASC
     `, [q, destinosSep]);
 
-    const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [] };
+    const colunas = { 'Solicitado': [], 'Stund-by': [], 'Em Separação': [], 'Separado': [], 'Aguardando retirada': [], 'Concluído': [], 'Devolvido': [] };
     rows.forEach(r => {
       if (r.coluna === 'Solicitado' && r.tem_pendente_sem_local) return;
       if (colunas[r.coluna]) colunas[r.coluna].push(r);
@@ -22812,6 +22924,143 @@ app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
   } catch (err) {
     console.error('[logistica/concluido] erro:', err);
     res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// POST /api/logistica/itens_solicitados/devolver — Devolve item Concluído (parcial/total) ao armazém de origem (Omie + ETQ)
+app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    await ensureSchemaMigrated();
+    await _ensureOmieSepColumns(client);
+    await _ensureEtqSepColumns(client);
+
+    const id_user = req.session?.user?.id;
+    if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+
+    const solicId = parseInt(req.body?.solic_id, 10);
+    const qtdReq = parseFloat(req.body?.quantidade);
+    const motivo = String(req.body?.motivo || '').trim();
+    if (!solicId) return res.status(400).json({ ok: false, error: 'solic_id inválido.' });
+    if (!Number.isFinite(qtdReq) || qtdReq <= 0) {
+      return res.status(400).json({ ok: false, error: 'Informe a quantidade a devolver.' });
+    }
+    if (motivo.length < 3) {
+      return res.status(400).json({ ok: false, error: 'Informe o motivo da devolução (mín. 3 caracteres).' });
+    }
+
+    const acesso = await assertAcessoSeparacao(client, [solicId], req);
+    if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
+
+    await client.query('BEGIN');
+
+    const { rows } = await client.query(
+      `SELECT i.id, i.n_solic, i.status, i.id_carr,
+              i.omie_sep_origem, i.omie_sep_destino, i.omie_sep_qtd,
+              i.omie_sep_codigo_produto, i.omie_sep_codigo,
+              i.etq_sep_endereco, i.etq_sep_codigo, i.etq_sep_qtd, i.etq_sep_detalhes,
+              c.quantidade::numeric AS qty_carr,
+              c.codigo_produto
+         FROM solicitacao_produto.itens_solicitados i
+         JOIN logistica.carrinho c ON c.id = i.id_carr
+        WHERE i.id = $1
+        FOR UPDATE OF i`,
+      [solicId]
+    );
+    const item = rows[0];
+    if (!item) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Item não encontrado.' });
+    }
+    if (String(item.status || '') !== 'Concluído') {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        error: `Só é possível devolver item Concluído (status atual: ${item.status || '—'}).`
+      });
+    }
+
+    const omieQtd = parseFloat(item.omie_sep_qtd) || 0;
+    const orig = String(item.omie_sep_origem || '').trim();
+    const dest = String(item.omie_sep_destino || '').trim();
+    if (!orig || !dest || omieQtd <= 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        error: 'Este item não tem dados Omie da separação. Não é possível devolver com segurança (SEP antiga ou metadados limpos).'
+      });
+    }
+    if (qtdReq > omieQtd + 1e-9) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        ok: false,
+        error: `Quantidade ${qtdReq} maior que a disponível para devolução (${omieQtd}).`
+      });
+    }
+
+    const nomeUser = _logisticaNomeUsuarioReq(req);
+    const qtdDev = Math.min(qtdReq, omieQtd);
+    const total = qtdDev >= omieQtd - 1e-9;
+
+    await _logisticaDevolverTrfOmieItem(client, item, qtdDev, { nome_user: nomeUser });
+    await _etqDevolverDebitoSeparacaoQtd(client, item, qtdDev);
+
+    const obsMov = `Devolução ${total ? 'total' : 'parcial'}: ${qtdDev} — ${motivo}`.slice(0, 500);
+
+    if (total) {
+      await registrarMovimentacaoKanbanItens(client, [solicId], 'Devolvido', req, obsMov);
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET status = 'Devolvido',
+                omie_sep_origem = NULL,
+                omie_sep_destino = NULL,
+                omie_sep_qtd = NULL,
+                omie_sep_codigo_produto = NULL,
+                omie_sep_codigo = NULL,
+                motivo = COALESCE(NULLIF(TRIM(motivo), ''), $2),
+                usuario_separando = NULL
+          WHERE id = $1`,
+        [solicId, motivo.slice(0, 500)]
+      );
+    } else {
+      const omieRest = Math.max(0, omieQtd - qtdDev);
+      const qtyCarr = parseFloat(item.qty_carr) || 0;
+      const qtyRest = Math.max(0, qtyCarr - qtdDev);
+      await registrarMovimentacaoKanbanItens(client, [solicId], 'Concluído', req, obsMov);
+      await client.query(
+        `UPDATE solicitacao_produto.itens_solicitados
+            SET omie_sep_qtd = $2,
+                motivo = $3
+          WHERE id = $1`,
+        [solicId, omieRest, motivo.slice(0, 500)]
+      );
+      if (item.id_carr && qtyCarr > 0) {
+        await client.query(
+          `UPDATE logistica.carrinho SET quantidade = $1 WHERE id = $2`,
+          [qtyRest > 0 ? qtyRest : qtyCarr, item.id_carr]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+    console.log(`[logistica/devolver] item ${solicId} qtd=${qtdDev} total=${total} por user ${id_user}`);
+    res.json({
+      ok: true,
+      solic_id: solicId,
+      quantidade: qtdDev,
+      total,
+      status: total ? 'Devolvido' : 'Concluído',
+      omie_origem: orig
+    });
+  } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    console.error('[logistica/devolver] erro:', err);
+    const status = err?.code === 'OMIE_DEVOLUCAO_SEM_META' || err?.code === 'OMIE_TRF_SEPARACAO'
+      ? 409
+      : 500;
+    res.status(status).json({ ok: false, error: String(err?.message || err) });
+  } finally {
+    client.release();
   }
 });
 
