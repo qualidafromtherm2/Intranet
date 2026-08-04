@@ -17,6 +17,7 @@ function requireAuth(req, res, next) {
 }
 
 function num(v) {
+  if (v == null || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
@@ -45,12 +46,229 @@ function stdDev(arr) {
 function isEmRegime(l) {
   const cop = num(l.cop);
   const cons = num(l.kw_consumo);
+  const kwAq = num(l.kw_aquecimento);
   const pA = num(l.pressao_alta);
   const pB = num(l.pressao_baixa);
-  if (cop == null || cop < 1.5) return false;
-  if (cons == null || cons < 0.4) return false;
-  if (pA != null && pB != null && Math.abs(pA - pB) < 25) return false;
-  return true;
+  if (cop == null || cop < 1.2) return false;
+  if (cons == null || cons < 0.25) return false;
+  // Pressões equalizadas = não está comprimindo
+  if (pA != null && pB != null && Math.abs(pA - pB) < 20) return false;
+  // Aceita COP bom mesmo com instrumentação de pressão incompleta
+  if (cop >= 2.5 && (kwAq == null || kwAq > 0.5)) return true;
+  if (cop >= 1.5 && cons >= 0.4) return true;
+  return false;
+}
+
+function isParada(l) {
+  const cop = num(l.cop) || 0;
+  const cons = num(l.kw_consumo) || 0;
+  const pA = num(l.pressao_alta);
+  const pB = num(l.pressao_baixa);
+  const dP = (pA != null && pB != null) ? Math.abs(pA - pB) : 999;
+  return cop < 0.5 && cons < 0.5 && dP < 25;
+}
+
+function resumoLeitura(l, idx) {
+  if (!l) return null;
+  return {
+    indice: idx + 1,
+    id: l.id,
+    data_hora: l.data_hora,
+    fase: l.fase,
+    temp_ambiente: num(l.temp_ambiente),
+    temp_entrada: num(l.temp_entrada),
+    temp_saida: num(l.temp_saida),
+    temp_dif: num(l.temp_dif),
+    cop: num(l.cop),
+    kw_aquecimento: num(l.kw_aquecimento),
+    kw_consumo: num(l.kw_consumo),
+    kcal_h: num(l.kcal_h),
+    vazao: num(l.vazao),
+    pressao_alta: num(l.pressao_alta),
+    pressao_baixa: num(l.pressao_baixa),
+    tensao: num(l.tensao),
+    corrente: num(l.corrente),
+  };
+}
+
+function deltaCampo(a, b, campo) {
+  const va = num(a?.[campo]);
+  const vb = num(b?.[campo]);
+  if (va == null || vb == null) return null;
+  return Number((vb - va).toFixed(3));
+}
+
+/**
+ * Classifica fases e compara leituras entre si (início × pico × fim).
+ * É o núcleo lógico do relatório — não apenas médias de um registro.
+ */
+function analisarComparativoLeituras(leiturasRaw) {
+  const leituras = (leiturasRaw || []).map((l, i) => {
+    let fase = 'transicao';
+    if (isParada(l)) fase = 'parada';
+    else if (isEmRegime(l)) fase = 'regime';
+    else if ((num(l.cop) || 0) > 0.5 || (num(l.kw_consumo) || 0) > 0.3) fase = 'partida';
+    return { ...l, em_regime: isEmRegime(l), fase, _i: i };
+  });
+
+  // Refinar: primeiras leituras em regime ainda com ΔT baixo = aquecimento
+  const regimeIdxs = leituras.map((l, i) => (l.fase === 'regime' ? i : -1)).filter((i) => i >= 0);
+  if (regimeIdxs.length >= 4) {
+    const firstThird = Math.max(1, Math.floor(regimeIdxs.length / 3));
+    for (let k = 0; k < firstThird; k++) {
+      const i = regimeIdxs[k];
+      const dt = num(leituras[i].temp_dif) || 0;
+      const peakDt = Math.max(...regimeIdxs.map((j) => num(leituras[j].temp_dif) || 0));
+      if (dt < peakDt * 0.75) leituras[i].fase = 'aquecimento';
+    }
+    // Queda de COP/potência no final do regime = desaceleração
+    const lastFew = regimeIdxs.slice(-Math.max(1, Math.floor(regimeIdxs.length / 5)));
+    const maxKw = Math.max(...regimeIdxs.map((j) => num(leituras[j].kw_aquecimento) || 0));
+    lastFew.forEach((i) => {
+      const kw = num(leituras[i].kw_aquecimento) || 0;
+      const cop = num(leituras[i].cop) || 0;
+      const maxCop = Math.max(...regimeIdxs.map((j) => num(leituras[j].cop) || 0));
+      if (maxKw > 0 && kw < maxKw * 0.8 && cop < maxCop * 0.85) {
+        leituras[i].fase = 'desaceleracao';
+      }
+    });
+  }
+
+  const ativas = leituras.filter((l) => l.fase !== 'parada');
+  const regime = leituras.filter((l) => l.fase === 'regime' || l.fase === 'aquecimento');
+  const baseCmp = regime.length ? regime : ativas;
+
+  const pickBest = (arr, campo) => {
+    if (!arr.length) return null;
+    return arr.reduce((best, cur) => (
+      (num(cur[campo]) || -Infinity) > (num(best[campo]) || -Infinity) ? cur : best
+    ));
+  };
+
+  const inicio = ativas[0] || leituras[0] || null;
+  const picoCop = pickBest(baseCmp, 'cop');
+  const picoPotencia = pickBest(baseCmp, 'kw_aquecimento');
+  const picoDelta = pickBest(baseCmp, 'temp_dif');
+  const fimRegime = [...baseCmp].reverse().find((l) => l.fase === 'regime' || l.fase === 'desaceleracao')
+    || baseCmp[baseCmp.length - 1]
+    || null;
+  const parada = [...leituras].reverse().find((l) => l.fase === 'parada') || leituras[leituras.length - 1] || null;
+
+  const pontos = {
+    inicio: resumoLeitura(inicio, inicio?._i ?? 0),
+    pico_cop: resumoLeitura(picoCop, picoCop?._i ?? 0),
+    pico_potencia: resumoLeitura(picoPotencia, picoPotencia?._i ?? 0),
+    pico_delta_t: resumoLeitura(picoDelta, picoDelta?._i ?? 0),
+    fim_regime: resumoLeitura(fimRegime, fimRegime?._i ?? 0),
+    parada: resumoLeitura(parada, parada?._i ?? 0),
+  };
+
+  // Comparação início → pico → fim (campos-chave)
+  const campos = ['cop', 'temp_dif', 'kw_aquecimento', 'kw_consumo', 'temp_saida', 'pressao_alta', 'corrente'];
+  const comparacao = {
+    inicio_para_pico: {},
+    pico_para_fim: {},
+    inicio_para_fim: {},
+  };
+  campos.forEach((c) => {
+    comparacao.inicio_para_pico[c] = deltaCampo(pontos.inicio, pontos.pico_cop, c);
+    comparacao.pico_para_fim[c] = deltaCampo(pontos.pico_cop, pontos.fim_regime, c);
+    comparacao.inicio_para_fim[c] = deltaCampo(pontos.inicio, pontos.fim_regime, c);
+  });
+
+  // Séries para gráfico de barras comparativo (3 momentos)
+  const momentos = [
+    { key: 'inicio', label: 'Início', ponto: pontos.inicio },
+    { key: 'pico', label: 'Pico COP', ponto: pontos.pico_cop },
+    { key: 'fim', label: 'Fim regime', ponto: pontos.fim_regime },
+  ].filter((m) => m.ponto);
+
+  const barrasComparativas = {
+    labels: momentos.map((m) => `${m.label} (#${m.ponto.indice})`),
+    cop: momentos.map((m) => m.ponto.cop),
+    delta_t: momentos.map((m) => m.ponto.temp_dif),
+    kw_aquecimento: momentos.map((m) => m.ponto.kw_aquecimento),
+    kw_consumo: momentos.map((m) => m.ponto.kw_consumo),
+    temp_saida: momentos.map((m) => m.ponto.temp_saida),
+    corrente: momentos.map((m) => m.ponto.corrente),
+  };
+
+  // Variação leitura a leitura (só ativas)
+  const evolucao = [];
+  for (let i = 1; i < ativas.length; i++) {
+    const prev = ativas[i - 1];
+    const cur = ativas[i];
+    evolucao.push({
+      de: prev._i + 1,
+      para: cur._i + 1,
+      data_hora: cur.data_hora,
+      d_cop: deltaCampo(prev, cur, 'cop'),
+      d_temp_dif: deltaCampo(prev, cur, 'temp_dif'),
+      d_kw_aq: deltaCampo(prev, cur, 'kw_aquecimento'),
+      d_temp_saida: deltaCampo(prev, cur, 'temp_saida'),
+    });
+  }
+
+  const contagemFases = leituras.reduce((acc, l) => {
+    acc[l.fase] = (acc[l.fase] || 0) + 1;
+    return acc;
+  }, {});
+
+  // Narrativa curta do teste
+  const narrativa = [];
+  if (pontos.inicio && pontos.pico_cop) {
+    const dCop = comparacao.inicio_para_pico.cop;
+    const dDt = comparacao.inicio_para_pico.temp_dif;
+    narrativa.push(
+      `Das ${ativas.length} leituras ativas, o COP saiu de ${fmtOrDash(pontos.inicio.cop)} (#${pontos.inicio.indice}) ` +
+      `para o pico ${fmtOrDash(pontos.pico_cop.cop)} na leitura #${pontos.pico_cop.indice}` +
+      (dCop != null ? ` (Δ ${dCop >= 0 ? '+' : ''}${dCop.toFixed(2)})` : '') + '.'
+    );
+    if (dDt != null) {
+      narrativa.push(
+        `No mesmo trecho o ΔT ${dDt >= 0 ? 'subiu' : 'caiu'} ${Math.abs(dDt).toFixed(2)} °C ` +
+        `(${fmtOrDash(pontos.inicio.temp_dif)} → ${fmtOrDash(pontos.pico_cop.temp_dif)}).`
+      );
+    }
+  }
+  if (pontos.pico_potencia && pontos.pico_cop && pontos.pico_potencia.id !== pontos.pico_cop.id) {
+    narrativa.push(
+      `Maior potência de aquecimento: ${fmtOrDash(pontos.pico_potencia.kw_aquecimento)} kW na leitura #${pontos.pico_potencia.indice} ` +
+      `(COP ${fmtOrDash(pontos.pico_potencia.cop)}), diferente do pico de COP.`
+    );
+  }
+  if (pontos.fim_regime && pontos.pico_cop && comparacao.pico_para_fim.cop != null) {
+    const d = comparacao.pico_para_fim.cop;
+    if (Math.abs(d) >= 0.3) {
+      narrativa.push(
+        `Do pico ao fim do regime o COP ${d < 0 ? 'caiu' : 'subiu'} ${Math.abs(d).toFixed(2)} ` +
+        `(leitura #${pontos.fim_regime.indice}).`
+      );
+    } else {
+      narrativa.push('Do pico ao fim do regime o COP permaneceu estável.');
+    }
+  }
+  if (pontos.parada && pontos.parada.fase === 'parada') {
+    const nearEnd = pontos.parada.indice >= Math.max(2, Math.floor(leituras.length * 0.7));
+    if (nearEnd) {
+      narrativa.push(`Encerramento detectado na leitura #${pontos.parada.indice} (pressões equalizadas / COP ~0).`);
+    }
+  }
+
+  return {
+    leituras_classificadas: leituras.map(({ _i, ...rest }) => rest),
+    fases: contagemFases,
+    pontos_chave: pontos,
+    comparacao,
+    barras_comparativas: barrasComparativas,
+    evolucao_leitura_a_leitura: evolucao,
+    narrativa,
+  };
+}
+
+function fmtOrDash(v) {
+  if (v == null || Number.isNaN(Number(v))) return '—';
+  return Number(v).toFixed(2);
 }
 
 let _specsCache = null;
@@ -432,11 +650,8 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
       [id]
     );
 
-    const leituras = (leit.rows || []).map((l) => ({
-      ...l,
-      em_regime: isEmRegime(l),
-    }));
-
+    const comparativo = analisarComparativoLeituras(leit.rows || []);
+    const leituras = comparativo.leituras_classificadas;
     const stats = calcularStats(leituras);
     const spec = findSpec(relatorio.modelo);
     const diagnostico = gerarDiagnostico(relatorio, stats, leituras, spec);
@@ -445,7 +660,9 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
     const peers = await dbQuery(
       `SELECT r.id, r.criado_em, r.num_op, r.operador, r.total_registros,
               ROUND((AVG(l.cop) FILTER (WHERE l.cop > 1.5))::numeric, 2) AS cop_medio,
-              ROUND((AVG(l.temp_dif) FILTER (WHERE l.temp_dif > 0.5))::numeric, 2) AS delta_t_medio
+              ROUND((AVG(l.temp_dif) FILTER (WHERE l.temp_dif > 0.5))::numeric, 2) AS delta_t_medio,
+              ROUND(MAX(l.cop)::numeric, 2) AS cop_max,
+              ROUND(MAX(l.kw_aquecimento)::numeric, 2) AS kw_aq_max
        FROM testes.relatorios r
        LEFT JOIN testes.leituras l ON l.relatorio_id = r.id
        WHERE r.modelo = $1 AND r.id <> $2
@@ -461,6 +678,14 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
       leituras,
       stats,
       diagnostico,
+      comparativo: {
+        fases: comparativo.fases,
+        pontos_chave: comparativo.pontos_chave,
+        comparacao: comparativo.comparacao,
+        barras_comparativas: comparativo.barras_comparativas,
+        evolucao_leitura_a_leitura: comparativo.evolucao_leitura_a_leitura,
+        narrativa: comparativo.narrativa,
+      },
       spec,
       comparativo_modelo: peers.rows || [],
     });

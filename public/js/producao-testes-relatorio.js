@@ -1,11 +1,11 @@
-// Relatório de Testes de Produção — bombas de calor (testes.relatorios + testes.leituras)
+// Relatório de Testes — compara leituras entre si (início × pico × fim) + gráficos
 (function () {
   'use strict';
 
   let _init = false;
   let _charts = {};
   let _resumo = null;
-  let _view = 'lista'; // lista | detalhe
+  let _view = 'lista';
   let _filtroModelo = '';
   let _searchTimer = null;
 
@@ -20,6 +20,18 @@
     pAlta: '#ef4444',
     pBaixa: '#22d3ee',
     vazao: '#2dd4bf',
+    inicio: '#64748b',
+    pico: '#34d399',
+    fim: '#f59e0b',
+  };
+
+  const FASE_META = {
+    partida: { label: 'Partida', color: '#94a3b8' },
+    aquecimento: { label: 'Aquecimento', color: '#38bdf8' },
+    regime: { label: 'Regime', color: '#22c55e' },
+    desaceleracao: { label: 'Desaceleração', color: '#f59e0b' },
+    transicao: { label: 'Transição', color: '#a78bfa' },
+    parada: { label: 'Parada', color: '#64748b' },
   };
 
   function $(id) { return document.getElementById(id); }
@@ -31,6 +43,13 @@
   function fmtNum(v, dig = 1) {
     if (v == null || v === '' || Number.isNaN(Number(v))) return '—';
     return Number(v).toLocaleString('pt-BR', { minimumFractionDigits: dig, maximumFractionDigits: dig });
+  }
+
+  function fmtDelta(v, dig = 2, suf = '') {
+    if (v == null || Number.isNaN(Number(v))) return '—';
+    const n = Number(v);
+    const sign = n > 0 ? '+' : '';
+    return `${sign}${n.toLocaleString('pt-BR', { minimumFractionDigits: dig, maximumFractionDigits: dig })}${suf}`;
   }
 
   function fmtData(raw) {
@@ -49,9 +68,15 @@
   function destroyCharts() {
     Object.keys(_charts).forEach((k) => {
       try { _charts[k]?.destroy?.(); } catch (_) {}
-      _charts[k] = null;
     });
     _charts = {};
+  }
+
+  function destroyOne(key) {
+    if (_charts[key]) {
+      try { _charts[key].destroy(); } catch (_) {}
+      _charts[key] = null;
+    }
   }
 
   function chartDefaults() {
@@ -80,8 +105,8 @@
         background:linear-gradient(135deg, rgba(15,23,42,.96), rgba(6,78,59,.35));
         border:1px solid rgba(52,211,153,.22);
       }
-      #producaoTestesPane .pt-hero h2 { margin:0; color:#f8fafc; font-size:20px; display:flex; align-items:center; gap:10px; }
-      #producaoTestesPane .pt-hero p { margin:6px 0 0; color:#94a3b8; font-size:13px; max-width:640px; line-height:1.45; }
+      #producaoTestesPane .pt-hero h2 { margin:0; color:#f8fafc; font-size:20px; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+      #producaoTestesPane .pt-hero p { margin:6px 0 0; color:#94a3b8; font-size:13px; max-width:720px; line-height:1.45; }
       #producaoTestesPane .pt-kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px; }
       #producaoTestesPane .pt-kpi {
         padding:12px 14px; border-radius:10px; border:1px solid rgba(148,163,184,.18);
@@ -91,9 +116,7 @@
       #producaoTestesPane .pt-kpi strong { display:block; margin-top:4px; font-size:22px; color:#f8fafc; line-height:1.1; }
       #producaoTestesPane .pt-kpi em { display:block; margin-top:4px; font-style:normal; font-size:11px; color:#94a3b8; }
       #producaoTestesPane .pt-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-      #producaoTestesPane .pt-search {
-        position:relative; flex:1; min-width:220px; max-width:420px;
-      }
+      #producaoTestesPane .pt-search { position:relative; flex:1; min-width:220px; max-width:420px; }
       #producaoTestesPane .pt-search i.fa-magnifying-glass {
         position:absolute; left:12px; top:50%; transform:translateY(-50%); color:#64748b; pointer-events:none;
       }
@@ -143,8 +166,10 @@
       #producaoTestesPane .pt-table td {
         padding:10px 12px; color:#e2e8f0; border-bottom:1px solid rgba(148,163,184,.08); white-space:nowrap;
       }
-      #producaoTestesPane .pt-table tr { cursor:pointer; }
-      #producaoTestesPane .pt-table tbody tr:hover { background:rgba(52,211,153,.06); }
+      #producaoTestesPane .pt-table tr.clickable { cursor:pointer; }
+      #producaoTestesPane .pt-table tbody tr.clickable:hover { background:rgba(52,211,153,.06); }
+      #producaoTestesPane .pt-table tr.pt-row-key { background:rgba(52,211,153,.08); }
+      #producaoTestesPane .pt-table tr.pt-row-pico { background:rgba(52,211,153,.14); }
       #producaoTestesPane .pt-badge {
         display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px;
         font-size:11px; font-weight:700;
@@ -154,32 +179,60 @@
       }
       #producaoTestesPane .pt-chart-card {
         padding:14px; border-radius:12px; border:1px solid rgba(148,163,184,.18); background:rgba(15,23,42,.65);
-        min-height:280px;
       }
+      #producaoTestesPane .pt-chart-card.wide { grid-column:1 / -1; }
       #producaoTestesPane .pt-chart-card h4 { margin:0 0 10px; color:#e2e8f0; font-size:13px; display:flex; align-items:center; gap:8px; }
-      #producaoTestesPane .pt-chart-card canvas { width:100% !important; max-height:240px; }
-      #producaoTestesPane .pt-diag {
-        display:grid; grid-template-columns:1fr; gap:10px;
+      #producaoTestesPane .pt-chart-card .pt-chart-box { height:260px; position:relative; }
+      #producaoTestesPane .pt-chart-card.wide .pt-chart-box { height:300px; }
+      #producaoTestesPane .pt-chart-card canvas { width:100% !important; height:100% !important; }
+      #producaoTestesPane .pt-compare-grid {
+        display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;
       }
-      #producaoTestesPane .pt-diag-item {
-        padding:12px 14px; border-radius:10px; border:1px solid rgba(148,163,184,.15); background:rgba(15,23,42,.5);
-        font-size:13px; color:#e2e8f0; line-height:1.45;
+      #producaoTestesPane .pt-compare-card {
+        padding:14px; border-radius:12px; border:1px solid rgba(148,163,184,.2);
+        background:rgba(15,23,42,.72); position:relative; overflow:hidden;
       }
-      #producaoTestesPane .pt-diag-ok { border-color:rgba(34,197,94,.3); }
-      #producaoTestesPane .pt-diag-atencao { border-color:rgba(245,158,11,.35); }
-      #producaoTestesPane .pt-diag-critico { border-color:rgba(239,68,68,.4); }
-      #producaoTestesPane .pt-diag-info { border-color:rgba(56,189,248,.3); }
+      #producaoTestesPane .pt-compare-card:before {
+        content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--pt-accent,#34d399);
+      }
+      #producaoTestesPane .pt-compare-card h5 {
+        margin:0 0 4px; font-size:12px; text-transform:uppercase; letter-spacing:.04em; color:#94a3b8;
+      }
+      #producaoTestesPane .pt-compare-card .pt-idx {
+        font-size:11px; color:#64748b; margin-bottom:10px;
+      }
+      #producaoTestesPane .pt-compare-card .pt-big {
+        font-size:28px; font-weight:800; color:#f8fafc; line-height:1;
+      }
+      #producaoTestesPane .pt-compare-card .pt-big small { font-size:13px; font-weight:600; color:#94a3b8; margin-left:4px; }
+      #producaoTestesPane .pt-compare-metrics {
+        display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:12px;
+      }
+      #producaoTestesPane .pt-compare-metrics div {
+        padding:8px; border-radius:8px; background:rgba(255,255,255,.03);
+      }
+      #producaoTestesPane .pt-compare-metrics span { display:block; font-size:10px; color:#64748b; text-transform:uppercase; font-weight:700; }
+      #producaoTestesPane .pt-compare-metrics strong { display:block; margin-top:2px; color:#e2e8f0; font-size:14px; }
+      #producaoTestesPane .pt-delta-up { color:#34d399 !important; }
+      #producaoTestesPane .pt-delta-down { color:#f87171 !important; }
+      #producaoTestesPane .pt-narrativa {
+        padding:14px 16px; border-radius:12px; border:1px solid rgba(56,189,248,.25);
+        background:rgba(14,165,233,.08); color:#e2e8f0; font-size:13px; line-height:1.55;
+      }
+      #producaoTestesPane .pt-narrativa li { margin:6px 0; }
+      #producaoTestesPane .pt-delta-table td.delta { font-weight:700; }
       #producaoTestesPane .pt-section-title {
         margin:8px 0 4px; color:#cbd5e1; font-size:14px; font-weight:700; display:flex; align-items:center; gap:8px;
       }
       #producaoTestesPane .pt-muted { color:#64748b; font-size:12px; }
       #producaoTestesPane .pt-empty { padding:28px; text-align:center; color:#94a3b8; font-size:13px; }
-      #producaoTestesPane .pt-back { margin-bottom:4px; }
-      #producaoTestesPane .pt-regime-dot {
-        display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px;
+      #producaoTestesPane .pt-fase-pill {
+        display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px;
+        font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
       }
       @media (max-width: 960px) {
         #producaoTestesPane .pt-charts { grid-template-columns:1fr; }
+        #producaoTestesPane .pt-chart-card.wide { grid-column:auto; }
       }
     `;
     document.head.appendChild(style);
@@ -194,6 +247,16 @@
     el.textContent = msg;
   }
 
+  function fasePill(fase) {
+    const m = FASE_META[fase] || FASE_META.transicao;
+    return `<span class="pt-fase-pill" style="background:${m.color}22;color:${m.color};border:1px solid ${m.color}55;">${esc(m.label)}</span>`;
+  }
+
+  function deltaClass(v) {
+    if (v == null || Number.isNaN(Number(v)) || Number(v) === 0) return '';
+    return Number(v) > 0 ? 'pt-delta-up' : 'pt-delta-down';
+  }
+
   function renderListaShell() {
     const root = $('prodTestesRoot');
     if (!root) return;
@@ -202,7 +265,7 @@
         <div class="pt-hero">
           <div>
             <h2><i class="fa-solid fa-flask" style="color:#34d399;"></i> Testes — Bombas de calor</h2>
-            <p>Acompanhe os testes aplicados nas máquinas: COP, ΔT, pressões, potência e vazão. Pesquise por OP ou modelo e abra o relatório completo.</p>
+            <p>Escolha uma OP/máquina para ver o relatório comparando as leituras entre si (início → pico → fim), com gráficos de evolução.</p>
           </div>
           <button type="button" class="pt-btn pt-btn-primary" id="prodTestesAtualizarBtn">
             <i class="fa-solid fa-rotate"></i> Atualizar
@@ -256,10 +319,7 @@
   function renderMachines() {
     const box = $('prodTestesMachines');
     if (!box || !_resumo) return;
-    const list = (_resumo.maquinas || []).filter((m) => {
-      if (!_filtroModelo) return true;
-      return m.modelo === _filtroModelo;
-    });
+    const list = (_resumo.maquinas || []).filter((m) => !_filtroModelo || m.modelo === _filtroModelo);
     if (!list.length) {
       box.innerHTML = '<div class="pt-empty">Nenhuma máquina encontrada.</div>';
       return;
@@ -273,7 +333,7 @@
           <div><span>ΔT</span><strong>${fmtNum(m.delta_t_medio, 1)}°</strong></div>
           <div><span>Testes</span><strong>${fmtNum(m.qtd_relatorios, 0)}</strong></div>
         </div>
-        <div class="pt-muted" style="margin-top:8px;">Último: ${fmtData(m.ultimo_teste)} · ${fmtNum(m.kw_aq_medio, 1)} kW aq.</div>
+        <div class="pt-muted" style="margin-top:8px;">Último: ${fmtData(m.ultimo_teste)}</div>
       </button>
     `).join('');
 
@@ -302,20 +362,13 @@
       <table class="pt-table">
         <thead>
           <tr>
-            <th>Data</th>
-            <th>OP</th>
-            <th>Modelo</th>
-            <th>Linha</th>
-            <th>Operador</th>
-            <th>Leituras</th>
-            <th>COP méd.</th>
-            <th>ΔT méd.</th>
-            <th>kW aq.</th>
+            <th>Data</th><th>OP</th><th>Modelo</th><th>Linha</th><th>Operador</th>
+            <th>Leituras</th><th>COP méd.</th><th>COP máx.</th><th>ΔT méd.</th>
           </tr>
         </thead>
         <tbody>
           ${rows.map((r) => `
-            <tr data-id="${r.id}">
+            <tr class="clickable" data-id="${r.id}">
               <td>${fmtData(r.criado_em)}</td>
               <td><strong>${esc(r.num_op || '—')}</strong></td>
               <td>${esc(r.modelo || '—')}</td>
@@ -323,8 +376,8 @@
               <td>${esc(r.operador || '—')}</td>
               <td>${fmtNum(r.leituras_count || r.total_registros, 0)}</td>
               <td>${fmtNum(r.cop_medio, 1)}</td>
+              <td>${fmtNum(r.cop_max, 1)}</td>
               <td>${fmtNum(r.delta_t_medio, 1)}</td>
-              <td>${fmtNum(r.kw_aq_medio, 1)}</td>
             </tr>
           `).join('')}
         </tbody>
@@ -335,13 +388,13 @@
     });
   }
 
-  async function loadResumo(force) {
+  async function loadResumo() {
     try {
       setStatus('Carregando máquinas e testes...');
       _resumo = await apiGet('/api/testes/resumo');
       renderKpis();
       renderMachines();
-      await loadRelatorios($('prodTestesSearch')?.value || '', force);
+      await loadRelatorios($('prodTestesSearch')?.value || '');
       setStatus('');
     } catch (err) {
       setStatus(err.message || 'Falha ao carregar', true);
@@ -361,37 +414,11 @@
     }
   }
 
-  function makeLineChart(canvasId, labels, datasets, opts = {}) {
+  function makeChart(canvasId, config) {
     const canvas = $(canvasId);
     if (!canvas || typeof Chart === 'undefined') return;
     destroyOne(canvasId);
-    _charts[canvasId] = new Chart(canvas.getContext('2d'), {
-      type: 'line',
-      data: { labels, datasets },
-      options: {
-        responsive: true,
-        maintainAspectRatio: false,
-        interaction: { mode: 'index', intersect: false },
-        plugins: {
-          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
-          tooltip: { callbacks: opts.tooltipCallbacks || {} },
-        },
-        scales: {
-          x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8, font: { size: 10 } } },
-          y: { beginAtZero: opts.beginAtZero !== false, ticks: { font: { size: 10 } } },
-          ...(opts.y1 ? {
-            y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false }, ticks: { font: { size: 10 } } },
-          } : {}),
-        },
-      },
-    });
-  }
-
-  function destroyOne(key) {
-    if (_charts[key]) {
-      try { _charts[key].destroy(); } catch (_) {}
-      _charts[key] = null;
-    }
+    _charts[canvasId] = new Chart(canvas.getContext('2d'), config);
   }
 
   function ds(label, data, color, extra = {}) {
@@ -401,11 +428,31 @@
       borderColor: color,
       backgroundColor: color + '33',
       borderWidth: 2,
-      pointRadius: data.length > 40 ? 0 : 2,
+      pointRadius: Array.isArray(data) && data.length > 40 ? 0 : 3,
       tension: 0.25,
       fill: false,
       ...extra,
     };
+  }
+
+  function cardMomento(titulo, ponto, accent, destaque) {
+    if (!ponto) return '';
+    return `
+      <div class="pt-compare-card" style="--pt-accent:${accent};">
+        <h5>${esc(titulo)}</h5>
+        <div class="pt-idx">Leitura #${ponto.indice} · ${esc(ponto.data_hora || '')} · ${fasePill(ponto.fase)}</div>
+        <div class="pt-big">${fmtNum(ponto.cop, 2)}<small>COP</small></div>
+        <div class="pt-compare-metrics">
+          <div><span>ΔT</span><strong>${fmtNum(ponto.temp_dif, 2)} °C</strong></div>
+          <div><span>kW aq.</span><strong>${fmtNum(ponto.kw_aquecimento, 1)}</strong></div>
+          <div><span>T saída</span><strong>${fmtNum(ponto.temp_saida, 1)} °C</strong></div>
+          <div><span>Consumo</span><strong>${fmtNum(ponto.kw_consumo, 1)} kW</strong></div>
+          <div><span>P alta/baixa</span><strong>${fmtNum(ponto.pressao_alta, 0)} / ${fmtNum(ponto.pressao_baixa, 0)}</strong></div>
+          <div><span>Corrente</span><strong>${fmtNum(ponto.corrente, 1)} A</strong></div>
+        </div>
+        ${destaque ? `<div class="pt-muted" style="margin-top:10px;">${esc(destaque)}</div>` : ''}
+      </div>
+    `;
   }
 
   async function openDetalhe(id) {
@@ -413,17 +460,24 @@
     if (!root) return;
     _view = 'detalhe';
     destroyCharts();
-    root.innerHTML = `<div class="pt-empty"><i class="fa-solid fa-spinner fa-spin"></i> Carregando relatório #${esc(id)}...</div>`;
+    root.innerHTML = `<div class="pt-empty"><i class="fa-solid fa-spinner fa-spin"></i> Analisando leituras do relatório #${esc(id)}...</div>`;
     setStatus('');
 
     try {
       const data = await apiGet(`/api/testes/relatorios/${id}`);
       const r = data.relatorio || {};
-      const st = data.stats || {};
-      const diag = data.diagnostico || {};
+      const cmp = data.comparativo || {};
+      const pontos = cmp.pontos_chave || {};
+      const comp = cmp.comparacao || {};
+      const barras = cmp.barras_comparativas || {};
       const leituras = data.leituras || [];
-      const spec = data.spec;
+      const diag = data.diagnostico || {};
       const ver = veredictoMeta(diag.veredicto);
+      const keyIds = new Set(
+        [pontos.inicio, pontos.pico_cop, pontos.pico_potencia, pontos.fim_regime]
+          .filter(Boolean)
+          .map((p) => p.id)
+      );
 
       const labels = leituras.map((l, i) => {
         const dh = String(l.data_hora || '');
@@ -431,126 +485,160 @@
         return hora || `#${i + 1}`;
       });
 
+      // Pontos anotados no gráfico (índices 0-based)
+      const annIndices = {
+        inicio: pontos.inicio ? pontos.inicio.indice - 1 : null,
+        pico: pontos.pico_cop ? pontos.pico_cop.indice - 1 : null,
+        fim: pontos.fim_regime ? pontos.fim_regime.indice - 1 : null,
+      };
+
       root.innerHTML = `
         <div class="pt-shell">
           <div class="pt-back">
             <button type="button" class="pt-btn" id="prodTestesVoltarBtn"><i class="fa-solid fa-arrow-left"></i> Voltar</button>
           </div>
+
           <div class="pt-hero">
             <div>
               <h2>
-                <i class="fa-solid fa-file-waveform" style="color:#34d399;"></i>
+                <i class="fa-solid fa-chart-line" style="color:#34d399;"></i>
                 OP ${esc(r.num_op || '—')} · ${esc(r.modelo || '—')}
-                <span class="pt-badge" style="background:${ver.bg};color:${ver.color};border:1px solid ${ver.border};margin-left:8px;">${ver.label}</span>
+                <span class="pt-badge" style="background:${ver.bg};color:${ver.color};border:1px solid ${ver.border};">${ver.label}</span>
               </h2>
               <p>
-                ${esc(r.linha || '')}
-                · Operador: <strong style="color:#e2e8f0;">${esc(r.operador || '—')}</strong>
+                Comparativo entre <strong style="color:#e2e8f0;">${leituras.length} leituras</strong>
+                · ${esc(r.linha || '')}
+                · Operador ${esc(r.operador || '—')}
                 · ${fmtData(r.criado_em)}
-                · ${leituras.length} leituras
-                ${r.arquivo_xlsx ? ` · <span class="pt-muted">${esc(r.arquivo_xlsx)}</span>` : ''}
               </p>
             </div>
           </div>
 
-          <div class="pt-kpis">
-            <div class="pt-kpi"><span>COP médio</span><strong>${fmtNum(st.cop?.media, 2)}</strong><em>máx ${fmtNum(st.cop?.max, 1)} · mín ${fmtNum(st.cop?.min, 1)}</em></div>
-            <div class="pt-kpi"><span>ΔT médio</span><strong>${fmtNum(st.delta_t?.media, 2)}°</strong><em>entrada→saída</em></div>
-            <div class="pt-kpi"><span>kW aquecimento</span><strong>${fmtNum(st.kw_aquecimento?.media, 1)}</strong><em>consumo ${fmtNum(st.kw_consumo?.media, 1)} kW</em></div>
-            <div class="pt-kpi"><span>kcal/h</span><strong>${fmtNum(st.kcal_h?.media, 1)}</strong><em>capacidade térmica</em></div>
-            <div class="pt-kpi"><span>Pressão A/B</span><strong style="font-size:16px;">${fmtNum(st.pressao_alta?.media, 0)} / ${fmtNum(st.pressao_baixa?.media, 0)}</strong><em>alta / baixa</em></div>
-            <div class="pt-kpi"><span>Em regime</span><strong>${fmtNum(st.leituras_regime, 0)}</strong><em>de ${fmtNum(st.total_leituras, 0)} leituras</em></div>
-          </div>
-
-          ${spec ? `
-            <div class="pt-section-title"><i class="fa-solid fa-book" style="color:#a78bfa;"></i> Catálogo / etiqueta</div>
-            <div class="pt-table-wrap" style="padding:12px 14px;">
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;font-size:12px;color:#cbd5e1;">
-                <div><span class="pt-muted">Modelo catálogo</span><br><strong>${esc(spec.modeloLabel || spec.modelo)}</strong></div>
-                <div><span class="pt-muted">COP nominal</span><br><strong>${spec.cop?.min != null ? `${fmtNum(spec.cop.min,1)}–${fmtNum(spec.cop.max,1)}` : fmtNum(spec.cop, 1)}</strong></div>
-                <div><span class="pt-muted">Capacidade kW</span><br><strong>${spec.capacidadekW?.min != null ? `${fmtNum(spec.capacidadekW.min,1)}–${fmtNum(spec.capacidadekW.max,1)}` : fmtNum(spec.capacidadekW, 1)}</strong></div>
-                <div><span class="pt-muted">Vazão ideal</span><br><strong>${fmtNum(typeof spec.vazaoAguaIdeal === 'object' ? spec.vazaoAguaIdeal.mid : spec.vazaoAguaIdeal, 1)} m³/h</strong></div>
-                <div><span class="pt-muted">Tensão</span><br><strong>${esc(spec.tensaoNominal || '—')}</strong></div>
-                <div><span class="pt-muted">Fluido</span><br><strong>${esc(spec.fluido || '—')}</strong></div>
-              </div>
+          ${(cmp.narrativa || []).length ? `
+            <div class="pt-narrativa">
+              <strong style="color:#7dd3fc;"><i class="fa-solid fa-book-open"></i> O que as leituras mostram</strong>
+              <ul style="margin:8px 0 0;padding-left:18px;">
+                ${cmp.narrativa.map((t) => `<li>${esc(t)}</li>`).join('')}
+              </ul>
             </div>
           ` : ''}
 
-          <div class="pt-section-title"><i class="fa-solid fa-stethoscope" style="color:#f59e0b;"></i> Diagnóstico do teste</div>
-          <div class="pt-diag" id="prodTestesDiag">
-            ${(diag.alertas || []).map((a) => `
-              <div class="pt-diag-item pt-diag-${esc(a.nivel)}">
-                <i class="fa-solid ${a.nivel === 'critico' ? 'fa-triangle-exclamation' : 'fa-circle-exclamation'}" style="color:${a.nivel === 'critico' ? '#ef4444' : '#f59e0b'};margin-right:6px;"></i>
-                ${esc(a.texto)}
-              </div>
-            `).join('')}
-            ${(diag.ok || []).map((t) => `
-              <div class="pt-diag-item pt-diag-ok"><i class="fa-solid fa-circle-check" style="color:#22c55e;margin-right:6px;"></i>${esc(t)}</div>
-            `).join('')}
-            ${(diag.infos || []).map((t) => `
-              <div class="pt-diag-item pt-diag-info"><i class="fa-solid fa-circle-info" style="color:#38bdf8;margin-right:6px;"></i>${esc(t)}</div>
-            `).join('')}
+          <div class="pt-section-title"><i class="fa-solid fa-code-compare" style="color:#34d399;"></i> Comparar momentos do teste</div>
+          <div class="pt-compare-grid">
+            ${cardMomento('1. Início', pontos.inicio, CORES.inicio, 'Primeira leitura ativa')}
+            ${cardMomento('2. Pico de COP', pontos.pico_cop, CORES.pico, 'Melhor eficiência registrada')}
+            ${cardMomento('3. Fim do regime', pontos.fim_regime, CORES.fim, 'Última leitura estável antes da parada')}
+            ${pontos.pico_potencia && pontos.pico_cop && pontos.pico_potencia.id !== pontos.pico_cop.id
+              ? cardMomento('Pico de potência', pontos.pico_potencia, CORES.aquecimento, 'Maior kW de aquecimento')
+              : ''}
           </div>
 
-          <div class="pt-section-title"><i class="fa-solid fa-chart-line" style="color:#38bdf8;"></i> Evolução durante o teste</div>
-          <div class="pt-charts">
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-gauge-high" style="color:${CORES.cop};"></i> COP (eficiência)</h4><div style="height:220px;"><canvas id="ptChartCop"></canvas></div></div>
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-temperature-half" style="color:${CORES.saida};"></i> Temperaturas (°C)</h4><div style="height:220px;"><canvas id="ptChartTemp"></canvas></div></div>
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-bolt" style="color:${CORES.aquecimento};"></i> Potência (kW)</h4><div style="height:220px;"><canvas id="ptChartKw"></canvas></div></div>
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-gauge" style="color:${CORES.pAlta};"></i> Pressões</h4><div style="height:220px;"><canvas id="ptChartPress"></canvas></div></div>
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-water" style="color:${CORES.vazao};"></i> Vazão</h4><div style="height:220px;"><canvas id="ptChartVazao"></canvas></div></div>
-            <div class="pt-chart-card"><h4><i class="fa-solid fa-plug" style="color:#fbbf24;"></i> Elétrica (V / A)</h4><div style="height:220px;"><canvas id="ptChartElec"></canvas></div></div>
-          </div>
-
-          <div class="pt-section-title"><i class="fa-solid fa-table" style="color:#94a3b8;"></i> Leituras brutas
-            <span class="pt-muted"> · ponto verde = em regime</span>
-          </div>
-          <div class="pt-table-wrap" style="max-height:420px;">
-            <table class="pt-table">
+          <div class="pt-section-title"><i class="fa-solid fa-arrow-right-arrow-left" style="color:#a78bfa;"></i> Diferença entre as leituras</div>
+          <div class="pt-table-wrap">
+            <table class="pt-table pt-delta-table">
               <thead>
                 <tr>
-                  <th></th><th>Data/hora</th><th>T amb</th><th>T ent</th><th>T sai</th><th>ΔT</th>
-                  <th>COP</th><th>kW aq</th><th>kW cons</th><th>kcal/h</th>
-                  <th>Vazão</th><th>P alta</th><th>P baixa</th><th>V</th><th>A</th>
+                  <th>Grandeza</th>
+                  <th>Início → Pico</th>
+                  <th>Pico → Fim</th>
+                  <th>Início → Fim</th>
                 </tr>
               </thead>
               <tbody>
-                ${leituras.map((l) => `
-                  <tr style="${l.em_regime ? '' : 'opacity:.72;'}">
-                    <td><span class="pt-regime-dot" style="background:${l.em_regime ? '#22c55e' : '#64748b'};"></span></td>
-                    <td>${esc(l.data_hora || '—')}</td>
-                    <td>${fmtNum(l.temp_ambiente, 1)}</td>
-                    <td>${fmtNum(l.temp_entrada, 1)}</td>
-                    <td>${fmtNum(l.temp_saida, 1)}</td>
-                    <td>${fmtNum(l.temp_dif, 2)}</td>
-                    <td><strong style="color:${Number(l.cop) >= 4 ? '#34d399' : Number(l.cop) >= 2.5 ? '#fbbf24' : '#f87171'};">${fmtNum(l.cop, 1)}</strong></td>
-                    <td>${fmtNum(l.kw_aquecimento, 1)}</td>
-                    <td>${fmtNum(l.kw_consumo, 1)}</td>
-                    <td>${fmtNum(l.kcal_h, 1)}</td>
-                    <td>${fmtNum(l.vazao, 0)}</td>
-                    <td>${fmtNum(l.pressao_alta, 1)}</td>
-                    <td>${fmtNum(l.pressao_baixa, 1)}</td>
-                    <td>${fmtNum(l.tensao, 0)}</td>
-                    <td>${fmtNum(l.corrente, 1)}</td>
+                ${[
+                  { k: 'cop', label: 'COP', dig: 2 },
+                  { k: 'temp_dif', label: 'ΔT (°C)', dig: 2 },
+                  { k: 'kw_aquecimento', label: 'kW aquecimento', dig: 2 },
+                  { k: 'kw_consumo', label: 'kW consumo', dig: 2 },
+                  { k: 'temp_saida', label: 'T saída (°C)', dig: 2 },
+                  { k: 'corrente', label: 'Corrente (A)', dig: 1 },
+                  { k: 'pressao_alta', label: 'Pressão alta', dig: 1 },
+                ].map((row) => `
+                  <tr>
+                    <td>${esc(row.label)}</td>
+                    <td class="delta ${deltaClass(comp.inicio_para_pico?.[row.k])}">${fmtDelta(comp.inicio_para_pico?.[row.k], row.dig)}</td>
+                    <td class="delta ${deltaClass(comp.pico_para_fim?.[row.k])}">${fmtDelta(comp.pico_para_fim?.[row.k], row.dig)}</td>
+                    <td class="delta ${deltaClass(comp.inicio_para_fim?.[row.k])}">${fmtDelta(comp.inicio_para_fim?.[row.k], row.dig)}</td>
                   </tr>
                 `).join('')}
               </tbody>
             </table>
           </div>
 
+          <div class="pt-section-title"><i class="fa-solid fa-chart-column" style="color:#38bdf8;"></i> Gráficos — evolução e comparação</div>
+          <div class="pt-charts">
+            <div class="pt-chart-card wide">
+              <h4><i class="fa-solid fa-timeline" style="color:#34d399;"></i> Evolução das leituras (COP × ΔT × T saída)</h4>
+              <div class="pt-chart-box"><canvas id="ptChartEvolucao"></canvas></div>
+            </div>
+            <div class="pt-chart-card">
+              <h4><i class="fa-solid fa-chart-simple" style="color:#a78bfa;"></i> Início × Pico × Fim</h4>
+              <div class="pt-chart-box"><canvas id="ptChartBarras"></canvas></div>
+            </div>
+            <div class="pt-chart-card">
+              <h4><i class="fa-solid fa-bolt" style="color:#f59e0b;"></i> Potência ao longo do teste</h4>
+              <div class="pt-chart-box"><canvas id="ptChartKw"></canvas></div>
+            </div>
+            <div class="pt-chart-card">
+              <h4><i class="fa-solid fa-gauge" style="color:#ef4444;"></i> Pressões (alta × baixa)</h4>
+              <div class="pt-chart-box"><canvas id="ptChartPress"></canvas></div>
+            </div>
+            <div class="pt-chart-card">
+              <h4><i class="fa-solid fa-circle-nodes" style="color:#22d3ee;"></i> Relação COP × ΔT (cada ponto = 1 leitura)</h4>
+              <div class="pt-chart-box"><canvas id="ptChartScatter"></canvas></div>
+            </div>
+          </div>
+
+          <div class="pt-section-title"><i class="fa-solid fa-table" style="color:#94a3b8;"></i> Todas as leituras
+            <span class="pt-muted"> · destacadas = momentos-chave da comparação</span>
+          </div>
+          <div class="pt-table-wrap" style="max-height:420px;">
+            <table class="pt-table">
+              <thead>
+                <tr>
+                  <th>#</th><th>Fase</th><th>Hora</th><th>T ent</th><th>T sai</th><th>ΔT</th>
+                  <th>COP</th><th>kW aq</th><th>kW cons</th><th>P alta</th><th>P baixa</th><th>A</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${leituras.map((l, i) => {
+                  const isPico = pontos.pico_cop && l.id === pontos.pico_cop.id;
+                  const isKey = keyIds.has(l.id);
+                  return `
+                    <tr class="${isPico ? 'pt-row-pico' : isKey ? 'pt-row-key' : ''}" style="${l.fase === 'parada' ? 'opacity:.65;' : ''}">
+                      <td><strong>${i + 1}</strong></td>
+                      <td>${fasePill(l.fase)}</td>
+                      <td>${esc(l.data_hora || '—')}</td>
+                      <td>${fmtNum(l.temp_entrada, 1)}</td>
+                      <td>${fmtNum(l.temp_saida, 1)}</td>
+                      <td>${fmtNum(l.temp_dif, 2)}</td>
+                      <td><strong style="color:${Number(l.cop) >= 4 ? '#34d399' : Number(l.cop) >= 2.5 ? '#fbbf24' : '#f87171'};">${fmtNum(l.cop, 1)}</strong></td>
+                      <td>${fmtNum(l.kw_aquecimento, 1)}</td>
+                      <td>${fmtNum(l.kw_consumo, 1)}</td>
+                      <td>${fmtNum(l.pressao_alta, 1)}</td>
+                      <td>${fmtNum(l.pressao_baixa, 1)}</td>
+                      <td>${fmtNum(l.corrente, 1)}</td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+
           ${(data.comparativo_modelo || []).length ? `
-            <div class="pt-section-title"><i class="fa-solid fa-code-compare" style="color:#a78bfa;"></i> Outros testes do modelo ${esc(r.modelo)}</div>
+            <div class="pt-section-title"><i class="fa-solid fa-layer-group" style="color:#a78bfa;"></i> Outros testes do modelo ${esc(r.modelo)}</div>
             <div class="pt-table-wrap">
               <table class="pt-table">
-                <thead><tr><th>Data</th><th>OP</th><th>Operador</th><th>Leituras</th><th>COP</th><th>ΔT</th></tr></thead>
+                <thead><tr><th>Data</th><th>OP</th><th>Operador</th><th>Leituras</th><th>COP méd</th><th>COP máx</th><th>ΔT</th></tr></thead>
                 <tbody>
                   ${data.comparativo_modelo.map((c) => `
-                    <tr data-id="${c.id}">
+                    <tr class="clickable" data-id="${c.id}">
                       <td>${fmtData(c.criado_em)}</td>
                       <td><strong>${esc(c.num_op || '—')}</strong></td>
                       <td>${esc(c.operador || '—')}</td>
                       <td>${fmtNum(c.total_registros, 0)}</td>
                       <td>${fmtNum(c.cop_medio, 1)}</td>
+                      <td>${fmtNum(c.cop_max, 1)}</td>
                       <td>${fmtNum(c.delta_t_medio, 1)}</td>
                     </tr>
                   `).join('')}
@@ -570,36 +658,169 @@
         loadRelatorios($('prodTestesSearch')?.value || '');
       });
 
-      root.querySelectorAll('tr[data-id]').forEach((tr) => {
+      root.querySelectorAll('tr.clickable[data-id]').forEach((tr) => {
         tr.addEventListener('click', () => openDetalhe(tr.getAttribute('data-id')));
       });
 
       chartDefaults();
       requestAnimationFrame(() => {
-        makeLineChart('ptChartCop', labels, [
-          ds('COP', leituras.map((l) => l.cop), CORES.cop),
-        ]);
-        makeLineChart('ptChartTemp', labels, [
-          ds('Ambiente', leituras.map((l) => l.temp_ambiente), CORES.amb),
-          ds('Entrada', leituras.map((l) => l.temp_entrada), CORES.entrada),
-          ds('Saída', leituras.map((l) => l.temp_saida), CORES.saida),
-          ds('ΔT', leituras.map((l) => l.temp_dif), CORES.delta),
-        ], { beginAtZero: false });
-        makeLineChart('ptChartKw', labels, [
-          ds('Aquecimento', leituras.map((l) => l.kw_aquecimento), CORES.aquecimento),
-          ds('Consumo', leituras.map((l) => l.kw_consumo), CORES.consumo),
-        ]);
-        makeLineChart('ptChartPress', labels, [
-          ds('Alta', leituras.map((l) => l.pressao_alta), CORES.pAlta),
-          ds('Baixa', leituras.map((l) => l.pressao_baixa), CORES.pBaixa),
-        ], { beginAtZero: false });
-        makeLineChart('ptChartVazao', labels, [
-          ds('Vazão', leituras.map((l) => l.vazao), CORES.vazao),
-        ], { beginAtZero: false });
-        makeLineChart('ptChartElec', labels, [
-          ds('Tensão (V)', leituras.map((l) => l.tensao), '#fbbf24', { yAxisID: 'y' }),
-          ds('Corrente (A)', leituras.map((l) => l.corrente), '#fb7185', { yAxisID: 'y1' }),
-        ], { beginAtZero: false, y1: true });
+        // 1) Evolução principal com pontos-chave maiores
+        const pointRadius = leituras.map((_, i) => (
+          i === annIndices.inicio || i === annIndices.pico || i === annIndices.fim ? 6 : (leituras.length > 40 ? 0 : 2)
+        ));
+        makeChart('ptChartEvolucao', {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              ds('COP', leituras.map((l) => l.cop), CORES.cop, { yAxisID: 'y', pointRadius, pointHoverRadius: 7 }),
+              ds('ΔT (°C)', leituras.map((l) => l.temp_dif), CORES.delta, { yAxisID: 'y1', pointRadius: 0 }),
+              ds('T saída (°C)', leituras.map((l) => l.temp_saida), CORES.saida, { yAxisID: 'y1', pointRadius: 0, borderDash: [4, 3] }),
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: {
+              legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+              tooltip: {
+                callbacks: {
+                  afterBody(items) {
+                    const i = items?.[0]?.dataIndex;
+                    if (i == null) return '';
+                    const tags = [];
+                    if (i === annIndices.inicio) tags.push('→ INÍCIO');
+                    if (i === annIndices.pico) tags.push('→ PICO COP');
+                    if (i === annIndices.fim) tags.push('→ FIM REGIME');
+                    const fase = leituras[i]?.fase;
+                    if (fase) tags.push(`Fase: ${FASE_META[fase]?.label || fase}`);
+                    return tags;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: { ticks: { maxTicksLimit: 10, font: { size: 10 } } },
+              y: { title: { display: true, text: 'COP', color: CORES.cop }, beginAtZero: true, ticks: { font: { size: 10 } } },
+              y1: {
+                position: 'right',
+                title: { display: true, text: '°C', color: CORES.delta },
+                grid: { drawOnChartArea: false },
+                ticks: { font: { size: 10 } },
+              },
+            },
+          },
+        });
+
+        // 2) Barras comparativas início/pico/fim
+        if (barras.labels?.length) {
+          makeChart('ptChartBarras', {
+            type: 'bar',
+            data: {
+              labels: barras.labels,
+              datasets: [
+                { label: 'COP', data: barras.cop, backgroundColor: CORES.cop + 'cc', borderRadius: 6 },
+                { label: 'ΔT (°C)', data: barras.delta_t, backgroundColor: CORES.delta + 'cc', borderRadius: 6 },
+                { label: 'kW aq.', data: barras.kw_aquecimento, backgroundColor: CORES.aquecimento + 'cc', borderRadius: 6 },
+              ],
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+              scales: {
+                x: { ticks: { font: { size: 10 } } },
+                y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+              },
+            },
+          });
+        }
+
+        // 3) Potência
+        makeChart('ptChartKw', {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              ds('Aquecimento', leituras.map((l) => l.kw_aquecimento), CORES.aquecimento),
+              ds('Consumo', leituras.map((l) => l.kw_consumo), CORES.consumo),
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+            scales: {
+              x: { ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+              y: { beginAtZero: true, ticks: { font: { size: 10 } } },
+            },
+          },
+        });
+
+        // 4) Pressões
+        makeChart('ptChartPress', {
+          type: 'line',
+          data: {
+            labels,
+            datasets: [
+              ds('Alta', leituras.map((l) => l.pressao_alta), CORES.pAlta),
+              ds('Baixa', leituras.map((l) => l.pressao_baixa), CORES.pBaixa),
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index', intersect: false },
+            plugins: { legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } } },
+            scales: {
+              x: { ticks: { maxTicksLimit: 8, font: { size: 10 } } },
+              y: { beginAtZero: false, ticks: { font: { size: 10 } } },
+            },
+          },
+        });
+
+        // 5) Scatter COP × ΔT
+        const scatterPts = leituras
+          .filter((l) => l.fase !== 'parada' && numOk(l.cop) && numOk(l.temp_dif))
+          .map((l) => ({
+            x: Number(l.temp_dif),
+            y: Number(l.cop),
+            label: l.data_hora,
+            fase: l.fase,
+          }));
+        makeChart('ptChartScatter', {
+          type: 'scatter',
+          data: {
+            datasets: [{
+              label: 'Leituras',
+              data: scatterPts,
+              backgroundColor: scatterPts.map((p) => (FASE_META[p.fase]?.color || '#94a3b8') + 'cc'),
+              borderColor: scatterPts.map((p) => FASE_META[p.fase]?.color || '#94a3b8'),
+              pointRadius: 5,
+            }],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+              legend: { display: false },
+              tooltip: {
+                callbacks: {
+                  label(ctx) {
+                    const p = ctx.raw || {};
+                    return `ΔT ${p.x} °C · COP ${p.y} · ${FASE_META[p.fase]?.label || ''}`;
+                  },
+                },
+              },
+            },
+            scales: {
+              x: { title: { display: true, text: 'ΔT (°C)' }, ticks: { font: { size: 10 } } },
+              y: { title: { display: true, text: 'COP' }, beginAtZero: true, ticks: { font: { size: 10 } } },
+            },
+          },
+        });
       });
     } catch (err) {
       root.innerHTML = `
@@ -616,10 +837,13 @@
     }
   }
 
+  function numOk(v) {
+    return v != null && !Number.isNaN(Number(v));
+  }
+
   function init() {
     if (_init) return;
-    const pane = $('producaoTestesPane');
-    if (!pane) return;
+    if (!$('producaoTestesPane')) return;
     _init = true;
     ensureStyles();
     chartDefaults();
