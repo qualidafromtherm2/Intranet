@@ -189,6 +189,37 @@ async function uploadAnexo(file, chamadoTempId) {
   };
 }
 
+// GET /api/suporte/chamados/contagem — abertos (aberto + em_andamento)
+router.get('/chamados/contagem', requireAuth, async (req, res) => {
+  try {
+    await ensureSchema();
+    const admin = isAdmin(req);
+    const usuario = getUsuario(req);
+    const params = [];
+    const where = [
+      `LOWER(REPLACE(TRIM(status), ' ', '_')) IN ('aberto', 'em_andamento')`,
+    ];
+
+    // Não-admin: só os próprios; admin: fila completa
+    if (!admin) {
+      params.push(usuario);
+      where.push(`criado_por = $${params.length}`);
+    }
+
+    const { rows } = await dbQuery(
+      `SELECT COUNT(*)::int AS total
+         FROM "Suporte_tecnico"."Chamado"
+        WHERE ${where.join(' AND ')}`,
+      params
+    );
+
+    res.json({ ok: true, admin, abertos: rows[0]?.total || 0 });
+  } catch (err) {
+    console.error('[suporte/chamados] contagem:', err);
+    res.status(500).json({ error: err.message || 'Falha ao contar chamados' });
+  }
+});
+
 // GET /api/suporte/chamados
 router.get('/chamados', requireAuth, async (req, res) => {
   try {

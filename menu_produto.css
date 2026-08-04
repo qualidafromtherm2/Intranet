@@ -8397,6 +8397,31 @@ li.duplicado::after{
   display:flex;align-items:center;justify-content:center;
 }
 
+/* badge de chamados abertos no ícone headset */
+#chamado-icon {
+  position: relative;
+}
+.chamado-badge {
+  position: absolute;
+  top: -6px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-style: normal;
+}
+
 /* foto do usu�rio */
 .profile-img{
   width:32px;height:32px;
