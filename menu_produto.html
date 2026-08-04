@@ -9731,13 +9731,14 @@
             </div>
             <button type="button" id="confZplEditorFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
           </div>
-          <div style="display:grid;grid-template-columns:1.2fr 0.9fr;gap:16px;padding:16px 18px;">
+          <div class="conf-zpl-editor-grid" style="display:grid;grid-template-columns:1.2fr 0.9fr;gap:16px;padding:16px 18px;">
             <div>
               <label style="display:block;font-size:12px;color:#94a3b8;margin-bottom:10px;">Nome do perfil/layout<input id="confZplNome" type="text" style="width:100%;margin-top:4px;padding:7px 8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;"></label>
-              <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin-bottom:12px;">
+              <div class="conf-zpl-settings-grid" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:12px;">
                 <label style="font-size:12px;color:#94a3b8;">Largura (mm)<input id="confZplW" type="number" min="10" max="300" style="width:100%;margin-top:4px;padding:7px 8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;"></label>
                 <label style="font-size:12px;color:#94a3b8;">Altura (mm)<input id="confZplH" type="number" min="10" max="400" style="width:100%;margin-top:4px;padding:7px 8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;"></label>
                 <label style="font-size:12px;color:#94a3b8;">DPI<input id="confZplDpi" type="number" min="150" max="600" style="width:100%;margin-top:4px;padding:7px 8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;"></label>
+                <label style="font-size:12px;color:#94a3b8;">Escuridão (0–30)<input id="confZplDarkness" type="number" min="0" max="30" step="1" style="width:100%;margin-top:4px;padding:7px 8px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#f1f5f9;"></label>
               </div>
               <div style="display:flex;gap:6px;margin-bottom:10px;">
                 <button type="button" id="confZplTabFacil" class="content-button" style="background:#7c3aed;color:#fff;">Modo fácil</button>
@@ -9788,6 +9789,18 @@
                 <div id="confZplAmostraGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:8px;"></div>
               </details>
               <pre id="confZplPreviewZpl" style="display:none;margin-top:10px;max-height:120px;overflow:auto;background:#020617;border:1px solid #334155;border-radius:8px;padding:8px;font-size:10px;color:#94a3b8;"></pre>
+              <div style="margin-top:12px;padding:12px;border:1px solid #334155;border-radius:10px;background:#111c30;">
+                <strong style="display:block;color:#f1f5f9;font-size:13px;margin-bottom:4px;">Impressão de teste</strong>
+                <span style="display:block;color:#94a3b8;font-size:11px;line-height:1.4;margin-bottom:8px;">Envia exatamente o ZPL exibido na prévia, sem criar uma etiqueta ou consumir um ID.</span>
+                <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                  <select id="confZplTesteImpressora" style="min-width:220px;flex:1;padding:8px;border-radius:8px;border:1px solid #475569;background:#1e293b;color:#f1f5f9;">
+                    <option value="">Carregando impressoras disponíveis...</option>
+                  </select>
+                  <button type="button" id="confZplBtnTeste" class="content-button" style="background:#d97706;color:#fff;" disabled>
+                    <i class="fa-solid fa-print"></i> Imprimir teste
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
           <div style="display:flex;gap:10px;justify-content:flex-end;padding:12px 18px 16px;border-top:1px solid #334155;position:sticky;bottom:0;background:#0f172a;">

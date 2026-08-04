@@ -12213,6 +12213,8 @@ app.put('/api/etiquetas/layout-config/:chave', express.json({ limit: '1mb' }), a
       const tmpLayout = {
         label_width: numOrNull(b.labelWidth ?? b.label_width),
         label_height: numOrNull(b.labelHeight ?? b.label_height),
+        darkness: numOrNull(b.darkness),
+        speed: numOrNull(b.speed),
         dpi: numOrNull(b.dpi) || 203,
         offset_x: Math.round(numOrNull(b.offsetX ?? b.offset_x) ?? 0),
         offset_y: Math.round(numOrNull(b.offsetY ?? b.offset_y) ?? 0),
@@ -12228,6 +12230,8 @@ app.put('/api/etiquetas/layout-config/:chave', express.json({ limit: '1mb' }), a
           dpi: tmpLayout.dpi,
           offsetX: tmpLayout.offset_x,
           offsetY: tmpLayout.offset_y,
+          darkness: tmpLayout.darkness,
+          speed: tmpLayout.speed,
         }
       );
     }
@@ -12292,6 +12296,8 @@ app.post('/api/etiquetas/layout-config/preview', express.json({ limit: '1mb' }),
     const dpi = Number(b.dpi ?? layout?.dpi) || 203;
     const offsetX = Number(b.offsetX ?? b.offset_x ?? layout?.offset_x) || 0;
     const offsetY = Number(b.offsetY ?? b.offset_y ?? layout?.offset_y) || 0;
+    const darkness = b.darkness ?? layout?.darkness;
+    const speed = b.speed ?? layout?.speed;
     const campos = Array.isArray(b.campos) ? b.campos : (Array.isArray(layout?.campos) ? layout.campos : []);
     const template = (b.zplTemplate != null ? b.zplTemplate : (b.zpl_template != null ? b.zpl_template : layout?.zpl_template)) || '';
     const amostra = Object.assign({}, ETQ_LAYOUT_SAMPLE_DEFAULT, layout?.amostra || {}, b.amostra || {});
@@ -12303,6 +12309,8 @@ app.post('/api/etiquetas/layout-config/preview', express.json({ limit: '1mb' }),
       dpi,
       offset_x: offsetX,
       offset_y: offsetY,
+      darkness,
+      speed,
       campos,
       zpl_template: template,
     };
@@ -12342,6 +12350,39 @@ app.post('/api/etiquetas/layout-config/preview', express.json({ limit: '1mb' }),
   } catch (err) {
     console.error('[etiquetas/layout-config/preview]', err);
     res.status(500).json({ error: err?.message });
+  }
+});
+
+// POST /api/etiquetas/layout-config/test-print — enfileira exatamente o ZPL conferido na prévia.
+// Não cria ETQ, não consome ID e não altera o estoque: é somente uma prova física do layout.
+app.post('/api/etiquetas/layout-config/test-print', express.json({ limit: '1mb' }), async (req, res) => {
+  if (!req.session?.user?.id) return res.status(401).json({ error: 'Não autenticado' });
+  try {
+    const zpl = String(req.body?.zpl || '').trim();
+    const destinoAgente = String(req.body?.destinoAgente || req.body?.destino_agente || '').trim();
+    const impressora = String(req.body?.impressora || '').trim();
+    const perfil = String(req.body?.perfil || '').trim();
+    if (!zpl || !/^\s*(?:~SD\d+\s*)?\^XA/i.test(zpl) || !/\^XZ\s*$/i.test(zpl)) {
+      return res.status(400).json({ error: 'Gere uma prévia ZPL válida antes de imprimir o teste.' });
+    }
+    if (!destinoAgente || !impressora) {
+      return res.status(400).json({ error: 'Escolha o agente e a impressora do teste.' });
+    }
+    const usuario = String(
+      req.session?.user?.nome || req.session?.user?.login || req.session?.usuario || ''
+    ).trim() || 'intranet';
+    const fila = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao"
+         (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ('{}'::int[], 0, $1, $2, 1, $3, $4)
+       RETURNING id`,
+      [usuario, zpl, destinoAgente, impressora]
+    );
+    console.log(`[etiqueta/teste] fila #${fila.rows[0].id} · ${perfil || 'sem perfil'} · ${destinoAgente} / ${impressora}`);
+    res.json({ ok: true, filaId: fila.rows[0].id });
+  } catch (err) {
+    console.error('[etiquetas/layout-config/test-print]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao enfileirar impressão de teste.' });
   }
 });
 
@@ -12905,13 +12946,18 @@ function _etqDotsPorMm(dpi = 203) {
 }
 
 /** Converte lista de campos visuais → ZPL (modo fácil). */
-function _etqCamposParaZpl(campos, vars, { chave = '', widthMm, heightMm, dpi = 203, offsetX = 0, offsetY = 0 } = {}) {
+function _etqCamposParaZpl(campos, vars, { chave = '', widthMm, heightMm, dpi = 203, offsetX = 0, offsetY = 0, darkness = null, speed = null } = {}) {
   const dpm = _etqDotsPorMm(dpi);
   const pw = Math.max(1, Math.round((Number(widthMm) || 50) * dpm));
   const ll = Math.max(1, Math.round((Number(heightMm) || 30) * dpm));
   const ox = Math.round(Number(offsetX) || 0);
   const oy = Math.round(Number(offsetY) || 0);
-  const lines = ['^XA', '^CI28', `^PW${pw}`, `^LL${ll}`];
+  const esc = Number.isFinite(Number(darkness)) ? Math.max(0, Math.min(30, Math.round(Number(darkness)))) : null;
+  const vel = Number.isFinite(Number(speed)) ? Math.max(1, Math.min(14, Math.round(Number(speed)))) : null;
+  const lines = [];
+  if (esc != null) lines.push(`~SD${esc}`);
+  lines.push('^XA', '^FXSGF_PROFILE_MANAGED^FS', '^CI28', `^PW${pw}`, `^LL${ll}`);
+  if (vel != null) lines.push(`^PR${vel}`);
   if (ox || oy) lines.push(`^LH${ox},${oy}`);
 
   const lista = Array.isArray(campos) ? campos : [];
@@ -12951,7 +12997,7 @@ function _etqCamposParaZpl(campos, vars, { chave = '', widthMm, heightMm, dpi = 
 }
 
 /** Aplica template ZPL com placeholders {{campo}}. */
-function _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi = 203 } = {}) {
+function _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi = 203, darkness = null, speed = null } = {}) {
   let zpl = _etqSubstituirPlaceholders(template, vars);
   const dpm = _etqDotsPorMm(dpi);
   if (Number(widthMm) > 0) {
@@ -12964,6 +13010,21 @@ function _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi = 203 }
     if (/\^LL\d+/i.test(zpl)) zpl = zpl.replace(/\^LL\d+/gi, `^LL${ll}`);
     else zpl = zpl.replace(/(\^XA)/i, `$1\n^LL${ll}`);
   }
+  if (!/\^FXSGF_PROFILE_MANAGED\^FS/i.test(zpl)) {
+    zpl = zpl.replace(/(\^XA)/i, `$1\n^FXSGF_PROFILE_MANAGED^FS`);
+  }
+  const esc = Number(darkness);
+  if (Number.isFinite(esc)) {
+    const cmd = `~SD${Math.max(0, Math.min(30, Math.round(esc)))}`;
+    if (/~SD\d+/i.test(zpl)) zpl = zpl.replace(/~SD\d+/gi, cmd);
+    else zpl = `${cmd}\n${zpl}`;
+  }
+  const vel = Number(speed);
+  if (Number.isFinite(vel)) {
+    const cmd = `^PR${Math.max(1, Math.min(14, Math.round(vel)))}`;
+    if (/\^PR\d+/i.test(zpl)) zpl = zpl.replace(/\^PR\d+/gi, cmd);
+    else zpl = zpl.replace(/(\^XA)/i, `$1\n${cmd}`);
+  }
   return zpl;
 }
 
@@ -12975,6 +13036,8 @@ function _etqGerarZplDoLayout(layout, varsIn) {
   const dpi = Number(layout?.dpi) || 203;
   const offsetX = Number(layout?.offset_x) || 0;
   const offsetY = Number(layout?.offset_y) || 0;
+  const darkness = layout?.darkness;
+  const speed = layout?.speed;
   const campos = Array.isArray(layout?.campos) ? layout.campos : [];
   const template = String(layout?.zpl_template || '').trim();
 
@@ -12986,10 +13049,12 @@ function _etqGerarZplDoLayout(layout, varsIn) {
       dpi,
       offsetX,
       offsetY,
+      darkness,
+      speed,
     });
   }
   if (template) {
-    return _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi });
+    return _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi, darkness, speed });
   }
   return null;
 }

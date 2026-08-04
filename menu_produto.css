@@ -23496,3 +23496,28 @@ html.light-mode #minhasComprasWrapper {
     bottom: -10px !important;
   }
 }
+@media (max-width: 900px) {
+  #confZplEditorModal .conf-zpl-editor-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  #confZplEditorModal .conf-zpl-settings-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  #confZplEditorModal {
+    padding: 6px !important;
+  }
+
+  #confZplEditorModal .conf-zpl-settings-grid {
+    grid-template-columns: 1fr 1fr !important;
+  }
+
+  #confZplTesteImpressora,
+  #confZplBtnTeste {
+    width: 100%;
+    min-width: 0 !important;
+  }
+}
