@@ -119,6 +119,28 @@ BEGIN
          (COALESCE(v_codigo, '') <> '' AND TRIM(codigo) = v_codigo)
          OR (COALESCE(v_integracao, '') <> '' AND TRIM(COALESCE(codigo_produto_integracao, '')) = v_integracao)
        );
+
+    -- Saldo de etiqueta preso no ID fantasma → ID ativo (evita "não possui saldo" na SEP).
+    UPDATE etiqueta."ETQ_rec_impresso" e
+       SET codigo_produto = v_codigo_produto::text,
+           descricao_produto = COALESCE(
+             NULLIF((
+               SELECT LEFT(COALESCE(pa.descricao, ''), 120)
+                 FROM public.produtos_omie pa
+                WHERE pa.codigo_produto = v_codigo_produto
+                LIMIT 1
+             ), ''),
+             e.descricao_produto
+           )
+     WHERE TRIM(COALESCE(e.codigo_produto, '')) IN (
+       SELECT p.codigo_produto::text
+         FROM public.produtos_omie p
+        WHERE p.codigo_produto <> v_codigo_produto
+          AND (
+            (COALESCE(v_codigo, '') <> '' AND TRIM(p.codigo) = v_codigo)
+            OR (COALESCE(v_integracao, '') <> '' AND TRIM(COALESCE(p.codigo_produto_integracao, '')) = v_integracao)
+          )
+     );
   END IF;
 
   -- IMAGENS NÃO SÃO MAIS SINCRONIZADAS A PARTIR DA OMIE.
@@ -127,4 +149,4 @@ END;
 $function$;
 
 COMMENT ON FUNCTION public.omie_upsert_produto(jsonb) IS
-'Upsert produtos_omie + inativa duplicatas do mesmo SKU (ID antigo). Imagens no Supabase.';
+'Upsert produtos_omie + inativa duplicatas do mesmo SKU e migra ETQ_rec_impresso para o ID ativo. Imagens no Supabase.';

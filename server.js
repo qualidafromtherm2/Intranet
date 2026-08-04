@@ -15129,16 +15129,42 @@ async function _etqEnderecosConhecidosProduto(client, codigoOmie, codigoTexto) {
   return rows.map((r) => r.endereco).filter(Boolean);
 }
 
+async function _etqIdsEquivalentesSku(client, codigoOmie) {
+  const id = String(codigoOmie || '').trim();
+  if (!id) return [];
+  const { rows } = await client.query(
+    `WITH base AS (
+       SELECT TRIM(COALESCE(codigo, '')) AS codigo,
+              TRIM(COALESCE(codigo_produto_integracao, '')) AS integ
+         FROM public.produtos_omie
+        WHERE codigo_produto::text = $1
+        LIMIT 1
+     )
+     SELECT DISTINCT p.codigo_produto::text AS id
+       FROM public.produtos_omie p
+       CROSS JOIN base b
+      WHERE (b.codigo <> '' AND TRIM(p.codigo) = b.codigo)
+         OR (b.integ <> '' AND TRIM(COALESCE(p.codigo_produto_integracao, '')) = b.integ)
+     UNION
+     SELECT $1::text`,
+    [id]
+  );
+  return rows.map((r) => String(r.id || '').trim()).filter(Boolean);
+}
+
 async function _etqLinhasSaldoEndereco(client, codigoOmie, endereco) {
+  const ids = await _etqIdsEquivalentesSku(client, codigoOmie);
+  const idsBusca = ids.length ? ids : [String(codigoOmie || '').trim()].filter(Boolean);
+  if (!idsBusca.length) return [];
   const { rows } = await client.query(
     `SELECT i.id, i.qtd, i.unidade, i.data_emissao, i.endereco, i.complemento,
             i.codigo_produto, i.descricao_produto, i.fonte, i.origem_id, i.usuario_criacao
        FROM etiqueta."ETQ_rec_impresso" i
-      WHERE TRIM(COALESCE(i.codigo_produto, '')) = $1
+      WHERE TRIM(COALESCE(i.codigo_produto, '')) = ANY($1::text[])
         AND TRIM(COALESCE(i.endereco, '')) = $2
         AND COALESCE(i.qtd, 0) > 0
       ORDER BY i.impresso_em ASC NULLS LAST, i.id ASC`,
-    [codigoOmie, endereco]
+    [idsBusca, endereco]
   );
   return rows;
 }
@@ -15895,10 +15921,15 @@ async function _etqDebitarPorId(client, { id, qtd, codigoOmie }) {
     err.code = 'ETQ_ID_NAO_ENCONTRADO';
     throw err;
   }
-  if (codigoOmie && String(row.codigo_produto || '').trim() !== String(codigoOmie).trim()) {
-    const err = new Error(`Etiqueta ID ${etqId} não pertence a este produto.`);
-    err.code = 'ETQ_ID_PRODUTO';
-    throw err;
+  if (codigoOmie) {
+    const idsOk = await _etqIdsEquivalentesSku(client, codigoOmie);
+    const codRow = String(row.codigo_produto || '').trim();
+    const ativo = String(codigoOmie).trim();
+    if (codRow && idsOk.length && !idsOk.includes(codRow) && codRow !== ativo) {
+      const err = new Error(`Etiqueta ID ${etqId} não pertence a este produto.`);
+      err.code = 'ETQ_ID_PRODUTO';
+      throw err;
+    }
   }
   const atual = Number(row.qtd || 0);
   if (atual + 1e-9 < qtdNum) {
@@ -15907,10 +15938,19 @@ async function _etqDebitarPorId(client, { id, qtd, codigoOmie }) {
     throw err;
   }
   const novaQtd = Math.max(0, atual - qtdNum);
-  await client.query(
-    `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
-    [novaQtd, etqId]
-  );
+  const ativoTxt = String(codigoOmie || '').trim();
+  // Se a etiqueta ainda está no ID fantasma, já corrige para o ativo ao debitar.
+  if (ativoTxt && String(row.codigo_produto || '').trim() !== ativoTxt) {
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1, codigo_produto = $2 WHERE id = $3`,
+      [novaQtd, ativoTxt, etqId]
+    );
+  } else {
+    await client.query(
+      `UPDATE etiqueta."ETQ_rec_impresso" SET qtd = $1 WHERE id = $2`,
+      [novaQtd, etqId]
+    );
+  }
   return {
     id: etqId,
     endereco: row.endereco || null,
@@ -15928,6 +15968,18 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
   const codigoTexto = String(codigo_produto || '').trim();
   const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto);
   if (!codigoOmie) throw new Error(`Produto "${codigoTexto}" não encontrado em produtos_omie.`);
+
+  // ID fantasma (SKU recriado na Omie): move saldo ETQ para o ID ativo antes de debitar.
+  try {
+    const { migrarEtqCodigoProduto } = require('./utils/etqMigrarCodigoFantasma');
+    const idsEq = await _etqIdsEquivalentesSku(client, codigoOmie);
+    const deIds = idsEq.filter((id) => id !== String(codigoOmie).trim());
+    if (deIds.length) {
+      await migrarEtqCodigoProduto(client, { deIds, paraId: codigoOmie });
+    }
+  } catch (e) {
+    console.warn('[etq] migração fantasma→ativo na separação:', e?.message || e);
+  }
 
   let lista = Array.isArray(etq_enderecos)
     ? etq_enderecos.filter(x => x && (x.etq_id || x.endereco || x.endereco_origem))

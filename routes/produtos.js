@@ -95,8 +95,26 @@ async function ensureOmieUpsertProdutoDedupSku() {
   }
 }
 
+/** Migra saldo ETQ preso em ID Omie fantasma → ID ativo (ex.: 01.MP.N.30100). */
+async function ensureEtqMigracaoSkuFantasma() {
+  try {
+    const client = await dbGetClient();
+    try {
+      const { migrarEtqSaldosSkuFantasma } = require('../utils/etqMigrarCodigoFantasma');
+      const r = await migrarEtqSaldosSkuFantasma(client);
+      if (r.migrados > 0) {
+        console.log(`[produtos] ETQ: ${r.migrados} etiqueta(s) migrada(s) de ID fantasma → ativo (${r.pares} SKU)`);
+      }
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    console.error('[produtos] Falha ao migrar ETQ de IDs fantasma:', String(err?.message || err));
+  }
+}
+
 ensureProdutosOmieWebhookOnlyGuard();
-ensureOmieUpsertProdutoDedupSku();
+ensureOmieUpsertProdutoDedupSku().then(() => ensureEtqMigracaoSkuFantasma());
 
 // === Helpers =================================================================
 function ensureIntegrationKey(item) {
@@ -1053,6 +1071,8 @@ router.post('/limpar-duplicatas-sku', express.json(), async (req, res) => {
         ok: true,
         marcados: result.marcados,
         grupos: result.grupos,
+        etq_migrados: result.etq_migrados || 0,
+        etq: result.etq || null,
         detalhes: result.detalhes
       });
     } finally {

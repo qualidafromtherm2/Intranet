@@ -9,7 +9,15 @@
  * Também trata o caso "mesmo SKU, ID novo": quando a Omie recria o produto
  * com outro codigo_produto, o ID antigo precisa ficar inativo para a
  * separação/transferência não mandarem o ID fantasma.
+ *
+ * Ao inativar o ID antigo, migra saldo de etiqueta.ETQ_rec_impresso
+ * para o ID ativo (senão a SEP acha "não possui saldo").
  */
+
+const {
+  migrarEtqAoInativarDuplicatas,
+  migrarEtqSaldosSkuFantasma
+} = require('./etqMigrarCodigoFantasma');
 
 async function comSourceOmie(client, source, fn) {
   await client.query('BEGIN');
@@ -113,10 +121,26 @@ async function desativarDuplicatasMesmoCodigo(client, opts, source = 'omie_sync'
       [codigoProduto, cod, integ]
     );
 
+    let etq = { migrados: 0, ids: [], detalhes: [] };
+    if (rows.length) {
+      const { rows: descRows } = await client.query(
+        `SELECT LEFT(COALESCE(descricao, ''), 120) AS descricao
+           FROM public.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
+        [codigoProduto]
+      );
+      etq = await migrarEtqAoInativarDuplicatas(client, {
+        manterId: codigoProduto,
+        idsInativados: rows.map((r) => r.codigo_produto),
+        descricao: descRows[0]?.descricao || ''
+      });
+    }
+
     return {
       marcados: rows.length,
       ids: rows.map((r) => r.codigo_produto),
-      detalhes: rows
+      detalhes: rows,
+      etq_migrados: etq.migrados,
+      etq
     };
   };
 
@@ -141,6 +165,7 @@ async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
     );
 
     let marcados = 0;
+    let etqMigrados = 0;
     const detalhes = [];
     for (const g of grupos) {
       const ids = (g.ids || []).map(String);
@@ -160,9 +185,32 @@ async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
       for (const r of rows) {
         detalhes.push({ ...r, mantido: manter, motivo: 'duplicata_ativa_local' });
       }
+      if (rows.length) {
+        const { rows: descRows } = await client.query(
+          `SELECT LEFT(COALESCE(descricao, ''), 120) AS descricao
+             FROM public.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
+          [manter]
+        );
+        const etq = await migrarEtqAoInativarDuplicatas(client, {
+          manterId: manter,
+          idsInativados: rows.map((r) => r.codigo_produto),
+          descricao: descRows[0]?.descricao || ''
+        });
+        etqMigrados += etq.migrados || 0;
+      }
     }
 
-    return { marcados, detalhes, grupos: grupos.length };
+    // Também cobre fantasmas já inativos com saldo ETQ preso (ex.: 01.MP.N.30100).
+    const etqExtra = await migrarEtqSaldosSkuFantasma(client);
+    etqMigrados += etqExtra.migrados || 0;
+
+    return {
+      marcados,
+      detalhes,
+      grupos: grupos.length,
+      etq_migrados: etqMigrados,
+      etq: etqExtra
+    };
   });
 }
 
@@ -212,4 +260,5 @@ module.exports = {
   desativarDuplicatasMesmoCodigo,
   limparDuplicatasAtivasLocais,
   reconciliarProdutosOmieAusentes,
+  migrarEtqSaldosSkuFantasma
 };

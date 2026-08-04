@@ -20,6 +20,12 @@ test('desativarDuplicatasMesmoCodigo inativa irmãos ativos do mesmo SKU', async
           rowCount: 1
         };
       }
+      if (sql.includes('LEFT(COALESCE(descricao')) {
+        return { rows: [{ descricao: 'SMARTPOWER' }] };
+      }
+      if (sql.includes('UPDATE etiqueta."ETQ_rec_impresso"')) {
+        return { rows: [{ id: 1754, endereco: '01-02-19-001', qtd: 166, codigo_produto: '10770703208' }] };
+      }
       return { rows: [], rowCount: 0 };
     }
   };
@@ -32,6 +38,7 @@ test('desativarDuplicatasMesmoCodigo inativa irmãos ativos do mesmo SKU', async
 
   assert.equal(r.marcados, 1);
   assert.deepEqual(r.ids, ['10748663973']);
+  assert.equal(r.etq_migrados, 1);
   assert.equal(updates.length, 1);
   assert.equal(String(updates[0][0]), '10770703208');
 });
@@ -55,6 +62,12 @@ test('limparDuplicatasAtivasLocais mantém o maior ID e inativa o resto', async 
           rows: [{ codigo_produto: '10748663973', codigo: '01.MP.N.30100', descricao: 'ANTIGO' }],
           rowCount: 1
         };
+      }
+      if (sql.includes('LEFT(COALESCE(descricao')) {
+        return { rows: [{ descricao: 'SMARTPOWER' }] };
+      }
+      if (sql.includes('UPDATE etiqueta."ETQ_rec_impresso"') || sql.includes('ids_fantasma') || sql.includes('array_agg')) {
+        return { rows: [] };
       }
       return { rows: [], rowCount: 0 };
     }
