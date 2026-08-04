@@ -6980,10 +6980,26 @@
             .envio-mercadoria-title h2{margin:0;color:#f8fafc;font-size:20px;line-height:1.2;letter-spacing:0;}
             .envio-mercadoria-title p{margin:4px 0 0;color:#94a3b8;font-size:13px;line-height:1.45;}
             .envio-mercadoria-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;position:relative;}
-            .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(4,minmax(140px,1fr));gap:10px;}
+            .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;}
             .envio-metric{border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(15,23,42,.62);padding:10px 14px;min-height:72px;}
             .envio-metric span{display:block;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
             .envio-metric strong{display:block;margin-top:4px;color:#f8fafc;font-size:20px;line-height:1;}
+            .envio-metric small{display:block;margin-top:6px;color:#64748b;font-size:10px;line-height:1.3;}
+            .envio-metric.is-alert{border-color:rgba(248,113,113,.42);background:rgba(127,29,29,.17);}
+            .envio-metric.is-alert strong{color:#fca5a5;}
+            .envio-metric.is-success{border-color:rgba(52,211,153,.3);background:rgba(6,78,59,.18);}
+            .envio-metric.is-success strong{color:#6ee7b7;}
+            .envio-performance-row{display:grid;grid-template-columns:minmax(280px,1.35fr) minmax(280px,1fr);gap:10px;}
+            .envio-performance-card{border:1px solid rgba(148,163,184,.18);border-radius:10px;background:rgba(15,23,42,.58);padding:12px 14px;}
+            .envio-performance-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#e2e8f0;font-size:12px;font-weight:800;}
+            .envio-performance-head span{color:#94a3b8;font-weight:600;}
+            .envio-goal-track{height:9px;margin-top:10px;border-radius:999px;background:rgba(51,65,85,.75);overflow:hidden;}
+            .envio-goal-fill{height:100%;width:0;border-radius:inherit;background:linear-gradient(90deg,#0ea5e9,#22c55e);transition:width .25s ease;}
+            .envio-executor-details summary{cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between;gap:10px;color:#e2e8f0;font-size:12px;font-weight:800;}
+            .envio-executor-details summary::-webkit-details-marker{display:none;}
+            .envio-executor-list{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px;}
+            .envio-executor-chip{display:inline-flex;align-items:center;gap:7px;border:1px solid rgba(148,163,184,.18);border-radius:999px;padding:6px 9px;color:#cbd5e1;background:rgba(2,6,23,.28);font-size:11px;}
+            .envio-executor-chip strong{color:#f8fafc;}
             .envio-mercadoria-filters{display:grid;grid-template-columns:minmax(260px,1fr) 210px 190px;gap:10px;align-items:center;}
             .envio-mercadoria-filters input,.envio-mercadoria-filters select{height:40px;border:1px solid rgba(148,163,184,.24);border-radius:8px;background:rgba(15,23,42,.68);color:#e5e7eb;padding:0 12px;font-size:13px;outline:none;}
             .envio-mercadoria-list{display:flex;flex-direction:column;gap:10px;}
@@ -6995,6 +7011,12 @@
             .envio-card-status-correios{--envio-status-color:#3b82f6;--envio-status-glow:rgba(59,130,246,.34);--envio-status-bg:rgba(59,130,246,.16);--envio-status-border:rgba(59,130,246,.42);--envio-status-text:#bfdbfe;}
             .envio-card-status-enviado{--envio-status-color:#06b6d4;--envio-status-glow:rgba(6,182,212,.32);--envio-status-bg:rgba(6,182,212,.15);--envio-status-border:rgba(6,182,212,.4);--envio-status-text:#a5f3fc;}
             .envio-card-status-finalizado{--envio-status-color:#22c55e;--envio-status-glow:rgba(34,197,94,.3);--envio-status-bg:rgba(34,197,94,.14);--envio-status-border:rgba(34,197,94,.38);--envio-status-text:#bbf7d0;}
+            .envio-card.is-overdue{border-color:rgba(248,113,113,.62);background:linear-gradient(90deg,rgba(127,29,29,.22),rgba(15,23,42,.82) 42%);--envio-status-color:#ef4444;--envio-status-glow:rgba(239,68,68,.35);}
+            .envio-card.is-due-today{border-color:rgba(251,191,36,.48);--envio-status-color:#f59e0b;--envio-status-glow:rgba(245,158,11,.28);}
+            .envio-sla-badge{display:inline-flex;align-items:center;gap:6px;width:max-content;max-width:100%;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:800;}
+            .envio-sla-badge.is-overdue{background:#fee2e2;color:#991b1b;}
+            .envio-sla-badge.is-due-today{background:#fef3c7;color:#92400e;}
+            .envio-sla-badge.is-on-time{background:rgba(30,41,59,.92);color:#cbd5e1;border:1px solid rgba(148,163,184,.2);}
             .envio-card-main{display:flex;flex-direction:column;gap:6px;}
             .envio-card-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;}
             .envio-card-id{display:flex;align-items:center;gap:8px;color:#f8fafc;font-weight:800;font-size:15px;}
@@ -7025,8 +7047,8 @@
             .envio-card-actions{display:flex;flex-direction:column;gap:8px;align-items:stretch;justify-content:center;}
             .envio-card-actions .content-button{justify-content:center;width:100%;}
             .envio-empty-state{padding:28px;border:1px dashed rgba(148,163,184,.26);border-radius:10px;text-align:center;color:#94a3b8;background:rgba(15,23,42,.48);}
-            @media (max-width:1200px){.envio-card{grid-template-columns:1fr 1fr}.envio-mercadoria-metrics{grid-template-columns:repeat(2,minmax(140px,1fr));}.envio-mercadoria-filters{grid-template-columns:1fr 1fr;}}
-            @media (max-width:760px){.envio-mercadoria-hero{flex-direction:column}.envio-mercadoria-actions{justify-content:flex-start}.envio-card,.envio-mercadoria-filters,.envio-mercadoria-metrics{grid-template-columns:1fr;}}
+            @media (max-width:1200px){.envio-card{grid-template-columns:1fr 1fr}.envio-mercadoria-metrics{grid-template-columns:repeat(3,minmax(140px,1fr));}.envio-mercadoria-filters{grid-template-columns:1fr 1fr;}}
+            @media (max-width:760px){.envio-mercadoria-hero{flex-direction:column}.envio-mercadoria-actions{justify-content:flex-start}.envio-card,.envio-mercadoria-filters,.envio-performance-row{grid-template-columns:1fr;}.envio-mercadoria-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.envio-metric{min-height:66px;padding:10px;}.envio-metric strong{font-size:18px;}}
           </style>
           <div class="content-wrapper">
             <div class="content-section envio-mercadoria-shell" style="margin-top:0;">
@@ -7056,10 +7078,24 @@
               </div>
 
               <div class="envio-mercadoria-metrics">
-                <div class="envio-metric"><span>Pendentes</span><strong id="envioMetricPendente">0</strong></div>
-                <div class="envio-metric"><span>Aguardando correios</span><strong id="envioMetricCorreios">0</strong></div>
-                <div class="envio-metric"><span>Enviados</span><strong id="envioMetricEnviado">0</strong></div>
-                <div class="envio-metric"><span>Total ativo</span><strong id="envioMetricTotal">0</strong></div>
+                <div class="envio-metric is-success"><span>Meta de hoje</span><strong id="envioMetricMetaHoje">0 / 0</strong><small id="envioMetricMetaTexto">Fila em dia</small></div>
+                <div class="envio-metric"><span>Pendentes</span><strong id="envioMetricPendente">0</strong><small>Fila ativa agora</small></div>
+                <div class="envio-metric is-alert"><span>Atrasados</span><strong id="envioMetricAtrasados">0</strong><small>Fora do prazo operacional</small></div>
+                <div class="envio-metric"><span>Enviados hoje</span><strong id="envioMetricEnviado">0</strong><small>Baixas feitas pela expedição</small></div>
+                <div class="envio-metric"><span>SLA últimos 7 dias</span><strong id="envioMetricSla7d">—</strong><small id="envioMetricMediana7d">Mediana: —</small></div>
+              </div>
+
+              <div class="envio-performance-row">
+                <div class="envio-performance-card">
+                  <div class="envio-performance-head"><div><i class="fa-solid fa-bullseye" style="color:#38bdf8;margin-right:7px;"></i>Progresso da expedição</div><span id="envioMetricProgresso">0%</span></div>
+                  <div class="envio-goal-track" aria-hidden="true"><div id="envioMetricProgressoBar" class="envio-goal-fill"></div></div>
+                </div>
+                <div class="envio-performance-card">
+                  <details class="envio-executor-details">
+                    <summary><span><i class="fa-solid fa-people-group" style="color:#34d399;margin-right:7px;"></i>Resultado da equipe — 7 dias</span><i class="fa-solid fa-chevron-down"></i></summary>
+                    <div id="envioExecutorList" class="envio-executor-list"><span class="envio-card-meta">Sem envios identificados.</span></div>
+                  </details>
+                </div>
               </div>
 
               <div class="tabela-wrapper" style="display:none;overflow:auto; margin-top:12px;">
