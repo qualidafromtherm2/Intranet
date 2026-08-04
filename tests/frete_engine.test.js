@@ -223,7 +223,7 @@ test('calcula Mengue com adicionais declarados sem TDA e TRT preventivos', () =>
 
 test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
   const resultado = simularTransportadora({
-    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 200 },
     permitirRevisao: true,
     destino: { uf: 'SC', cidade: 'Florianópolis' },
     romaneio: { peso_real_kg: 51, volume_m3: 0.23808 },
@@ -231,7 +231,7 @@ test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
     coberturas: [{ uf: 'SC', cidade_normalizada: 'FLORIANOPOLIS', codigo_regiao: 'UNIDADE_133' }],
     tarifas: [{
       codigo_regiao: 'UNIDADE_133', uf_destino: 'SC', cidade_normalizada: 'FLORIANOPOLIS',
-      peso_de_kg: 60, peso_ate_kg: 80, valor_base: 44.80
+      peso_de_kg: 40, peso_ate_kg: 60, valor_base: 61.12
     }],
     regras: [
       { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.005, valor_minimo: 12.98 },
@@ -240,10 +240,38 @@ test('calcula a previa Rodonaves com a faixa do PDF atualizado', () => {
     ]
   });
 
-  assert.equal(resultado.peso_cobravel_kg, 71.424);
-  assert.equal(resultado.frete_peso, 44.8);
+  assert.equal(resultado.peso_cobravel_kg, 51);
+  assert.equal(resultado.frete_peso, 61.12);
   assert.equal(resultado.adicionais, 55.97);
-  assert.equal(resultado.valor_total, 121.41);
+  assert.equal(resultado.valor_total, 141.07);
+});
+
+test('aplica cubagem contratual de 200 kg por m3 na Rodonaves', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 200 },
+    permitirRevisao: true,
+    destino: { uf: 'SP', cidade: 'Guarulhos' },
+    romaneio: { peso_real_kg: 125, volume_m3: 1 },
+    valorMercadoria: 19755,
+    coberturas: [{ uf: 'SP', cidade_normalizada: 'GUARULHOS', codigo_regiao: 'UNIDADE_208' }],
+    tarifas: [{
+      codigo_regiao: 'UNIDADE_208', uf_destino: 'SP', cidade_normalizada: 'GUARULHOS',
+      peso_de_kg: 100, peso_ate_kg: null, valor_base: 99.17,
+      valor_kg_excedente: 1.73, peso_referencia_excedente_kg: 100
+    }],
+    regras: [
+      { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.005, valor_minimo: 12.98 },
+      { codigo: 'GRIS', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0023, valor_minimo: 1.74 },
+      { codigo: 'PEDAGIO', nome: 'Pedágio', tipo_calculo: 'por_100kg', valor: 13.97 },
+      { codigo: 'SEC_CAT', nome: 'SEC-CAT', tipo_calculo: 'fixo', valor: 74.47 }
+    ]
+  });
+
+  assert.equal(resultado.peso_cubado_kg, 200);
+  assert.equal(resultado.peso_cobravel_kg, 200);
+  assert.equal(resultado.frete_peso, 272.17);
+  assert.equal(resultado.subtotal_sem_icms, 518.8);
+  assert.equal(resultado.valor_total, 589.55);
 });
 
 test('prioriza SEC-CAT atual e acumula zona de risco sem duplicar o adicional', () => {

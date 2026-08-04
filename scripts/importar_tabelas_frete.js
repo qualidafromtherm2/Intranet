@@ -1379,6 +1379,18 @@ async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = 
     return { coberturas: 0, faixas: 0, regras: 0, alertas: ['A aba Planilha7 da Rodonaves não foi encontrada.'] };
   }
 
+  // A negociação vigente da Fromtherm usa cubagem contratual de 200 kg/m³.
+  // A proposta em PDF ainda informa 300 kg/m³, por isso a configuração precisa
+  // ficar explícita na tabela normalizada para não voltar ao padrão genérico.
+  await client.query(`
+    UPDATE frete.tabela_preco
+       SET fator_cubagem_kg_m3 = 200,
+           configuracao = COALESCE(configuracao, '{}'::jsonb) ||
+             '{"cubagem_contratual_kg_m3": 200}'::jsonb,
+           atualizado_em = NOW()
+     WHERE id = $1
+  `, [tabelaId]);
+
   const secCatPorCidade = new Map();
   for (const linha of (secCatGrupo?.linhas || []).filter((item) => item.numero_linha >= 2)) {
     const uf = String(celula(linha, 'D') || '').trim().toUpperCase();
@@ -1665,7 +1677,7 @@ async function normalizarRodonaves(client, tabelaId, grupos, fontesAuxiliares = 
       linhas_prazo_ignoradas_por_origem: prazosIgnoradosOutraOrigem
     },
     alertas: [
-      'Cobertura, CEPs, prazos e regras gerais foram normalizados para a origem 133/Biguaçu-SC.',
+      'Cobertura, CEPs, prazos e regras gerais foram normalizados para a origem 133/Biguaçu-SC, com cubagem contratual de 200 kg/m³.',
       ...(pdfConferido
         ? ['Tarifa principal de frete-peso reconciliada com o PDF atualizado para Sul, SP, MG, GO e DF.']
         : ['O PDF atualizado não corresponde à versão auditada; a tarifa principal não foi aplicada.']),
