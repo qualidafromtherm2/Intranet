@@ -420,6 +420,24 @@ router.get('/lista', async (req, res) => {
           BOOL_OR(COALESCE(saldo, 0) < 0) AS estoque_negativo
         FROM logistica.estoque_atual
         GROUP BY codigo
+      ), enderecos_resumo AS (
+        SELECT
+          p.codigo_produto,
+          SUM(COALESCE(i.saldo, 0)) AS saldo_enderecado
+        FROM public.produtos_omie p
+        JOIN (
+          SELECT
+            TRIM(codigo_produto) AS produto_ref,
+            SUM(COALESCE(qtd, 0)) AS saldo
+          FROM etiqueta."ETQ_rec_impresso"
+          WHERE endereco IS NOT NULL
+            AND TRIM(endereco) <> ''
+            AND TRIM(COALESCE(codigo_produto, '')) <> ''
+          GROUP BY TRIM(codigo_produto)
+        ) i
+          ON i.produto_ref = p.codigo_produto::text
+          OR i.produto_ref = TRIM(p.codigo)
+        GROUP BY p.codigo_produto
       ), base AS (
         SELECT
           v.*,
@@ -428,13 +446,17 @@ router.get('/lista', async (req, res) => {
           COALESCE(er.estoque_minimo, 0) AS estoque_minimo_local,
           COALESCE(er.saldo_almox, 0) AS saldo_almox_local,
           COALESCE(er.saldo_expedicao, 0) AS saldo_expedicao_local,
+          COALESCE(endr.saldo_enderecado, 0) AS saldo_enderecado_local,
           COALESCE(er.estoque_minimo, 0) > 0
             AND COALESCE(er.saldo_almox, 0) < COALESCE(er.estoque_minimo, 0) AS abaixo_minimo_local,
           COALESCE(er.estoque_negativo, false) AS estoque_negativo_local,
-          COALESCE(er.saldo_expedicao, 0) < 0 AS expedicao_negativa_local
+          COALESCE(er.saldo_expedicao, 0) < 0 AS expedicao_negativa_local,
+          COALESCE(endr.saldo_enderecado, 0) > 0.0001
+            AND COALESCE(er.saldo_almox, 0) <= 0.0001 AS saldo_endereco_sem_omie_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
         LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
+        LEFT JOIN enderecos_resumo endr ON endr.codigo_produto = v.codigo_produto
         WHERE
           ($1::text IS NULL
             OR v.descricao ILIKE '%' || $1 || '%'
@@ -461,9 +483,11 @@ router.get('/lista', async (req, res) => {
           estoque_minimo_local AS estoque_minimo,
           saldo_almox_local AS saldo_almox,
           saldo_expedicao_local AS saldo_expedicao,
+          saldo_enderecado_local AS saldo_enderecado,
           abaixo_minimo_local AS abaixo_minimo,
           estoque_negativo_local AS estoque_negativo,
           expedicao_negativa_local AS expedicao_negativa,
+          saldo_endereco_sem_omie_local AS saldo_endereco_sem_omie,
           item_limitado_local AS item_limitado,
           inativo,
           bloqueado,
