@@ -13,7 +13,13 @@ const BUCKET = process.env.STORAGE_BUCKET || process.env.SUPABASE_BUCKET || 'pro
 const STORAGE_PREFIX = 'suporte_chamados';
 
 const CRITICIDADES = new Set(['urgente', 'normal', 'baixa']);
-const STATUS_VALIDOS = new Set(['aberto', 'em_andamento', 'aguardando_aprovacao', 'fechado']);
+const STATUS_VALIDOS = new Set([
+  'aberto',
+  'em_andamento',
+  'necessario_revisao',
+  'aguardando_aprovacao',
+  'fechado',
+]);
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -115,7 +121,12 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS anexos_reprovacao JSONB NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS reprovado_por TEXT,
-      ADD COLUMN IF NOT EXISTS reprovado_por_nome TEXT
+      ADD COLUMN IF NOT EXISTS reprovado_por_nome TEXT,
+      ADD COLUMN IF NOT EXISTS pedido_mais_info TEXT,
+      ADD COLUMN IF NOT EXISTS pedido_mais_info_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS pedido_mais_info_por TEXT,
+      ADD COLUMN IF NOT EXISTS pedido_mais_info_por_nome TEXT,
+      ADD COLUMN IF NOT EXISTS comentarios JSONB NOT NULL DEFAULT '[]'::jsonb
   `);
   // Corrige status legado com espaço ("em andamento" → "em_andamento")
   await dbQuery(`
@@ -134,8 +145,24 @@ const CHAMADO_COLS = `
   criado_por, criado_por_nome, criado_em, atualizado_em,
   fechado_em, fechado_por, fechado_por_nome, observacao_admin,
   motivo_reprovacao, anexos_reprovacao,
-  reprovado_em, reprovado_por, reprovado_por_nome
+  reprovado_em, reprovado_por, reprovado_por_nome,
+  pedido_mais_info, pedido_mais_info_em,
+  pedido_mais_info_por, pedido_mais_info_por_nome,
+  comentarios
 `;
+
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (_e) {
+      return [];
+    }
+  }
+  return [];
+}
 
 async function uploadAnexo(file, chamadoTempId) {
   const tipo = inferTipoAnexo(file);
@@ -195,8 +222,9 @@ router.get('/chamados', requireAuth, async (req, res) => {
          CASE LOWER(REPLACE(TRIM(status), ' ', '_'))
            WHEN 'aberto' THEN 0
            WHEN 'em_andamento' THEN 1
-           WHEN 'aguardando_aprovacao' THEN 2
-           ELSE 3
+           WHEN 'necessario_revisao' THEN 2
+           WHEN 'aguardando_aprovacao' THEN 3
+           ELSE 4
          END,
          CASE criticidade WHEN 'urgente' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END,
          criado_em DESC
@@ -385,6 +413,28 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     if (body.enviar_aprovacao === true || body.enviar_aprovacao === 'true') {
       status = 'aguardando_aprovacao';
     }
+    const querSolicitarInfo =
+      body.solicitar_mais_info === true || body.solicitar_mais_info === 'true';
+    if (querSolicitarInfo) {
+      status = 'necessario_revisao';
+      const mensagem = textoUtf8(body.mensagem || body.pedido_mais_info);
+      if (!mensagem) {
+        return res.status(400).json({ error: 'Informe a mensagem pedindo mais informações.' });
+      }
+      const stAtual = normalizarStatusChamado(existing.status);
+      if (stAtual !== 'aberto' && stAtual !== 'em_andamento') {
+        return res.status(400).json({
+          error: 'Só é possível solicitar mais informações em chamado aberto.',
+        });
+      }
+      params.push(mensagem);
+      sets.push(`pedido_mais_info = $${params.length}`);
+      sets.push('pedido_mais_info_em = NOW()');
+      params.push(usuario);
+      sets.push(`pedido_mais_info_por = $${params.length}`);
+      params.push(getNomeUsuario(req));
+      sets.push(`pedido_mais_info_por_nome = $${params.length}`);
+    }
     if (status) {
       if (!STATUS_VALIDOS.has(status)) {
         return res.status(400).json({ error: 'Status inválido.' });
@@ -415,6 +465,153 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message || 'Falha ao atualizar chamado' });
   }
 });
+
+// POST /api/suporte/chamados/:id/responder-revisao
+// Autor complementa (edita descrição/anexos e/ou novo comentário) e devolve ao Aberto
+router.post(
+  '/chamados/:id/responder-revisao',
+  requireAuth,
+  upload.fields([
+    { name: 'foto', maxCount: 10 },
+    { name: 'video', maxCount: 5 },
+    { name: 'anexo', maxCount: 5 },
+    { name: 'foto_comentario', maxCount: 10 },
+    { name: 'video_comentario', maxCount: 5 },
+  ]),
+  async (req, res) => {
+    try {
+      await ensureSchema();
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ error: 'ID inválido.' });
+      }
+
+      const { rows: existingRows } = await dbQuery(
+        `SELECT id, status, criado_por, descricao, anexos, comentarios
+           FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+        [id]
+      );
+      const existing = existingRows[0];
+      if (!existing) return res.status(404).json({ error: 'Chamado não encontrado.' });
+
+      const usuario = getUsuario(req);
+      if (String(existing.criado_por || '') !== usuario) {
+        return res.status(403).json({
+          error: 'Somente quem abriu o chamado pode responder a revisão.',
+        });
+      }
+      if (normalizarStatusChamado(existing.status) !== 'necessario_revisao') {
+        return res.status(400).json({
+          error: 'Chamado não está em Necessário revisão.',
+        });
+      }
+
+      const descricaoNova = Object.prototype.hasOwnProperty.call(req.body || {}, 'descricao')
+        ? textoUtf8(req.body.descricao)
+        : null;
+      const comentarioTxt = textoUtf8(req.body?.comentario || req.body?.novo_comentario);
+      const modo = String(req.body?.modo || '').trim().toLowerCase(); // 'editar' | 'comentario' | ''
+
+      const filesDescricao = [
+        ...(req.files?.foto || []),
+        ...(req.files?.video || []),
+        ...(req.files?.anexo || []),
+      ];
+      const filesComentario = [
+        ...(req.files?.foto_comentario || []),
+        ...(req.files?.video_comentario || []),
+      ];
+
+      if (modo === 'comentario' || (!modo && comentarioTxt)) {
+        if (!comentarioTxt && !filesComentario.length) {
+          return res.status(400).json({
+            error: 'Escreva o comentário ou anexe fotos/vídeos.',
+          });
+        }
+      } else if (modo === 'editar') {
+        if (!descricaoNova) {
+          return res.status(400).json({ error: 'A descrição não pode ficar vazia.' });
+        }
+      } else if (!descricaoNova && !comentarioTxt && !filesDescricao.length && !filesComentario.length) {
+        return res.status(400).json({
+          error: 'Informe a descrição atualizada ou um novo comentário.',
+        });
+      }
+
+      const anexosExtra = [];
+      for (const file of filesDescricao) {
+        try {
+          anexosExtra.push(await uploadAnexo(file, `revisao-${id}`));
+        } catch (upErr) {
+          console.error('[suporte/chamados] upload revisão:', upErr);
+          return res.status(500).json({
+            error: 'Falha ao enviar anexo: ' + (upErr.message || upErr),
+          });
+        }
+      }
+
+      const anexosComentario = [];
+      for (const file of filesComentario) {
+        try {
+          anexosComentario.push(await uploadAnexo(file, `comentario-${id}`));
+        } catch (upErr) {
+          console.error('[suporte/chamados] upload comentário:', upErr);
+          return res.status(500).json({
+            error: 'Falha ao enviar anexo do comentário: ' + (upErr.message || upErr),
+          });
+        }
+      }
+
+      let anexosAtuais = parseJsonArray(existing.anexos);
+      if (anexosExtra.length) {
+        anexosAtuais = [...anexosAtuais, ...anexosExtra];
+      }
+
+      let comentarios = parseJsonArray(existing.comentarios);
+      if (comentarioTxt || anexosComentario.length) {
+        comentarios = [
+          ...comentarios,
+          {
+            id: uuidv4(),
+            texto: comentarioTxt || '',
+            anexos: anexosComentario,
+            criado_por: usuario,
+            criado_por_nome: getNomeUsuario(req),
+            criado_em: new Date().toISOString(),
+          },
+        ];
+      }
+
+      const descricaoFinal =
+        descricaoNova != null && descricaoNova !== ''
+          ? descricaoNova
+          : String(existing.descricao || '');
+
+      const { rows } = await dbQuery(
+        `UPDATE "Suporte_tecnico"."Chamado"
+            SET status = 'aberto',
+                descricao = $1,
+                anexos = $2::jsonb,
+                comentarios = $3::jsonb,
+                atualizado_em = NOW()
+          WHERE id = $4
+          RETURNING ${CHAMADO_COLS}`,
+        [
+          descricaoFinal,
+          JSON.stringify(anexosAtuais),
+          JSON.stringify(comentarios),
+          id,
+        ]
+      );
+
+      res.json({ ok: true, chamado: rows[0] });
+    } catch (err) {
+      console.error('[suporte/chamados] responder-revisao:', err);
+      res.status(500).json({ error: err.message || 'Falha ao responder revisão' });
+    }
+  }
+);
 
 // POST /api/suporte/chamados/:id/reprovar
 // Solicitante reprova o fechamento → volta para aberto com motivo + anexos
