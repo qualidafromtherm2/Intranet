@@ -82,6 +82,22 @@ test('aceita cobertura por cidade quando a transportadora nao informa faixa de C
   assert.equal(cobertura.id, 3);
 });
 
+test('usa a cidade exata como fallback quando a planilha possui um buraco de CEP', () => {
+  const cobertura = escolherCobertura([
+    { id: 10, uf: 'DF', cidade: 'BRASILIA', cidade_normalizada: 'BRASILIA', cep_inicio: 70000001, cep_fim: 70639999, atendida: true },
+    { id: 11, uf: 'DF', cidade: 'BRASILIA (GUARA)', cidade_normalizada: 'BRASILIA GUARA', cep_inicio: 71000000, cep_fim: 71499999, atendida: true }
+  ], { uf: 'DF', cidade: 'Brasilia', cep: '70800-220' });
+  assert.equal(cobertura.id, 10);
+});
+
+test('mantem a faixa de CEP especifica acima do fallback por cidade', () => {
+  const cobertura = escolherCobertura([
+    { id: 20, uf: 'DF', cidade: 'BRASILIA', cidade_normalizada: 'BRASILIA', cep_inicio: 70000001, cep_fim: 70639999, atendida: true },
+    { id: 21, uf: 'DF', cidade: 'ASA NORTE', cidade_normalizada: 'ASA NORTE', cep_inicio: 70800000, cep_fim: 70899999, atendida: true }
+  ], { uf: 'DF', cidade: 'Brasilia', cep: '70800-220' });
+  assert.equal(cobertura.id, 21);
+});
+
 test('calcula tabela em revisão somente quando solicitada como prévia técnica', () => {
   const entrada = {
     tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
