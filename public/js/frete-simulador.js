@@ -17,7 +17,8 @@ const freteState = {
   buscaController: null,
   localidadesTimer: null,
   localidadesController: null,
-  ultimaUf: ''
+  ultimaUf: '',
+  medidasCopiadas: null
 };
 
 const FRETE_UFS = ['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'];
@@ -326,7 +327,13 @@ function renderGestao() {
       }).join('')}
     </div>
     <section class="frete-product-quality">
-      <div class="frete-subhead"><div><h3>Qualidade do cadastro dos produtos</h3><p>Produtos fiscais 00 e 04 que ainda não podem compor uma cotação confiável.</p></div><span>${numero(resumo.total_pendentes)} pendente(s)</span></div>
+      <div class="frete-subhead">
+        <div><h3>Qualidade do cadastro dos produtos</h3><p>Produtos fiscais 00 e 04 que ainda não podem compor uma cotação confiável.</p></div>
+        <div class="frete-subhead-actions">
+          <span class="frete-pending-count">${numero(resumo.total_pendentes)} pendente(s)</span>
+          ${podeGerenciar ? `<button type="button" class="frete-btn frete-btn-primary" data-frete-open-global-measure-queue ${numero(resumo.total_pendentes) ? '' : 'disabled'}><i class="fa-solid fa-ruler-combined"></i>Abrir fila de medidas</button>` : ''}
+        </div>
+      </div>
       <div class="frete-quality-tags"><span>Sem altura: ${numero(resumo.sem_altura)}</span><span>Sem largura: ${numero(resumo.sem_largura)}</span><span>Sem profundidade: ${numero(resumo.sem_profundidade)}</span><span>Sem peso: ${numero(resumo.sem_peso)}</span><span>Unidade suspeita: ${numero(resumo.unidade_suspeita)}</span></div>
       <div class="frete-product-pending-list">
         ${(pendentes?.itens || []).slice(0, 30).map((item) => `<div class="frete-product-pending"><strong>${esc(item.codigo)}</strong><span>${esc(item.descricao)}</span><small>${(item.pendencias || []).map(esc).join(' · ')}</small>${podeGerenciar ? `<button type="button" class="frete-btn frete-btn-ghost" data-frete-edit-product="${esc(item.codigo)}"><i class="fa-solid fa-ruler-combined"></i>Editar medidas</button>` : ''}</div>`).join('') || '<div class="frete-empty"><strong>Cadastros completos</strong><span>Nenhuma pendência encontrada.</span></div>'}
@@ -347,7 +354,7 @@ async function carregarGestao() {
   try {
     const [gestao, produtosPendentes] = await Promise.all([
       fetchJson('/api/frete/gestao'),
-      fetchJson('/api/frete/produtos-pendentes?limit=100')
+      fetchJson('/api/frete/produtos-pendentes?limit=500')
     ]);
     freteState.gestao = gestao;
     freteState.produtosPendentes = produtosPendentes;
@@ -569,18 +576,88 @@ function filtrarFilaMedidas() {
   if (contador) contador.textContent = `${visiveis} produto(s) exibido(s)`;
 }
 
-async function abrirFilaMedidas() {
+function valoresMedidasLinha(linha) {
+  return ['altura', 'largura', 'profundidade', 'peso_bruto']
+    .map((campo) => linha?.querySelector(`[name="${campo}"]`)?.value || '');
+}
+
+function medidasDoTexto(texto) {
+  const valores = String(texto || '').trim().split(/\t|\r?\n/).map((valor) => valor.trim()).filter(Boolean);
+  if (valores.length !== 4) return null;
+  return valores.map((valor) => valor.replace(/\s/g, '').replace(',', '.'));
+}
+
+function aplicarMedidasNaLinha(linha, valores, avancar = false) {
+  if (!linha || !Array.isArray(valores) || valores.length !== 4) return false;
+  const linhasVisiveis = avancar
+    ? [...linha.parentElement.querySelectorAll('[data-frete-measure-row]:not([hidden])')]
+    : [];
+  const proximaLinha = linhasVisiveis[linhasVisiveis.indexOf(linha) + 1];
+  const campos = ['altura', 'largura', 'profundidade', 'peso_bruto'];
+  campos.forEach((campo, indice) => {
+    const input = linha.querySelector(`[name="${campo}"]`);
+    if (input) {
+      input.value = valores[indice];
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  });
+  linha.classList.add('is-measure-pasted');
+  setTimeout(() => linha.classList.remove('is-measure-pasted'), 900);
+  if (avancar) {
+    const primeiroCampo = proximaLinha?.querySelector('input[name="altura"]');
+    primeiroCampo?.focus();
+    primeiroCampo?.select();
+  }
+  return true;
+}
+
+async function copiarMedidasLinha(linha, botao = null) {
+  const valores = valoresMedidasLinha(linha);
+  freteState.medidasCopiadas = valores;
+  navigator.clipboard?.writeText(valores.join('\t')).catch(() => null);
+  if (botao) {
+    const original = botao.innerHTML;
+    botao.innerHTML = '<i class="fa-solid fa-check"></i><span>Copiado</span>';
+    setTimeout(() => { if (botao.isConnected) botao.innerHTML = original; }, 1200);
+  }
+}
+
+async function colarMedidasLinha(linha) {
+  let valores = freteState.medidasCopiadas;
+  if (!valores) {
+    try {
+      const texto = await Promise.race([
+        navigator.clipboard.readText(),
+        new Promise((resolve) => setTimeout(() => resolve(''), 500))
+      ]);
+      valores = medidasDoTexto(texto);
+    } catch (_erro) {}
+  }
+  if (!valores) {
+    window.alert('Copie primeiro uma linha de medidas usando o botão Copiar ou Ctrl+C.');
+    return;
+  }
+  aplicarMedidasNaLinha(linha, valores, true);
+}
+
+async function abrirFilaMedidas({ global = false } = {}) {
   const root = document.getElementById('freteModalRoot');
-  const pendentes = freteState.itens.filter((item) => !item.apto_simulacao);
+  const pendentes = global
+    ? (freteState.produtosPendentes?.itens || [])
+    : freteState.itens.filter((item) => !item.apto_simulacao);
   if (!root || !pendentes.length) return;
   root.innerHTML = '<div class="frete-modal-backdrop"><div class="frete-modal-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando fila de medidas...</div></div>';
   document.body.classList.add('frete-modal-open');
   try {
-    const produtos = await Promise.all(pendentes.map((item) => fetchJson(`/api/produtos/${encodeURIComponent(item.codigo)}`)));
-    root.innerHTML = `<div class="frete-modal-backdrop" data-frete-close-modal><form id="freteFilaMedidasForm" class="frete-entity-modal frete-measure-queue" data-frete-modal-panel><header><div><span>QUALIDADE DO CADASTRO</span><h3>Fila de medidas</h3><p>Revise vários produtos sem sair da cotação.</p></div><button class="frete-icon-btn" type="button" data-frete-close-modal aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button></header><div class="frete-measure-toolbar"><div class="frete-search-box"><i class="fa-solid fa-magnifying-glass"></i><input id="freteFilaBusca" class="frete-input" type="search" placeholder="Pesquisar código ou descrição" autocomplete="off"></div><select id="freteFilaFiltro" class="frete-select" aria-label="Filtrar pendência"><option value="todos">Todas as pendências</option><option value="altura">Sem altura</option><option value="largura">Sem largura</option><option value="profundidade">Sem comprimento</option><option value="peso_bruto">Sem peso</option></select></div><div id="freteFilaContador" class="frete-measure-count">${produtos.length} produto(s) exibido(s)</div><div class="frete-measure-list">${produtos.map((produto) => {
+    const produtos = await Promise.all(pendentes.map((item) => (
+      global && Object.hasOwn(item, 'lead_time') && Object.hasOwn(item, 'estoque_minimo')
+        ? item
+        : fetchJson(`/api/produtos/${encodeURIComponent(item.codigo)}`)
+    )));
+    root.innerHTML = `<div class="frete-modal-backdrop" data-frete-close-modal><form id="freteFilaMedidasForm" class="frete-entity-modal frete-measure-queue" data-frete-queue-scope="${global ? 'global' : 'cotacao'}" data-frete-modal-panel><header><div><span>QUALIDADE DO CADASTRO</span><h3>Fila de medidas</h3><p>${global ? 'Pesquise, filtre e complete os produtos pendentes do cadastro.' : 'Revise vários produtos sem sair da cotação.'}</p></div><button class="frete-icon-btn" type="button" data-frete-close-modal aria-label="Fechar"><i class="fa-solid fa-xmark"></i></button></header><div class="frete-measure-toolbar"><div class="frete-search-box"><i class="fa-solid fa-magnifying-glass"></i><input id="freteFilaBusca" class="frete-input" type="search" placeholder="Pesquisar código ou descrição" autocomplete="off"></div><select id="freteFilaFiltro" class="frete-select" aria-label="Filtrar pendência"><option value="todos">Todas as pendências</option><option value="altura">Sem altura</option><option value="largura">Sem largura</option><option value="profundidade">Sem comprimento</option><option value="peso_bruto">Sem peso</option></select></div><div id="freteFilaContador" class="frete-measure-count">${produtos.length} produto(s) exibido(s)</div><div class="frete-measure-list">${produtos.map((produto) => {
       const item = pendentes.find((registro) => String(registro.codigo) === String(produto.codigo)) || produto;
       const valor = (campo) => produto[campo] || item[campo] || '';
-      return `<article class="frete-measure-row" data-frete-measure-row data-codigo="${esc(item.codigo)}" data-search="${esc(`${item.codigo} ${item.descricao || produto.descricao || ''}`.toLowerCase())}" data-produto='${esc(JSON.stringify(produto))}'><div class="frete-measure-product"><strong>${esc(item.codigo)}</strong><span>${esc(item.descricao || produto.descricao)}</span></div><label><span>Altura (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="altura" value="${esc(valor('altura'))}"></label><label><span>Largura (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="largura" value="${esc(valor('largura'))}"></label><label><span>Comprimento (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="profundidade" value="${esc(valor('profundidade'))}"></label><label><span>Peso (kg)</span><input class="frete-input" type="number" min="0.001" step="0.001" name="peso_bruto" value="${esc(valor('peso_bruto'))}"></label></article>`;
+      return `<article class="frete-measure-row" tabindex="0" data-frete-measure-row data-codigo="${esc(item.codigo)}" data-search="${esc(`${item.codigo} ${item.descricao || produto.descricao || ''}`.toLowerCase())}" data-produto='${esc(JSON.stringify(produto))}'><div class="frete-measure-product"><div class="frete-measure-product-copy"><strong>${esc(item.codigo)}</strong><div class="frete-measure-copy-actions"><button type="button" data-frete-copy-measures aria-label="Copiar medidas de ${esc(item.codigo)}" title="Copiar as quatro medidas"><i class="fa-regular fa-copy"></i><span>Copiar</span></button><button type="button" data-frete-paste-measures aria-label="Colar medidas em ${esc(item.codigo)}" title="Colar as quatro medidas"><i class="fa-solid fa-paste"></i><span>Colar</span></button></div></div><span>${esc(item.descricao || produto.descricao)}</span></div><label><span>Altura (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="altura" value="${esc(valor('altura'))}"></label><label><span>Largura (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="largura" value="${esc(valor('largura'))}"></label><label><span>Comprimento (cm)</span><input class="frete-input" type="number" min="0.01" max="500" step="0.01" name="profundidade" value="${esc(valor('profundidade'))}"></label><label><span>Peso (kg)</span><input class="frete-input" type="number" min="0.001" step="0.001" name="peso_bruto" value="${esc(valor('peso_bruto'))}"></label></article>`;
     }).join('')}</div><footer><button class="frete-btn frete-btn-ghost" type="button" data-frete-close-modal>Cancelar</button><button class="frete-btn frete-btn-primary" type="submit"><i class="fa-solid fa-floppy-disk"></i>Salvar preenchidos</button></footer></form></div>`;
   } catch (erro) {
     fecharModalFrete();
@@ -609,9 +686,14 @@ async function salvarFilaMedidas(form) {
       const item = freteState.itens.find((registro) => String(registro.codigo) === String(linha.dataset.codigo));
       if (item) Object.assign(item, dimensoes, { apto_simulacao: true });
     }
+    const filaGlobal = form.dataset.freteQueueScope === 'global';
     fecharModalFrete();
     renderItens();
     await carregarStatus();
+    if (filaGlobal) {
+      freteState.produtosPendentes = await fetchJson('/api/frete/produtos-pendentes?limit=500');
+      renderGestao();
+    }
   } catch (erro) {
     window.alert(erro.message);
     botao.disabled = false;
@@ -946,6 +1028,11 @@ function bind() {
   document.getElementById('freteRecentesBtn')?.addEventListener('click', carregarCotacoesRecentes);
   document.getElementById('freteGestaoBtn')?.addEventListener('click', carregarGestao);
   document.getElementById('freteGestaoConteudo')?.addEventListener('click', (event) => {
+    const filaMedidas = event.target.closest('[data-frete-open-global-measure-queue]');
+    if (filaMedidas && !filaMedidas.disabled) {
+      abrirFilaMedidas({ global: true });
+      return;
+    }
     const botao = event.target.closest('[data-frete-table-status]');
     if (botao && !botao.disabled) alterarStatusTabela(botao.dataset.freteTableId, botao.dataset.freteTableStatus);
     const gerenciar = event.target.closest('[data-frete-table-manage]');
@@ -955,6 +1042,16 @@ function bind() {
   });
   const modalRoot = document.getElementById('freteModalRoot');
   modalRoot?.addEventListener('click', async (event) => {
+    const copiarMedidas = event.target.closest('[data-frete-copy-measures]');
+    if (copiarMedidas) {
+      await copiarMedidasLinha(copiarMedidas.closest('[data-frete-measure-row]'), copiarMedidas);
+      return;
+    }
+    const colarMedidas = event.target.closest('[data-frete-paste-measures]');
+    if (colarMedidas) {
+      await colarMedidasLinha(colarMedidas.closest('[data-frete-measure-row]'));
+      return;
+    }
     const fechar = event.target.closest('[data-frete-close-modal]');
     if (fechar && (fechar.tagName === 'BUTTON' || event.target === fechar)) {
       fecharModalFrete();
@@ -1023,6 +1120,24 @@ function bind() {
   });
   modalRoot?.addEventListener('change', (event) => {
     if (event.target.id === 'freteFilaFiltro') filtrarFilaMedidas();
+  });
+  modalRoot?.addEventListener('copy', (event) => {
+    const linha = event.target.closest('[data-frete-measure-row]');
+    if (!linha) return;
+    if (event.target.matches('input') && event.target.selectionStart !== event.target.selectionEnd) return;
+    const valores = valoresMedidasLinha(linha);
+    freteState.medidasCopiadas = valores;
+    event.clipboardData?.setData('text/plain', valores.join('\t'));
+    event.preventDefault();
+  });
+  modalRoot?.addEventListener('paste', (event) => {
+    const linha = event.target.closest('[data-frete-measure-row]');
+    if (!linha) return;
+    const valores = medidasDoTexto(event.clipboardData?.getData('text/plain'));
+    if (!valores) return;
+    event.preventDefault();
+    freteState.medidasCopiadas = valores;
+    aplicarMedidasNaLinha(linha, valores, true);
   });
   modalRoot?.addEventListener('submit', async (event) => {
     event.preventDefault();

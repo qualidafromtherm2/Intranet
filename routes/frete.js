@@ -807,11 +807,11 @@ router.get('/produtos', async (req, res) => {
 
 router.get('/produtos-pendentes', async (req, res) => {
   try {
-    const limite = Math.min(200, Math.max(10, Number(req.query.limit) || 100));
+    const limite = Math.min(500, Math.max(10, Number(req.query.limit) || 100));
     const baseSql = `
       WITH base AS (
-        SELECT p.codigo, p.descricao, p.altura, p.largura, p.profundidade,
-               p.peso_bruto, p.peso_liq,
+        SELECT p.codigo, p.descricao, p.lead_time, p.estoque_minimo,
+               p.altura, p.largura, p.profundidade, p.peso_bruto, p.peso_liq,
                ARRAY_REMOVE(ARRAY[
                  CASE WHEN COALESCE(p.altura, 0) <= 0 THEN 'Altura ausente' END,
                  CASE WHEN COALESCE(p.largura, 0) <= 0 THEN 'Largura ausente' END,
