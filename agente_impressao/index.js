@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '3.0';
+const AGENT_VERSION = '3.1';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -239,7 +239,8 @@ function injectLH(zpl, cfg) {
 
   // Perfis personalizados já levam ^PW/^LL definidos no ZPL central.
   // O agente mantém apenas o offset/calibração e não deforma o perfil escolhido.
-  const perfilGerenciado = !!String(cfg.layoutProfile || '').trim();
+  const perfilGerenciado = !!String(cfg.layoutProfile || '').trim()
+    || /\^FXSGF_PROFILE_MANAGED\^FS/i.test(result);
   // ── Substituir ^PW e ^LL pelos valores configurados ─────────────────────
   if (!perfilGerenciado && cfg.labelWidth && Number(cfg.labelWidth) > 0) {
     const pw = Math.round(Number(cfg.labelWidth) * dpm);
@@ -1491,7 +1492,7 @@ function runService() {
 async function install() {
   const LINE = '═'.repeat(52);
   console.log(`\n╔${LINE}╗`);
-  console.log('║  Agente de Impressão SGF v2.9 — Instalador          ║');
+  console.log(`║  Agente de Impressão SGF v${AGENT_VERSION} — Instalador          ║`);
   console.log(`╚${LINE}╝\n`);
 
   const step = msg => process.stdout.write(`  ► ${msg}... `);
