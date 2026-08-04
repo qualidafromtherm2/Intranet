@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '3.1';
+const AGENT_VERSION = '3.2';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -239,7 +239,11 @@ function injectLH(zpl, cfg) {
 
   // Perfis personalizados já levam ^PW/^LL definidos no ZPL central.
   // O agente mantém apenas o offset/calibração e não deforma o perfil escolhido.
+  const possuiPerfisPorTipo = cfg.layoutProfiles
+    && typeof cfg.layoutProfiles === 'object'
+    && Object.values(cfg.layoutProfiles).some((chave) => String(chave || '').trim());
   const perfilGerenciado = !!String(cfg.layoutProfile || '').trim()
+    || possuiPerfisPorTipo
     || /\^FXSGF_PROFILE_MANAGED\^FS/i.test(result);
   // ── Substituir ^PW e ^LL pelos valores configurados ─────────────────────
   if (!perfilGerenciado && cfg.labelWidth && Number(cfg.labelWidth) > 0) {
