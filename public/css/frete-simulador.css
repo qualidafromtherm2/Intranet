@@ -40,6 +40,7 @@
 .frete-field:last-child { margin-bottom: 0; }
 .frete-field label { color: #cbd5e1; font-size: 12px; font-weight: 700; }
 .frete-field small { color: var(--frete-muted); font-size: 11px; line-height: 1.35; }
+.frete-field small:empty { display: none; }
 .frete-input, .frete-select { width: 100%; min-height: 40px; box-sizing: border-box; border: 1px solid #3a4457; border-radius: 7px; background: #10141c; color: #f8fafc; padding: 9px 11px; font: inherit; font-size: 14px; outline: none; }
 .frete-input:focus, .frete-select:focus { border-color: var(--frete-accent); box-shadow: 0 0 0 3px rgba(255,90,79,.13); }
 .frete-input[aria-invalid="true"] { border-color: #ef4444; }
@@ -76,12 +77,22 @@
 .frete-empty i { font-size: 22px; color: #64748b; }
 .frete-empty strong { color: #cbd5e1; font-size: 13px; }
 .frete-empty span { font-size: 12px; }
-.frete-item { display: grid; grid-template-columns: 44px minmax(0,1fr) 88px auto; align-items: center; gap: 10px; border: 1px solid #30394a; border-radius: 8px; padding: 9px; background: #141922; }
+.frete-item { display: grid; grid-template-columns: 44px minmax(0,1fr) auto auto; align-items: center; gap: 10px; border: 1px solid #30394a; border-radius: 8px; padding: 9px; background: #141922; }
 .frete-item.is-invalid { border-color: rgba(245,158,11,.55); }
 .frete-item-meta { margin-top: 5px; display: flex; flex-wrap: wrap; gap: 5px 10px; color: #94a3b8; font-size: 10px; }
-.frete-qty { display: grid; grid-template-columns: 28px 32px 28px; gap: 2px; align-items: center; }
+.frete-item-fix { margin-top: 7px; display: inline-flex; align-items: center; gap: 6px; border: 0; padding: 0; background: transparent; color: #fbbf24; font: inherit; font-size: 11px; font-weight: 800; cursor: pointer; }
+.frete-item-fix:hover { text-decoration: underline; }
+.frete-item-fix:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.frete-measure-entry { margin-top: 10px; }
+.frete-queue-button { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 12px; border: 1px solid #f1c56d; border-radius: 7px; padding: 10px 12px; background: #fff7e6; color: #7a4300; text-align: left; cursor: pointer; }
+.frete-queue-button > span { min-width: 0; display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; column-gap: 8px; }
+.frete-queue-button > span > i { grid-row: 1 / 3; }
+.frete-queue-button strong, .frete-queue-button small { display: block; }
+.frete-queue-button small { margin-top: 2px; color: #925d12; }
+.frete-queue-button:hover { background: #ffefc7; }
+.frete-qty { min-width: 128px; display: grid; grid-template-columns: 30px 62px 30px; gap: 3px; align-items: center; }
 .frete-qty button { width: 28px; height: 30px; border: 1px solid #3b4659; background: #252d3a; color: #f8fafc; cursor: pointer; border-radius: 5px; }
-.frete-qty input { width: 32px; height: 30px; box-sizing: border-box; border: 1px solid #3b4659; background: #10141c; color: #fff; text-align: center; border-radius: 5px; font-size: 12px; }
+.frete-qty input { width: 62px; height: 30px; box-sizing: border-box; border: 1px solid #3b4659; background: #10141c; color: #fff; text-align: center; border-radius: 5px; font-size: 13px; font-weight: 800; }
 
 .frete-summary { display: grid; gap: 10px; }
 .frete-metric-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 8px; }
@@ -170,6 +181,137 @@
 .frete-product-pending strong { font-size: 10px; color: #f8fafc; }
 .frete-product-pending span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #cbd5e1; font-size: 10px; }
 .frete-product-pending small { grid-column: 1 / -1; color: #fbbf24; font-size: 9px; }
+.frete-product-pending .frete-btn { grid-column: 1 / -1; justify-self: end; min-height: 30px; }
+
+/* Identidade operacional Fromtherm: cabeçalho escuro e área de trabalho clara. */
+#freteSimuladorPane { background: #edf2f7; color: #14213a; }
+.frete-app {
+  --frete-accent: #0b8a68;
+  --frete-panel: #ffffff;
+  --frete-panel-2: #f5f8fb;
+  --frete-border: #d5dfeb;
+  --frete-muted: #64748b;
+  --frete-warning: #8a4b00;
+  --frete-warning-bg: #fff3d6;
+  --frete-danger: #b42318;
+  --frete-danger-bg: #fee4e2;
+  --frete-success: #067647;
+  --frete-success-bg: #d1fadf;
+  background: #edf2f7;
+  color: #14213a;
+}
+.frete-header { margin: -18px -18px 16px; padding: 13px 18px; align-items: center; background: #0d1b33; color: #fff; border-bottom: 2px solid #16b58b; }
+.frete-title { align-items: center; }
+.frete-title-icon { width: 34px; height: 34px; background: #0b8a68; font-size: 15px; }
+.frete-title h1 { font-size: 19px; }
+.frete-title p { color: #b9c7d9; }
+.frete-status-pill { border-color: #31425e; background: #162540; color: #dce7f5; }
+.frete-panel { box-shadow: 0 2px 8px rgba(15, 32, 55, .06); }
+.frete-panel-head { background: #f8fafc; }
+.frete-panel-head h2, .frete-search-copy strong, .frete-item-copy strong, .frete-empty strong,
+.frete-metric strong, .frete-quote h3, .frete-breakdown strong, .frete-table-health h3,
+.frete-subhead h3, .frete-product-pending strong { color: #14213a; }
+.frete-field label { color: #334155; }
+.frete-input, .frete-select { border-color: #b9c7d9; background: #fff; color: #14213a; }
+.frete-btn-primary { background: #0b8a68; color: #fff; }
+.frete-btn-primary:hover { background: #087557; }
+.frete-btn-secondary { border-color: #c6d2e1; background: #eef3f8; color: #243b5a; }
+.frete-btn-secondary:hover { background: #e2eaf3; }
+.frete-btn-ghost { border-color: #c6d2e1; color: #36506f; }
+.frete-product-state { color: var(--frete-success); }
+.frete-product-state.is-warning { color: var(--frete-warning); }
+.frete-alert { border-color: #f1c56d; background: #fff7e6; color: #7a4300; }
+.frete-alert.is-error { border-color: #f3a6a0; background: var(--frete-danger-bg); color: var(--frete-danger); }
+.frete-results { border-color: #c6d2e1; background: #fff; box-shadow: 0 16px 38px rgba(15, 32, 55, .18); }
+.frete-search-option { border-color: #e1e8f0; color: #14213a; }
+.frete-search-option:hover, .frete-search-option:focus-visible { background: #f0f6fb; }
+.frete-product-placeholder { background: #e7eef6; color: #7890aa; }
+.frete-item, .frete-metric, .frete-recent, .frete-quote, .frete-quality-metric,
+.frete-table-health, .frete-product-pending { border-color: #d8e1eb; background: #fff; }
+.frete-item-meta, .frete-search-copy span, .frete-item-copy span { color: #64748b; }
+.frete-qty button { border-color: #c2cfde; background: #eaf0f7; color: #18324f; }
+.frete-qty input { border-color: #8fa4ba; background: #fff; color: #14213a; }
+.frete-chip, .frete-table-stats span, .frete-quality-tags span { background: #eaf0f7; color: #36506f; }
+.frete-breakdown { border-color: #dce4ed; }
+.frete-breakdown div { color: #64748b; }
+.frete-quote.is-preview .frete-quote-price,
+.frete-quote.is-pending .frete-quote-price,
+.frete-quote.is-unavailable .frete-quote-price,
+.frete-item-meta-warning,
+.frete-product-pending small { color: var(--frete-warning); }
+.frete-item-fix { color: #7a4300; }
+.frete-quote.is-best-preview { background: #fffaf0; }
+.frete-table-status { border: 1px solid #f1c56d; background: var(--frete-warning-bg); color: var(--frete-warning); }
+.frete-table-status.is-active { border-color: #75d6aa; background: var(--frete-success-bg); color: var(--frete-success); }
+.frete-table-status.is-inactive { border-color: #cbd5e1; background: #eef2f6; color: #475467; }
+.frete-quality-note { color: var(--frete-warning); font-weight: 600; }
+.frete-quality-note.is-blocker { color: var(--frete-danger); }
+.frete-subhead > span { border: 1px solid #f1c56d; background: var(--frete-warning-bg); color: var(--frete-warning); }
+.frete-aux-source { border-color: #d8e1eb; background: #f7f9fc; }
+.frete-aux-sources { border-color: #d8e1eb; }
+.frete-aux-sources > strong { color: #526a86; }
+.frete-aux-source i { color: #2563a9; }
+.frete-aux-source b { color: #1e4f8a; }
+.frete-aux-source small { color: #526a86; }
+.frete-aux-source em { border: 1px solid #b8d4f5; background: #e8f2ff; color: #175cd3; }
+.frete-table-actions { border-color: #d8e1eb; }
+
+body.frete-modal-open { overflow: hidden; }
+.frete-modal-backdrop, .frete-submodal-backdrop { position: fixed; inset: 0; z-index: 10050; display: grid; place-items: center; padding: 18px; background: rgba(8, 18, 34, .72); backdrop-filter: blur(3px); }
+.frete-submodal-backdrop { z-index: 10060; }
+.frete-modal-loading { min-width: 260px; border-radius: 8px; padding: 30px; background: #fff; color: #36506f; }
+.frete-config-modal { width: min(1280px, 96vw); height: min(850px, 94vh); display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid #cdd9e6; border-radius: 8px; background: #edf2f7; box-shadow: 0 28px 80px rgba(0, 0, 0, .32); color: #14213a; }
+.frete-config-header { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; padding: 15px 18px; border-bottom: 2px solid #16b58b; background: #0d1b33; color: #fff; }
+.frete-config-header span, .frete-entity-modal header span { color: #5fe0bc; font-size: 9px; font-weight: 900; letter-spacing: .12em; }
+.frete-config-header h2, .frete-entity-modal h3 { margin: 2px 0 0; font-size: 19px; }
+.frete-config-header p, .frete-entity-modal header p { margin: 3px 0 0; color: #b9c7d9; font-size: 11px; }
+.frete-icon-btn { width: 34px; height: 34px; flex: 0 0 auto; display: grid; place-items: center; border: 1px solid #c6d2e1; border-radius: 6px; background: #fff; color: #36506f; cursor: pointer; }
+.frete-config-header .frete-icon-btn, .frete-entity-modal header .frete-icon-btn { border-color: #334963; background: #142640; color: #fff; }
+.frete-icon-btn.is-danger { color: #dc2626; }
+.frete-config-content { min-height: 0; overflow: auto; padding: 14px; }
+.frete-config-general { display: grid; grid-template-columns: minmax(220px, 1.4fr) repeat(3, minmax(145px, .65fr)) auto; align-items: end; gap: 9px; border: 1px solid #d5dfeb; border-radius: 8px; padding: 12px; background: #fff; }
+.frete-config-general .frete-field { margin: 0; }
+.frete-config-tabs { display: flex; gap: 5px; overflow-x: auto; margin-top: 12px; border-bottom: 1px solid #cbd6e3; }
+.frete-config-tabs button { min-height: 42px; display: inline-flex; align-items: center; gap: 7px; border: 0; border-bottom: 3px solid transparent; padding: 8px 12px; background: transparent; color: #526a86; font: inherit; font-size: 12px; font-weight: 800; white-space: nowrap; cursor: pointer; }
+.frete-config-tabs button.is-active { border-color: #0b8a68; color: #075e49; }
+.frete-config-tabs button span { border-radius: 999px; padding: 2px 6px; background: #e1e9f2; font-size: 9px; }
+.frete-config-toolbar { display: grid; grid-template-columns: minmax(240px, 1fr) auto; gap: 9px; margin: 12px 0; }
+.frete-config-list { display: grid; gap: 6px; }
+.frete-config-row { min-width: 0; display: grid; grid-template-columns: minmax(180px, 1.25fr) repeat(3, minmax(110px, .75fr)) auto auto; align-items: center; gap: 10px; border: 1px solid #d5dfeb; border-radius: 7px; padding: 10px; background: #fff; }
+.frete-config-row.is-tariff { grid-template-columns: minmax(170px, 1.2fr) repeat(4, minmax(105px, .7fr)) auto; }
+.frete-config-row.is-disabled { opacity: .62; }
+.frete-config-row strong { display: block; color: #14213a; font-size: 11px; }
+.frete-config-main small, .frete-config-label { display: block; margin-top: 2px; color: #64748b; font-size: 9px; }
+.frete-row-actions { display: flex; gap: 5px; }
+.frete-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; color: #64748b; font-size: 11px; }
+.frete-pagination > div { display: flex; align-items: center; gap: 8px; }
+.frete-audit-list { display: grid; gap: 6px; }
+.frete-audit-list article { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 9px; border: 1px solid #d5dfeb; border-radius: 7px; padding: 9px; background: #fff; }
+.frete-audit-list strong { display: block; font-size: 11px; }
+.frete-audit-list small { display: block; margin-top: 2px; color: #64748b; font-size: 9px; }
+.frete-audit-list > article > span:last-child { color: #7890aa; font-size: 9px; }
+.frete-audit-icon { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: #e4f6f1; color: #0b8a68; }
+.frete-entity-modal { width: min(680px, 94vw); max-height: 92vh; overflow: auto; border: 1px solid #cdd9e6; border-radius: 8px; padding: 0 16px 16px; background: #fff; color: #14213a; box-shadow: 0 24px 70px rgba(0,0,0,.32); }
+.frete-entity-modal header { display: flex; justify-content: space-between; gap: 14px; margin: 0 -16px 15px; padding: 14px 16px; background: #0d1b33; color: #fff; }
+.frete-entity-modal footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.frete-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.frete-form-grid .frete-field { margin: 0; }
+.frete-form-grid .is-wide { grid-column: 1 / -1; }
+.frete-check { display: flex; align-items: center; gap: 8px; color: #334155; font-size: 12px; font-weight: 700; }
+.frete-check input { width: 18px; height: 18px; accent-color: #0b8a68; }
+.frete-product-editor { width: min(560px, 94vw); }
+.frete-measure-queue { width: min(1120px, 96vw); }
+.frete-measure-toolbar { display: grid; grid-template-columns: minmax(260px, 1fr) 230px; gap: 9px; }
+.frete-measure-count { margin: 9px 0; color: #526a86; font-size: 11px; }
+.frete-measure-list { max-height: min(58vh, 560px); display: grid; gap: 7px; overflow: auto; padding-right: 3px; }
+.frete-measure-row { display: grid; grid-template-columns: minmax(230px, 1.45fr) repeat(4, minmax(110px, .65fr)); align-items: end; gap: 8px; border: 1px solid #d5dfeb; border-radius: 7px; padding: 10px; background: #f8fafc; }
+.frete-measure-product { min-width: 0; align-self: center; }
+.frete-measure-product strong, .frete-measure-product span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.frete-measure-product strong { color: #14213a; font-size: 12px; }
+.frete-measure-product span { margin-top: 3px; color: #526a86; font-size: 10px; }
+.frete-measure-row label { min-width: 0; color: #334155; font-size: 10px; font-weight: 800; }
+.frete-measure-row label span { display: block; margin-bottom: 4px; }
+.frete-measure-row .frete-input { min-height: 36px; padding: 7px 8px; }
 
 @media (max-width: 1180px) {
   .frete-workspace { grid-template-columns: minmax(250px,.8fr) minmax(420px,1.3fr); }
@@ -180,7 +322,7 @@
 
 @media (max-width: 760px) {
   .frete-app { padding: 12px 10px 24px; }
-  .frete-header { align-items: stretch; flex-direction: column; margin-bottom: 12px; }
+  .frete-header { align-items: stretch; flex-direction: column; margin: -12px -10px 12px; padding: 12px 10px; }
   .frete-header-actions { justify-content: space-between; }
   .frete-status-pill { align-self: flex-start; }
   .frete-title h1 { font-size: 18px; }
@@ -198,9 +340,25 @@
   .frete-table-health-grid, .frete-product-pending-list { grid-template-columns: 1fr; }
   .frete-search-option { grid-template-columns: 38px minmax(0,1fr); }
   .frete-search-option .frete-product-state { grid-column: 2; }
+  .frete-item .frete-qty { min-width: 150px; grid-template-columns: 34px 76px 34px; }
+  .frete-item .frete-qty input { width: 76px; font-size: 14px; }
+  .frete-modal-backdrop, .frete-submodal-backdrop { padding: 0; align-items: stretch; }
+  .frete-config-modal { width: 100vw; height: 100dvh; max-height: none; border: 0; border-radius: 0; }
+  .frete-config-content { padding: 10px; }
+  .frete-config-general { grid-template-columns: 1fr 1fr; }
+  .frete-config-general .frete-field:first-child, .frete-config-general .frete-btn { grid-column: 1 / -1; }
+  .frete-config-toolbar { grid-template-columns: 1fr; }
+  .frete-config-toolbar .frete-btn { width: 100%; }
+  .frete-config-row, .frete-config-row.is-tariff { grid-template-columns: 1fr 1fr; gap: 8px; }
+  .frete-config-row .frete-config-main { grid-column: 1 / -1; }
+  .frete-config-row .frete-table-status { justify-self: start; }
+  .frete-config-row .frete-row-actions { justify-self: end; }
+  .frete-pagination { align-items: stretch; flex-direction: column; }
+  .frete-pagination > div { justify-content: space-between; }
+  .frete-entity-modal { width: 100vw; max-height: 100dvh; min-height: 100dvh; border: 0; border-radius: 0; }
 }
 
-@media (max-width: 390px) {
+@media (max-width: 480px) {
   .frete-app { padding-inline: 8px; }
   .frete-panel-body { padding: 11px; }
   .frete-inline { grid-template-columns: 1fr; }
@@ -216,6 +374,21 @@
   .frete-product-pending { grid-template-columns: 92px minmax(0,1fr); }
   .frete-aux-source { align-items: flex-start; }
   .frete-aux-source small { white-space: normal; }
+  .frete-config-general, .frete-form-grid { grid-template-columns: 1fr; }
+  .frete-config-general .frete-field, .frete-form-grid .frete-field, .frete-form-grid .is-wide { grid-column: 1; }
+  .frete-measure-queue { width: 100vw; max-height: 100dvh; border: 0; border-radius: 0; }
+  .frete-measure-toolbar { grid-template-columns: 1fr; }
+  .frete-measure-list { max-height: none; overflow: visible; }
+  .frete-measure-row { grid-template-columns: 1fr 1fr; }
+  .frete-measure-product { grid-column: 1 / -1; }
+  .frete-measure-queue footer { position: sticky; bottom: 0; margin: 12px -16px -16px; padding: 10px 16px; border-top: 1px solid #d5dfeb; background: #fff; }
+  .frete-config-header p { display: none; }
+  .frete-config-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); overflow: visible; }
+  .frete-config-tabs button { justify-content: center; padding-inline: 5px; white-space: normal; text-align: center; }
+  .frete-config-row, .frete-config-row.is-tariff { grid-template-columns: 1fr; }
+  .frete-config-row .frete-config-main { grid-column: 1; }
+  .frete-config-row .frete-row-actions { justify-self: stretch; }
+  .frete-config-row .frete-row-actions .frete-icon-btn { flex: 1; }
 }
 
 @media print {

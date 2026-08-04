@@ -2,7 +2,7 @@ const express = require('express');
 const fs = require('node:fs');
 const path = require('node:path');
 const { pool } = require('../src/db');
-const { exigirPermissaoNav } = require('../utils/navPermissions');
+const { exigirPermissaoNav, usuarioTemPermissaoNav } = require('../utils/navPermissions');
 const {
   calcularRomaneio,
   normalizarCep,
@@ -20,6 +20,79 @@ let schemaPromise = null;
 function usuarioEhAdmin(req) {
   const roles = Array.isArray(req.session?.user?.roles) ? req.session.user.roles : [];
   return roles.some((role) => String(role || '').trim().toLowerCase() === 'admin');
+}
+
+function numeroOpcional(valor, campo, { minimo = 0, maximo = null } = {}) {
+  if (valor === undefined || valor === null || String(valor).trim() === '') return null;
+  const numero = Number(String(valor).replace(',', '.'));
+  if (!Number.isFinite(numero) || numero < minimo || (maximo !== null && numero > maximo)) {
+    const limite = maximo === null ? `maior ou igual a ${minimo}` : `entre ${minimo} e ${maximo}`;
+    const erro = new Error(`${campo} deve ser um número ${limite}.`);
+    erro.status = 400;
+    throw erro;
+  }
+  return numero;
+}
+
+function inteiroOpcional(valor, campo, opcoes = {}) {
+  const numero = numeroOpcional(valor, campo, opcoes);
+  if (numero === null) return null;
+  if (!Number.isInteger(numero)) {
+    const erro = new Error(`${campo} deve ser um número inteiro.`);
+    erro.status = 400;
+    throw erro;
+  }
+  return numero;
+}
+
+function cepOpcional(valor, campo) {
+  if (valor === undefined || valor === null || String(valor).trim() === '') return null;
+  const cep = normalizarCep(valor);
+  if (!cep) {
+    const erro = new Error(`${campo} deve conter 8 dígitos.`);
+    erro.status = 400;
+    throw erro;
+  }
+  return cep;
+}
+
+async function usuarioPodeGerenciarFrete(req) {
+  if (usuarioEhAdmin(req)) return true;
+  return usuarioTemPermissaoNav(req.session?.user?.id, 'top:produto');
+}
+
+async function exigirGestorFrete(req, res) {
+  if (await usuarioPodeGerenciarFrete(req)) return true;
+  res.status(403).json({ ok: false, error: 'Seu usuário não possui permissão para gerenciar tabelas de frete.' });
+  return false;
+}
+
+async function auditarGestao(client, req, { tabelaId, entidade, entidadeId, acao, antes = null, depois = null }) {
+  await client.query(`
+    INSERT INTO frete.gestao_auditoria (
+      tabela_preco_id, entidade, entidade_id, acao, dados_antes, dados_depois,
+      usuario_id, usuario_nome
+    ) VALUES ($1,$2,$3,$4,$5::jsonb,$6::jsonb,$7,$8)
+  `, [
+    tabelaId,
+    entidade,
+    entidadeId || null,
+    acao,
+    antes ? JSON.stringify(antes) : null,
+    depois ? JSON.stringify(depois) : null,
+    req.session?.user?.id || null,
+    req.session?.user?.username || null
+  ]);
+}
+
+async function obterTabela(tabelaId, client = pool) {
+  const { rows } = await client.query(`
+    SELECT t.*, tr.nome AS transportadora
+    FROM frete.tabela_preco t
+    JOIN frete.transportadora tr ON tr.id = t.transportadora_id
+    WHERE t.id = $1
+  `, [tabelaId]);
+  return rows[0] || null;
 }
 
 function classificarFonteTabela(item) {
@@ -225,7 +298,7 @@ router.get('/status', async (req, res) => {
       produtos: produtos.rows[0],
       tabelas: tabelas.rows,
       origem: configuracao.rows[0]?.valor || null,
-      pode_gerenciar: usuarioEhAdmin(req)
+      pode_gerenciar: await usuarioPodeGerenciarFrete(req)
     });
   } catch (erro) {
     console.error('[frete/status]', erro);
@@ -260,11 +333,367 @@ router.get('/gestao', async (req, res) => {
         fontes_auxiliares: auxiliaresPorTransportadora.get(String(item.transportadora_id)) || [],
         diagnostico: await diagnosticarTabela(item.id)
       })));
-    res.json({ ok: true, pode_gerenciar: usuarioEhAdmin(req), tabelas });
+    res.json({
+      ok: true,
+      pode_gerenciar: await usuarioPodeGerenciarFrete(req),
+      pode_homologar: usuarioEhAdmin(req),
+      tabelas
+    });
   } catch (erro) {
     console.error('[frete/gestao]', erro);
     res.status(500).json({ ok: false, error: 'Falha ao carregar a central de tabelas.' });
   }
+});
+
+router.get('/tabelas/:id/editor', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  const secao = String(req.query.secao || 'coberturas').toLowerCase();
+  const busca = String(req.query.q || '').trim();
+  const pagina = Math.max(1, Number(req.query.page) || 1);
+  const limite = Math.min(100, Math.max(10, Number(req.query.limit) || 30));
+  const offset = (pagina - 1) * limite;
+  if (!Number.isInteger(tabelaId) || tabelaId <= 0 || !['coberturas', 'tarifas', 'historico'].includes(secao)) {
+    return res.status(400).json({ ok: false, error: 'Tabela ou seção inválida.' });
+  }
+  try {
+    const tabela = await obterTabela(tabelaId);
+    if (!tabela) return res.status(404).json({ ok: false, error: 'Tabela não encontrada.' });
+    const contagens = await pool.query(`
+      SELECT
+        (SELECT COUNT(*)::int FROM frete.cobertura WHERE tabela_preco_id = $1) AS coberturas,
+        (SELECT COUNT(*)::int FROM frete.tarifa_faixa WHERE tabela_preco_id = $1) AS tarifas,
+        (SELECT COUNT(*)::int FROM frete.gestao_auditoria WHERE tabela_preco_id = $1) AS alteracoes
+    `, [tabelaId]);
+    let total = 0;
+    let itens = [];
+    const like = `%${busca}%`;
+    if (secao === 'coberturas') {
+      const resultado = await pool.query(`
+        SELECT COUNT(*) OVER()::int AS total, id, codigo_regiao, uf, cidade,
+               cidade_normalizada, codigo_ibge, cep_inicio, cep_fim,
+               prazo_min_dias, prazo_max_dias, frequencia, atendida, observacao
+        FROM frete.cobertura
+        WHERE tabela_preco_id = $1
+          AND ($2 = '' OR cidade ILIKE $3 OR cidade_normalizada ILIKE $3 OR codigo_regiao ILIKE $3 OR uf ILIKE $3)
+        ORDER BY uf, cidade_normalizada, cep_inicio NULLS FIRST, id
+        LIMIT $4 OFFSET $5
+      `, [tabelaId, busca, like, limite, offset]);
+      itens = resultado.rows;
+      total = Number(itens[0]?.total || 0);
+    } else if (secao === 'tarifas') {
+      const resultado = await pool.query(`
+        SELECT COUNT(*) OVER()::int AS total, id, codigo_regiao, uf_destino,
+               cidade_normalizada, peso_de_kg, peso_ate_kg, valor_base,
+               valor_kg_excedente, peso_referencia_excedente_kg, frete_minimo,
+               ad_valorem_aliquota, taxa_despacho, pedagio_por_100kg, prioridade
+        FROM frete.tarifa_faixa
+        WHERE tabela_preco_id = $1
+          AND ($2 = '' OR cidade_normalizada ILIKE $3 OR codigo_regiao ILIKE $3 OR uf_destino ILIKE $3)
+        ORDER BY COALESCE(uf_destino, ''), COALESCE(cidade_normalizada, ''), codigo_regiao, peso_de_kg, prioridade, id
+        LIMIT $4 OFFSET $5
+      `, [tabelaId, busca, like, limite, offset]);
+      itens = resultado.rows;
+      total = Number(itens[0]?.total || 0);
+    } else {
+      const resultado = await pool.query(`
+        SELECT COUNT(*) OVER()::int AS total, id, entidade, entidade_id, acao,
+               dados_antes, dados_depois, usuario_nome, criado_em
+        FROM frete.gestao_auditoria
+        WHERE tabela_preco_id = $1
+          AND ($2 = '' OR entidade ILIKE $3 OR acao ILIKE $3 OR COALESCE(usuario_nome, '') ILIKE $3)
+        ORDER BY criado_em DESC, id DESC
+        LIMIT $4 OFFSET $5
+      `, [tabelaId, busca, like, limite, offset]);
+      itens = resultado.rows;
+      total = Number(itens[0]?.total || 0);
+    }
+    res.json({
+      ok: true,
+      tabela,
+      contagens: contagens.rows[0],
+      secao,
+      paginacao: { pagina, limite, total, paginas: Math.max(1, Math.ceil(total / limite)) },
+      itens
+    });
+  } catch (erro) {
+    console.error('[frete/tabelas/editor]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao carregar o configurador da tabela.' });
+  }
+});
+
+router.patch('/tabelas/:id/configuracao', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  if (!Number.isInteger(tabelaId) || tabelaId <= 0) return res.status(400).json({ ok: false, error: 'Tabela inválida.' });
+  try {
+    const fator = numeroOpcional(req.body?.fator_cubagem_kg_m3, 'Fator de cubagem', { minimo: 1, maximo: 2000 });
+    const nome = String(req.body?.nome || '').trim().slice(0, 160);
+    if (!nome) return res.status(400).json({ ok: false, error: 'Informe o nome da tabela.' });
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const antes = await obterTabela(tabelaId, client);
+      if (!antes) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Tabela não encontrada.' });
+      }
+      const { rows } = await client.query(`
+        UPDATE frete.tabela_preco
+        SET nome = $2,
+            fator_cubagem_kg_m3 = $3,
+            vigencia_inicio = $4,
+            vigencia_fim = $5,
+            configuracao = COALESCE(configuracao, '{}'::jsonb) || jsonb_build_object(
+              'edicao_manual', TRUE,
+              'edicao_manual_em', NOW()
+            ),
+            atualizado_em = NOW()
+        WHERE id = $1
+        RETURNING *
+      `, [tabelaId, nome, fator, req.body?.vigencia_inicio || null, req.body?.vigencia_fim || null]);
+      await auditarGestao(client, req, { tabelaId, entidade: 'tabela', entidadeId: tabelaId, acao: 'alterar', antes, depois: rows[0] });
+      await client.query('COMMIT');
+      res.json({ ok: true, tabela: rows[0] });
+    } catch (erro) {
+      await client.query('ROLLBACK');
+      throw erro;
+    } finally {
+      client.release();
+    }
+  } catch (erro) {
+    console.error('[frete/tabelas/configuracao]', erro);
+    res.status(erro.status || 500).json({ ok: false, error: erro.status ? erro.message : 'Falha ao salvar a configuração da tabela.' });
+  }
+});
+
+function dadosCobertura(body) {
+  const cidade = String(body?.cidade || '').trim().slice(0, 160);
+  const uf = String(body?.uf || '').trim().toUpperCase();
+  const codigoRegiao = String(body?.codigo_regiao || '').trim().slice(0, 120);
+  if (!cidade || !/^[A-Z]{2}$/.test(uf) || !codigoRegiao) {
+    const erro = new Error('Informe cidade, UF e região tarifária.');
+    erro.status = 400;
+    throw erro;
+  }
+  const cepInicio = cepOpcional(body?.cep_inicio, 'CEP inicial');
+  const cepFim = cepOpcional(body?.cep_fim, 'CEP final');
+  if ((cepInicio === null) !== (cepFim === null) || (cepInicio !== null && cepInicio > cepFim)) {
+    const erro = new Error('Informe uma faixa de CEP completa e crescente.');
+    erro.status = 400;
+    throw erro;
+  }
+  const prazoMin = inteiroOpcional(body?.prazo_min_dias, 'Prazo mínimo', { minimo: 0, maximo: 365 });
+  const prazoMax = inteiroOpcional(body?.prazo_max_dias, 'Prazo máximo', { minimo: 0, maximo: 365 });
+  if (prazoMin !== null && prazoMax !== null && prazoMin > prazoMax) {
+    const erro = new Error('O prazo mínimo não pode superar o prazo máximo.');
+    erro.status = 400;
+    throw erro;
+  }
+  return {
+    codigo_regiao: codigoRegiao,
+    uf,
+    cidade,
+    cidade_normalizada: normalizarTexto(cidade),
+    cep_inicio: cepInicio,
+    cep_fim: cepFim,
+    prazo_min_dias: prazoMin,
+    prazo_max_dias: prazoMax,
+    frequencia: String(body?.frequencia || '').trim().slice(0, 120) || null,
+    atendida: body?.atendida !== false,
+    observacao: String(body?.observacao || '').trim().slice(0, 500) || null
+  };
+}
+
+router.post('/tabelas/:id/coberturas', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  try {
+    const dados = dadosCobertura(req.body);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      if (!await obterTabela(tabelaId, client)) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Tabela não encontrada.' });
+      }
+      const { rows } = await client.query(`
+        INSERT INTO frete.cobertura (
+          tabela_preco_id, codigo_regiao, uf, cidade, cidade_normalizada,
+          cep_inicio, cep_fim, prazo_min_dias, prazo_max_dias, frequencia,
+          atendida, observacao, metadados
+        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,'{"gestao_manual":true}'::jsonb)
+        RETURNING *
+      `, [tabelaId, dados.codigo_regiao, dados.uf, dados.cidade, dados.cidade_normalizada,
+        dados.cep_inicio, dados.cep_fim, dados.prazo_min_dias, dados.prazo_max_dias,
+        dados.frequencia, dados.atendida, dados.observacao]);
+      await auditarGestao(client, req, { tabelaId, entidade: 'cobertura', entidadeId: rows[0].id, acao: 'criar', depois: rows[0] });
+      await client.query('COMMIT');
+      res.status(201).json({ ok: true, item: rows[0] });
+    } catch (erro) {
+      await client.query('ROLLBACK');
+      throw erro;
+    } finally { client.release(); }
+  } catch (erro) {
+    console.error('[frete/coberturas/criar]', erro);
+    res.status(erro.status || 500).json({ ok: false, error: erro.status ? erro.message : 'Falha ao incluir a cidade atendida.' });
+  }
+});
+
+router.patch('/tabelas/:id/coberturas/:coberturaId', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  const coberturaId = Number(req.params.coberturaId);
+  try {
+    const dados = dadosCobertura(req.body);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      const anterior = await client.query('SELECT * FROM frete.cobertura WHERE id = $1 AND tabela_preco_id = $2 FOR UPDATE', [coberturaId, tabelaId]);
+      if (!anterior.rows[0]) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Cobertura não encontrada.' });
+      }
+      const { rows } = await client.query(`
+        UPDATE frete.cobertura SET codigo_regiao=$3, uf=$4, cidade=$5, cidade_normalizada=$6,
+          cep_inicio=$7, cep_fim=$8, prazo_min_dias=$9, prazo_max_dias=$10,
+          frequencia=$11, atendida=$12, observacao=$13,
+          metadados=COALESCE(metadados,'{}'::jsonb)||'{"gestao_manual":true}'::jsonb
+        WHERE id=$1 AND tabela_preco_id=$2 RETURNING *
+      `, [coberturaId, tabelaId, dados.codigo_regiao, dados.uf, dados.cidade, dados.cidade_normalizada,
+        dados.cep_inicio, dados.cep_fim, dados.prazo_min_dias, dados.prazo_max_dias,
+        dados.frequencia, dados.atendida, dados.observacao]);
+      await auditarGestao(client, req, { tabelaId, entidade: 'cobertura', entidadeId: coberturaId, acao: 'alterar', antes: anterior.rows[0], depois: rows[0] });
+      await client.query('COMMIT');
+      res.json({ ok: true, item: rows[0] });
+    } catch (erro) { await client.query('ROLLBACK'); throw erro; } finally { client.release(); }
+  } catch (erro) {
+    console.error('[frete/coberturas/alterar]', erro);
+    res.status(erro.status || 500).json({ ok: false, error: erro.status ? erro.message : 'Falha ao atualizar a cidade atendida.' });
+  }
+});
+
+router.delete('/tabelas/:id/coberturas/:coberturaId', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  const coberturaId = Number(req.params.coberturaId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const anterior = await client.query('SELECT * FROM frete.cobertura WHERE id=$1 AND tabela_preco_id=$2 FOR UPDATE', [coberturaId, tabelaId]);
+    if (!anterior.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Cobertura não encontrada.' });
+    }
+    await client.query('UPDATE frete.cotacao_resultado SET cobertura_id=NULL WHERE cobertura_id=$1', [coberturaId]);
+    await client.query('DELETE FROM frete.cobertura WHERE id=$1', [coberturaId]);
+    await auditarGestao(client, req, { tabelaId, entidade: 'cobertura', entidadeId: coberturaId, acao: 'excluir', antes: anterior.rows[0] });
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (erro) {
+    await client.query('ROLLBACK');
+    console.error('[frete/coberturas/excluir]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao excluir a cobertura.' });
+  } finally { client.release(); }
+});
+
+function dadosTarifa(body) {
+  const codigoRegiao = String(body?.codigo_regiao || '').trim().slice(0, 120);
+  const uf = String(body?.uf_destino || '').trim().toUpperCase();
+  if (!codigoRegiao || (uf && !/^[A-Z]{2}$/.test(uf))) {
+    const erro = new Error('Informe a região tarifária e uma UF válida.');
+    erro.status = 400;
+    throw erro;
+  }
+  const pesoDe = numeroOpcional(body?.peso_de_kg, 'Peso inicial', { minimo: 0 }) ?? 0;
+  const pesoAte = numeroOpcional(body?.peso_ate_kg, 'Peso final', { minimo: 0 });
+  if (pesoAte !== null && pesoAte < pesoDe) {
+    const erro = new Error('O peso final não pode ser menor que o peso inicial.');
+    erro.status = 400;
+    throw erro;
+  }
+  return {
+    codigo_regiao: codigoRegiao,
+    uf_destino: uf || null,
+    cidade_normalizada: normalizarTexto(body?.cidade_normalizada || '') || null,
+    peso_de_kg: pesoDe,
+    peso_ate_kg: pesoAte,
+    valor_base: numeroOpcional(body?.valor_base, 'Valor base', { minimo: 0 }) ?? 0,
+    valor_kg_excedente: numeroOpcional(body?.valor_kg_excedente, 'Valor por kg excedente', { minimo: 0 }),
+    peso_referencia_excedente_kg: numeroOpcional(body?.peso_referencia_excedente_kg, 'Peso de referência', { minimo: 0 }),
+    frete_minimo: numeroOpcional(body?.frete_minimo, 'Frete mínimo', { minimo: 0 }),
+    prioridade: inteiroOpcional(body?.prioridade, 'Prioridade', { minimo: 0, maximo: 10000 }) ?? 100
+  };
+}
+
+async function salvarTarifa(req, res, tarifaId = null) {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  try {
+    const dados = dadosTarifa(req.body);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      let antes = null;
+      if (tarifaId) {
+        const atual = await client.query('SELECT * FROM frete.tarifa_faixa WHERE id=$1 AND tabela_preco_id=$2 FOR UPDATE', [tarifaId, tabelaId]);
+        antes = atual.rows[0];
+        if (!antes) {
+          await client.query('ROLLBACK');
+          return res.status(404).json({ ok: false, error: 'Faixa tarifária não encontrada.' });
+        }
+      } else if (!await obterTabela(tabelaId, client)) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ ok: false, error: 'Tabela não encontrada.' });
+      }
+      const params = [tabelaId, dados.codigo_regiao, dados.uf_destino, dados.cidade_normalizada,
+        dados.peso_de_kg, dados.peso_ate_kg, dados.valor_base, dados.valor_kg_excedente,
+        dados.peso_referencia_excedente_kg, dados.frete_minimo, dados.prioridade];
+      const resultado = tarifaId
+        ? await client.query(`UPDATE frete.tarifa_faixa SET codigo_regiao=$2,uf_destino=$3,cidade_normalizada=$4,
+            peso_de_kg=$5,peso_ate_kg=$6,valor_base=$7,valor_kg_excedente=$8,
+            peso_referencia_excedente_kg=$9,frete_minimo=$10,prioridade=$11,
+            metadados=COALESCE(metadados,'{}'::jsonb)||'{"gestao_manual":true}'::jsonb
+            WHERE id=$12 AND tabela_preco_id=$1 RETURNING *`, [...params, tarifaId])
+        : await client.query(`INSERT INTO frete.tarifa_faixa (tabela_preco_id,codigo_regiao,uf_destino,
+            cidade_normalizada,peso_de_kg,peso_ate_kg,valor_base,valor_kg_excedente,
+            peso_referencia_excedente_kg,frete_minimo,prioridade,metadados)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'{"gestao_manual":true}'::jsonb) RETURNING *`, params);
+      const item = resultado.rows[0];
+      await auditarGestao(client, req, { tabelaId, entidade: 'tarifa', entidadeId: item.id, acao: tarifaId ? 'alterar' : 'criar', antes, depois: item });
+      await client.query('COMMIT');
+      res.status(tarifaId ? 200 : 201).json({ ok: true, item });
+    } catch (erro) { await client.query('ROLLBACK'); throw erro; } finally { client.release(); }
+  } catch (erro) {
+    console.error('[frete/tarifas/salvar]', erro);
+    res.status(erro.status || 500).json({ ok: false, error: erro.status ? erro.message : 'Falha ao salvar a faixa tarifária.' });
+  }
+}
+
+router.post('/tabelas/:id/tarifas', (req, res) => salvarTarifa(req, res));
+router.patch('/tabelas/:id/tarifas/:tarifaId', (req, res) => salvarTarifa(req, res, Number(req.params.tarifaId)));
+
+router.delete('/tabelas/:id/tarifas/:tarifaId', async (req, res) => {
+  if (!await exigirGestorFrete(req, res)) return;
+  const tabelaId = Number(req.params.id);
+  const tarifaId = Number(req.params.tarifaId);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const anterior = await client.query('SELECT * FROM frete.tarifa_faixa WHERE id=$1 AND tabela_preco_id=$2 FOR UPDATE', [tarifaId, tabelaId]);
+    if (!anterior.rows[0]) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Faixa tarifária não encontrada.' });
+    }
+    await client.query('DELETE FROM frete.tarifa_faixa WHERE id=$1', [tarifaId]);
+    await auditarGestao(client, req, { tabelaId, entidade: 'tarifa', entidadeId: tarifaId, acao: 'excluir', antes: anterior.rows[0] });
+    await client.query('COMMIT');
+    res.json({ ok: true });
+  } catch (erro) {
+    await client.query('ROLLBACK');
+    console.error('[frete/tarifas/excluir]', erro);
+    res.status(500).json({ ok: false, error: 'Falha ao excluir a faixa tarifária.' });
+  } finally { client.release(); }
 });
 
 router.patch('/tabelas/:id/status', async (req, res) => {
