@@ -343,6 +343,17 @@
       <i class="fa-solid fa-clipboard-check" style="margin-right:8px;"></i>
       RI - Registro de inspeção
     </a>
+    <a href="#"
+       id="menu-producao-testes"
+       class="menu-link"
+       data-nav-key="side:producao:testes"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="testes"
+       data-nav-selector="#menu-producao-testes">
+      <i class="fa-solid fa-flask" style="margin-right:8px;"></i>
+      testes
+    </a>
   </div>
 </div>
 
@@ -12829,6 +12840,15 @@
           </div>
         </div>
 
+        <!-- Painel Produção: Testes — relatório de bombas de calor -->
+        <div id="producaoTestesPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header" style="display:none;"></div>
+            <div id="prodTestesStatus" style="display:none;margin:0 0 10px;font-size:13px;color:#94a3b8;"></div>
+            <div id="prodTestesRoot"></div>
+          </div>
+        </div>
+
         <!-- Modal Configuração — RI Registro de inspeção -->
         <div id="riRegistroConfigModal" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
           <div style="width:100%;max-width:480px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
@@ -13229,7 +13249,8 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260728-simulador-frete"></script>
+  <script src="/public/js/producao-testes-relatorio.js?v=20260804a" defer></script>
+  <script type="module" src="menu_produto.js?v=20260804-testes"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260729b"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260730-filtro-expedicao"></script>
