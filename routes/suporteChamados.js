@@ -109,6 +109,14 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_em
       ON "Suporte_tecnico"."Chamado" (criado_em DESC)
   `);
+  await dbQuery(`
+    ALTER TABLE "Suporte_tecnico"."Chamado"
+      ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT,
+      ADD COLUMN IF NOT EXISTS anexos_reprovacao JSONB NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
+      ADD COLUMN IF NOT EXISTS reprovado_por TEXT,
+      ADD COLUMN IF NOT EXISTS reprovado_por_nome TEXT
+  `);
   // Corrige status legado com espaço ("em andamento" → "em_andamento")
   await dbQuery(`
     UPDATE "Suporte_tecnico"."Chamado"
@@ -118,6 +126,16 @@ async function ensureSchema() {
   `);
   schemaReady = true;
 }
+
+const CHAMADO_COLS = `
+  id, descricao, criticidade,
+  LOWER(REPLACE(TRIM(status), ' ', '_')) AS status,
+  prazo, anexos,
+  criado_por, criado_por_nome, criado_em, atualizado_em,
+  fechado_em, fechado_por, fechado_por_nome, observacao_admin,
+  motivo_reprovacao, anexos_reprovacao,
+  reprovado_em, reprovado_por, reprovado_por_nome
+`;
 
 async function uploadAnexo(file, chamadoTempId) {
   const tipo = inferTipoAnexo(file);
@@ -170,11 +188,7 @@ router.get('/chamados', requireAuth, async (req, res) => {
     }
 
     const sql = `
-      SELECT id, descricao, criticidade,
-             LOWER(REPLACE(TRIM(status), ' ', '_')) AS status,
-             prazo, anexos,
-             criado_por, criado_por_nome, criado_em, atualizado_em,
-             fechado_em, fechado_por, fechado_por_nome, observacao_admin
+      SELECT ${CHAMADO_COLS}
         FROM "Suporte_tecnico"."Chamado"
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY
@@ -207,11 +221,7 @@ router.get('/chamados/:id', requireAuth, async (req, res) => {
     }
 
     const { rows } = await dbQuery(
-      `SELECT id, descricao, criticidade,
-              LOWER(REPLACE(TRIM(status), ' ', '_')) AS status,
-              prazo, anexos,
-              criado_por, criado_por_nome, criado_em, atualizado_em,
-              fechado_em, fechado_por, fechado_por_nome, observacao_admin
+      `SELECT ${CHAMADO_COLS}
          FROM "Suporte_tecnico"."Chamado"
         WHERE id = $1`,
       [id]
@@ -276,9 +286,7 @@ router.post(
         `INSERT INTO "Suporte_tecnico"."Chamado"
            (descricao, criticidade, status, anexos, criado_por, criado_por_nome)
          VALUES ($1, $2, 'aberto', $3::jsonb, $4, $5)
-         RETURNING id, descricao, criticidade, status, prazo, anexos,
-                   criado_por, criado_por_nome, criado_em, atualizado_em,
-                   fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+         RETURNING ${CHAMADO_COLS}`,
         [
           descricao,
           criticidade,
@@ -338,9 +346,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
                 fechado_em = NOW(),
                 atualizado_em = NOW()
           WHERE id = $3
-          RETURNING id, descricao, criticidade, status, prazo, anexos,
-                    criado_por, criado_por_nome, criado_em, atualizado_em,
-                    fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+          RETURNING ${CHAMADO_COLS}`,
         [usuario, getNomeUsuario(req), id]
       );
       return res.json({ ok: true, chamado: rows[0] });
@@ -399,9 +405,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
       `UPDATE "Suporte_tecnico"."Chamado"
           SET ${sets.join(', ')}
         WHERE id = $${params.length}
-        RETURNING id, descricao, criticidade, status, prazo, anexos,
-                  criado_por, criado_por_nome, criado_em, atualizado_em,
-                  fechado_em, fechado_por, fechado_por_nome, observacao_admin`,
+        RETURNING ${CHAMADO_COLS}`,
       params
     );
 
@@ -411,5 +415,102 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     res.status(500).json({ error: err.message || 'Falha ao atualizar chamado' });
   }
 });
+
+// POST /api/suporte/chamados/:id/reprovar
+// Solicitante reprova o fechamento → volta para aberto com motivo + anexos
+router.post(
+  '/chamados/:id/reprovar',
+  requireAuth,
+  upload.fields([
+    { name: 'foto', maxCount: 10 },
+    { name: 'video', maxCount: 5 },
+    { name: 'anexo', maxCount: 5 },
+  ]),
+  async (req, res) => {
+    try {
+      await ensureSchema();
+
+      const id = Number(req.params.id);
+      if (!Number.isFinite(id) || id <= 0) {
+        return res.status(400).json({ error: 'ID inválido.' });
+      }
+
+      const motivo = textoUtf8(req.body?.motivo || req.body?.motivo_reprovacao);
+      if (!motivo) {
+        return res.status(400).json({ error: 'Informe o motivo da reprovação.' });
+      }
+
+      const { rows: existingRows } = await dbQuery(
+        `SELECT id, status, criado_por, anexos_reprovacao
+           FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+        [id]
+      );
+      const existing = existingRows[0];
+      if (!existing) return res.status(404).json({ error: 'Chamado não encontrado.' });
+
+      const usuario = getUsuario(req);
+      if (String(existing.criado_por || '') !== usuario) {
+        return res.status(403).json({ error: 'Somente quem abriu o chamado pode reprovar.' });
+      }
+      if (normalizarStatusChamado(existing.status) !== 'aguardando_aprovacao') {
+        return res.status(400).json({ error: 'Chamado não está aguardando aprovação.' });
+      }
+
+      const files = [
+        ...(req.files?.foto || []),
+        ...(req.files?.video || []),
+        ...(req.files?.anexo || []),
+      ];
+
+      const anexosNovos = [];
+      for (const file of files) {
+        try {
+          anexosNovos.push(await uploadAnexo(file, `reprovar-${id}`));
+        } catch (upErr) {
+          console.error('[suporte/chamados] upload reprovação:', upErr);
+          return res.status(500).json({
+            error: 'Falha ao enviar anexo: ' + (upErr.message || upErr),
+          });
+        }
+      }
+
+      let anexosAnteriores = existing.anexos_reprovacao;
+      if (typeof anexosAnteriores === 'string') {
+        try {
+          anexosAnteriores = JSON.parse(anexosAnteriores);
+        } catch (_e) {
+          anexosAnteriores = [];
+        }
+      }
+      if (!Array.isArray(anexosAnteriores)) anexosAnteriores = [];
+      const anexosReprovacao = [...anexosAnteriores, ...anexosNovos];
+
+      const { rows } = await dbQuery(
+        `UPDATE "Suporte_tecnico"."Chamado"
+            SET status = 'aberto',
+                motivo_reprovacao = $1,
+                anexos_reprovacao = $2::jsonb,
+                reprovado_em = NOW(),
+                reprovado_por = $3,
+                reprovado_por_nome = $4,
+                atualizado_em = NOW()
+          WHERE id = $5
+          RETURNING ${CHAMADO_COLS}`,
+        [
+          motivo,
+          JSON.stringify(anexosReprovacao),
+          usuario,
+          getNomeUsuario(req),
+          id,
+        ]
+      );
+
+      res.json({ ok: true, chamado: rows[0] });
+    } catch (err) {
+      console.error('[suporte/chamados] reprovar:', err);
+      res.status(500).json({ error: err.message || 'Falha ao reprovar chamado' });
+    }
+  }
+);
 
 module.exports = router;
