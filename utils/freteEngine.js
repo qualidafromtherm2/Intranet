@@ -123,15 +123,27 @@ function coberturaAtende(cobertura, destino) {
 }
 
 function escolherCobertura(coberturas, destino) {
-  const candidatas = (Array.isArray(coberturas) ? coberturas : []).filter((item) => coberturaAtende(item, destino));
-  return candidatas.sort((a, b) => {
+  const lista = Array.isArray(coberturas) ? coberturas : [];
+  const candidatas = lista.filter((item) => coberturaAtende(item, destino));
+  const ordenar = (itens) => itens.sort((a, b) => {
     const aCep = a.cep_inicio != null && a.cep_fim != null;
     const bCep = b.cep_inicio != null && b.cep_fim != null;
     if (aCep !== bCep) return aCep ? -1 : 1;
     const aAmplitude = aCep ? numero(a.cep_fim) - numero(a.cep_inicio) : Number.MAX_SAFE_INTEGER;
     const bAmplitude = bCep ? numero(b.cep_fim) - numero(b.cep_inicio) : Number.MAX_SAFE_INTEGER;
     return aAmplitude - bAmplitude;
-  })[0] || null;
+  });
+  const coberturaExata = ordenar(candidatas)[0];
+  if (coberturaExata) return coberturaExata;
+
+  // Algumas tabelas informam uma cidade atendida, mas publicam faixas de CEP
+  // incompletas. Quando nenhuma faixa casa, a cidade exata continua sendo um
+  // fallback válido. Faixas específicas sempre vencem pelo retorno acima.
+  const uf = String(destino?.uf || '').trim().toUpperCase();
+  const cidade = normalizarTexto(destino?.cidade);
+  return ordenar(lista.filter((item) => item?.atendida !== false
+    && String(item?.uf || '').trim().toUpperCase() === uf
+    && normalizarTexto(item?.cidade_normalizada || item?.cidade) === cidade))[0] || null;
 }
 
 function tarifaCompativel(tarifa, cobertura, destino) {

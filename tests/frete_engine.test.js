@@ -82,6 +82,22 @@ test('aceita cobertura por cidade quando a transportadora nao informa faixa de C
   assert.equal(cobertura.id, 3);
 });
 
+test('usa a cidade exata como fallback quando a planilha possui um buraco de CEP', () => {
+  const cobertura = escolherCobertura([
+    { id: 10, uf: 'DF', cidade: 'BRASILIA', cidade_normalizada: 'BRASILIA', cep_inicio: 70000001, cep_fim: 70639999, atendida: true },
+    { id: 11, uf: 'DF', cidade: 'BRASILIA (GUARA)', cidade_normalizada: 'BRASILIA GUARA', cep_inicio: 71000000, cep_fim: 71499999, atendida: true }
+  ], { uf: 'DF', cidade: 'Brasilia', cep: '70800-220' });
+  assert.equal(cobertura.id, 10);
+});
+
+test('mantem a faixa de CEP especifica acima do fallback por cidade', () => {
+  const cobertura = escolherCobertura([
+    { id: 20, uf: 'DF', cidade: 'BRASILIA', cidade_normalizada: 'BRASILIA', cep_inicio: 70000001, cep_fim: 70639999, atendida: true },
+    { id: 21, uf: 'DF', cidade: 'ASA NORTE', cidade_normalizada: 'ASA NORTE', cep_inicio: 70800000, cep_fim: 70899999, atendida: true }
+  ], { uf: 'DF', cidade: 'Brasilia', cep: '70800-220' });
+  assert.equal(cobertura.id, 21);
+});
+
 test('calcula tabela em revisão somente quando solicitada como prévia técnica', () => {
   const entrada = {
     tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300 },
@@ -193,6 +209,36 @@ test('calcula faixa Fitlog sem aplicar TDE ou TRT preventivamente', () => {
   assert.equal(resultado.icms_percentual, 12);
   assert.equal(resultado.valor_total, 141.34);
   assert.equal(resultado.adicionais_detalhe.some((item) => ['TDE_COBERTURA', 'TRT_COBERTURA'].includes(item.codigo)), false);
+});
+
+test('simula a FITLOG para o destino real do CTe 807266 mesmo com lacuna de CEP', () => {
+  const resultado = simularTransportadora({
+    tabela: { status: 'em_revisao', fator_cubagem_kg_m3: 300, origem_uf: 'SC' },
+    permitirRevisao: true,
+    destino: { uf: 'DF', cidade: 'Brasilia', cep: '70800-220' },
+    romaneio: { volumes: 4, peso_real_kg: 614, volume_m3: 4.428 },
+    valorMercadoria: 144422.64,
+    coberturas: [{
+      uf: 'DF', cidade_normalizada: 'BRASILIA', codigo_regiao: 'FITLOG_DF_BRASILIA',
+      cep_inicio: 70000001, cep_fim: 70639999, atendida: true
+    }],
+    tarifas: [{
+      codigo_regiao: 'FITLOG_DF_BRASILIA', peso_de_kg: 50, peso_ate_kg: null,
+      valor_base: 130.38, valor_kg_excedente: 1.066, peso_referencia_excedente_kg: 50,
+      taxa_despacho: 66, pedagio_por_100kg: 6.9
+    }],
+    regras: [
+      { codigo: 'FRETE_VALOR', nome: 'Frete valor', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0045, valor_minimo: 5.3 },
+      { codigo: 'GRIS', nome: 'GRIS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.002, valor_minimo: 5.3 },
+      { codigo: 'POS', nome: 'POS', tipo_calculo: 'maior_entre_percentual_e_minimo', valor: 0.0015, valor_minimo: 10 },
+      { codigo: 'TAS', nome: 'TAS', tipo_calculo: 'fixo', valor: 5.05 }
+    ]
+  });
+
+  assert.equal(resultado.ok, true);
+  assert.equal(resultado.cobertura.codigo_regiao, 'FITLOG_DF_BRASILIA');
+  assert.equal(resultado.peso_cobravel_kg, 1328.4);
+  assert.equal(resultado.valor_total, 3028.15);
 });
 
 test('calcula Mengue com adicionais declarados sem TDA e TRT preventivos', () => {

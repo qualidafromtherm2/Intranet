@@ -51,6 +51,22 @@ CREATE TABLE IF NOT EXISTS frete.tabela_preco_auditoria (
   criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE TABLE IF NOT EXISTS frete.gestao_auditoria (
+  id BIGSERIAL PRIMARY KEY,
+  tabela_preco_id BIGINT NOT NULL REFERENCES frete.tabela_preco(id) ON DELETE CASCADE,
+  entidade TEXT NOT NULL CHECK (entidade IN ('tabela', 'cobertura', 'tarifa')),
+  entidade_id BIGINT,
+  acao TEXT NOT NULL CHECK (acao IN ('criar', 'alterar', 'excluir')),
+  dados_antes JSONB,
+  dados_depois JSONB,
+  usuario_id BIGINT REFERENCES public.auth_user(id),
+  usuario_nome TEXT,
+  criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS frete_gestao_auditoria_tabela_idx
+  ON frete.gestao_auditoria (tabela_preco_id, criado_em DESC);
+
 CREATE TABLE IF NOT EXISTS frete.importacao (
   id BIGSERIAL PRIMARY KEY,
   tabela_preco_id BIGINT REFERENCES frete.tabela_preco(id) ON DELETE CASCADE,

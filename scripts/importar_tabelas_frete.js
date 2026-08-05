@@ -24,6 +24,7 @@ const valorArg = (nome) => {
   return indice >= 0 ? args[indice + 1] : null;
 };
 const aplicar = args.includes('--apply');
+const sobrescreverAjustesManuais = args.includes('--sobrescrever-ajustes-manuais');
 const diretorio = path.resolve(valorArg('--dir') || process.env.FRETE_TABELAS_DIR || '');
 
 const FONTES = [
@@ -1722,6 +1723,28 @@ async function persistirFonte(client, fonte, caminho, grupos, sha, fontesAuxilia
     ON CONFLICT (arquivo_sha256) DO UPDATE SET tabela_preco_id = EXCLUDED.tabela_preco_id
     RETURNING id
   `, [tabela.rows[0].id, fonte.arquivo, sha]);
+
+  if (!sobrescreverAjustesManuais) {
+    const { rows: ajustes } = await client.query(`
+      SELECT
+        COALESCE((SELECT (configuracao->>'edicao_manual')::boolean FROM frete.tabela_preco WHERE id = $1), FALSE)
+        OR EXISTS (
+          SELECT 1 FROM frete.cobertura
+          WHERE tabela_preco_id = $1 AND COALESCE((metadados->>'gestao_manual')::boolean, FALSE)
+        )
+        OR EXISTS (
+          SELECT 1 FROM frete.tarifa_faixa
+          WHERE tabela_preco_id = $1 AND COALESCE((metadados->>'gestao_manual')::boolean, FALSE)
+        ) AS possui_ajustes
+    `, [tabela.rows[0].id]);
+    if (ajustes[0]?.possui_ajustes) {
+      throw new Error(
+        `A tabela ${fonte.nome} possui ajustes feitos pelo configurador. ` +
+        'A importação foi interrompida para não apagá-los. ' +
+        'Revise os ajustes e, somente se quiser substituí-los pela planilha, repita com --sobrescrever-ajustes-manuais.'
+      );
+    }
+  }
 
   await client.query('DELETE FROM frete.importacao_linha WHERE importacao_id = $1', [importacao.rows[0].id]);
   await client.query('DELETE FROM frete.regra_adicional WHERE tabela_preco_id = $1', [tabela.rows[0].id]);
