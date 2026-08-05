@@ -6980,7 +6980,7 @@
             .envio-mercadoria-title h2{margin:0;color:#f8fafc;font-size:20px;line-height:1.2;letter-spacing:0;}
             .envio-mercadoria-title p{margin:4px 0 0;color:#94a3b8;font-size:13px;line-height:1.45;}
             .envio-mercadoria-actions{display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:flex-end;position:relative;}
-            .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(5,minmax(140px,1fr));gap:10px;}
+            .envio-mercadoria-metrics{display:grid;grid-template-columns:repeat(6,minmax(140px,1fr));gap:10px;}
             .envio-metric{border:1px solid rgba(148,163,184,.18);border-radius:8px;background:rgba(15,23,42,.62);padding:10px 14px;min-height:72px;}
             .envio-metric span{display:block;color:#94a3b8;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
             .envio-metric strong{display:block;margin-top:4px;color:#f8fafc;font-size:20px;line-height:1;}
@@ -7023,18 +7023,39 @@
             .envio-card-sep{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:linear-gradient(135deg,rgba(56,189,248,.18),rgba(37,99,235,.2));border:1px solid rgba(96,165,250,.28);color:#dbeafe;font-weight:900;font-size:15px;letter-spacing:.02em;white-space:nowrap;}
             .envio-card-sep small{font-size:10px;font-weight:800;letter-spacing:.08em;color:#93c5fd;text-transform:uppercase;}
             .envio-card-sep-block{display:flex;flex-direction:column;align-items:flex-end;gap:10px;}
+            .envio-sep-status{display:inline-flex;align-items:center;gap:6px;max-width:100%;padding:5px 9px;border:1px solid rgba(96,165,250,.3);border-radius:999px;background:rgba(30,64,175,.22);color:#bfdbfe;font:800 11px/1.2 inherit;cursor:pointer;transition:transform .15s,border-color .15s,background .15s;}
+            .envio-sep-status:hover,.envio-sep-status:focus-visible{transform:translateY(-1px);border-color:#60a5fa;background:rgba(37,99,235,.34);outline:none;}
+            .envio-sep-status-solicitado{color:#bfdbfe;background:rgba(37,99,235,.2);}
+            .envio-sep-status-em-separacao{color:#fde68a;background:rgba(217,119,6,.2);border-color:rgba(245,158,11,.35);}
+            .envio-sep-status-separado,.envio-sep-status-concluido{color:#bbf7d0;background:rgba(21,128,61,.2);border-color:rgba(34,197,94,.35);}
+            .envio-sep-status-aguardando-retirada{color:#ddd6fe;background:rgba(109,40,217,.2);border-color:rgba(167,139,250,.35);}
             .envio-card-metodo{display:inline-flex;align-items:center;gap:10px;color:#f8fafc;font-weight:900;font-size:18px;line-height:1.15;letter-spacing:.01em;text-align:right;}
             .envio-card-metodo-icon{font-size:24px;color:#fbbf24;flex-shrink:0;}
             .envio-card-metodo-icon-correios{width:28px;height:28px;object-fit:contain;flex-shrink:0;}
             .envio-card-metodo-icon-truck{color:#38bdf8;}
             .envio-card-metodo-icon-moto{color:#fb923c;}
             .envio-card-meta{color:#94a3b8;font-size:12px;line-height:1.35;}
+            .envio-card-request{display:flex;flex-direction:column;gap:4px;width:max-content;max-width:100%;padding:8px 10px;border:1px solid rgba(56,189,248,.24);border-left:3px solid #38bdf8;border-radius:8px;background:rgba(14,165,233,.08);}
+            .envio-card-request-label{display:flex;align-items:center;gap:6px;color:#7dd3fc;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;}
+            .envio-card-request-date{display:flex;align-items:baseline;gap:7px;color:#f8fafc;line-height:1.1;}
+            .envio-card-request-date strong{font-size:15px;font-weight:900;}
+            .envio-card-request-date span{color:#bae6fd;font-size:12px;font-weight:800;}
+            .envio-card-request-user{color:#94a3b8;font-size:11px;line-height:1.25;}
+            .envio-card-request-user strong{color:#e2e8f0;}
             .envio-card-label{color:#64748b;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;margin-bottom:4px;}
             .envio-card-text{color:#e5e7eb;font-size:13px;line-height:1.35;word-break:break-word;}
             .envio-content-list{display:flex;flex-direction:column;gap:5px;}
             .envio-content-item{display:grid;grid-template-columns:1fr auto;gap:10px;align-items:start;padding:7px 10px;border:1px solid rgba(148,163,184,.14);border-radius:8px;background:rgba(2,6,23,.28);}
             .envio-content-item b{color:#f8fafc;font-size:13px;font-weight:650;line-height:1.35;}
             .envio-content-item span{color:#93c5fd;font-size:12px;font-weight:800;white-space:nowrap;}
+            .envio-content-item-side{display:flex;align-items:center;gap:8px;}
+            .envio-stock-trigger{position:relative;display:inline-grid;place-items:center;width:25px;height:25px;border-radius:7px;background:rgba(56,189,248,.12);color:#7dd3fc!important;cursor:help;}
+            .envio-stock-tooltip{position:absolute;z-index:30;right:0;bottom:calc(100% + 7px);display:none;min-width:170px;padding:9px 11px;border:1px solid #334155;border-radius:9px;background:#0f172a!important;box-shadow:0 12px 30px rgba(0,0,0,.35);color:#e2e8f0!important;font-size:11px!important;font-weight:600!important;white-space:normal!important;}
+            .envio-stock-tooltip strong,.envio-stock-tooltip span{display:block;color:#e2e8f0!important;font-size:11px!important;white-space:normal!important;}
+            .envio-stock-tooltip strong{margin-bottom:4px;color:#7dd3fc!important;}
+            .envio-content-item:first-child .envio-stock-tooltip{top:calc(100% + 7px);bottom:auto;}
+            .envio-content-item:hover,.envio-content-item:focus{position:relative;z-index:4;}
+            .envio-stock-trigger:hover .envio-stock-tooltip,.envio-stock-trigger:focus .envio-stock-tooltip,.envio-content-item:focus .envio-stock-tooltip{display:block;}
             .envio-status-pill{display:inline-flex;align-items:center;gap:7px;width:max-content;border-radius:999px;padding:6px 10px;font-size:12px;font-weight:800;border:1px solid var(--envio-status-border,transparent);box-shadow:0 0 0 1px rgba(255,255,255,.02) inset;}
             .envio-status-pendente{background:rgba(148,163,184,.16);color:#cbd5e1;}
             .envio-status-separacao{background:rgba(245,158,11,.16);color:#fbbf24;}
@@ -7083,6 +7104,7 @@
                 <div class="envio-metric is-alert"><span>Atrasados</span><strong id="envioMetricAtrasados">0</strong><small>Fora do prazo operacional</small></div>
                 <div class="envio-metric"><span>Enviados hoje</span><strong id="envioMetricEnviado">0</strong><small>Baixas feitas pela expedição</small></div>
                 <div class="envio-metric"><span>SLA últimos 7 dias</span><strong id="envioMetricSla7d">—</strong><small id="envioMetricMediana7d">Mediana: —</small></div>
+                <div class="envio-metric"><span>Tempo médio da operação</span><strong id="envioMetricMedia7d">—</strong><small>Solicitação até envio · 7 dias</small></div>
               </div>
 
               <div class="envio-performance-row">

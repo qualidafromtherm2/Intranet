@@ -4996,7 +4996,23 @@ router.get('/solicitacoes', async (req, res) => {
 
     const r = await pool.query(
       `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio, id_at, valor_envio,
-              sla_limite_em, enviado_em, enviado_por
+              sla_limite_em, enviado_em, enviado_por,
+              (
+                SELECT CASE
+                  WHEN COUNT(*) = 0 THEN NULL
+                  WHEN BOOL_OR(i.status = 'pendente') THEN 'Solicitado'
+                  WHEN BOOL_OR(i.status = 'Stund-by') THEN 'Stund-by'
+                  WHEN BOOL_OR(i.status IN ('Separação', 'Em Separação')) THEN 'Em Separação'
+                  WHEN BOOL_OR(i.status = 'Separado') THEN 'Separado'
+                  WHEN BOOL_OR(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
+                  WHEN BOOL_OR(i.status = 'Concluído') THEN 'Concluído'
+                  WHEN BOOL_OR(i.status = 'Devolvido') THEN 'Devolvido'
+                  ELSE 'Concluído'
+                END
+                  FROM solicitacao_produto.itens_solicitados i
+                 WHERE i.n_solic = envios.solicitacoes.numero_sep
+                   AND COALESCE(i.status, '') NOT IN ('Excluído', 'Excluido')
+              ) AS sep_status
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
@@ -5019,7 +5035,22 @@ router.get('/solicitacoes', async (req, res) => {
           ), ativo AS (
             SELECT * FROM base WHERE status NOT IN ('Enviado', 'Entregue', 'Finalizado')
           ), enviados_7d AS (
-            SELECT * FROM base
+            SELECT base.*,
+                   (
+                     SELECT COALESCE(SUM(
+                       EXTRACT(EPOCH FROM (
+                         LEAST(base.data_envio, dia + INTERVAL '1 day')
+                         - GREATEST(base.created_at, dia)
+                       )) / 3600.0
+                     ), 0)
+                       FROM generate_series(
+                         date_trunc('day', base.created_at),
+                         date_trunc('day', base.data_envio),
+                         INTERVAL '1 day'
+                       ) AS dias(dia)
+                      WHERE EXTRACT(ISODOW FROM dia) BETWEEN 1 AND 5
+                   ) AS horas_operacao_uteis
+              FROM base
              WHERE data_envio >= NOW() - INTERVAL '7 days'
                AND data_envio >= created_at
           )
@@ -5030,7 +5061,8 @@ router.get('/solicitacoes', async (req, res) => {
             (SELECT COUNT(*)::int FROM base WHERE data_envio::date = CURRENT_DATE) AS enviados_hoje,
             (SELECT COUNT(*)::int FROM enviados_7d) AS enviados_7d,
             (SELECT COUNT(*)::int FROM enviados_7d WHERE data_envio <= sla_limite_em) AS dentro_sla_7d,
-            (SELECT ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (data_envio - created_at)) / 3600.0))::numeric, 1) FROM enviados_7d) AS mediana_horas_7d
+            (SELECT ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY horas_operacao_uteis))::numeric, 1) FROM enviados_7d) AS mediana_horas_7d,
+            (SELECT ROUND(AVG(horas_operacao_uteis)::numeric, 1) FROM enviados_7d) AS media_horas_7d
         `),
         pool.query(`
           SELECT COALESCE(NULLIF(TRIM(enviado_por), ''), 'Não identificado') AS executor,
@@ -5057,6 +5089,7 @@ router.get('/solicitacoes', async (req, res) => {
         enviados_7d: enviados7d,
         sla_7d_percentual: enviados7d > 0 ? Math.round((Number(m.dentro_sla_7d || 0) / enviados7d) * 100) : null,
         mediana_horas_7d: m.mediana_horas_7d == null ? null : Number(m.mediana_horas_7d),
+        media_horas_7d: m.media_horas_7d == null ? null : Number(m.media_horas_7d),
         sla_referencia: '1 dia útil',
       };
       porExecutor = executorResult.rows.map((row) => ({
