@@ -10851,20 +10851,6 @@ table.tabela td.num {
     display: none !important;
   }
 
-  /* P�gina de compras (mobile): mostrar somente bot�o dedicado para abrir solicita��o */
-  #comprasFormPane .content-section,
-  #comprasFormPane #minhasComprasWrapper {
-    display: none !important;
-  }
-
-  #comprasFormPane #comprasMobileAbrirSolicitacao {
-    display: flex !important;
-  }
-
-  #comprasFormPane #comprasMobileCatalogoBtn {
-    box-shadow: 0 8px 20px rgba(34, 197, 94, 0.35);
-  }
-
   /* Lista de produtos (mobile): 1 card por linha e sem bot�o modo lista */
   #listaProdutos #viewToggleBtn {
     display: none !important;
@@ -17431,7 +17417,7 @@ body.mobile-modal-open {
 }
 
 @media (max-width: 720px) {
-  #minhasComprasWrapper .compras-toolbar-actions > .content-button:not(#comprasCatalogoOmieBtn):not(#comprasAtualizarKanbansBtn):not(#comprasAcoesHamburgerBtn) {
+  #minhasComprasWrapper .compras-toolbar-actions > .content-button:not(#comprasAtualizarKanbansBtn):not(#comprasAcoesHamburgerBtn) {
     display: none !important;
   }
 }
@@ -18545,11 +18531,7 @@ body.mobile-modal-open {
     -webkit-overflow-scrolling: touch;
   }
 
-  /* —— Compras: além do CTA, kanban em coluna se existir —— */
-  #comprasFormPane #comprasMobileAbrirSolicitacao {
-    min-height: 48px;
-  }
-
+  /* —— Compras: kanban em coluna no mobile —— */
   #comprasFormPane .kanban-board,
   #comprasFormPane #minhasComprasKanban {
     flex-direction: column !important;
@@ -19333,12 +19315,6 @@ html.light-mode #minhasComprasWrapper {
   color: var(--cp-text) !important;
   border-color: var(--cp-accent) !important;
   transform: translateY(-1px);
-}
-
-#comprasCatalogoOmieBtn {
-  color: #fff !important;
-  background: var(--cp-accent) !important;
-  border-color: var(--cp-accent) !important;
 }
 
 #comprasToggleSolicitanteBtn {
@@ -23811,4 +23787,26 @@ html.light-mode #minhasComprasWrapper {
     width: 100%;
     min-width: 0 !important;
   }
+}
+
+/* Card "Solicitação" no fim da Lista de produtos (após filtro de busca) */
+#listaProdutosGrid .lista-solicitacao-compra-card:hover {
+  box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);
+  transform: translateY(-2px);
+  border-color: #d97706;
+}
+
+:root:not(.light-mode) #listaProdutosGrid .lista-solicitacao-compra-card {
+  background: linear-gradient(180deg, #422006 0%, #1f2937 55%) !important;
+  border-color: #f59e0b !important;
+}
+
+:root:not(.light-mode) #listaProdutosGrid .lista-solicitacao-compra-card > div:first-child {
+  background: #451a03 !important;
+  border-bottom-color: #f59e0b !important;
+}
+
+:root:not(.light-mode) #listaProdutosList .lista-solicitacao-compra-item {
+  background: #422006 !important;
+  border-color: #f59e0b !important;
 }
