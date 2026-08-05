@@ -1,6 +1,20 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { reconciliarEstoqueAtualOmie } = require('../utils/reconciliarEstoqueOmie');
+const {
+  reconciliarEstoqueAtualOmie,
+  saldoMudouNaDirecaoEsperada
+} = require('../utils/reconciliarEstoqueOmie');
+
+test('nao confirma saldo apenas porque o horario de sincronizacao mudou', () => {
+  assert.equal(saldoMudouNaDirecaoEsperada(198, 178, -20), true);
+  assert.equal(saldoMudouNaDirecaoEsperada(-20, -20, 20), false);
+  assert.equal(saldoMudouNaDirecaoEsperada(-20, 0, 20), true);
+});
+
+test('aceita atualizacao maior que o delta quando a base local ja estava defasada', () => {
+  assert.equal(saldoMudouNaDirecaoEsperada(198, 158, -20), true);
+  assert.equal(saldoMudouNaDirecaoEsperada(-20, 5, 20), true);
+});
 
 test('consulta a posição pontual na Omie e atualiza estoque_atual', async () => {
   let payloadEnviado;

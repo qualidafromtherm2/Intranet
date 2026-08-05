@@ -112,17 +112,68 @@ async function reconciliarEstoqueAtualOmie({
   return posicao;
 }
 
+function saldoMudouNaDirecaoEsperada(saldoAntes, saldoAtual, deltaEsperado, tolerancia = 0.0001) {
+  const antes = Number(saldoAntes);
+  const atual = Number(saldoAtual);
+  const delta = Number(deltaEsperado);
+  if (![antes, atual, delta].every(Number.isFinite) || delta === 0) return false;
+
+  const limite = antes + delta;
+  return delta > 0
+    ? atual >= limite - tolerancia
+    : atual <= limite + tolerancia;
+}
+
+async function buscarSaldoLocal({ codigo, localCodigo, query = defaultDbQuery }) {
+  const { rows } = await query(
+    `SELECT saldo
+       FROM logistica.estoque_atual
+      WHERE codigo = $1
+        AND local_codigo = $2
+      LIMIT 1`,
+    [String(codigo || '').trim(), String(localCodigo || '').trim()]
+  );
+  if (!rows?.length) return 0;
+  const saldo = Number(rows?.[0]?.saldo);
+  return Number.isFinite(saldo) ? saldo : null;
+}
+
+function aguardar(ms) {
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    timer.unref?.();
+  });
+}
+
 function agendarReconciliacaoEstoqueOmie(dados, delayMs = 3000) {
-  const timer = setTimeout(() => {
-    reconciliarEstoqueAtualOmie(dados).catch((err) => {
-      console.error('[estoque][reconcile] Falha ao reconciliar posição após ajuste:', err?.message || err);
+  void (async () => {
+    const saldoAntes = await buscarSaldoLocal(dados).catch(() => null);
+    const deltaEsperado = Number(dados?.deltaEsperado);
+    const intervalos = [Math.max(0, Number(delayMs) || 0), 5000, 10000];
+    let ultimaPosicao = null;
+
+    for (const espera of intervalos) {
+      await aguardar(espera);
+      ultimaPosicao = await reconciliarEstoqueAtualOmie(dados);
+      if (!Number.isFinite(deltaEsperado) || deltaEsperado === 0 || saldoAntes === null) return;
+      if (saldoMudouNaDirecaoEsperada(saldoAntes, ultimaPosicao.saldo, deltaEsperado)) return;
+    }
+
+    console.warn('[estoque][reconcile] Omie ainda não refletiu o movimento esperado.', {
+      codigo: dados?.codigo,
+      localCodigo: dados?.localCodigo,
+      saldoAntes,
+      saldoAtual: ultimaPosicao?.saldo,
+      deltaEsperado
     });
-  }, delayMs);
-  timer.unref?.();
+  })().catch((err) => {
+    console.error('[estoque][reconcile] Falha ao reconciliar posição após ajuste:', err?.message || err);
+  });
 }
 
 module.exports = {
   consultarPosicaoEstoqueOmie,
   reconciliarEstoqueAtualOmie,
-  agendarReconciliacaoEstoqueOmie
+  agendarReconciliacaoEstoqueOmie,
+  saldoMudouNaDirecaoEsperada
 };

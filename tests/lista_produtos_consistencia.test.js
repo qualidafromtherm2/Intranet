@@ -35,9 +35,11 @@ test('movimentacoes aguardam saldo absoluto e nao calculam delta nos fluxos prin
   const transferencia = trecho(menu, 'async function salvarTransferencia(', 'if (localSel)');
   assert.match(ajuste, /__capturarVersoesEstoque/);
   assert.match(ajuste, /__reconciliarEstoqueAposMovimentacao/);
+  assert.match(ajuste, /\{ \[local\]: tipo === 'ENT' \? qtd : -qtd \}/);
   assert.doesNotMatch(ajuste, /aplicarEstoqueOtimistaMovim/);
   assert.match(transferencia, /__capturarVersoesEstoque/);
   assert.match(transferencia, /__reconciliarEstoqueAposMovimentacao/);
+  assert.match(transferencia, /\{ \[origem\]: -qtd, \[destino\]: qtd \}/);
   assert.doesNotMatch(transferencia, /aplicarEstoqueOtimistaMovim/);
 });
 
@@ -49,4 +51,6 @@ test('backend publica versao do saldo e reconcilia origem e destino', () => {
   assert.match(batch, /updated_at:\s*row\.updated_at/);
   assert.match(transferencias, /registroAtual\.origem, registroAtual\.destino/);
   assert.match(transferencias, /agendarReconciliacaoEstoqueOmie/);
+  assert.match(transferencias, /deltaEsperado: -Number\(registroAtual\.qtd\)/);
+  assert.match(transferencias, /deltaEsperado: Number\(registroAtual\.qtd\)/);
 });

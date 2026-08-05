@@ -844,7 +844,10 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     agendarReconciliacaoEstoqueOmie({
       codigoProduto: registro.codigo_produto,
       codigo: registro.codigo,
-      localCodigo: registro.local_estoque
+      localCodigo: registro.local_estoque,
+      deltaEsperado: String(registro.tipo_operacao || '').toUpperCase() === 'ENT'
+        ? Number(registro.qtd)
+        : -Number(registro.qtd)
     });
 
     res.json({
