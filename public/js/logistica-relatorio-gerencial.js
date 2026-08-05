@@ -214,6 +214,9 @@
           </div>
           <div class="at-rel-ger-grid-2" style="margin-top:14px;">
             <div class="at-rel-ger-card"><h4>Por Método de Envio</h4><div class="at-rel-ger-chart"><canvas id="logRelGerChartEnvioMetodo"></canvas></div></div>
+            <div class="at-rel-ger-card"><h4>Envios por executor</h4><div class="at-rel-ger-chart"><canvas id="logRelGerChartEnvioExecutor"></canvas></div></div>
+          </div>
+          <div class="at-rel-ger-grid-2" style="margin-top:14px;">
             <div class="at-rel-ger-card"><h4>Etapas do ciclo</h4>
               <div style="padding:8px 4px;font-size:13px;color:#334155;line-height:1.6;" id="logRelGerTempoEtapas"></div>
             </div>
@@ -347,6 +350,7 @@
     const receb = data.por_etapa_recebimento || [];
     const envio = data.por_status_envio || [];
     const envMet = data.por_metodo_envio || [];
+    const envExecutores = data.envios_por_executor || [];
     const k = data.kpis || {};
 
     if (sec === 'executivo') {
@@ -391,6 +395,7 @@
       const faixas = te.faixas_ciclo || [];
       _renderBar('logRelGerChartTempoFaixas', 'tempoFaixas', faixas.map(r => r.faixa), faixas.map(r => r.total), '#0284c7');
       _renderBar('logRelGerChartEnvioMetodo', 'envMet', envMet.map(r => r.metodo), envMet.map(r => r.total), '#06b6d4');
+      _renderBar('logRelGerChartEnvioExecutor', 'envExecutor', envExecutores.map(r => r.executor), envExecutores.map(r => r.total), '#10b981');
     }
     if (sec === 'estoque') {
       const wrap = document.getElementById('logRelGerEstoqueKpis');

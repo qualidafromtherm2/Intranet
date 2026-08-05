@@ -3711,6 +3711,28 @@ async function ensureSchema() {
     ALTER TABLE envios.solicitacoes
       ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2);
 
+    ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS sla_limite_em TIMESTAMPTZ;
+
+    ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMPTZ;
+
+    ALTER TABLE envios.solicitacoes
+      ADD COLUMN IF NOT EXISTS enviado_por TEXT;
+
+    UPDATE envios.solicitacoes
+       SET sla_limite_em = created_at + CASE EXTRACT(ISODOW FROM created_at)
+         WHEN 5 THEN INTERVAL '3 days'
+         WHEN 6 THEN INTERVAL '2 days'
+         ELSE INTERVAL '1 day'
+       END
+     WHERE sla_limite_em IS NULL;
+
+    UPDATE envios.solicitacoes
+       SET enviado_em = COALESCE(rastreio_quando, finalizado_em)
+     WHERE enviado_em IS NULL
+       AND COALESCE(NULLIF(TRIM(rastreio_status), ''), 'Pendente') IN ('Enviado', 'Entregue', 'Finalizado');
+
     CREATE INDEX IF NOT EXISTS idx_envios_solicitacoes_id_at
       ON envios.solicitacoes (id_at)
       WHERE id_at IS NOT NULL;
@@ -4800,9 +4822,10 @@ router.post('/solicitacoes/vipp', async (req, res) => {
   try {
     const result = await pool.query(
       `INSERT INTO envios.solicitacoes
-         (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio, id_at)
-       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6, $7)
-       RETURNING id, created_at, rastreio_status, id_vipp, conteudo, observacao, metodo_envio, id_at`,
+         (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio, id_at, sla_limite_em)
+       VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6, $7,
+         NOW() + CASE EXTRACT(ISODOW FROM NOW()) WHEN 5 THEN INTERVAL '3 days' WHEN 6 THEN INTERVAL '2 days' ELSE INTERVAL '1 day' END)
+       RETURNING id, created_at, rastreio_status, id_vipp, conteudo, observacao, metodo_envio, id_at, sla_limite_em`,
       [usuario, observacao || null, numeroSep, idVipp, conteudo ? String(conteudo) : null, metodoEnvio, idAt]
     );
     const row = result.rows[0];
@@ -4917,9 +4940,10 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce, id_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-       RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce, id_at`,
+      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce, id_at, sla_limite_em)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+         NOW() + CASE EXTRACT(ISODOW FROM NOW()) WHEN 5 THEN INTERVAL '3 days' WHEN 6 THEN INTERVAL '2 days' ELSE INTERVAL '1 day' END)
+       RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce, id_at, sla_limite_em`,
       [usuario, observacao, numeroSep, rastreioStatus, urls, false, etiquetaUrl, declaracaoUrl, identificacao, conteudo, chaveDce, idAt]
     );
 
@@ -4937,6 +4961,7 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
 // Lista solicitações de envio (com opção de filtrar por usuário logado)
 router.get('/solicitacoes', async (req, res) => {
   try {
+    await ensureSchema();
     const hideDone = String(req.query?.hideDone || '').toLowerCase() === 'true' || req.query?.hideDone === '1';
     const filaLogistica = String(req.query?.filaLogistica || '').toLowerCase() === 'true' || req.query?.filaLogistica === '1';
     // Novo parâmetro: filterByUser=1 indica que deve filtrar apenas registros do usuário logado
@@ -4970,14 +4995,78 @@ router.get('/solicitacoes', async (req, res) => {
     const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const r = await pool.query(
-      `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio, id_at, valor_envio
+      `SELECT id, created_at, usuario, observacao, numero_sep, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, rastreio_status, rastreio_quando, finalizado_em, id_vipp, metodo_envio, id_at, valor_envio,
+              sla_limite_em, enviado_em, enviado_por
          FROM envios.solicitacoes
         ${whereClause}
         ORDER BY id DESC
         LIMIT 200`,
       params
     );
-    return res.json({ ok: true, rows: r.rows });
+
+    let metricas = null;
+    let porExecutor = [];
+    if (filaLogistica) {
+      const [metricasResult, executorResult] = await Promise.all([
+        pool.query(`
+          WITH base AS (
+            SELECT created_at,
+                   sla_limite_em,
+                   COALESCE(enviado_em, rastreio_quando, finalizado_em) AS data_envio,
+                   COALESCE(NULLIF(TRIM(rastreio_status), ''), 'Pendente') AS status
+              FROM envios.solicitacoes
+             WHERE COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+          ), ativo AS (
+            SELECT * FROM base WHERE status NOT IN ('Enviado', 'Entregue', 'Finalizado')
+          ), enviados_7d AS (
+            SELECT * FROM base
+             WHERE data_envio >= NOW() - INTERVAL '7 days'
+               AND data_envio >= created_at
+          )
+          SELECT
+            (SELECT COUNT(*)::int FROM ativo) AS pendentes,
+            (SELECT COUNT(*)::int FROM ativo WHERE sla_limite_em < NOW()) AS atrasados,
+            (SELECT COUNT(*)::int FROM ativo WHERE sla_limite_em::date = CURRENT_DATE AND sla_limite_em >= NOW()) AS vencem_hoje,
+            (SELECT COUNT(*)::int FROM base WHERE data_envio::date = CURRENT_DATE) AS enviados_hoje,
+            (SELECT COUNT(*)::int FROM enviados_7d) AS enviados_7d,
+            (SELECT COUNT(*)::int FROM enviados_7d WHERE data_envio <= sla_limite_em) AS dentro_sla_7d,
+            (SELECT ROUND((PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY EXTRACT(EPOCH FROM (data_envio - created_at)) / 3600.0))::numeric, 1) FROM enviados_7d) AS mediana_horas_7d
+        `),
+        pool.query(`
+          SELECT COALESCE(NULLIF(TRIM(enviado_por), ''), 'Não identificado') AS executor,
+                 COUNT(*)::int AS enviados,
+                 COUNT(*) FILTER (WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) <= sla_limite_em)::int AS dentro_sla
+            FROM envios.solicitacoes
+           WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) >= NOW() - INTERVAL '7 days'
+             AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+           GROUP BY 1
+           ORDER BY enviados DESC, executor
+        `),
+      ]);
+      const m = metricasResult.rows[0] || {};
+      const enviados7d = Number(m.enviados_7d || 0);
+      const enviadosHoje = Number(m.enviados_hoje || 0);
+      const demandaHoje = enviadosHoje + Number(m.atrasados || 0) + Number(m.vencem_hoje || 0);
+      metricas = {
+        pendentes: Number(m.pendentes || 0),
+        atrasados: Number(m.atrasados || 0),
+        vencem_hoje: Number(m.vencem_hoje || 0),
+        enviados_hoje: enviadosHoje,
+        meta_hoje: demandaHoje,
+        progresso_meta_hoje: demandaHoje > 0 ? Math.round((enviadosHoje / demandaHoje) * 100) : 100,
+        enviados_7d: enviados7d,
+        sla_7d_percentual: enviados7d > 0 ? Math.round((Number(m.dentro_sla_7d || 0) / enviados7d) * 100) : null,
+        mediana_horas_7d: m.mediana_horas_7d == null ? null : Number(m.mediana_horas_7d),
+        sla_referencia: '1 dia útil',
+      };
+      porExecutor = executorResult.rows.map((row) => ({
+        executor: row.executor,
+        enviados: Number(row.enviados || 0),
+        dentro_sla: Number(row.dentro_sla || 0),
+      }));
+    }
+
+    return res.json({ ok: true, rows: r.rows, metricas, por_executor: porExecutor });
   } catch (err) {
     console.error('[SAC] erro ao listar solicitacoes:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao listar solicitacoes.' });
@@ -5220,21 +5309,36 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Status inválido.' });
   }
 
+  const alteradoPor = String(
+    req.session?.user?.fullName
+    || req.session?.user?.username
+    || req.session?.user?.nome
+    || req.session?.user?.login
+    || ''
+  ).trim() || null;
+
   try {
     const r = await pool.query(
       `UPDATE envios.solicitacoes
           SET rastreio_status = $1,
-              rastreio_quando = CASE WHEN $1 = 'Enviado' THEN NOW() ELSE rastreio_quando END
+              rastreio_quando = CASE WHEN $1 = 'Enviado' THEN COALESCE(rastreio_quando, NOW()) ELSE rastreio_quando END,
+              enviado_em = CASE WHEN $1 = 'Enviado' THEN COALESCE(enviado_em, NOW()) ELSE enviado_em END,
+              enviado_por = CASE WHEN $1 = 'Enviado' THEN COALESCE($3, enviado_por) ELSE enviado_por END
         WHERE id = $2
-      RETURNING id, rastreio_status`,
-      [status, id]
+      RETURNING id, rastreio_status, enviado_em, enviado_por`,
+      [status, id, alteradoPor]
     );
 
     if (!r.rowCount) {
       return res.status(404).json({ ok: false, error: 'Registro não encontrado.' });
     }
 
-    return res.json({ ok: true, rastreio_status: r.rows[0].rastreio_status });
+    return res.json({
+      ok: true,
+      rastreio_status: r.rows[0].rastreio_status,
+      enviado_em: r.rows[0].enviado_em,
+      enviado_por: r.rows[0].enviado_por,
+    });
   } catch (err) {
     console.error('[SAC] erro ao atualizar status:', err);
     return res.status(500).json({ ok: false, error: 'Erro ao atualizar status.' });
@@ -5314,13 +5418,24 @@ router.patch('/solicitacoes/:id/status-livre', async (req, res) => {
     return res.status(400).json({ ok: false, error: 'Status não pode ser vazio.' });
   }
 
+  const alteradoPor = String(
+    req.session?.user?.fullName
+    || req.session?.user?.username
+    || req.session?.user?.nome
+    || req.session?.user?.login
+    || ''
+  ).trim() || null;
+
   try {
     const r = await pool.query(
       `UPDATE envios.solicitacoes
-          SET rastreio_status = $1
+          SET rastreio_status = $1,
+              rastreio_quando = CASE WHEN $1 = 'Enviado' THEN COALESCE(rastreio_quando, NOW()) ELSE rastreio_quando END,
+              enviado_em = CASE WHEN $1 = 'Enviado' THEN COALESCE(enviado_em, NOW()) ELSE enviado_em END,
+              enviado_por = CASE WHEN $1 = 'Enviado' THEN COALESCE($3, enviado_por) ELSE enviado_por END
         WHERE id = $2
-      RETURNING id, rastreio_status`,
-      [status, id]
+      RETURNING id, rastreio_status, enviado_em, enviado_por`,
+      [status, id, alteradoPor]
     );
 
     if (!r.rowCount) {

@@ -136,6 +136,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       rTempoEnvio,
       rTempoFaixas,
       rTempoDetalhe,
+      rEnvioExecutor,
     ] = await Promise.all([
       safeQuery(`
         SELECT
@@ -383,6 +384,19 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
          ORDER BY e.created_at DESC
          LIMIT 25
       `, rangeParams),
+      safeQuery(`
+        SELECT COALESCE(NULLIF(TRIM(enviado_por), ''), 'Não identificado') AS executor,
+               COUNT(*)::int AS total,
+               COUNT(*) FILTER (
+                 WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) <= sla_limite_em
+               )::int AS dentro_sla
+          FROM envios.solicitacoes
+         WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em)::date >= $1::date
+           AND COALESCE(enviado_em, rastreio_quando, finalizado_em)::date < $2::date
+           AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
+         GROUP BY 1
+         ORDER BY total DESC, executor
+      `, rangeParams),
     ]);
 
     const kpiSep = rKpiSep.rows[0] || {};
@@ -499,6 +513,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       por_etapa_recebimento: rRecebStatus.rows || [],
       por_status_envio: envioRows,
       por_metodo_envio: rEnvioMetodo.rows || [],
+      envios_por_executor: rEnvioExecutor.rows || [],
       top_produtos_separacao: rTopSep.rows || [],
       tempo_envio,
       evolucao_semanal,
