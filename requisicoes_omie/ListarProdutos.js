@@ -530,7 +530,10 @@ function renderFromCache() {
 }
 
 async function hardRefreshLista() {
-  if (__refreshing) return;
+  if (__refreshing) {
+    while (__refreshing) await new Promise(resolve => setTimeout(resolve, 25));
+    return hardRefreshLista();
+  }
   __refreshing = true;
   try {
     showProductSpinner();
@@ -548,7 +551,44 @@ async function hardRefreshLista() {
 }
 
 // deixa disponível global (se quiser chamar manualmente)
-window.__forceListaRefresh = hardRefreshLista;
+let __refreshQueue = Promise.resolve();
+let __refreshTimer = null;
+let __refreshTimerResolve = [];
+
+// Serializa invalidacoes. Se a carga inicial comecou antes da mutacao,
+// espera ela terminar e executa uma nova leitura necessariamente posterior.
+function sincronizarListaProdutos({ motivo = 'alteracao de produto', debounceMs = 80 } = {}) {
+  setCacheDirty(true);
+  return new Promise((resolve) => {
+    __refreshTimerResolve.push(resolve);
+    clearTimeout(__refreshTimer);
+    __refreshTimer = setTimeout(() => {
+      const resolvers = __refreshTimerResolve.splice(0);
+      __refreshQueue = __refreshQueue
+        .catch(() => null)
+        .then(async () => {
+          if (__preloadPromise) await __preloadPromise.catch(() => null);
+          await hardRefreshLista();
+          console.info(`[ListarProdutos] Lista sincronizada apos ${motivo}.`);
+        })
+        .catch((err) => {
+          console.warn('[ListarProdutos] Falha ao sincronizar lista:', err);
+          setCacheDirty(true);
+        })
+        .finally(() => resolvers.forEach(fn => fn()));
+    }, Math.max(0, Number(debounceMs) || 0));
+  });
+}
+
+window.__sincronizarListaProdutos = sincronizarListaProdutos;
+window.__forceListaRefresh = () => sincronizarListaProdutos({ motivo: 'atualizacao manual', debounceMs: 0 });
+
+window.addEventListener('produtos:atualizar', (event) => {
+  void sincronizarListaProdutos({
+    motivo: event?.detail?.motivo || 'evento local',
+    debounceMs: 80
+  });
+});
 
 /* --------------------- SSE (opcional) --------------------------------- */
 let __esInstance = null;  // garante uma única conexão
@@ -565,9 +605,11 @@ function connectSSE() {
     try { msg = JSON.parse(ev.data || '{}'); } catch {}
     if (!msg || !msg.type) return;
 
-    if (['produtos_updated','refresh_all','product_updated'].includes(msg.type)) {
+    if (['produtos_updated','produtos_changed','refresh_all','product_updated'].includes(msg.type)) {
       clearTimeout(debounce);
-      debounce = setTimeout(() => setCacheDirty(true), 200);
+      debounce = setTimeout(() => {
+        void sincronizarListaProdutos({ motivo: `evento do servidor (${msg.type})`, debounceMs: 0 });
+      }, 200);
     }
   };
 
@@ -757,25 +799,6 @@ export async function initListarProdutosUI(
   // liga SSE (se estiver funcionando no back)
   connectSSE();
 }
-
-// === FORÇAR ATUALIZAÇÃO AO CLICAR NO MENU ===============================
-// Função global que refaz o cache e redesenha a lista
-window.__forceListaRefresh = async function () {
-  try {
-    // 1) baixa tudo do /api/produtos/lista (sem cache do browser)
-    await preloadFromDB();
-
-    // 2) coloca no filtro/cache e pega os itens já filtrados
-    setCache(window.__omieFullCache || []);
-    const itens = getFiltered();
-
-    // 3) redesenha a UL
-    const pane = document.getElementById(__listaPaneId);
-    renderListaFiltradaComTitulo(pane, itens, { resetPage: true });
-  } catch (e) {
-    console.warn('forceListaRefresh falhou:', e);
-  }
-};
 
 window.__setListaProdutosExternalFilter = function (fn, label = '') {
   __externalFilterFn = typeof fn === 'function' ? fn : null;

@@ -107,6 +107,10 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
       [codigoNum, pos, publicUrl, pathKey, nomeFoto, descricaoFoto]
     );
 
+    try {
+      req.app.get('sseBroadcast')?.({ type: 'product_updated', codigo_produto: codigoNum, at: Date.now() });
+    } catch (_) {}
+
     // Auditoria: foto adicionada/atualizada
     try {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
