@@ -13517,6 +13517,125 @@ async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
   return Buffer.from(await labelaryResp.arrayBuffer());
 }
 
+// POST /api/etiquetas/recebimento/manual
+// Entrada sem NF-e/pedido (Lista de produtos → Escolha a ação).
+// Body: { codigo_produto, descricao_produto, qtd, unidade, nfe?, pedido? }
+// Cria ETQ_recebimento respeitando pir_vai_direto_identificacao:
+//   vai_direto=true → pir=true → Identificação do produto
+//   vai_direto=false → pir=false → lista PIR
+app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const codProdRaw = String(body.codigo_produto || body.codigo || '').trim();
+    const descProdRaw = String(body.descricao_produto || body.descricao || '').trim();
+    const qtdRaw = String(body.qtd ?? body.quantidade ?? '').trim();
+    const unidRaw = String(body.unidade || 'UN').trim() || 'UN';
+    const nfeInformada = String(body.nfe || body.numero_nfe || '').trim();
+    const pedidoInformado = String(body.pedido || body.numero_pedido || '').trim();
+    const usuario = body.usuario
+      || req.session?.usuario
+      || req.session?.user?.login
+      || req.session?.user?.nome
+      || null;
+
+    if (!codProdRaw) {
+      return res.status(400).json({ ok: false, error: 'Informe o código do produto.' });
+    }
+    const qtdNum = qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) : NaN;
+    if (!Number.isFinite(qtdNum) || qtdNum <= 0) {
+      return res.status(400).json({ ok: false, error: 'Informe uma quantidade válida maior que zero.' });
+    }
+
+    // Sem NF-e/pedido real: gera identificadores únicos para permitir várias entradas do mesmo produto
+    const agora = new Date();
+    const stamp = [
+      agora.getFullYear(),
+      String(agora.getMonth() + 1).padStart(2, '0'),
+      String(agora.getDate()).padStart(2, '0'),
+      '-',
+      String(agora.getHours()).padStart(2, '0'),
+      String(agora.getMinutes()).padStart(2, '0'),
+      String(agora.getSeconds()).padStart(2, '0'),
+    ].join('');
+    const nfe = nfeInformada || `SEM-NFE-${stamp}`;
+    const pedido = pedidoInformado || `MANUAL-${stamp}`;
+    const lote = `${pedido}-${nfe}`;
+
+    const dataExibir = [
+      String(agora.getDate()).padStart(2, '0'),
+      String(agora.getMonth() + 1).padStart(2, '0'),
+      agora.getFullYear(),
+    ].join('/');
+
+    await pool.query(`
+      ALTER TABLE public.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+
+    let pirInicial = false;
+    try {
+      const flag = await pool.query(
+        `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto
+           FROM public.produtos_omie
+          WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
+             OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
+          LIMIT 1`,
+        [codProdRaw]
+      );
+      pirInicial = flag.rows[0]?.vai_direto === true;
+    } catch (_) { /* segue com pir=false */ }
+
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const codProd = sanitize(codProdRaw, 30);
+    const descProd = sanitize(descProdRaw, 70);
+    const loteTxt = sanitize(lote, 40);
+
+    const layoutRecebimento = await _carregarLayoutEtiqueta('recebimento');
+
+    const ins = await pool.query(
+      `INSERT INTO etiqueta."ETQ_recebimento"
+         (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
+          qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id, pir`,
+      [
+        nfe, pedido, lote,
+        codProdRaw, descProdRaw,
+        qtdNum, unidRaw, dataExibir, '', usuario, pirInicial,
+      ]
+    );
+    const idEtq = ins.rows[0]?.id;
+    if (!idEtq) {
+      return res.status(500).json({ ok: false, error: 'Falha ao criar etiqueta de recebimento.' });
+    }
+
+    const zpl = _gerarZplRecebimentoBloco({
+      codProd, descProd, loteTxt, dataExibir, idEtq, layout: layoutRecebimento,
+    });
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
+      [zpl, idEtq]
+    );
+
+    const destino = pirInicial ? 'identificacao' : 'pir';
+    return res.json({
+      ok: true,
+      id: idEtq,
+      pir: pirInicial,
+      destino,
+      lote,
+      numero_nfe: nfe,
+      numero_pedido: pedido,
+      mensagem: pirInicial
+        ? 'Entrada criada. Produto configurado para ir direto à Identificação do produto.'
+        : 'Entrada criada. Produto enviado para a lista PIR (Qualidade Fábrica).',
+    });
+  } catch (err) {
+    console.error('[etiquetas/recebimento/manual]', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao criar entrada manual.' });
+  }
+});
+
 // ── Etiquetas de Recebimento: gera PDF + salva no banco (1 etiqueta por item) ─
 // POST /api/etiquetas/recebimento/preview
 // Body JSON: { nfe, pedido, itens: [{ codigo_produto, descricao_produto, qtd, unidade }] }
