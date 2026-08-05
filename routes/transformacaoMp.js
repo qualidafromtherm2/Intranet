@@ -14,6 +14,7 @@ const express = require('express');
 const router = express.Router();
 const { dbQuery } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
+const { anexarHoraObs } = require('../utils/anexarHoraObs');
 
 // ─── Schema setup ─────────────────────────────────────────────────────────────
 
@@ -96,7 +97,7 @@ async function incluirAjusteOmie({ id, tipo_operacao, codigo_produto, codigo, qt
       id_prod: Number(codigo_produto),
       data: formatarDataBR(new Date()),
       quan: String(Number(qtd)),
-      obs: String(obs || `Transf.MP ${tipoOmie} #${id}`).slice(0, 200),
+      obs: anexarHoraObs(obs || `Transf.MP ${tipoOmie} #${id}`),
       origem: 'AJU',
       tipo: tipoOmie,
       motivo: motivoOmie,

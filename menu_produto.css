@@ -13537,7 +13537,7 @@ table.tabela td.num {
   display: flex; align-items: center; justify-content: center; padding: 16px;
 }
 .movim-hist-panel {
-  width: min(920px, 100%);
+  width: min(1040px, 100%);
   max-height: 88vh;
   background: #1a1d27;
   border: 1px solid rgba(113,119,144,.28);
@@ -13582,6 +13582,7 @@ table.tabela td.num {
 .movim-hist-tipo-ent { color: #4ade80; font-weight: 700; }
 .movim-hist-tipo-sai { color: #f87171; font-weight: 700; }
 .movim-hist-tipo-trf { color: #60a5fa; font-weight: 700; }
+.movim-hist-saldo { color: #fbbf24; font-weight: 600; white-space: nowrap; }
 .movim-hist-obs { color: #94a3b8; max-width: 220px; word-break: break-word; }
 .movim-mesmo-arm-aviso {
   font-size: .78rem;
@@ -17429,7 +17430,7 @@ body.mobile-modal-open {
 }
 .movim-imp-panel { width: min(560px, 100%); max-height: min(90vh, 820px); display: flex; flex-direction: column; }
 .movim-scan-panel { width: min(460px, 92vw); background: #1e293b; border-color: #334155; }
-.movim-hist-panel { width: min(920px, 100%); max-height: 88vh; display: flex; flex-direction: column; }
+.movim-hist-panel { width: min(1040px, 100%); max-height: 88vh; display: flex; flex-direction: column; }
 .movim-imp-header,
 .movim-scan-header,
 .movim-hist-header {
@@ -17585,6 +17586,7 @@ body.mobile-modal-open {
 .movim-hist-tipo-ent { color: #4ade80; font-weight: 700; }
 .movim-hist-tipo-sai { color: #f87171; font-weight: 700; }
 .movim-hist-tipo-trf { color: #60a5fa; font-weight: 700; }
+.movim-hist-saldo { color: #fbbf24; font-weight: 600; white-space: nowrap; }
 .movim-hist-obs { color: #94a3b8; max-width: 220px; word-break: break-word; }
 .movim-mesmo-arm-aviso {
   font-size: .78rem;

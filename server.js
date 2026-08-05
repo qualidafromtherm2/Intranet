@@ -21,6 +21,7 @@ const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
 const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
 const { obterPermissaoSeparacao, assertAcessoSeparacao } = require('./utils/separacaoPermissoes');
 const { exigirGestaoEnderecos } = require('./utils/produtoEnderecosPermissoes');
+const { anexarHoraObs } = require('./utils/anexarHoraObs');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
 const { iniciarCicloPosto } = require('./utils/tempoProducao');
@@ -15041,7 +15042,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
           const qtdNum  = parseFloat(qtd) || 1;
           const hoje    = new Date();
           const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
-          const obs     = `Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`;
+          const obs     = anexarHoraObs(`Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`);
 
           const omiePayload = {
             call: 'IncluirAjusteEstoque',
@@ -15532,7 +15533,7 @@ async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codig
       tipo: 'TRF',
       quan: qtdNum,
       valor,
-      obs: String(obs || 'Separação logística').slice(0, 200),
+      obs: anexarHoraObs(obs || 'Separação logística'),
       origem: 'AJU',
       motivo: 'TRF'
     }]

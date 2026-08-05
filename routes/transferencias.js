@@ -7,6 +7,7 @@ const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { resolverProdutoOmieAtivo } = require('../utils/produtoOmieAtivo');
+const { anexarHoraObs } = require('../utils/anexarHoraObs');
 
 const EXPEDICAO_LOCAL = '10440426539';
 
@@ -192,7 +193,7 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
         id_prod: idProdutoNumero ?? codigo_produto,
         data: formatarDataBR(dataMovimentacao),
         quan: String(quantidadeValida || quantidadeNumero || qtd || '0'),
-        obs: `Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`,
+        obs: anexarHoraObs(`Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`),
         origem: 'AJU',
         tipo: 'TRF',
         motivo: motivoOmie,

@@ -17,6 +17,7 @@ const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { agendarReconciliacaoEstoqueOmie } = require('../utils/reconciliarEstoqueOmie');
+const { anexarHoraObs } = require('../utils/anexarHoraObs');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_EXECUTADO  = 'Executado';
@@ -227,9 +228,10 @@ async function incluirAjusteOmie(registro, aprovadoPor) {
   const tipoOmie = String(tipo_operacao || '').toUpperCase();
   const motivoNormalizado = String(motivo || 'INV').toUpperCase();
   const motivoOmie = motivoValidoParaTipo(tipoOmie, motivoNormalizado) ? motivoNormalizado : 'INV';
-  const obsTexto = obs
-    ? String(obs).slice(0, 200)
+  const obsBase = obs
+    ? String(obs)
     : `Ajuste ${tipoOmie} #${id} - Produto ${codigo || ''}. Executado por ${aprovadoPor}.`;
+  const obsTexto = anexarHoraObs(obsBase);
 
   const payload = {
     call: 'IncluirAjusteEstoque',
