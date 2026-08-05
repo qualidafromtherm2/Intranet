@@ -603,6 +603,90 @@
     }
   }
 
+  function _abrirModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
+  }
+
+  function _fecharModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
+
+  function _atualizarContagemCfop() {
+    const boxes = [...document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]')];
+    const marcados = boxes.filter((b) => b.checked).length;
+    const el = document.getElementById('vendRelGerCfopContagem');
+    if (el) el.textContent = `${marcados} de ${boxes.length} incluídos`;
+  }
+
+  function _renderListaCfop(cfops) {
+    const wrap = document.getElementById('vendRelGerCfopLista');
+    if (!wrap) return;
+    if (!Array.isArray(cfops) || !cfops.length) {
+      wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Nenhum CFOP encontrado nos pedidos.</div>';
+      _atualizarContagemCfop();
+      return;
+    }
+    wrap.innerHTML = cfops.map((c) => {
+      const id = `vendCfopChk_${_esc(c.cfop)}`;
+      const desc = c.descricao ? ` — ${_esc(c.descricao)}` : '';
+      return `<label for="${id}" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid #1e293b;margin-bottom:6px;cursor:pointer;background:rgba(255,255,255,.02);">
+        <input type="checkbox" id="${id}" data-cfop="${_esc(c.cfop)}" ${c.incluido !== false ? 'checked' : ''} style="margin-top:3px;accent-color:#38bdf8;">
+        <span style="font-size:13px;color:#e2e8f0;line-height:1.35;">
+          <strong style="font-variant-numeric:tabular-nums;">${_esc(c.cfop_exibicao || c.cfop)}</strong>
+          <span style="color:#64748b;">${desc}</span>
+        </span>
+      </label>`;
+    }).join('');
+    wrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
+      chk.addEventListener('change', _atualizarContagemCfop);
+    });
+    _atualizarContagemCfop();
+  }
+
+  async function _abrirConfigCfop() {
+    _fecharModal('vendRelGerConfigModal');
+    _abrirModal('vendRelGerCfopModal');
+    const wrap = document.getElementById('vendRelGerCfopLista');
+    const statusEl = document.getElementById('vendRelGerCfopStatus');
+    if (wrap) wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Carregando CFOPs...</div>';
+    if (statusEl) statusEl.textContent = '';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/cfop', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar CFOPs.');
+      _renderListaCfop(data.cfops || []);
+    } catch (err) {
+      if (wrap) wrap.innerHTML = `<div style="color:#f87171;font-size:13px;">${_esc(err.message || 'Erro')}</div>`;
+    }
+  }
+
+  async function _salvarConfigCfop() {
+    const statusEl = document.getElementById('vendRelGerCfopStatus');
+    const boxes = [...document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]')];
+    const cfops = boxes.map((b) => ({
+      cfop: b.getAttribute('data-cfop'),
+      incluido: !!b.checked,
+    }));
+    if (statusEl) statusEl.textContent = 'Salvando...';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/cfop', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cfops }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+      if (statusEl) statusEl.textContent = 'Padrão salvo para todos.';
+      _fecharModal('vendRelGerCfopModal');
+      await _carregar();
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || 'Erro ao salvar.';
+    }
+  }
+
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
@@ -610,6 +694,28 @@
       document.getElementById('vendRelGerEtapa')?.addEventListener('change', _carregar);
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => window.print());
+
+      document.getElementById('vendRelGerConfigBtn')?.addEventListener('click', () => _abrirModal('vendRelGerConfigModal'));
+      document.getElementById('vendRelGerConfigFechar')?.addEventListener('click', () => _fecharModal('vendRelGerConfigModal'));
+      document.getElementById('vendRelGerConfigCfopBtn')?.addEventListener('click', _abrirConfigCfop);
+      document.getElementById('vendRelGerCfopFechar')?.addEventListener('click', () => _fecharModal('vendRelGerCfopModal'));
+      document.getElementById('vendRelGerCfopCancelar')?.addEventListener('click', () => _fecharModal('vendRelGerCfopModal'));
+      document.getElementById('vendRelGerCfopSelTudo')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]').forEach((b) => { b.checked = true; });
+        _atualizarContagemCfop();
+      });
+      document.getElementById('vendRelGerCfopDesmarcar')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]').forEach((b) => { b.checked = false; });
+        _atualizarContagemCfop();
+      });
+      document.getElementById('vendRelGerCfopSalvar')?.addEventListener('click', _salvarConfigCfop);
+
+      document.getElementById('vendRelGerConfigModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerConfigModal') _fecharModal('vendRelGerConfigModal');
+      });
+      document.getElementById('vendRelGerCfopModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerCfopModal') _fecharModal('vendRelGerCfopModal');
+      });
     }
     _carregar();
   };

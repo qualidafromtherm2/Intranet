@@ -6555,6 +6555,10 @@
                     style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
                     <i class="fa-solid fa-rotate"></i>
                   </button>
+                  <button id="vendRelGerConfigBtn" type="button" title="Configurações do relatório"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #64748b;background:rgba(100,116,139,.15);color:#cbd5e1;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-gear"></i> Configuração
+                  </button>
                   <button id="vendRelGerPdfBtn" type="button" title="Exportar PDF"
                     style="padding:6px 14px;border-radius:8px;border:1px solid #38bdf8;background:rgba(56,189,248,.15);color:#7dd3fc;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
                     <i class="fa-solid fa-file-pdf"></i> Exportar PDF
@@ -6571,6 +6575,64 @@
                   <div class="at-rel-ger-main" id="vendRelGerPages"></div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: Configuração do Relatório Gerencial Vendas -->
+        <div id="vendRelGerConfigModal" class="modal-overlay" style="display:none;z-index:10060;" role="dialog" aria-modal="true">
+          <div class="modal-content" style="max-width:420px;width:92%;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:0;overflow:hidden;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #1e293b;">
+              <div style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-gear" style="color:#94a3b8;"></i> Configuração do relatório
+              </div>
+              <button type="button" id="vendRelGerConfigFechar" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;" title="Fechar">&times;</button>
+            </div>
+            <div style="padding:16px;">
+              <p style="margin:0 0 14px;font-size:13px;color:#94a3b8;line-height:1.45;">
+                Defina o padrão do relatório para todos os usuários.
+              </p>
+              <button type="button" id="vendRelGerConfigCfopBtn"
+                style="width:100%;padding:12px 14px;border-radius:10px;border:1px solid #38bdf8;background:rgba(56,189,248,.12);color:#7dd3fc;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;font-size:14px;font-weight:700;">
+                <i class="fa-solid fa-list-check"></i> Configurar CFOP
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- Modal: Configurar CFOP do Relatório Vendas -->
+        <div id="vendRelGerCfopModal" class="modal-overlay" style="display:none;z-index:10065;" role="dialog" aria-modal="true">
+          <div class="modal-content" style="max-width:560px;width:94%;max-height:88vh;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:0;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #1e293b;flex-shrink:0;">
+              <div style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+                <i class="fa-solid fa-list-check" style="color:#38bdf8;"></i> CFOP do relatório
+              </div>
+              <button type="button" id="vendRelGerCfopFechar" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;" title="Fechar">&times;</button>
+            </div>
+            <div style="padding:12px 16px;border-bottom:1px solid #1e293b;display:flex;gap:8px;flex-wrap:wrap;flex-shrink:0;">
+              <button type="button" id="vendRelGerCfopSelTudo"
+                style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:rgba(255,255,255,.04);color:#cbd5e1;cursor:pointer;font-size:12px;font-weight:600;">
+                Selecionar tudo
+              </button>
+              <button type="button" id="vendRelGerCfopDesmarcar"
+                style="padding:6px 12px;border-radius:8px;border:1px solid #334155;background:rgba(255,255,255,.04);color:#cbd5e1;cursor:pointer;font-size:12px;font-weight:600;">
+                Desmarcar tudo
+              </button>
+              <span id="vendRelGerCfopContagem" style="margin-left:auto;font-size:12px;color:#64748b;align-self:center;"></span>
+            </div>
+            <div id="vendRelGerCfopLista" style="padding:12px 16px;overflow:auto;flex:1;min-height:180px;max-height:52vh;">
+              <div style="color:#64748b;font-size:13px;">Carregando CFOPs...</div>
+            </div>
+            <div style="padding:12px 16px;border-top:1px solid #1e293b;display:flex;gap:10px;justify-content:flex-end;align-items:center;flex-shrink:0;">
+              <span id="vendRelGerCfopStatus" style="font-size:12px;color:#94a3b8;margin-right:auto;"></span>
+              <button type="button" id="vendRelGerCfopCancelar"
+                style="padding:8px 14px;border-radius:8px;border:1px solid #334155;background:transparent;color:#94a3b8;cursor:pointer;font-size:13px;">
+                Cancelar
+              </button>
+              <button type="button" id="vendRelGerCfopSalvar"
+                style="padding:8px 16px;border-radius:8px;border:1px solid #38bdf8;background:rgba(56,189,248,.2);color:#7dd3fc;cursor:pointer;font-size:13px;font-weight:700;">
+                <i class="fa-solid fa-floppy-disk"></i> Salvar padrão
+              </button>
             </div>
           </div>
         </div>
@@ -13301,7 +13363,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/at-tipo-falha.js?v=20260718f" defer></script>
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
-  <script src="/public/js/vendas-relatorio-gerencial.js?v=20260709a" defer></script>
+  <script src="/public/js/vendas-relatorio-gerencial.js?v=20260805a" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script type="module" src="menu_produto.js?v=20260805-consistencia-produtos"></script>

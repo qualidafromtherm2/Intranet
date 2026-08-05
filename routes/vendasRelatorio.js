@@ -6,6 +6,17 @@ const router = express.Router();
 
 let _ensureSchemaPromise = null;
 
+function normalizeCfopDigits(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function formatCfopDisplay(digits) {
+  const d = normalizeCfopDigits(digits);
+  if (!d) return '';
+  if (d.length === 4) return `${d[0]}.${d.slice(1)}`;
+  return d;
+}
+
 async function ensureVendasRelatorioSchema() {
   if (_ensureSchemaPromise) return _ensureSchemaPromise;
   _ensureSchemaPromise = pool.query(`
@@ -22,11 +33,49 @@ async function ensureVendasRelatorioSchema() {
     );
     CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_mes_idx
       ON "Vendas".relatorio_gerencial (mes);
+
+    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_cfop (
+      cfop VARCHAR(10) PRIMARY KEY,
+      incluido BOOLEAN NOT NULL DEFAULT TRUE,
+      descricao TEXT,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_por TEXT
+    );
+    CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_cfop_incluido_idx
+      ON "Vendas".relatorio_gerencial_cfop (incluido);
   `).then(() => undefined).catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
   });
   return _ensureSchemaPromise;
+}
+
+/** Garante catálogo de CFOPs a partir dos itens de pedido (6905 começa desmarcado). */
+async function syncRelatorioCfopCatalog() {
+  await ensureVendasRelatorioSchema();
+  await pool.query(`
+    INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, descricao)
+    SELECT DISTINCT
+      REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') AS cfop,
+      (REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> '6905') AS incluido,
+      NULL
+    FROM "Vendas".pedidos_venda_itens i
+    WHERE COALESCE(TRIM(i.cfop), '') <> ''
+      AND REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> ''
+    ON CONFLICT (cfop) DO NOTHING
+  `);
+  try {
+    await pool.query(`
+      UPDATE "Vendas".relatorio_gerencial_cfop c
+         SET descricao = cfg.descricao
+        FROM configuracoes.cfop cfg
+       WHERE REGEXP_REPLACE(TRIM(cfg.codigo), '\\D', '', 'g') = c.cfop
+         AND COALESCE(TRIM(c.descricao), '') = ''
+         AND COALESCE(TRIM(cfg.descricao), '') <> ''
+    `);
+  } catch (_) {
+    /* configuracoes.cfop pode não existir em algum ambiente */
+  }
 }
 
 function mesAtualReferencia(refDate = new Date()) {
@@ -95,12 +144,18 @@ function buildEtapaFilter(etapaRaw) {
   };
 }
 
+/** Pedidos com algum item cujo CFOP está desmarcado na config compartilhada. */
 const VENDAS_CTES = `
   ${VENDAS_NF_POR_PEDIDO_CTE},
   pedidos_cfop_ignorado AS (
-    SELECT DISTINCT codigo_pedido
-    FROM "Vendas".pedidos_venda_itens
-    WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
+    SELECT DISTINCT i.codigo_pedido
+    FROM "Vendas".pedidos_venda_itens i
+    WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> ''
+      AND REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
+        SELECT c.cfop
+          FROM "Vendas".relatorio_gerencial_cfop c
+         WHERE c.incluido IS FALSE
+      )
   )
 `;
 
@@ -154,7 +209,12 @@ const ITENS_CTE = `
       COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
     FROM "Vendas".pedidos_venda_itens i
     LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
-    WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
+    WHERE (
+      REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = ''
+      OR REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
+        SELECT c.cfop FROM "Vendas".relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
+      )
+    )
   )
 `;
 
@@ -205,10 +265,100 @@ function labelMes(yyyymm, nomesMes) {
   return mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : yyyymm;
 }
 
+function usuarioDaSessao(req) {
+  return req.session?.user?.fullName
+    || req.session?.user?.username
+    || req.session?.user?.login
+    || 'sistema';
+}
+
+// GET /vendas/relatorio-gerencial/config/cfop
+router.get('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
+  try {
+    await syncRelatorioCfopCatalog();
+    const { rows } = await pool.query(`
+      SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
+        FROM "Vendas".relatorio_gerencial_cfop c
+       ORDER BY c.cfop
+    `);
+    return res.json({
+      ok: true,
+      cfops: rows.map((r) => ({
+        cfop: r.cfop,
+        cfop_exibicao: formatCfopDisplay(r.cfop),
+        incluido: r.incluido !== false,
+        descricao: r.descricao || '',
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro listar config CFOP:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /vendas/relatorio-gerencial/config/cfop
+router.put('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
+  try {
+    await syncRelatorioCfopCatalog();
+    const lista = Array.isArray(req.body?.cfops) ? req.body.cfops : null;
+    if (!lista) {
+      return res.status(400).json({ ok: false, error: 'Informe cfops: [{ cfop, incluido }].' });
+    }
+
+    const usuario = usuarioDaSessao(req);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const item of lista) {
+        const cfop = normalizeCfopDigits(item?.cfop);
+        if (!cfop) continue;
+        const incluido = item?.incluido !== false && item?.incluido !== 'false' && item?.incluido !== 0;
+        await client.query(
+          `INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, atualizado_em, atualizado_por)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (cfop) DO UPDATE SET
+             incluido = EXCLUDED.incluido,
+             atualizado_em = NOW(),
+             atualizado_por = EXCLUDED.atualizado_por`,
+          [cfop, !!incluido, usuario]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    const { rows } = await pool.query(`
+      SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
+        FROM "Vendas".relatorio_gerencial_cfop c
+       ORDER BY c.cfop
+    `);
+    return res.json({
+      ok: true,
+      cfops: rows.map((r) => ({
+        cfop: r.cfop,
+        cfop_exibicao: formatCfopDisplay(r.cfop),
+        incluido: r.incluido !== false,
+        descricao: r.descricao || '',
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro salvar config CFOP:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /vendas/relatorio-gerencial
 router.get('/vendas/relatorio-gerencial', async (req, res) => {
   try {
-    await ensureVendasRelatorioSchema();
+    await syncRelatorioCfopCatalog();
     const modoRaw = String(req.query.modo || 'mes').trim().toLowerCase();
     const etapaParam = String(req.query.etapa || 'entregue').trim().toLowerCase();
     const periodoCfg = calcPeriodo(modoRaw);
@@ -259,6 +409,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       rMesTotal,
       rFamiliaCliente,
       rQtdItens,
+      rCfopCfg,
     ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
@@ -345,6 +496,13 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         SELECT COALESCE(SUM(quantidade), 0)::float AS quantidade_itens
         FROM itens
       `, rangeParams),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE incluido IS TRUE)::int AS incluidos,
+          COUNT(*) FILTER (WHERE incluido IS FALSE)::int AS excluidos
+        FROM "Vendas".relatorio_gerencial_cfop
+      `),
     ]);
 
     const kpi = rKpi.rows[0] || {};
@@ -394,6 +552,8 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       salvo: false,
     };
 
+    const cfgCfop = rCfopCfg.rows[0] || {};
+
     return res.json({
       ok: true,
       mes: mesRaw,
@@ -401,6 +561,11 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       etapa: etapaCfg.label,
       periodo: periodoLabel,
       evolucao_tipo: evolucaoTipo,
+      cfop_config: {
+        total: cfgCfop.total || 0,
+        incluidos: cfgCfop.incluidos || 0,
+        excluidos: cfgCfop.excluidos || 0,
+      },
       kpis: {
         total_pedidos: kpi.total_pedidos || 0,
         valor_total: Math.round((kpi.valor_total || 0) * 100) / 100,
@@ -498,10 +663,7 @@ router.put('/vendas/relatorio-gerencial/textos', async (req, res) => {
     const conclusao_pontos_criticos = String(req.body?.conclusao_pontos_criticos || '').trim().slice(0, 4000);
     const conclusao_oportunidades = String(req.body?.conclusao_oportunidades || '').trim().slice(0, 4000);
 
-    const usuarioLogado = req.session?.user?.fullName
-      || req.session?.user?.username
-      || req.session?.user?.login
-      || 'sistema';
+    const usuarioLogado = usuarioDaSessao(req);
 
     const { rows } = await pool.query(
       `INSERT INTO "Vendas".relatorio_gerencial (
