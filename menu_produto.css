@@ -7431,12 +7431,12 @@ ul#comprasList li ,
   cursor: pointer;
 }
 
-/* Celular / tablet estreito — Linha de produção: colunas empilhadas */
+/* Celular / tablet — Linha de produção: colunas empilhadas; página rola (sem scroll preso na coluna) */
 @media (max-width: 768px) {
   #montaProducaoPane #montaKanban,
   #riRegistroInspecaoPane #riRegistroKanban {
     flex-direction: column !important;
-    overflow-x: hidden !important;
+    overflow: visible !important;
     gap: 12px !important;
     align-items: stretch !important;
   }
@@ -7451,11 +7451,23 @@ ul#comprasList li ,
 
   #montaProducaoPane [id^="montaCol_"],
   #riRegistroInspecaoPane [id^="riRegistroCol_"] {
-    max-height: 420px !important;
+    max-height: none !important;
     min-height: 0 !important;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
+    overflow: visible !important;
   }
+
+  #montaProducaoPane > .content-wrapper {
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: auto;
+  }
+}
+
+.kanban-prod-grupo--accordion .kanban-prod-grupo-head:active {
+  opacity: 0.92;
+}
+
+.kanban-prod-grupo--accordion .kanban-prod-grupo-ops .kanban-op-card {
+  margin-top: 0;
 }
 
 .kanban-prog-pedido-badge {
@@ -18308,12 +18320,11 @@ body.mobile-modal-open {
     max-width: 100% !important;
   }
 
-  /* —— Linha de produção / RI: kanbans empilhados no celular —— */
+  /* —— Linha de produção / RI: kanbans empilhados; página rola livre —— */
   #montaProducaoPane #montaKanban,
   #riRegistroInspecaoPane #riRegistroKanban {
     flex-direction: column !important;
-    overflow-x: hidden !important;
-    overflow-y: visible !important;
+    overflow: visible !important;
     gap: 12px !important;
     align-items: stretch !important;
     padding-bottom: 8px !important;
@@ -18327,9 +18338,15 @@ body.mobile-modal-open {
     max-width: 100% !important;
   }
 
-  /* Coluna: ~3 cards/grupos visíveis; restante na barra de rolagem */
+  /* Sem max-height na coluna — evita travar o arraste da página no celular */
   #montaProducaoPane [id^="montaCol_"],
-  #riRegistroInspecaoPane [id^="riRegistroCol_"],
+  #riRegistroInspecaoPane [id^="riRegistroCol_"] {
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+  }
+
+  /* Registrar produção: mantém scroll interno leve (~3 grupos) */
   #producaoKanban #kanbanPedidos,
   #producaoKanban #kanbanProgramado,
   #producaoKanban #kanbanSolicitado,
@@ -18341,7 +18358,6 @@ body.mobile-modal-open {
     min-height: 0 !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch;
-    overscroll-behavior: contain;
   }
 
   #montaProducaoPane .content-wrapper-header {
