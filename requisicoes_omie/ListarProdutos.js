@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260730-filtro-expedicao';
+} from './filtro_produto.js?v=20260804-divergencia-estoque';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -232,7 +232,9 @@ function normalizeCatalogoProdutos(produtos = []) {
     saldo_estoque: p.saldo_estoque ?? p.quantidade_estoque,
     saldo_almox: p.saldo_almox ?? 0,
     saldo_expedicao: p.saldo_expedicao ?? 0,
+    saldo_enderecado: p.saldo_enderecado ?? 0,
     expedicao_negativa: p.expedicao_negativa || false,
+    saldo_endereco_sem_omie: p.saldo_endereco_sem_omie || false,
     estoque_minimo: p.estoque_minimo
   }));
 }
