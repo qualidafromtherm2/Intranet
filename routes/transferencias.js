@@ -8,6 +8,7 @@ const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoe
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { resolverProdutoOmieAtivo } = require('../utils/produtoOmieAtivo');
 const { anexarHoraObs } = require('../utils/anexarHoraObs');
+const { agendarReconciliacaoEstoqueOmie } = require('../utils/reconciliarEstoqueOmie');
 
 const EXPEDICAO_LOCAL = '10440426539';
 
@@ -605,6 +606,14 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
 
     const { rows } = await dbQuery(updateSql, [STATUS_TRANSFERIDO, aprovadoPor, id]);
 
+    [registroAtual.origem, registroAtual.destino].forEach((localCodigo, index) => {
+      agendarReconciliacaoEstoqueOmie({
+        codigoProduto: registroAtual.codigo_produto,
+        codigo: registroAtual.codigo,
+        localCodigo
+      }, 3000 + (index * 750));
+    });
+
     res.json({
       ok: true,
       registro: rows[0],
@@ -720,6 +729,14 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
        WHERE id=$5
     `, [STATUS_REVERTIDO, reversao.id, usuario, motivo, id]);
     await client.query('COMMIT');
+
+    [original.destino, original.origem].forEach((localCodigo, index) => {
+      agendarReconciliacaoEstoqueOmie({
+        codigoProduto: original.codigo_produto,
+        codigo: original.codigo,
+        localCodigo
+      }, 3000 + (index * 750));
+    });
 
     res.json({ ok: true, original_id: id, reversao, omie: respostaOmie || null });
     void monEventoReq(req, {

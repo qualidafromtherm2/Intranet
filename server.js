@@ -2792,8 +2792,41 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
     }
 
     console.log('[API] /api/produtos/incluir-omie → sucesso:', omieData);
+    let sincronizadoLocal = false;
+    let erroSincronizacao = null;
+    const produtoCriado = {
+      ...req.body,
+      ...omieData,
+      codigo_produto: omieData.codigo_produto,
+      codigo_produto_integracao,
+      codigo: codigoNormalizado,
+      descricao,
+      unidade,
+      tipoItem: tipoItem ? String(tipoItem).padStart(2, '0') : null,
+      ncm: '0000.00.00'
+    };
+    for (let tentativa = 1; tentativa <= 3 && !sincronizadoLocal; tentativa += 1) {
+      try {
+        await sincronizarProdutoParaPostgres(produtoCriado);
+        sincronizadoLocal = true;
+      } catch (syncErr) {
+        erroSincronizacao = syncErr;
+        if (tentativa < 3) await new Promise(resolve => setTimeout(resolve, tentativa * 150));
+      }
+    }
+    if (sincronizadoLocal) {
+      try {
+        app.get('sseBroadcast')?.({ type: 'product_updated', codigo: codigoNormalizado, at: Date.now() });
+      } catch (_) {}
+    } else {
+      console.error('[produtos/incluir-omie] Produto criado na Omie, mas a sincronizacao local falhou:', erroSincronizacao);
+    }
     console.info(`[produtos/incluir-omie] external_calls=${omieExternalCalls} result=success codigo=${codigoNormalizado}`);
-    res.json(omieData);
+    res.status(sincronizadoLocal ? 200 : 202).json({
+      ...omieData,
+      sincronizado_local: sincronizadoLocal,
+      aviso: sincronizadoLocal ? null : 'Produto criado na Omie, mas ainda aguardando sincronizacao local. Nao cadastre novamente.'
+    });
   } catch (err) {
     await liberarReservaLocal();
     console.error('[API] /api/produtos/incluir-omie erro:', err);
@@ -2849,6 +2882,9 @@ app.get('/api/produtos/consultar-omie/:codigoProduto', async (req, res) => {
     try {
       await sincronizarProdutoParaPostgres(omieData);
       console.log('[API] Produto sincronizado para PostgreSQL:', omieData.codigo);
+      try {
+        app.get('sseBroadcast')?.({ type: 'product_updated', codigo: omieData.codigo, at: Date.now() });
+      } catch (_) {}
     } catch (syncErr) {
       console.error('[API] Erro ao sincronizar produto:', syncErr);
       // Não falha a requisição se a sincronização der erro
@@ -24285,6 +24321,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
     // LATERAL LIMIT 1: produtos_omie.codigo não é único — JOIN direto multiplica linhas de estoque
     const { rows } = await pool.query(
       `SELECT e.codigo, e.local_nome, e.local_codigo, e.saldo, e.fisico, e.estoque_minimo,
+              e.updated_at,
               p.unidade
        FROM logistica.estoque_atual e
        LEFT JOIN LATERAL (
@@ -24314,7 +24351,8 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
         local_codigo: row.local_codigo,
         local_nome: row.local_nome || row.local_codigo,
         saldo: row.saldo,
-        unidade: row.unidade || ''
+        unidade: row.unidade || '',
+        updated_at: row.updated_at || null
       });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };
@@ -25956,6 +25994,13 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         message: 'Produto atualizado com sucesso',
         produto: updateResult.rows[0]
       });
+      try {
+        app.get('sseBroadcast')?.({
+          type: 'product_updated',
+          codigo: updateResult.rows[0]?.codigo || codigo,
+          at: Date.now()
+        });
+      } catch (_) {}
     } catch (err) {
       console.error('[API] PUT /api/produtos/:codigo erro:', err);
       res.status(err.status || 500).json({ error: err.message });
