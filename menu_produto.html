@@ -13363,7 +13363,7 @@
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/at-tipo-falha.js?v=20260718f" defer></script>
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
-  <script src="/public/js/vendas-relatorio-gerencial.js?v=20260805a" defer></script>
+  <script src="/public/js/vendas-relatorio-gerencial.js?v=20260805b" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script type="module" src="menu_produto.js?v=20260805-consistencia-produtos"></script>
@@ -15011,6 +15011,26 @@ function attachDropZone(ul) {
 #sacAtRelatorioPane .content-section,
 #vendasRelatorioPane .content-section,
 #logisticaRelatorioPane .content-section { overflow: visible; }
+
+/* CFOP config: evita checkbox gigante (regras globais de input esticam o nativo) */
+#vendRelGerCfopLista .vend-rel-cfop-chk,
+#vendRelGerCfopModal input[type="checkbox"] {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+  max-width: 16px !important;
+  max-height: 16px !important;
+  margin: 3px 0 0 0 !important;
+  padding: 0 !important;
+  flex: 0 0 16px !important;
+  transform: none !important;
+  appearance: auto !important;
+  -webkit-appearance: checkbox !important;
+  accent-color: #38bdf8;
+  cursor: pointer;
+}
+
 .at-rel-ger-layout {
   display: flex;
   gap: 14px;

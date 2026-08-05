@@ -632,7 +632,7 @@
       const id = `vendCfopChk_${_esc(c.cfop)}`;
       const desc = c.descricao ? ` — ${_esc(c.descricao)}` : '';
       return `<label for="${id}" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid #1e293b;margin-bottom:6px;cursor:pointer;background:rgba(255,255,255,.02);">
-        <input type="checkbox" id="${id}" data-cfop="${_esc(c.cfop)}" ${c.incluido !== false ? 'checked' : ''} style="margin-top:3px;accent-color:#38bdf8;">
+        <input type="checkbox" id="${id}" data-cfop="${_esc(c.cfop)}" class="vend-rel-cfop-chk" ${c.incluido !== false ? 'checked' : ''}>
         <span style="font-size:13px;color:#e2e8f0;line-height:1.35;">
           <strong style="font-variant-numeric:tabular-nums;">${_esc(c.cfop_exibicao || c.cfop)}</strong>
           <span style="color:#64748b;">${desc}</span>
