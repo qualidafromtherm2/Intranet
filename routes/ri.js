@@ -66,10 +66,11 @@ router.get('/item/:id', async (req, res) => {
 // Criar novo item RI
 router.post('/', async (req, res) => {
   try {
-    const { id_omie, codigo, item_verificado, o_que_verificar, local_verificacao, prioridade, foto_url } = req.body;
+    const { id_omie, codigo, item_verificado, o_que_verificar, local_verificacao, foto_url } = req.body;
+    const prioridade = String(req.body?.prioridade || 'Primario').trim() || 'Primario';
     
-    if (!id_omie || !codigo || !item_verificado || !o_que_verificar || !local_verificacao || !prioridade) {
-      return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    if (!id_omie || !codigo || !item_verificado || !o_que_verificar || !local_verificacao) {
+      return res.status(400).json({ error: 'Campos obrigatórios: produto, check, descrição e local' });
     }
     
     const result = await dbQuery(
@@ -102,10 +103,11 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const { id } = req.params;
-    const { item_verificado, o_que_verificar, local_verificacao, prioridade, foto_url } = req.body;
+    const { item_verificado, o_que_verificar, local_verificacao, foto_url } = req.body;
+    const prioridade = String(req.body?.prioridade || 'Primario').trim() || 'Primario';
     
-    if (!item_verificado || !o_que_verificar || !local_verificacao || !prioridade) {
-      return res.status(400).json({ error: 'Todos os campos são obrigatórios' });
+    if (!item_verificado || !o_que_verificar || !local_verificacao) {
+      return res.status(400).json({ error: 'Campos obrigatórios: check, descrição e local' });
     }
     
     const result = await dbQuery(
@@ -114,7 +116,7 @@ router.put('/:id', async (req, res) => {
            o_que_verificar = $2,
            local_verificacao = $3,
            prioridade = $4,
-           foto_url = $5,
+           foto_url = COALESCE($5, foto_url),
            atualizado_em = NOW()
        WHERE id = $6
        RETURNING *`,

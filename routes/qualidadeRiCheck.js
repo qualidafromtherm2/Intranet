@@ -154,6 +154,11 @@ async function garantirSchemaRi() {
       ON qualidade."RI_NIQ" (numero_op)
   `);
 
+  // Vários arquivos por verificação / ocorrência (foto, vídeo, documento)
+  await dbQuery(`ALTER TABLE qualidade.ri ADD COLUMN IF NOT EXISTS anexos JSONB DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE qualidade."RI_Verificacoes" ADD COLUMN IF NOT EXISTS anexos JSONB DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE qualidade."RI_NIQ" ADD COLUMN IF NOT EXISTS anexos JSONB DEFAULT '[]'::jsonb`);
+
   await dbQuery(`ALTER TABLE qualidade."RI_Check" ADD COLUMN IF NOT EXISTS op_producao_id BIGINT`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_ri_check_op_producao
@@ -438,9 +443,10 @@ async function semearVerificacoesDoTemplate(checkId, idOmie, kanbanLocal) {
   const localKanban = String(kanbanLocal || '').trim();
   const { rowCount } = await dbQuery(
     `INSERT INTO qualidade."RI_Verificacoes"
-       (ri_check_id, codigo_produto, check_nome, descricao_check, foto, local)
+       (ri_check_id, codigo_produto, check_nome, descricao_check, foto, local, anexos)
      SELECT $1, $2, t.item_verificado, t.o_que_verificar, t.foto_url,
-            COALESCE(NULLIF($3, ''), NULLIF(TRIM(t.local_verificacao), ''), NULL)
+            COALESCE(NULLIF($3, ''), NULLIF(TRIM(t.local_verificacao), ''), NULL),
+            COALESCE(t.anexos, '[]'::jsonb)
        FROM qualidade.ri t
       WHERE t.id_omie = $4
       ORDER BY t.id ASC`,
@@ -548,11 +554,14 @@ async function carregarVerificacoesTemplate(idOmie, kanbanLocal) {
 
   const localKanban = String(kanbanLocal || '').trim();
   const { rows } = await dbQuery(
-    `SELECT t.item_verificado AS check_nome,
+    `SELECT t.id,
+            t.item_verificado AS check_nome,
             t.o_que_verificar AS descricao_check,
             t.foto_url AS foto,
             NULL::text AS video,
-            COALESCE(NULLIF(TRIM(t.local_verificacao), ''), NULL) AS local
+            COALESCE(NULLIF(TRIM(t.local_verificacao), ''), NULL) AS local,
+            COALESCE(t.anexos, '[]'::jsonb) AS anexos,
+            TRUE AS template_mestre
        FROM qualidade.ri t
       WHERE t.id_omie = $1
       ORDER BY t.id ASC`,
@@ -686,10 +695,30 @@ async function buscarStatusKanbanOp(opRefId, numeroOpHint = '', check = null) {
   return statuses[0] || '';
 }
 
+function tipoArquivoRi(file) {
+  const mt = String(file?.mimetype || '').toLowerCase();
+  if (mt.startsWith('image/')) return 'foto';
+  if (mt.startsWith('video/')) return 'video';
+  return 'documento';
+}
+
+function coletarArquivosUpload(req) {
+  const out = [];
+  const files = req.files;
+  if (!files) return out;
+  if (Array.isArray(files)) return files.filter(Boolean);
+  for (const key of Object.keys(files)) {
+    for (const f of files[key] || []) {
+      if (f) out.push(f);
+    }
+  }
+  return out;
+}
+
 async function uploadRiMidia(codigoPasta, tipo, file) {
   if (!file?.buffer?.length) return null;
   const cod = sanitizePathPart(codigoPasta);
-  const pasta = tipo === 'video' ? 'videos' : 'fotos';
+  const pasta = tipo === 'video' ? 'videos' : (tipo === 'documento' ? 'docs' : 'fotos');
   const ext = mime.extension(file.mimetype) || (file.originalname || '').split('.').pop() || 'bin';
   const nome = `${uuidv4()}.${String(ext).replace(/[^a-zA-Z0-9]/g, '')}`;
   const pathKey = `RI/${cod}/${pasta}/${nome}`;
@@ -700,12 +729,12 @@ async function uploadRiMidia(codigoPasta, tipo, file) {
   return url;
 }
 
-/** Cloudflare: produtos/RI/{codigo}/RI_deteccao/{OP}/foto|video/ */
+/** Cloudflare: produtos/RI/{codigo}/RI_deteccao/{OP}/foto|video|docs/ */
 async function uploadRiNiqMidia(codigoPasta, numeroOp, tipo, file) {
   if (!file?.buffer?.length) return null;
   const cod = sanitizePathPart(codigoPasta);
   const op = sanitizePathPart(numeroOp);
-  const pasta = tipo === 'video' ? 'video' : 'foto';
+  const pasta = tipo === 'video' ? 'video' : (tipo === 'documento' ? 'docs' : 'foto');
   const ext = mime.extension(file.mimetype) || (file.originalname || '').split('.').pop() || 'bin';
   const nome = `${uuidv4()}.${String(ext).replace(/[^a-zA-Z0-9]/g, '')}`;
   const pathKey = `RI/${cod}/RI_deteccao/${op}/${pasta}/${nome}`;
@@ -716,9 +745,31 @@ async function uploadRiNiqMidia(codigoPasta, numeroOp, tipo, file) {
   return url;
 }
 
+async function uploadRiArquivosLista(codigoPasta, files, opts = {}) {
+  const anexos = [];
+  let fotoUrl = null;
+  let videoUrl = null;
+  for (const file of files || []) {
+    const tipo = tipoArquivoRi(file);
+    const url = opts.niq
+      ? await uploadRiNiqMidia(codigoPasta, opts.numeroOp, tipo, file)
+      : await uploadRiMidia(codigoPasta, tipo, file);
+    if (!url) continue;
+    anexos.push({
+      url,
+      tipo,
+      nome: String(file.originalname || '').trim() || url.split('/').pop(),
+    });
+    if (tipo === 'foto' && !fotoUrl) fotoUrl = url;
+    if (tipo === 'video' && !videoUrl) videoUrl = url;
+  }
+  return { anexos, fotoUrl, videoUrl };
+}
+
 async function listarNiqPorOp(opIappId) {
   const { rows } = await dbQuery(
     `SELECT id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
+            COALESCE(anexos, '[]'::jsonb) AS anexos,
             usuario, created_at::text AS created_at
        FROM qualidade."RI_NIQ"
       WHERE op_iapp_id = $1
@@ -1166,6 +1217,228 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
   }
 });
 
+// POST /api/qualidade/ri-check/template-verificacao — cadastro mestre (qualidade.ri) com vários arquivos
+router.post('/template-verificacao', requireAuth, upload.fields([
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
+]), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const idOmie = Number(req.body?.id_omie || req.body?.codigo_produto) || 0;
+    const codigo = String(req.body?.codigo || '').trim();
+    const checkNome = String(req.body?.check || req.body?.check_nome || req.body?.item_verificado || '').trim();
+    const descricaoCheck = String(req.body?.descricao_check || req.body?.o_que_verificar || req.body?.descricao || '').trim();
+    const local = String(req.body?.local || req.body?.local_verificacao || '').trim();
+    if (!idOmie) return res.status(400).json({ ok: false, error: 'id_omie do produto é obrigatório.' });
+    if (!checkNome) return res.status(400).json({ ok: false, error: 'Informe o nome do check.' });
+    if (!descricaoCheck) return res.status(400).json({ ok: false, error: 'Informe a descrição do check.' });
+    if (!local) return res.status(400).json({ ok: false, error: 'Informe o local (kanban).' });
+
+    const codigoPasta = codigo || String(idOmie);
+    const files = coletarArquivosUpload(req);
+    const { anexos, fotoUrl } = await uploadRiArquivosLista(codigoPasta, files);
+
+    const ins = await dbQuery(
+      `INSERT INTO qualidade.ri
+         (id_omie, codigo, item_verificado, o_que_verificar, local_verificacao, prioridade, foto_url, anexos)
+       VALUES ($1, $2, $3, $4, $5, 'Primario', $6, $7::jsonb)
+       RETURNING *`,
+      [idOmie, codigoPasta, checkNome, descricaoCheck, local, fotoUrl, JSON.stringify(anexos)]
+    );
+
+    return res.status(201).json({ ok: true, item: ins.rows[0], anexos });
+  } catch (err) {
+    console.error('[qualidade/ri-check/template-verificacao]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao cadastrar verificação.' });
+  }
+});
+
+// PUT /api/qualidade/ri-check/template-verificacao/:id — editar cadastro mestre + anexos
+router.put('/template-verificacao/:id', requireAuth, upload.fields([
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
+]), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const itemId = Number(req.params.id) || 0;
+    if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    const { rows: atuais } = await dbQuery(
+      `SELECT * FROM qualidade.ri WHERE id = $1 LIMIT 1`,
+      [itemId]
+    );
+    if (!atuais.length) return res.status(404).json({ ok: false, error: 'Verificação não encontrada.' });
+    const atual = atuais[0];
+
+    const checkNome = String(req.body?.check || req.body?.check_nome || req.body?.item_verificado || '').trim();
+    const descricaoCheck = String(req.body?.descricao_check || req.body?.o_que_verificar || req.body?.descricao || '').trim();
+    const local = String(req.body?.local || req.body?.local_verificacao || '').trim();
+    if (!checkNome) return res.status(400).json({ ok: false, error: 'Informe o nome do check.' });
+    if (!descricaoCheck) return res.status(400).json({ ok: false, error: 'Informe a descrição do check.' });
+    if (!local) return res.status(400).json({ ok: false, error: 'Informe o local (kanban).' });
+
+    let anexosManter = [];
+    try {
+      const raw = req.body?.anexos_manter;
+      anexosManter = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    } catch (_) { anexosManter = []; }
+    if (!Array.isArray(anexosManter)) anexosManter = [];
+    anexosManter = anexosManter.filter(a => a && a.url);
+
+    const codigoPasta = String(atual.codigo || atual.id_omie || 'sem_codigo');
+    const files = coletarArquivosUpload(req);
+    const { anexos: novos, fotoUrl: fotoNova } = await uploadRiArquivosLista(codigoPasta, files);
+    const anexosFinais = [...anexosManter, ...novos];
+    const fotoUrl = fotoNova
+      || anexosFinais.find(a => a.tipo === 'foto')?.url
+      || null;
+
+    const upd = await dbQuery(
+      `UPDATE qualidade.ri
+          SET item_verificado = $1,
+              o_que_verificar = $2,
+              local_verificacao = $3,
+              foto_url = $4,
+              anexos = $5::jsonb,
+              atualizado_em = NOW()
+        WHERE id = $6
+        RETURNING *`,
+      [checkNome, descricaoCheck, local, fotoUrl, JSON.stringify(anexosFinais), itemId]
+    );
+
+    return res.json({ ok: true, item: upd.rows[0], anexos: anexosFinais });
+  } catch (err) {
+    console.error('[qualidade/ri-check/template-verificacao PUT]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao editar verificação.' });
+  }
+});
+
+// PUT /api/qualidade/ri-check/verificacoes/:id — editar verificação da inspeção
+router.put('/verificacoes/:id', requireAuth, upload.fields([
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
+]), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const verifId = Number(req.params.id) || 0;
+    if (!verifId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    const { rows: atuais } = await dbQuery(
+      `SELECT * FROM qualidade."RI_Verificacoes" WHERE id = $1 LIMIT 1`,
+      [verifId]
+    );
+    if (!atuais.length) return res.status(404).json({ ok: false, error: 'Verificação não encontrada.' });
+    const atual = atuais[0];
+
+    const checkNome = String(req.body?.check || req.body?.check_nome || '').trim();
+    const descricaoCheck = String(req.body?.descricao_check || req.body?.descricao || '').trim();
+    const local = String(req.body?.local || '').trim();
+    if (!checkNome) return res.status(400).json({ ok: false, error: 'Informe o nome do check.' });
+    if (!local) return res.status(400).json({ ok: false, error: 'Informe o local (kanban).' });
+
+    let anexosManter = [];
+    try {
+      const raw = req.body?.anexos_manter;
+      anexosManter = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    } catch (_) { anexosManter = []; }
+    if (!Array.isArray(anexosManter)) anexosManter = [];
+    anexosManter = anexosManter.filter(a => a && a.url);
+
+    const dadosCheck = await carregarCheckCompleto(atual.ri_check_id);
+    const camposProd = await resolverCamposProdutoOmie({
+      codigoTexto: dadosCheck?.check?.codigo,
+      codigoProdutoHint: atual.codigo_produto || dadosCheck?.check?.codigo_produto,
+      opIappId: dadosCheck?.check?.op_iapp_id,
+      kanbanProgId: dadosCheck?.check?.id_kanban_programacao,
+    });
+    const codigoPasta = camposProd.codigoTexto || dadosCheck?.check?.codigo || String(camposProd.idOmie || 'sem_codigo');
+
+    const files = coletarArquivosUpload(req);
+    const { anexos: novos, fotoUrl: fotoNova, videoUrl: videoNovo } = await uploadRiArquivosLista(codigoPasta, files);
+    const anexosFinais = [...anexosManter, ...novos];
+    const fotoUrl = fotoNova || anexosFinais.find(a => a.tipo === 'foto')?.url || null;
+    const videoUrl = videoNovo || anexosFinais.find(a => a.tipo === 'video')?.url || null;
+
+    const upd = await dbQuery(
+      `UPDATE qualidade."RI_Verificacoes"
+          SET check_nome = $1,
+              descricao_check = $2,
+              local = $3,
+              foto = $4,
+              video = $5,
+              anexos = $6::jsonb
+        WHERE id = $7
+        RETURNING *`,
+      [checkNome, descricaoCheck || null, local, fotoUrl, videoUrl, JSON.stringify(anexosFinais), verifId]
+    );
+
+    if (atual.ri_check_id) {
+      await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [atual.ri_check_id]);
+      dispararNotificacaoRiCheck(atual.ri_check_id);
+    }
+
+    return res.json({ ok: true, verificacao: upd.rows[0], anexos: anexosFinais });
+  } catch (err) {
+    console.error('[qualidade/ri-check/verificacoes PUT]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao editar verificação.' });
+  }
+});
+
+// POST /api/qualidade/ri-check/niq — ocorrência por OP (sem exigir RI_Check gravado)
+router.post('/niq', requireAuth, upload.fields([
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
+]), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const opRefId = Number(req.body?.op_producao_id) || Number(req.body?.op_iapp_id) || 0;
+    if (!opRefId) return res.status(400).json({ ok: false, error: 'op_producao_id é obrigatório.' });
+
+    const falhaDetectada = String(req.body?.falha_detectada || '').trim();
+    if (!falhaDetectada) {
+      return res.status(400).json({ ok: false, error: 'Informe a falha detectada.' });
+    }
+
+    const codigo = String(req.body?.codigo || '').trim();
+    const codigoProdutoBody = Number(req.body?.codigo_produto) || null;
+    const camposProd = await resolverCamposProdutoOmie({
+      codigoTexto: codigo,
+      codigoProdutoHint: codigoProdutoBody,
+      opIappId: opRefId,
+    });
+    const codigoProdutoGravar = codigoProdutoOmieParaGravar(camposProd.idOmie);
+    const codigoPasta = camposProd.codigoTexto || codigo || String(camposProd.idOmie || 'sem_codigo');
+    const opDados = await buscarDadosOpKanban(opRefId);
+    const numeroOp = String(req.body?.numero_op || opDados?.numero_op || opRefId).trim();
+    const usuario = getUsuario(req);
+
+    const files = coletarArquivosUpload(req);
+    const { anexos, fotoUrl, videoUrl } = await uploadRiArquivosLista(codigoPasta, files, {
+      niq: true,
+      numeroOp,
+    });
+
+    const ins = await dbQuery(
+      `INSERT INTO qualidade."RI_NIQ"
+         (codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video, anexos, usuario)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
+       RETURNING id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
+                 COALESCE(anexos, '[]'::jsonb) AS anexos,
+                 usuario, created_at::text AS created_at`,
+      [codigoProdutoGravar, opRefId, numeroOp, falhaDetectada, fotoUrl, videoUrl, JSON.stringify(anexos), usuario]
+    );
+
+    return res.json({ ok: true, ocorrencia: ins.rows[0] });
+  } catch (err) {
+    console.error('[qualidade/ri-check/niq POST por OP]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao registrar ocorrência.' });
+  }
+});
+
 // GET /api/qualidade/ri-check/:id
 router.get('/:id', requireAuth, async (req, res) => {
   try {
@@ -1183,8 +1456,9 @@ router.get('/:id', requireAuth, async (req, res) => {
 
 // POST /api/qualidade/ri-check/:id/verificacoes
 router.post('/:id/verificacoes', requireAuth, upload.fields([
-  { name: 'foto', maxCount: 1 },
-  { name: 'video', maxCount: 1 },
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
 ]), async (req, res) => {
   try {
     await garantirSchemaRi();
@@ -1208,21 +1482,15 @@ router.post('/:id/verificacoes', requireAuth, upload.fields([
     const local = String(req.body?.local || '').trim();
     if (!local) return res.status(400).json({ ok: false, error: 'Informe o local (kanban).' });
 
-    let fotoUrl = null;
-    let videoUrl = null;
-    if (req.files?.foto?.[0]) {
-      fotoUrl = await uploadRiMidia(codigoPasta, 'foto', req.files.foto[0]);
-    }
-    if (req.files?.video?.[0]) {
-      videoUrl = await uploadRiMidia(codigoPasta, 'video', req.files.video[0]);
-    }
+    const files = coletarArquivosUpload(req);
+    const { anexos, fotoUrl, videoUrl } = await uploadRiArquivosLista(codigoPasta, files);
 
     const ins = await dbQuery(
       `INSERT INTO qualidade."RI_Verificacoes"
-         (ri_check_id, codigo_produto, check_nome, descricao_check, foto, video, local)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (ri_check_id, codigo_produto, check_nome, descricao_check, foto, video, local, anexos)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8::jsonb)
        RETURNING *`,
-      [checkId, codigoProdutoGravar, checkNome, descricaoCheck || null, fotoUrl, videoUrl, local]
+      [checkId, codigoProdutoGravar, checkNome, descricaoCheck || null, fotoUrl, videoUrl, local, JSON.stringify(anexos)]
     );
 
     await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [checkId]);
@@ -1252,10 +1520,11 @@ router.get('/:id/niq', requireAuth, async (req, res) => {
   }
 });
 
-// POST /api/qualidade/ri-check/:id/niq — registrar falha detectada (foto/vídeo no R2)
+// POST /api/qualidade/ri-check/:id/niq — registrar falha detectada (vários arquivos)
 router.post('/:id/niq', requireAuth, upload.fields([
-  { name: 'foto', maxCount: 1 },
-  { name: 'video', maxCount: 1 },
+  { name: 'arquivos', maxCount: 20 },
+  { name: 'foto', maxCount: 10 },
+  { name: 'video', maxCount: 10 },
 ]), async (req, res) => {
   try {
     await garantirSchemaRi();
@@ -1264,7 +1533,7 @@ router.post('/:id/niq', requireAuth, upload.fields([
     if (!dados) return res.status(404).json({ ok: false, error: 'RI não encontrado.' });
 
     const check = dados.check;
-    const opIappId = Number(check.op_iapp_id) || 0;
+    const opIappId = Number(check.op_iapp_id) || Number(check.op_producao_id) || 0;
     if (!opIappId) return res.status(400).json({ ok: false, error: 'OP inválida no RI.' });
 
     const falhaDetectada = String(req.body?.falha_detectada || '').trim();
@@ -1285,22 +1554,20 @@ router.post('/:id/niq', requireAuth, upload.fields([
     const numeroOp = String(check.numero_op || opDados?.numero_op || opIappId).trim();
     const usuario = getUsuario(req);
 
-    let fotoUrl = null;
-    let videoUrl = null;
-    if (req.files?.foto?.[0]) {
-      fotoUrl = await uploadRiNiqMidia(codigoPasta, numeroOp, 'foto', req.files.foto[0]);
-    }
-    if (req.files?.video?.[0]) {
-      videoUrl = await uploadRiNiqMidia(codigoPasta, numeroOp, 'video', req.files.video[0]);
-    }
+    const files = coletarArquivosUpload(req);
+    const { anexos, fotoUrl, videoUrl } = await uploadRiArquivosLista(codigoPasta, files, {
+      niq: true,
+      numeroOp,
+    });
 
     const ins = await dbQuery(
       `INSERT INTO qualidade."RI_NIQ"
-         (codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video, usuario)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video, anexos, usuario)
+       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
        RETURNING id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
+                 COALESCE(anexos, '[]'::jsonb) AS anexos,
                  usuario, created_at::text AS created_at`,
-      [codigoProdutoGravar, opIappId, numeroOp, falhaDetectada, fotoUrl, videoUrl, usuario]
+      [codigoProdutoGravar, opIappId, numeroOp, falhaDetectada, fotoUrl, videoUrl, JSON.stringify(anexos), usuario]
     );
 
     await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [checkId]);

@@ -19,8 +19,9 @@
 //   R2_* (Cloudflare R2 via utils/storage)
 //   DRY_RUN=1          → simula sem gravar
 //   MAX_PRODUTOS=N     → limita quantos produtos receberão upload (0 = todos)
-//   CONSULTAR=1        → fase extra ConsultarProduto (lenta; raramente necessária)
+//   CONSULTAR=1        → fase extra ConsultarProduto (lenta; só se Listar não trouxer imagens[])
 //   SOMENTE_SEM_FOTO=1 → ignora produtos que já têm alguma foto (só zerados)
+//   OMIE_MIN_INTERVAL_MS → intervalo entre calls Omie (default 400, mínimo 300; Omie máx 4/s)
 // ============================================================================
 
 require('dotenv/config');
@@ -41,8 +42,8 @@ const MAX_PRODUTOS = Number(process.env.MAX_PRODUTOS || 0);
 const CONSULTAR = String(process.env.CONSULTAR || '').trim() === '1';
 const SOMENTE_SEM_FOTO = String(process.env.SOMENTE_SEM_FOTO || '').trim() === '1';
 const REGISTROS_POR_PAGINA = 100;
-// Omie: máx. 4 req/s → intervalo mínimo 250 ms; usamos 280 ms com margem
-const OMIE_MIN_INTERVAL_MS = 280;
+// Omie: máx. 4 req/s → default 400 ms (~2.5/s) com margem; override via OMIE_MIN_INTERVAL_MS
+const OMIE_MIN_INTERVAL_MS = Math.max(300, Number(process.env.OMIE_MIN_INTERVAL_MS || 400) || 400);
 const LOCK_FILE = path.join(os.tmpdir(), 'sync_fotos_faltantes_omie.lock');
 const MAX_RETRIES = 5;
 
