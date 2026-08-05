@@ -12103,6 +12103,7 @@ app.get('/api/etiquetas/layout-config', async (req, res) => {
     res.json({
       ok: true,
       layouts: rows.map(_etqLayoutRowToClient),
+      layoutTypes: ETQ_LAYOUT_TIPOS,
       sampleDefaults: ETQ_LAYOUT_SAMPLE_DEFAULT,
       fieldTypes: [
         { value: 'texto', label: 'Texto' },
@@ -12162,6 +12163,11 @@ app.delete('/api/etiquetas/layout-config/:chave', async (req, res) => {
          FROM etiqueta."ETQ_agente_config",
               LATERAL jsonb_each(COALESCE(printer_configs, '{}'::jsonb))
         WHERE value->>'layoutProfile' = $1
+           OR EXISTS (
+             SELECT 1
+               FROM jsonb_each_text(COALESCE(value->'layoutProfiles', '{}'::jsonb)) AS perfil_tipo
+              WHERE perfil_tipo.value = $1
+           )
         LIMIT 10`,
       [chave]
     );
@@ -12861,6 +12867,15 @@ const ETQ_LAYOUT_SAMPLE_DEFAULT = {
   endereco: '01-02-03-001',
 };
 
+const ETQ_LAYOUT_TIPOS = [
+  { chave: 'recebimento', nome: 'Recebimento — preview NF-e', vinculoImpressora: false },
+  { chave: 'impressao', nome: 'Identificação do produto', vinculoImpressora: true },
+  { chave: 'produto', nome: 'Impressão rápida — produto grande', vinculoImpressora: true },
+  { chave: 'produto_pequena', nome: 'Impressão rápida — produto pequeno', vinculoImpressora: true },
+  { chave: 'contagem', nome: 'Impressão rápida — contagem', vinculoImpressora: true },
+  { chave: 'endereco', nome: 'Endereço de armazenagem', vinculoImpressora: false },
+];
+
 /** Defaults de campos visuais por tipo de etiqueta (modo fácil). */
 const ETQ_LAYOUT_CAMPOS_DEFAULT = {
   recebimento: [
@@ -13042,8 +13057,9 @@ function _etqGerarZplDoLayout(layout, varsIn) {
   const campos = Array.isArray(layout?.campos) ? layout.campos : [];
   const template = String(layout?.zpl_template || '').trim();
 
+  let zpl = null;
   if (campos.length) {
-    return _etqCamposParaZpl(campos, vars, {
+    zpl = _etqCamposParaZpl(campos, vars, {
       chave: layout?.chave,
       widthMm,
       heightMm,
@@ -13053,11 +13069,13 @@ function _etqGerarZplDoLayout(layout, varsIn) {
       darkness,
       speed,
     });
+  } else if (template) {
+    zpl = _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi, darkness, speed });
   }
-  if (template) {
-    return _etqAplicarTemplateZpl(template, vars, { widthMm, heightMm, dpi, darkness, speed });
+  if (zpl && layout?.perfil === true && !/\^FXSGF_PROFILE_MANAGED\^FS/i.test(zpl)) {
+    zpl = zpl.replace(/(\^XA)/i, '$1\n^FXSGF_PROFILE_MANAGED^FS');
   }
-  return null;
+  return zpl;
 }
 
 function _etqLayoutRowToClient(r) {
@@ -13096,7 +13114,15 @@ async function _etqResolverLayoutDaImpressora(pcName, printerName, tipoBase = 'i
       [pc]
     );
     const configs = rows[0]?.printer_configs || {};
-    const chave = String(configs?.[printer]?.layoutProfile || '').trim();
+    const configImpressora = configs?.[printer] || {};
+    const perfisPorTipo = configImpressora?.layoutProfiles && typeof configImpressora.layoutProfiles === 'object'
+      ? configImpressora.layoutProfiles
+      : {};
+    const chave = String(
+      perfisPorTipo?.[tipoBase]
+      || (tipoBase === 'impressao' ? configImpressora?.layoutProfile : '')
+      || ''
+    ).trim();
     if (!chave) return fallback;
     const perfil = await _carregarLayoutEtiqueta(chave);
     if (!perfil || perfil.ativo === false || (perfil.tipo_base && perfil.tipo_base !== tipoBase)) return fallback;
@@ -16493,6 +16519,8 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
     const acao = String(req.body?.acao || '').trim().toLowerCase();
     const codigo = _impressaoRapidaSanitize(req.body?.codigo, 40);
     const copias = Math.floor(Number(req.body?.copias) || 0);
+    const destinoAgente = String(req.body?.destino_agente || '').trim() || null;
+    const impressora = String(req.body?.impressora || '').trim() || null;
     if (!['produto', 'contagem'].includes(acao)) return res.status(400).json({ error: 'Acao de impressao invalida.' });
     if (copias < 1 || copias > 100) return res.status(400).json({ error: 'Informe de 1 a 100 copias.' });
 
@@ -16504,7 +16532,7 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
       if (!codigo || !descricao) return res.status(400).json({ error: 'Codigo e descricao sao obrigatorios.' });
       if (!['grande', 'pequena'].includes(tipo)) return res.status(400).json({ error: 'Tipo de etiqueta invalido.' });
       const layoutKey = tipo === 'pequena' ? 'produto_pequena' : 'produto';
-      const layoutProd = await _carregarLayoutEtiqueta(layoutKey);
+      const layoutProd = await _etqResolverLayoutDaImpressora(destinoAgente, impressora, layoutKey);
       zpl = _gerarZplImpressaoRapidaProduto({
         codigo, descricao, tipo, lote: req.body?.lote, copias, layout: layoutProd,
       });
@@ -16512,7 +16540,7 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
       if (quickQtd > 0) {
         const quickCopias = Math.floor(Number(req.body?.quick_copias) || 1);
         if (quickCopias < 1 || quickCopias > 100) return res.status(400).json({ error: 'Copias da contagem rapida invalidas.' });
-        const layoutCont = await _carregarLayoutEtiqueta('contagem');
+        const layoutCont = await _etqResolverLayoutDaImpressora(destinoAgente, impressora, 'contagem');
         zpl += '\n' + _gerarZplImpressaoRapidaContagem({
           quantidade: quickQtd, unidade: req.body?.quick_unidade, copias: quickCopias, codigo, layout: layoutCont,
         });
@@ -16521,15 +16549,13 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
     } else {
       const qtd = Math.floor(Number(req.body?.quantidade) || 0);
       if (qtd < 1) return res.status(400).json({ error: 'Quantidade de contagem invalida.' });
-      const layoutCont = await _carregarLayoutEtiqueta('contagem');
+      const layoutCont = await _etqResolverLayoutDaImpressora(destinoAgente, impressora, 'contagem');
       zpl = _gerarZplImpressaoRapidaContagem({
         quantidade: qtd, unidade: req.body?.unidade, copias, codigo, layout: layoutCont,
       });
     }
 
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
-    const destinoAgente = String(req.body?.destino_agente || '').trim() || null;
-    const impressora = String(req.body?.impressora || '').trim() || null;
     const fila = await pool.query(
       `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
        VALUES ($1, 0, $2, $3, $4, $5, $6) RETURNING id`,

@@ -9712,7 +9712,7 @@
               </button>
             </div>
             <p style="margin:0 0 12px;font-size:13px;color:var(--inactive-color);">
-              Crie quantos perfis precisar, monte o ZPL de cada tamanho e escolha qual perfil cada impressora deve usar.
+              Crie perfis por finalidade, monte o ZPL de cada tamanho e escolha o padrão de cada impressora para Identificação, Produto e Contagem.
             </p>
             <div id="confAgenteLayoutsLista" style="display:flex;flex-direction:column;gap:12px;">
               <div style="color:var(--inactive-color);padding:20px;text-align:center;">Carregando...</div>
@@ -9724,12 +9724,12 @@
       <div id="confPerfilNovoModal" style="display:none;position:fixed;inset:0;z-index:10061;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:16px;">
         <div style="width:min(470px,96vw);background:#0f172a;border:1px solid #334155;border-radius:14px;color:#e2e8f0;box-shadow:0 24px 70px rgba(0,0,0,.45);">
           <div style="padding:16px 18px;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;">
-            <div><strong>Novo perfil de etiqueta</strong><div style="font-size:12px;color:#94a3b8;margin-top:3px;">Independente e reutilizável em qualquer impressora.</div></div>
+            <div><strong>Novo perfil de etiqueta</strong><div style="font-size:12px;color:#94a3b8;margin-top:3px;">A finalidade é herdada do layout escolhido como ponto de partida.</div></div>
             <button type="button" id="confPerfilNovoFechar" class="etiquetas-modal-close">&times;</button>
           </div>
           <div style="padding:18px;display:grid;gap:12px;">
             <label style="font-size:12px;color:#94a3b8;">Nome do perfil<input id="confPerfilNovoNome" placeholder="Ex.: 50x30 — etiqueta média" style="width:100%;margin-top:5px;padding:9px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;"></label>
-            <label style="font-size:12px;color:#94a3b8;">Usar como ponto de partida<select id="confPerfilNovoOrigem" style="width:100%;margin-top:5px;padding:9px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;"></select></label>
+            <label style="font-size:12px;color:#94a3b8;">Finalidade e ponto de partida<select id="confPerfilNovoOrigem" style="width:100%;margin-top:5px;padding:9px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;"></select></label>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
               <label style="font-size:12px;color:#94a3b8;">Largura (mm)<input id="confPerfilNovoW" type="number" min="10" value="50" style="width:100%;margin-top:5px;padding:9px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;"></label>
               <label style="font-size:12px;color:#94a3b8;">Altura (mm)<input id="confPerfilNovoH" type="number" min="10" value="30" style="width:100%;margin-top:5px;padding:9px;border-radius:8px;border:1px solid #334155;background:#1e293b;color:#fff;"></label>
