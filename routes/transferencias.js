@@ -157,7 +157,7 @@ function isErroOmieRetryable({ httpStatus, texto }) {
     || /too many|rate limit|consumo redundante|requisi/i.test(body);
 }
 
-async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao, motivo }, aprovadoPor) {
+async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, codigo, id, cmc, data_movimentacao, motivo, obs }, aprovadoPor) {
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
     const err = new Error('Credenciais da Omie ausentes.');
     err.status = 500;
@@ -181,6 +181,8 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
   const dataMovimentacao = normalizarDataMovimentacao(data_movimentacao);
   const motivoNormalizado = String(motivo || 'TRF').toUpperCase();
   const motivoOmie = (motivoNormalizado === 'TPQ' || motivoNormalizado === 'TRF') ? motivoNormalizado : 'TRF';
+  const obsBase = String(obs || '').trim()
+    || `Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`;
 
   const payload = {
     call: 'IncluirAjusteEstoque',
@@ -193,7 +195,7 @@ async function incluirAjusteEstoqueOmie({ origem, destino, codigo_produto, qtd, 
         id_prod: idProdutoNumero ?? codigo_produto,
         data: formatarDataBR(dataMovimentacao),
         quan: String(quantidadeValida || quantidadeNumero || qtd || '0'),
-        obs: anexarHoraObs(`Solicitação de transferência #${id} do produto ${codigo || ''}. Aprovado por ${aprovadoPor}.`),
+        obs: anexarHoraObs(obsBase),
         origem: 'AJU',
         tipo: 'TRF',
         motivo: motivoOmie,
@@ -577,7 +579,11 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     }
 
     const motivoOmie = String(req.body?.motivo || 'TRF').trim().toUpperCase() || 'TRF';
-    const respostaOmie = await incluirAjusteEstoqueOmie({ ...registroAtual, motivo: motivoOmie }, aprovadoPor);
+    const obsExtra = String(req.body?.obs || '').trim() || null;
+    const respostaOmie = await incluirAjusteEstoqueOmie(
+      { ...registroAtual, motivo: motivoOmie, obs: obsExtra },
+      aprovadoPor
+    );
 
     const updateSql = `
       UPDATE mensagens.transferencias
