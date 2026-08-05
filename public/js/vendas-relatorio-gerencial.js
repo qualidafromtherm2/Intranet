@@ -16,12 +16,13 @@
     { id: 'geografico', label: 'Distribuição Geográfica', icon: 'fa-map-location-dot', pg: 2 },
     { id: 'familias', label: 'Famílias de Produto', icon: 'fa-boxes-stacked', pg: 3 },
     { id: 'clientes', label: 'Clientes', icon: 'fa-users', pg: 4 },
-    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 5 },
-    { id: 'pareto', label: 'Pareto 80/20', icon: 'fa-chart-line', pg: 6 },
-    { id: 'financeiro', label: 'Análise Financeira', icon: 'fa-coins', pg: 7 },
-    { id: 'itens', label: 'Análise de Itens', icon: 'fa-layer-group', pg: 8 },
-    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 9 },
-    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 10 },
+    { id: 'vendedores', label: 'Vendedores', icon: 'fa-handshake', pg: 5 },
+    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 6 },
+    { id: 'pareto', label: 'Pareto 80/20', icon: 'fa-chart-line', pg: 7 },
+    { id: 'financeiro', label: 'Análise Financeira', icon: 'fa-coins', pg: 8 },
+    { id: 'itens', label: 'Análise de Itens', icon: 'fa-layer-group', pg: 9 },
+    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 10 },
+    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 11 },
   ];
 
   function _esc(s) {
@@ -206,6 +207,20 @@
         </div>
         ${_footerHtml(4)}
       </div>
+      <div class="at-rel-ger-page${_secao === 'vendedores' ? ' is-active' : ''}" data-sec="vendedores">
+        ${hdr()}
+        <div class="at-rel-ger-sec-title"><i class="fa-solid fa-handshake"></i> Vendedores</div>
+        <div class="at-rel-ger-body">
+          <div id="vendRelGerKpisVendedor" class="at-rel-ger-kpis"></div>
+          <div class="at-rel-ger-grid-2">
+            <div class="at-rel-ger-card"><h4>Ranking por Faturamento</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartVendedor"></canvas></div></div>
+            <div class="at-rel-ger-card"><h4>Tabela — Vendedor × Valor</h4>
+              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr><th>Vendedor</th><th class="r">Pedidos</th><th class="r">Clientes</th><th class="r">Valor</th><th class="r">Ticket</th></tr></thead><tbody id="vendRelGerVendedorBody"></tbody></table></div>
+            </div>
+          </div>
+        </div>
+        ${_footerHtml(5)}
+      </div>
       <div class="at-rel-ger-page${_secao === 'evolucao' ? ' is-active' : ''}" data-sec="evolucao">
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-column"></i> Evolução no Período</div>
@@ -215,7 +230,7 @@
             <div class="at-rel-ger-card"><h4>Pedidos no Período</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartEvolPedidos"></canvas></div></div>
           </div>
         </div>
-        ${_footerHtml(5)}
+        ${_footerHtml(6)}
       </div>
       <div class="at-rel-ger-page${_secao === 'pareto' ? ' is-active' : ''}" data-sec="pareto">
         ${hdr()}
@@ -228,7 +243,7 @@
             </div>
           </div>
         </div>
-        ${_footerHtml(6)}
+        ${_footerHtml(7)}
       </div>
       <div class="at-rel-ger-page${_secao === 'financeiro' ? ' is-active' : ''}" data-sec="financeiro">
         ${hdr()}
@@ -241,7 +256,7 @@
             </div>
           </div>
         </div>
-        ${_footerHtml(7)}
+        ${_footerHtml(8)}
       </div>
       <div class="at-rel-ger-page${_secao === 'itens' ? ' is-active' : ''}" data-sec="itens">
         ${hdr()}
@@ -254,7 +269,7 @@
           </div>
           <div id="vendRelGerItensResumo" style="margin-top:12px;font-size:12px;color:#475569;"></div>
         </div>
-        ${_footerHtml(8)}
+        ${_footerHtml(9)}
       </div>
       <div class="at-rel-ger-page${_secao === 'plano' ? ' is-active' : ''}" data-sec="plano">
         ${hdr()}
@@ -267,7 +282,7 @@
           </div>
           <div style="overflow:auto;"><table class="at-rel-ger-tbl"><thead><tr><th>Ação</th><th>Descrição</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th><th></th></tr></thead><tbody id="vendRelGerPlanoBody"></tbody></table></div>
         </div>
-        ${_footerHtml(9)}
+        ${_footerHtml(10)}
       </div>
       <div class="at-rel-ger-page${_secao === 'conclusao' ? ' is-active' : ''}" data-sec="conclusao">
         ${hdr()}
@@ -281,7 +296,7 @@
             <div><label style="font-size:12px;font-weight:700;color:#1e3a5f;">Oportunidades</label><textarea id="vendRelGerConcOportunidades" rows="5" style="width:100%;margin-top:6px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;"></textarea></div>
           </div>
         </div>
-        ${_footerHtml(10)}
+        ${_footerHtml(11)}
       </div>`;
 
     nav.querySelectorAll('.at-rel-ger-nav-btn').forEach(btn => {
@@ -402,6 +417,10 @@
     if (sec === 'clientes') {
       _renderBar('vendRelGerChartCliente', 'cliente', cli.map(r => r.cliente), cli.map(r => r.valor_total), '#f59e0b');
     }
+    if (sec === 'vendedores') {
+      const vend = (data.por_vendedor || []).slice(0, 12);
+      _renderBar('vendRelGerChartVendedor', 'vendedor', vend.map(r => r.vendedor), vend.map(r => r.valor_total), '#6366f1');
+    }
     if (sec === 'evolucao') {
       const multi = data.evolucao_tipo === 'mes';
       const titulo = document.getElementById('vendRelGerEvolTitulo');
@@ -470,6 +489,27 @@
       cliBody.innerHTML = rows.length
         ? rows.map(r => `<tr><td>${_esc(r.cliente)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
         : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhum cliente no período.</td></tr>';
+    }
+    const vendBody = document.getElementById('vendRelGerVendedorBody');
+    if (vendBody) {
+      const rows = data.por_vendedor || [];
+      vendBody.innerHTML = rows.length
+        ? rows.map(r => `<tr><td>${_esc(r.vendedor)}</td><td class="r">${r.total_pedidos}</td><td class="r">${r.clientes}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${MOEDA.format(r.ticket_medio || 0)}</td></tr>`).join('')
+        : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhum vendedor no período.</td></tr>';
+    }
+    const vendKpis = document.getElementById('vendRelGerKpisVendedor');
+    if (vendKpis) {
+      const rows = data.por_vendedor || [];
+      const totalV = rows.length;
+      const fatV = rows.reduce((s, r) => s + (r.valor_total || 0), 0);
+      const top = rows[0];
+      const cards = [
+        { label: 'Vendedores ativos', value: totalV, cor: '#6366f1' },
+        { label: 'Faturamento (vendedores)', value: MOEDA.format(fatV), cor: '#38bdf8' },
+        { label: 'Top vendedor', value: top ? _esc(top.vendedor) : '—', cor: '#10b981' },
+        { label: 'Valor top', value: top ? MOEDA.format(top.valor_total || 0) : '—', cor: '#f59e0b' },
+      ];
+      vendKpis.innerHTML = cards.map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
     }
     const parBody = document.getElementById('vendRelGerParetoBody');
     if (parBody) {
@@ -570,8 +610,6 @@
   }
 
   async function _carregar() {
-    const modo = document.getElementById('vendRelGerModo')?.value || 'mes';
-    const etapa = document.getElementById('vendRelGerEtapa')?.value || 'entregue';
     const statusEl = document.getElementById('vendRelGerStatus');
     const erroEl = document.getElementById('vendRelGerErro');
     const conteudoEl = document.getElementById('vendRelGerConteudo');
@@ -581,7 +619,7 @@
     if (conteudoEl) conteudoEl.style.display = 'none';
 
     try {
-      const qs = new URLSearchParams({ modo, etapa });
+      const qs = _filtrosQueryParams();
       const resp = await fetch(`/api/sac/vendas/relatorio-gerencial?${qs}`, { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
@@ -603,14 +641,253 @@
     }
   }
 
+  function _preencherSelect(id, options, getVal, getLabel, todosLabel = 'Todos') {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const current = el.value;
+    el.innerHTML = `<option value="">${todosLabel}</option>${(options || []).map((o) => {
+      const v = getVal(o);
+      return `<option value="${_esc(v)}">${_esc(getLabel(o))}</option>`;
+    }).join('')}`;
+    if (current && [...el.options].some((opt) => opt.value === current)) el.value = current;
+  }
+
+  function _filtrosQueryParams() {
+    const qs = new URLSearchParams();
+    qs.set('modo', document.getElementById('vendRelGerModo')?.value || 'mes');
+    qs.set('etapa', document.getElementById('vendRelGerEtapa')?.value || 'entregue');
+    [
+      ['vendRelGerAno', 'ano'],
+      ['vendRelGerMes', 'mes'],
+      ['vendRelGerTrimestre', 'trimestre'],
+      ['vendRelGerVendedor', 'vendedor'],
+      ['vendRelGerFamilia', 'familia'],
+      ['vendRelGerEstado', 'estado'],
+      ['vendRelGerTipo', 'tipo'],
+    ].forEach(([id, key]) => {
+      const v = document.getElementById(id)?.value?.trim();
+      if (v) qs.set(key, v);
+    });
+    return qs;
+  }
+
+  async function _carregarFiltrosOpcoes() {
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/filtros-opcoes', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) return;
+      _preencherSelect('vendRelGerAno', data.anos || [], (a) => String(a), (a) => String(a));
+      _preencherSelect('vendRelGerVendedor', data.vendedores || [], (v) => v.codigo, (v) => v.nome);
+      _preencherSelect('vendRelGerFamilia', data.familias || [], (f) => f.codigo, (f) => f.descricao);
+      _preencherSelect('vendRelGerEstado', data.estados || [], (e) => e, (e) => e);
+      _preencherSelect('vendRelGerTipo', data.tipos || [], (t) => t.codigo, (t) => t.label);
+    } catch (_) { /* silencioso */ }
+  }
+
+  function _abrirModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'flex';
+  }
+
+  function _fecharModal(id) {
+    const el = document.getElementById(id);
+    if (el) el.style.display = 'none';
+  }
+
+  function _atualizarContagemCfop() {
+    const boxes = [...document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]')];
+    const marcados = boxes.filter((b) => b.checked).length;
+    const el = document.getElementById('vendRelGerCfopContagem');
+    if (el) el.textContent = `${marcados} de ${boxes.length} incluídos`;
+  }
+
+  function _renderListaCfop(cfops) {
+    const wrap = document.getElementById('vendRelGerCfopLista');
+    if (!wrap) return;
+    if (!Array.isArray(cfops) || !cfops.length) {
+      wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Nenhum CFOP encontrado nos pedidos.</div>';
+      _atualizarContagemCfop();
+      return;
+    }
+    wrap.innerHTML = cfops.map((c) => {
+      const id = `vendCfopChk_${_esc(c.cfop)}`;
+      const desc = c.descricao ? ` — ${_esc(c.descricao)}` : '';
+      return `<label for="${id}" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid #1e293b;margin-bottom:6px;cursor:pointer;background:rgba(255,255,255,.02);">
+        <input type="checkbox" id="${id}" data-cfop="${_esc(c.cfop)}" class="vend-rel-cfop-chk" ${c.incluido !== false ? 'checked' : ''}>
+        <span style="font-size:13px;color:#e2e8f0;line-height:1.35;">
+          <strong style="font-variant-numeric:tabular-nums;">${_esc(c.cfop_exibicao || c.cfop)}</strong>
+          <span style="color:#64748b;">${desc}</span>
+        </span>
+      </label>`;
+    }).join('');
+    wrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
+      chk.addEventListener('change', _atualizarContagemCfop);
+    });
+    _atualizarContagemCfop();
+  }
+
+  async function _abrirConfigCfop() {
+    _fecharModal('vendRelGerConfigModal');
+    _abrirModal('vendRelGerCfopModal');
+    const wrap = document.getElementById('vendRelGerCfopLista');
+    const statusEl = document.getElementById('vendRelGerCfopStatus');
+    if (wrap) wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Carregando CFOPs...</div>';
+    if (statusEl) statusEl.textContent = '';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/cfop', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar CFOPs.');
+      _renderListaCfop(data.cfops || []);
+    } catch (err) {
+      if (wrap) wrap.innerHTML = `<div style="color:#f87171;font-size:13px;">${_esc(err.message || 'Erro')}</div>`;
+    }
+  }
+
+  async function _salvarConfigCfop() {
+    const statusEl = document.getElementById('vendRelGerCfopStatus');
+    const boxes = [...document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]')];
+    const cfops = boxes.map((b) => ({
+      cfop: b.getAttribute('data-cfop'),
+      incluido: !!b.checked,
+    }));
+    if (statusEl) statusEl.textContent = 'Salvando...';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/cfop', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cfops }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+      if (statusEl) statusEl.textContent = 'Padrão salvo para todos.';
+      _fecharModal('vendRelGerCfopModal');
+      await _carregar();
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || 'Erro ao salvar.';
+    }
+  }
+
+  function _atualizarContagemStatus() {
+    const boxes = [...document.querySelectorAll('#vendRelGerStatusLista input[type="checkbox"][data-status]')];
+    const marcados = boxes.filter((b) => b.checked).length;
+    const el = document.getElementById('vendRelGerStatusContagem');
+    if (el) el.textContent = `${marcados} de ${boxes.length} incluídos`;
+  }
+
+  function _renderListaStatus(statusList) {
+    const wrap = document.getElementById('vendRelGerStatusLista');
+    if (!wrap) return;
+    if (!Array.isArray(statusList) || !statusList.length) {
+      wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Nenhum status encontrado nas notas.</div>';
+      _atualizarContagemStatus();
+      return;
+    }
+    wrap.innerHTML = statusList.map((s) => {
+      const id = `vendStatusChk_${_esc(s.status)}`;
+      return `<label for="${id}" style="display:flex;align-items:flex-start;gap:10px;padding:8px 10px;border-radius:8px;border:1px solid #1e293b;margin-bottom:6px;cursor:pointer;background:rgba(255,255,255,.02);">
+        <input type="checkbox" id="${id}" data-status="${_esc(s.status)}" class="vend-rel-status-chk" ${s.incluido !== false ? 'checked' : ''}>
+        <span style="font-size:13px;color:#e2e8f0;line-height:1.35;"><strong>${_esc(s.status)}</strong></span>
+      </label>`;
+    }).join('');
+    wrap.querySelectorAll('input[type="checkbox"]').forEach((chk) => {
+      chk.addEventListener('change', _atualizarContagemStatus);
+    });
+    _atualizarContagemStatus();
+  }
+
+  async function _abrirConfigStatus() {
+    _fecharModal('vendRelGerConfigModal');
+    _abrirModal('vendRelGerStatusModal');
+    const wrap = document.getElementById('vendRelGerStatusLista');
+    const statusEl = document.getElementById('vendRelGerStatusSaveStatus');
+    if (wrap) wrap.innerHTML = '<div style="color:#64748b;font-size:13px;">Carregando status...</div>';
+    if (statusEl) statusEl.textContent = '';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/status', { credentials: 'include' });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar status.');
+      _renderListaStatus(data.status_list || []);
+    } catch (err) {
+      if (wrap) wrap.innerHTML = `<div style="color:#f87171;font-size:13px;">${_esc(err.message || 'Erro')}</div>`;
+    }
+  }
+
+  async function _salvarConfigStatus() {
+    const statusEl = document.getElementById('vendRelGerStatusSaveStatus');
+    const boxes = [...document.querySelectorAll('#vendRelGerStatusLista input[type="checkbox"][data-status]')];
+    const status_list = boxes.map((b) => ({
+      status: b.getAttribute('data-status'),
+      incluido: !!b.checked,
+    }));
+    if (statusEl) statusEl.textContent = 'Salvando...';
+    try {
+      const resp = await fetch('/api/sac/vendas/relatorio-gerencial/config/status', {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status_list }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao salvar.');
+      if (statusEl) statusEl.textContent = 'Padrão salvo para todos.';
+      _fecharModal('vendRelGerStatusModal');
+      await _carregar();
+    } catch (err) {
+      if (statusEl) statusEl.textContent = err.message || 'Erro ao salvar.';
+    }
+  }
+
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
       document.getElementById('vendRelGerModo')?.addEventListener('change', _carregar);
       document.getElementById('vendRelGerEtapa')?.addEventListener('change', _carregar);
+      ['vendRelGerAno', 'vendRelGerMes', 'vendRelGerTrimestre', 'vendRelGerVendedor', 'vendRelGerFamilia', 'vendRelGerEstado', 'vendRelGerTipo'].forEach((id) => {
+        document.getElementById(id)?.addEventListener('change', _carregar);
+      });
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => window.print());
+
+      document.getElementById('vendRelGerConfigBtn')?.addEventListener('click', () => _abrirModal('vendRelGerConfigModal'));
+      document.getElementById('vendRelGerConfigFechar')?.addEventListener('click', () => _fecharModal('vendRelGerConfigModal'));
+      document.getElementById('vendRelGerConfigCfopBtn')?.addEventListener('click', _abrirConfigCfop);
+      document.getElementById('vendRelGerConfigStatusBtn')?.addEventListener('click', _abrirConfigStatus);
+      document.getElementById('vendRelGerCfopFechar')?.addEventListener('click', () => _fecharModal('vendRelGerCfopModal'));
+      document.getElementById('vendRelGerCfopCancelar')?.addEventListener('click', () => _fecharModal('vendRelGerCfopModal'));
+      document.getElementById('vendRelGerCfopSelTudo')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]').forEach((b) => { b.checked = true; });
+        _atualizarContagemCfop();
+      });
+      document.getElementById('vendRelGerCfopDesmarcar')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerCfopLista input[type="checkbox"][data-cfop]').forEach((b) => { b.checked = false; });
+        _atualizarContagemCfop();
+      });
+      document.getElementById('vendRelGerCfopSalvar')?.addEventListener('click', _salvarConfigCfop);
+
+      document.getElementById('vendRelGerStatusFechar')?.addEventListener('click', () => _fecharModal('vendRelGerStatusModal'));
+      document.getElementById('vendRelGerStatusCancelar')?.addEventListener('click', () => _fecharModal('vendRelGerStatusModal'));
+      document.getElementById('vendRelGerStatusSelTudo')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerStatusLista input[type="checkbox"][data-status]').forEach((b) => { b.checked = true; });
+        _atualizarContagemStatus();
+      });
+      document.getElementById('vendRelGerStatusDesmarcar')?.addEventListener('click', () => {
+        document.querySelectorAll('#vendRelGerStatusLista input[type="checkbox"][data-status]').forEach((b) => { b.checked = false; });
+        _atualizarContagemStatus();
+      });
+      document.getElementById('vendRelGerStatusSalvar')?.addEventListener('click', _salvarConfigStatus);
+
+      document.getElementById('vendRelGerConfigModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerConfigModal') _fecharModal('vendRelGerConfigModal');
+      });
+      document.getElementById('vendRelGerCfopModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerCfopModal') _fecharModal('vendRelGerCfopModal');
+      });
+      document.getElementById('vendRelGerStatusModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerStatusModal') _fecharModal('vendRelGerStatusModal');
+      });
     }
+    _carregarFiltrosOpcoes();
     _carregar();
   };
 })();

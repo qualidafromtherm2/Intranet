@@ -188,6 +188,122 @@ function attachOpenHandlers(ul) {
   });
 }
 
+function getListaSearchTerm() {
+  return (document.getElementById('codeFilter')?.value || '').trim();
+}
+
+function deveMostrarSolicitacaoCompraCard() {
+  return getListaSearchTerm().length > 0;
+}
+
+async function abrirSolicitacaoCompraDaLista() {
+  const termo = getListaSearchTerm();
+  if (typeof window.abrirModalCatalogoOmie === 'function') {
+    await window.abrirModalCatalogoOmie();
+  }
+  if (!termo) return;
+  const input = document.getElementById('catalogoDescricaoNaoCadastrado');
+  if (input && !String(input.value || '').trim()) {
+    input.value = termo;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+function buildSolicitacaoCompraCardHtml() {
+  return `
+    <div class="produto-catalogo-card lista-solicitacao-compra-card" data-lista-solicitacao-compra="1" role="button" tabindex="0"
+      title="Não encontrou o produto? Abrir solicitação de compra"
+      style="
+        background:linear-gradient(180deg,#fff7ed 0%,#ffffff 55%);
+        border:2px dashed #f59e0b;
+        border-radius:8px;
+        overflow:hidden;
+        transition:all 0.2s;
+        cursor:pointer;
+        display:flex;
+        flex-direction:column;
+        min-height:100%;
+      ">
+      <div style="
+        width:100%;
+        height:140px;
+        background:#fffbeb;
+        display:flex;
+        align-items:center;
+        justify-content:center;
+        border-bottom:1px dashed #f59e0b;
+      ">
+        <div style="
+          width:72px;height:72px;border-radius:50%;
+          background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);
+          color:#fff;display:flex;align-items:center;justify-content:center;
+          box-shadow:0 8px 20px rgba(245,158,11,0.35);
+        ">
+          <i class="fa-solid fa-file-circle-plus" style="font-size:32px;"></i>
+        </div>
+      </div>
+      <div style="padding:12px;flex:1;display:flex;flex-direction:column;gap:8px;">
+        <div style="font-size:13px;font-weight:800;color:#92400e;">Solicitação</div>
+        <div style="font-size:11px;line-height:1.4;color:#78350f;flex:1;">
+          Não encontrou o produto na lista? Cadastre e solicite a compra de um item novo.
+        </div>
+        <button type="button" style="
+          margin-top:auto;width:100%;border:none;border-radius:6px;padding:10px;
+          background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;
+          font-size:12px;font-weight:700;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;gap:6px;
+        ">
+          <i class="fa-solid fa-cart-plus"></i> Solicitar compra
+        </button>
+      </div>
+    </div>
+  `;
+}
+
+function bindSolicitacaoCompraCard(el) {
+  if (!el || el.__solicitacaoBound) return;
+  el.__solicitacaoBound = true;
+  const open = (ev) => {
+    ev?.preventDefault?.();
+    ev?.stopPropagation?.();
+    void abrirSolicitacaoCompraDaLista();
+  };
+  el.addEventListener('click', open);
+  el.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter' || ev.key === ' ') open(ev);
+  });
+}
+
+function appendSolicitacaoCompraCardIfNeeded(container, { asListItem = false } = {}) {
+  if (!container) return;
+  container.querySelectorAll('[data-lista-solicitacao-compra="1"]').forEach(el => el.remove());
+  if (!deveMostrarSolicitacaoCompraCard()) return;
+
+  if (asListItem) {
+    const li = document.createElement('li');
+    li.className = 'product-list-item lista-solicitacao-compra-item';
+    li.dataset.listaSolicitacaoCompra = '1';
+    li.style.cssText = 'cursor:pointer;display:flex;align-items:center;gap:10px;padding:12px 14px;border:2px dashed #f59e0b;border-radius:8px;background:#fffbeb;margin-top:8px;';
+    li.innerHTML = `
+      <span style="width:36px;height:36px;border-radius:50%;background:linear-gradient(135deg,#f59e0b 0%,#d97706 100%);color:#fff;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0;">
+        <i class="fa-solid fa-file-circle-plus"></i>
+      </span>
+      <span class="products" style="color:#92400e;font-weight:800;">Solicitação</span>
+      <span class="status" style="color:#78350f;">Não encontrou? Solicitar compra / cadastrar produto novo</span>
+    `;
+    bindSolicitacaoCompraCard(li);
+    container.appendChild(li);
+    return;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = buildSolicitacaoCompraCardHtml().trim();
+  const card = wrap.firstElementChild;
+  if (!card) return;
+  bindSolicitacaoCompraCard(card);
+  container.appendChild(card);
+}
+
 function renderList(ul, produtos) {
   ul.innerHTML = produtos.map(p => `
     <li data-codigo="${p.codigo ?? ''}" style="cursor: pointer;" class="product-list-item">
@@ -195,6 +311,7 @@ function renderList(ul, produtos) {
       <span class="status">${p.descricao ?? ''}</span>
     </li>`).join('');
   attachOpenHandlers(ul);
+  appendSolicitacaoCompraCardIfNeeded(ul, { asListItem: true });
 }
 
 const __gridState = {
@@ -255,6 +372,16 @@ function renderGrid(grid, produtos) {
 
   if (typeof window.renderizarCatalogoOmie !== 'function') {
     gridEl.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Visualização em grade indisponível</div>';
+    appendSolicitacaoCompraCardIfNeeded(gridEl);
+    return;
+  }
+
+  if (!normalizados.length) {
+    if (deveMostrarSolicitacaoCompraCard()) {
+      appendSolicitacaoCompraCardIfNeeded(gridEl);
+    } else {
+      gridEl.innerHTML = '<div style="text-align:center;padding:40px;color:#9ca3af;grid-column:1/-1;">Nenhum produto encontrado</div>';
+    }
     return;
   }
 
@@ -271,11 +398,18 @@ function renderNextGridBatch(grid, generation = __gridState.generation) {
   const start = __gridState.rendered;
   const end = start + __gridState.batchSize;
   const slice = __gridState.items.slice(start, end);
-  if (!slice.length) return;
+  if (!slice.length) {
+    if (__gridState.rendered >= __gridState.items.length) {
+      appendSolicitacaoCompraCardIfNeeded(gridEl);
+    }
+    return;
+  }
 
   __gridState.loading = true;
   try {
     if (generation !== __gridState.generation) return;
+    // Remove card temporário antes de appendar mais produtos
+    gridEl.querySelectorAll('[data-lista-solicitacao-compra="1"]').forEach(el => el.remove());
     window.renderizarCatalogoOmie(slice, {
       containerId: 'listaProdutosGrid',
       atualizarContador: false,
@@ -283,6 +417,9 @@ function renderNextGridBatch(grid, generation = __gridState.generation) {
     });
     if (generation === __gridState.generation) {
       __gridState.rendered += slice.length;
+      if (__gridState.rendered >= __gridState.items.length) {
+        appendSolicitacaoCompraCardIfNeeded(gridEl);
+      }
     }
   } finally {
     __gridState.loading = false;

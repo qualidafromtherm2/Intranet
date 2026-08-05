@@ -1,10 +1,28 @@
 const express = require('express');
 const { pool } = require('../src/db');
-const { VENDAS_NF_POR_PEDIDO_CTE, vendasNfJoinPedidoSql } = require('../utils/vendasNfJoin');
+const omieCall = require('../utils/omieCall');
+const { vendasNfJoinPedidoSql } = require('../utils/vendasNfJoin');
+const {
+  calcPeriodoComFiltros,
+  parseFiltrosRelatorio,
+  appendFiltrosSql,
+  labelTipoItem,
+} = require('../utils/vendasRelatorioFiltros');
 
 const router = express.Router();
 
 let _ensureSchemaPromise = null;
+
+function normalizeCfopDigits(value) {
+  return String(value || '').replace(/\D/g, '').trim();
+}
+
+function formatCfopDisplay(digits) {
+  const d = normalizeCfopDigits(digits);
+  if (!d) return '';
+  if (d.length === 4) return `${d[0]}.${d.slice(1)}`;
+  return d;
+}
 
 async function ensureVendasRelatorioSchema() {
   if (_ensureSchemaPromise) return _ensureSchemaPromise;
@@ -22,6 +40,38 @@ async function ensureVendasRelatorioSchema() {
     );
     CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_mes_idx
       ON "Vendas".relatorio_gerencial (mes);
+
+    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_cfop (
+      cfop VARCHAR(10) PRIMARY KEY,
+      incluido BOOLEAN NOT NULL DEFAULT TRUE,
+      descricao TEXT,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_por TEXT
+    );
+    CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_cfop_incluido_idx
+      ON "Vendas".relatorio_gerencial_cfop (incluido);
+
+    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_status (
+      status VARCHAR(40) PRIMARY KEY,
+      incluido BOOLEAN NOT NULL DEFAULT TRUE,
+      descricao TEXT,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      atualizado_por TEXT
+    );
+    CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_status_incluido_idx
+      ON "Vendas".relatorio_gerencial_status (incluido);
+    ALTER TABLE "Vendas".relatorio_gerencial_status
+      ADD COLUMN IF NOT EXISTS descricao TEXT;
+
+    CREATE TABLE IF NOT EXISTS "Vendas".vendedores_omie (
+      codigo BIGINT PRIMARY KEY,
+      nome TEXT,
+      email TEXT,
+      inativo BOOLEAN NOT NULL DEFAULT FALSE,
+      atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    ALTER TABLE "Vendas".vendedores_omie
+      ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `).then(() => undefined).catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
@@ -29,55 +79,103 @@ async function ensureVendasRelatorioSchema() {
   return _ensureSchemaPromise;
 }
 
-function mesAtualReferencia(refDate = new Date()) {
-  const ano = refDate.getFullYear();
-  const mesNum = refDate.getMonth() + 1;
-  const pad = (n) => String(n).padStart(2, '0');
-  return { ano, mesNum, mesRaw: `${ano}-${pad(mesNum)}` };
+/** Garante catálogo de CFOPs a partir dos itens de pedido (6905 começa desmarcado). */
+async function syncRelatorioCfopCatalog() {
+  await ensureVendasRelatorioSchema();
+  await pool.query(`
+    INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, descricao)
+    SELECT DISTINCT
+      REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') AS cfop,
+      (REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> '6905') AS incluido,
+      NULL
+    FROM "Vendas".pedidos_venda_itens i
+    WHERE COALESCE(TRIM(i.cfop), '') <> ''
+      AND REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> ''
+    ON CONFLICT (cfop) DO NOTHING
+  `);
+  try {
+    await pool.query(`
+      UPDATE "Vendas".relatorio_gerencial_cfop c
+         SET descricao = cfg.descricao
+        FROM configuracoes.cfop cfg
+       WHERE REGEXP_REPLACE(TRIM(cfg.codigo), '\\D', '', 'g') = c.cfop
+         AND COALESCE(TRIM(c.descricao), '') = ''
+         AND COALESCE(TRIM(cfg.descricao), '') <> ''
+    `);
+  } catch (_) {
+    /* configuracoes.cfop pode não existir em algum ambiente */
+  }
 }
 
-function calcPeriodo(modoRaw, refDate = new Date()) {
-  const modosValidos = new Set(['mes', '3m', '6m', 'anual']);
-  const modo = modosValidos.has(modoRaw) ? modoRaw : 'mes';
-  const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
-  const { ano, mesNum, mesRaw } = mesAtualReferencia(refDate);
-  const pad = (n) => String(n).padStart(2, '0');
-  const fmtYmd = (y, m, d = 1) => `${y}-${pad(m)}-${pad(d)}`;
-  const mesLabel = (y, m) => (m >= 1 && m <= 12 ? `${nomesMes[m - 1]}/${y}` : `${y}-${pad(m)}`);
+/** Catálogo de status NF a partir das notas (Autorizada incluída por padrão). */
+async function syncRelatorioStatusCatalog() {
+  await ensureVendasRelatorioSchema();
+  await pool.query(`
+    INSERT INTO "Vendas".relatorio_gerencial_status (status, incluido)
+    SELECT DISTINCT
+      TRIM(n.status_ultimo) AS status,
+      (TRIM(n.status_ultimo) = 'Autorizada') AS incluido
+    FROM "Vendas".notas_fiscais_omie n
+    WHERE COALESCE(TRIM(n.status_ultimo), '') <> ''
+    ON CONFLICT (status) DO NOTHING
+  `);
+}
 
-  if (modo === 'mes') {
-    const nextM = mesNum === 12 ? 1 : mesNum + 1;
-    const nextY = mesNum === 12 ? ano + 1 : ano;
-    return {
-      modo,
-      mesRef: mesRaw,
-      inicio: fmtYmd(ano, mesNum),
-      fimExclusive: fmtYmd(nextY, nextM),
-      label: mesLabel(ano, mesNum),
-      meses: [mesRaw],
-      evolucaoTipo: 'semana',
-    };
+async function syncVendedoresOmieIfNeeded(force = false) {
+  await ensureVendasRelatorioSchema();
+  if (!force) {
+    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM "Vendas".vendedores_omie`);
+    if ((rows[0]?.n || 0) > 0) return;
   }
+  const appKey = process.env.OMIE_APP_KEY;
+  const appSecret = process.env.OMIE_APP_SECRET;
+  if (!appKey || !appSecret) return;
 
-  const qtd = modo === '3m' ? 3 : (modo === '6m' ? 6 : 12);
-  const inicioDate = new Date(ano, mesNum - 1 - qtd, 1);
-  const meses = [];
-  for (let i = 0; i < qtd; i += 1) {
-    const d = new Date(inicioDate.getFullYear(), inicioDate.getMonth() + i, 1);
-    meses.push(`${d.getFullYear()}-${pad(d.getMonth() + 1)}`);
+  let pagina = 1;
+  let totalPaginas = 1;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (force) {
+      await client.query(`DELETE FROM "Vendas".vendedores_omie`);
+    }
+    while (pagina <= totalPaginas) {
+      const data = await omieCall('https://app.omie.com.br/api/v1/geral/vendedores/', {
+        call: 'ListarVendedores',
+        app_key: appKey,
+        app_secret: appSecret,
+        param: [{ pagina, registros_por_pagina: 50, apenas_importado_api: 'N' }],
+      });
+      totalPaginas = Math.max(1, Number(data?.total_de_paginas || 1));
+      const cadastro = Array.isArray(data?.cadastro) ? data.cadastro : [];
+      for (const v of cadastro) {
+        const codigoRaw = String(v?.codigo ?? v?.codigo_vendedor ?? '').replace(/\D/g, '').trim();
+        if (!codigoRaw) continue;
+        const codigo = Number(codigoRaw);
+        if (!Number.isFinite(codigo)) continue;
+        const nome = String(v?.nome ?? v?.nome_vendedor ?? '').trim() || null;
+        const email = String(v?.email ?? '').trim() || null;
+        const inativo = String(v?.inativo ?? 'N').trim().toUpperCase() === 'S';
+        await client.query(
+          `INSERT INTO "Vendas".vendedores_omie (codigo, nome, email, inativo, atualizado_em)
+           VALUES ($1, $2, $3, $4, NOW())
+           ON CONFLICT (codigo) DO UPDATE SET
+             nome = EXCLUDED.nome,
+             email = EXCLUDED.email,
+             inativo = EXCLUDED.inativo,
+             atualizado_em = NOW()`,
+          [codigo, nome, email, inativo]
+        );
+      }
+      pagina += 1;
+    }
+    await client.query('COMMIT');
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
   }
-  const fimY = mesNum === 1 ? ano - 1 : ano;
-  const fimM = mesNum === 1 ? 12 : mesNum - 1;
-
-  return {
-    modo,
-    mesRef: mesRaw,
-    inicio: fmtYmd(inicioDate.getFullYear(), inicioDate.getMonth() + 1),
-    fimExclusive: fmtYmd(ano, mesNum),
-    label: `${mesLabel(inicioDate.getFullYear(), inicioDate.getMonth() + 1)} a ${mesLabel(fimY, fimM)}`,
-    meses,
-    evolucaoTipo: 'mes',
-  };
 }
 
 function buildEtapaFilter(etapaRaw) {
@@ -95,22 +193,55 @@ function buildEtapaFilter(etapaRaw) {
   };
 }
 
-const VENDAS_CTES = `
-  ${VENDAS_NF_POR_PEDIDO_CTE},
-  pedidos_cfop_ignorado AS (
-    SELECT DISTINCT codigo_pedido
-    FROM "Vendas".pedidos_venda_itens
-    WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
+/** NF por pedido — filtro de status_ultimo só neste relatório (não altera utils/vendasNfJoin). */
+const VENDAS_NF_POR_PEDIDO_CTE = `
+  nf_por_pedido AS (
+    SELECT
+      COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') AS pedido_key,
+      MAX(
+        CASE
+          WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+            THEN LEFT(TRIM(data_emissao), 10)::date
+          WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
+            THEN to_date(regexp_replace(SUBSTRING(TRIM(data_emissao) FROM 1 FOR 10), ' .*', ''), 'DD/MM/YYYY')
+          ELSE NULL
+        END
+      ) AS data_emissao_dt
+    FROM "Vendas".notas_fiscais_omie
+    WHERE COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') <> ''
+      AND (
+        status_ultimo IN (
+          SELECT s.status FROM "Vendas".relatorio_gerencial_status s WHERE s.incluido IS TRUE
+        )
+        OR NOT EXISTS (SELECT 1 FROM "Vendas".relatorio_gerencial_status LIMIT 1)
+      )
+    GROUP BY 1
   )
 `;
 
-function buildBaseCte(etapaSql) {
+/** Pedidos com algum item cujo CFOP está desmarcado na config compartilhada. */
+const VENDAS_CTES = `
+  ${VENDAS_NF_POR_PEDIDO_CTE},
+  pedidos_cfop_ignorado AS (
+    SELECT DISTINCT i.codigo_pedido
+    FROM "Vendas".pedidos_venda_itens i
+    WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> ''
+      AND REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
+        SELECT c.cfop
+          FROM "Vendas".relatorio_gerencial_cfop c
+         WHERE c.incluido IS FALSE
+      )
+  )
+`;
+
+function buildBaseCte(etapaSql, pedidoSql = '') {
   return `
     WITH ${VENDAS_CTES},
     base AS (
       SELECT DISTINCT ON (p.codigo_pedido)
         p.codigo_pedido,
         p.numero_pedido,
+        TRIM(COALESCE(p.informacoes_adicionais->>'codVend', '')) AS codigo_vendedor,
         TRIM(COALESCE(p.etapa::text, '')) AS etapa,
         CASE TRIM(COALESCE(p.etapa::text, ''))
           WHEN '00' THEN 'Aberto'
@@ -140,6 +271,7 @@ function buildBaseCte(etapaSql) {
         AND COALESCE(nf.data_emissao_dt, p.updated_at::date) >= $1::date
         AND COALESCE(nf.data_emissao_dt, p.updated_at::date) < $2::date
         ${etapaSql}
+        ${pedidoSql}
       ORDER BY p.codigo_pedido
     )
   `;
@@ -154,14 +286,21 @@ const ITENS_CTE = `
       COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
     FROM "Vendas".pedidos_venda_itens i
     LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
-    WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
+    WHERE (
+      REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = ''
+      OR REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
+        SELECT c.cfop FROM "Vendas".relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
+      )
+    )
+    __ITEM_SQL__
   )
 `;
 
-function buildItensCte(etapaSql) {
+function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
+  const itensBlock = ITENS_CTE.replace('__ITEM_SQL__', itemSql || '');
   return `
     WITH ${VENDAS_CTES},
-    ${ITENS_CTE},
+    ${itensBlock},
     base AS (
       SELECT DISTINCT ON (p.codigo_pedido)
         p.codigo_pedido,
@@ -182,6 +321,7 @@ function buildItensCte(etapaSql) {
         AND COALESCE(nf.data_emissao_dt, p.updated_at::date) >= $1::date
         AND COALESCE(nf.data_emissao_dt, p.updated_at::date) < $2::date
         ${etapaSql}
+        ${pedidoSql}
       ORDER BY p.codigo_pedido
     ),
     itens AS (
@@ -205,13 +345,253 @@ function labelMes(yyyymm, nomesMes) {
   return mi >= 1 && mi <= 12 ? `${nomesMes[mi - 1]}/${y}` : yyyymm;
 }
 
+function usuarioDaSessao(req) {
+  return req.session?.user?.fullName
+    || req.session?.user?.username
+    || req.session?.user?.login
+    || 'sistema';
+}
+
+// GET /vendas/relatorio-gerencial/config/cfop
+router.get('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
+  try {
+    await syncRelatorioCfopCatalog();
+    const { rows } = await pool.query(`
+      SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
+        FROM "Vendas".relatorio_gerencial_cfop c
+       ORDER BY c.cfop
+    `);
+    return res.json({
+      ok: true,
+      cfops: rows.map((r) => ({
+        cfop: r.cfop,
+        cfop_exibicao: formatCfopDisplay(r.cfop),
+        incluido: r.incluido !== false,
+        descricao: r.descricao || '',
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro listar config CFOP:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /vendas/relatorio-gerencial/config/cfop
+router.put('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
+  try {
+    await syncRelatorioCfopCatalog();
+    const lista = Array.isArray(req.body?.cfops) ? req.body.cfops : null;
+    if (!lista) {
+      return res.status(400).json({ ok: false, error: 'Informe cfops: [{ cfop, incluido }].' });
+    }
+
+    const usuario = usuarioDaSessao(req);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const item of lista) {
+        const cfop = normalizeCfopDigits(item?.cfop);
+        if (!cfop) continue;
+        const incluido = item?.incluido !== false && item?.incluido !== 'false' && item?.incluido !== 0;
+        await client.query(
+          `INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, atualizado_em, atualizado_por)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (cfop) DO UPDATE SET
+             incluido = EXCLUDED.incluido,
+             atualizado_em = NOW(),
+             atualizado_por = EXCLUDED.atualizado_por`,
+          [cfop, !!incluido, usuario]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    const { rows } = await pool.query(`
+      SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
+        FROM "Vendas".relatorio_gerencial_cfop c
+       ORDER BY c.cfop
+    `);
+    return res.json({
+      ok: true,
+      cfops: rows.map((r) => ({
+        cfop: r.cfop,
+        cfop_exibicao: formatCfopDisplay(r.cfop),
+        incluido: r.incluido !== false,
+        descricao: r.descricao || '',
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro salvar config CFOP:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/relatorio-gerencial/config/status
+router.get('/vendas/relatorio-gerencial/config/status', async (req, res) => {
+  try {
+    await syncRelatorioStatusCatalog();
+    const { rows } = await pool.query(`
+      SELECT s.status, s.incluido, s.atualizado_em, s.atualizado_por
+        FROM "Vendas".relatorio_gerencial_status s
+       ORDER BY s.status
+    `);
+    return res.json({
+      ok: true,
+      status_list: rows.map((r) => ({
+        status: r.status,
+        incluido: r.incluido !== false,
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro listar config status NF:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// PUT /vendas/relatorio-gerencial/config/status
+router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
+  try {
+    await syncRelatorioStatusCatalog();
+    const lista = Array.isArray(req.body?.status_list) ? req.body.status_list : null;
+    if (!lista) {
+      return res.status(400).json({ ok: false, error: 'Informe status_list: [{ status, incluido }].' });
+    }
+
+    const usuario = usuarioDaSessao(req);
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      for (const item of lista) {
+        const status = String(item?.status || '').trim();
+        if (!status) continue;
+        const incluido = item?.incluido !== false && item?.incluido !== 'false' && item?.incluido !== 0;
+        await client.query(
+          `INSERT INTO "Vendas".relatorio_gerencial_status (status, incluido, atualizado_em, atualizado_por)
+           VALUES ($1, $2, NOW(), $3)
+           ON CONFLICT (status) DO UPDATE SET
+             incluido = EXCLUDED.incluido,
+             atualizado_em = NOW(),
+             atualizado_por = EXCLUDED.atualizado_por`,
+          [status, !!incluido, usuario]
+        );
+      }
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
+
+    const { rows } = await pool.query(`
+      SELECT s.status, s.incluido, s.atualizado_em, s.atualizado_por
+        FROM "Vendas".relatorio_gerencial_status s
+       ORDER BY s.status
+    `);
+    return res.json({
+      ok: true,
+      status_list: rows.map((r) => ({
+        status: r.status,
+        incluido: r.incluido !== false,
+        atualizado_em: r.atualizado_em || null,
+        atualizado_por: r.atualizado_por || null,
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro salvar config status NF:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// GET /vendas/relatorio-gerencial/filtros-opcoes
+router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
+  try {
+    await syncVendedoresOmieIfNeeded();
+    const syncVendedores = String(req.query.sync_vendedores || '').trim() === '1';
+    if (syncVendedores) {
+      await syncVendedoresOmieIfNeeded(true);
+    }
+
+    const [rAnos, rVendedores, rFamilias, rEstados, rTipos] = await Promise.all([
+      pool.query(`
+        SELECT DISTINCT EXTRACT(YEAR FROM p.updated_at)::int AS ano
+          FROM "Vendas".pedidos_venda p
+         WHERE p.updated_at IS NOT NULL
+         ORDER BY 1 DESC
+         LIMIT 15
+      `),
+      pool.query(`
+        SELECT codigo, nome
+          FROM "Vendas".vendedores_omie
+         WHERE inativo IS DISTINCT FROM TRUE
+         ORDER BY nome NULLS LAST, codigo
+      `),
+      pool.query(`
+        SELECT DISTINCT
+          TRIM(po.codigo_familia::text) AS codigo,
+          COALESCE(NULLIF(TRIM(po.descricao_familia), ''), TRIM(po.codigo_familia::text)) AS descricao
+          FROM public.produtos_omie po
+         WHERE po.codigo_familia IS NOT NULL
+           AND TRIM(po.codigo_familia::text) <> ''
+         ORDER BY 2, 1
+         LIMIT 500
+      `),
+      pool.query(`
+        SELECT DISTINCT UPPER(TRIM(f.estado)) AS uf
+          FROM omie.fornecedores f
+         WHERE COALESCE(TRIM(f.estado), '') <> ''
+         ORDER BY 1
+      `),
+      pool.query(`
+        SELECT DISTINCT LPAD(TRIM(COALESCE(po.tipoitem, '')), 2, '0') AS codigo
+          FROM public.produtos_omie po
+         WHERE TRIM(COALESCE(po.tipoitem, '')) <> ''
+         ORDER BY 1
+      `),
+    ]);
+
+    return res.json({
+      ok: true,
+      anos: (rAnos.rows || []).map((r) => r.ano).filter(Boolean),
+      vendedores: (rVendedores.rows || []).map((r) => ({
+        codigo: r.codigo,
+        nome: r.nome || r.codigo,
+      })),
+      familias: (rFamilias.rows || []).map((r) => ({
+        codigo: r.codigo,
+        descricao: r.descricao || r.codigo,
+      })),
+      estados: (rEstados.rows || []).map((r) => r.uf),
+      tipos: (rTipos.rows || []).map((r) => ({
+        codigo: r.codigo,
+        label: labelTipoItem(r.codigo),
+      })),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro filtros-opcoes relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /vendas/relatorio-gerencial
 router.get('/vendas/relatorio-gerencial', async (req, res) => {
   try {
-    await ensureVendasRelatorioSchema();
-    const modoRaw = String(req.query.modo || 'mes').trim().toLowerCase();
-    const etapaParam = String(req.query.etapa || 'entregue').trim().toLowerCase();
-    const periodoCfg = calcPeriodo(modoRaw);
+    await syncRelatorioCfopCatalog();
+    await syncRelatorioStatusCatalog();
+    const filtros = parseFiltrosRelatorio(req.query);
+    const etapaParam = filtros.etapa;
+    const periodoCfg = calcPeriodoComFiltros(filtros);
     const etapaCfg = buildEtapaFilter(etapaParam);
     const {
       inicio: mesInicio,
@@ -223,10 +603,11 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       mesRef: mesRaw,
     } = periodoCfg;
     const rangeParams = [mesInicio, mesFimExclusive];
+    const { pedidoSql, itemSql } = appendFiltrosSql(filtros, rangeParams);
     const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-    const baseCte = buildBaseCte(etapaCfg.sql);
-    const itensCte = buildItensCte(etapaCfg.sql);
+    const baseCte = buildBaseCte(etapaCfg.sql, pedidoSql);
+    const itensCte = buildItensCte(etapaCfg.sql, pedidoSql, itemSql);
 
     const evolucaoSql = evolucaoTipo === 'mes'
       ? `${baseCte}
@@ -259,6 +640,8 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       rMesTotal,
       rFamiliaCliente,
       rQtdItens,
+      rCfopCfg,
+      rVendedor,
     ] = await Promise.all([
       pool.query(`${baseCte}
         SELECT
@@ -345,6 +728,33 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         SELECT COALESCE(SUM(quantidade), 0)::float AS quantidade_itens
         FROM itens
       `, rangeParams),
+      pool.query(`
+        SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE incluido IS TRUE)::int AS incluidos,
+          COUNT(*) FILTER (WHERE incluido IS FALSE)::int AS excluidos
+        FROM "Vendas".relatorio_gerencial_cfop
+      `),
+      pool.query(`${baseCte}
+        SELECT
+          b.codigo_vendedor,
+          COALESCE(
+            NULLIF(TRIM(v.nome), ''),
+            NULLIF(TRIM(b.codigo_vendedor), ''),
+            '(sem vendedor)'
+          ) AS vendedor,
+          COUNT(*)::int AS total_pedidos,
+          COALESCE(SUM(b.valor_total_pedido), 0)::float AS valor_total,
+          COALESCE(AVG(b.valor_total_pedido) FILTER (WHERE b.valor_total_pedido > 0), 0)::float AS ticket_medio,
+          COUNT(DISTINCT b.cliente) FILTER (WHERE b.cliente <> '(sem cliente)')::int AS clientes,
+          COUNT(DISTINCT b.estado) FILTER (WHERE b.estado <> 'N/D')::int AS estados
+        FROM base b
+        LEFT JOIN "Vendas".vendedores_omie v
+          ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
+        GROUP BY b.codigo_vendedor, v.nome
+        ORDER BY valor_total DESC, total_pedidos DESC, vendedor
+        LIMIT 30
+      `, rangeParams),
     ]);
 
     const kpi = rKpi.rows[0] || {};
@@ -394,6 +804,8 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       salvo: false,
     };
 
+    const cfgCfop = rCfopCfg.rows[0] || {};
+
     return res.json({
       ok: true,
       mes: mesRaw,
@@ -401,6 +813,22 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       etapa: etapaCfg.label,
       periodo: periodoLabel,
       evolucao_tipo: evolucaoTipo,
+      filtros_aplicados: {
+        modo: filtros.modo,
+        etapa: etapaParam,
+        ano: filtros.ano || null,
+        mes: filtros.mes || null,
+        trimestre: filtros.trimestre || null,
+        vendedor: filtros.vendedor || null,
+        familia: filtros.familia || null,
+        estado: filtros.estado || null,
+        tipo: filtros.tipo || null,
+      },
+      cfop_config: {
+        total: cfgCfop.total || 0,
+        incluidos: cfgCfop.incluidos || 0,
+        excluidos: cfgCfop.excluidos || 0,
+      },
       kpis: {
         total_pedidos: kpi.total_pedidos || 0,
         valor_total: Math.round((kpi.valor_total || 0) * 100) / 100,
@@ -412,6 +840,15 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       por_estado: rEstado.rows || [],
       por_familia: familias,
       por_cliente: rCliente.rows || [],
+      por_vendedor: (rVendedor.rows || []).map((r) => ({
+        codigo_vendedor: r.codigo_vendedor || '',
+        vendedor: r.vendedor,
+        total_pedidos: r.total_pedidos,
+        valor_total: Math.round((r.valor_total || 0) * 100) / 100,
+        ticket_medio: Math.round((r.ticket_medio || 0) * 100) / 100,
+        clientes: r.clientes,
+        estados: r.estados,
+      })),
       por_etapa: rEtapa.rows || [],
       familia_por_estado: rFamiliaEstado.rows || [],
       evolucao_semanal: evolucaoTipo === 'semana'
@@ -498,10 +935,7 @@ router.put('/vendas/relatorio-gerencial/textos', async (req, res) => {
     const conclusao_pontos_criticos = String(req.body?.conclusao_pontos_criticos || '').trim().slice(0, 4000);
     const conclusao_oportunidades = String(req.body?.conclusao_oportunidades || '').trim().slice(0, 4000);
 
-    const usuarioLogado = req.session?.user?.fullName
-      || req.session?.user?.username
-      || req.session?.user?.login
-      || 'sistema';
+    const usuarioLogado = usuarioDaSessao(req);
 
     const { rows } = await pool.query(
       `INSERT INTO "Vendas".relatorio_gerencial (

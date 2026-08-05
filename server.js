@@ -7756,7 +7756,7 @@ app.post([
     try {
       await client.query('BEGIN');
 
-      await upsertNotaFiscalVendaEstado(client, {
+      const upsertResult = await upsertNotaFiscalVendaEstado(client, {
         identidade,
         tipoDocumento,
         topicUltimo: topic,
@@ -7800,6 +7800,16 @@ app.post([
       });
 
       await client.query('COMMIT');
+
+      // Webhook Omie não traz CFOP — consulta ConsultarNF em fila (após responder 200).
+      if (tipoDocumento === 'NFe' && !upsertResult?.cfop) {
+        agendarEnrichCfopNotaVenda({
+          identidade,
+          chaveNfe: parsed.chaveNfe,
+          idNfOmie: parsed.idNfOmie,
+          numeroNota: parsed.numeroNota,
+        });
+      }
 
       console.log('[webhook/notas-vendas] gravado:', { topic, identidade, tipoDocumento, statusUltimo, numeroNota: parsed.numeroNota });
 
@@ -13906,18 +13916,25 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
       OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
       OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
     )`;
-    // Padrão: só MP. Com sem_mp=1: itens que NÃO são MP (nem por família nem pelo código)
+    // Entrada manual (Recebimento sem NF-e) aparece mesmo fora de MP
+    const entradaManualSql = `(
+      UPPER(TRIM(COALESCE(er.numero_pedido, ''))) LIKE 'MANUAL%'
+      OR UPPER(TRIM(COALESCE(er.numero_nfe, ''))) LIKE 'SEM-NFE%'
+    )`;
+    // Padrão: só MP (+ manuais). Com sem_mp=1: itens que NÃO são MP (+ manuais)
     const familiaMpCond = semMp
-      ? `NOT EXISTS (
-           SELECT 1 FROM public.produtos_omie po
-            WHERE ${isMpSql}
-              AND (
-                TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
-                OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
-              )
-         )
-         AND UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) <> 'MP'`
-      : `(
+      ? `(${entradaManualSql} OR (
+           NOT EXISTS (
+             SELECT 1 FROM public.produtos_omie po
+              WHERE ${isMpSql}
+                AND (
+                  TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                  OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                )
+           )
+           AND UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) <> 'MP'
+         ))`
+      : `(${entradaManualSql} OR (
            EXISTS (
              SELECT 1 FROM public.produtos_omie po
               WHERE ${isMpSql}
@@ -13927,7 +13944,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
                 )
            )
            OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
-         )`;
+         ))`;
     const idImpressoSub = `(SELECT id FROM etiqueta."ETQ_rec_impresso" ri WHERE ri.origem_id = er.id ORDER BY ri.id DESC LIMIT 1) AS id_impresso`;
     let rows;
     if (q) {
@@ -14057,17 +14074,23 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
          WHERE COALESCE(er.pir, false) = false
            AND COALESCE(po.pir_vai_direto_identificacao, FALSE) = FALSE
            AND (
-             ($2::boolean = false AND (
-               UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
-               OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
-               OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
-             ))
-             OR
-             ($2::boolean = true AND NOT (
-               UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
-               OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
-               OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
-             ))
+             -- Entrada manual (sem NF-e/pedido) sempre aparece na lista PIR, mesmo fora de MP
+             UPPER(TRIM(COALESCE(er.numero_pedido, ''))) LIKE 'MANUAL%'
+             OR UPPER(TRIM(COALESCE(er.numero_nfe, ''))) LIKE 'SEM-NFE%'
+             OR (
+               $2::boolean = false AND (
+                 UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+                 OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
+                 OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
+               )
+             )
+             OR (
+               $2::boolean = true AND NOT (
+                 UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
+                 OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
+                 OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
+               )
+             )
            )
            AND (
              $1::text IS NULL
@@ -20343,9 +20366,146 @@ async function ensureVendasNotasOmieTables(client) {
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
   `);
 
   _vendasNotasOmieTablesReady = true;
+}
+
+/** Extrai CFOPs únicos dos itens da NF (Omie det[].prod.CFOP). */
+function extractCfopsFromNfPayload(nfOrPayload = {}) {
+  const root =
+    (nfOrPayload && typeof nfOrPayload === 'object' && Array.isArray(nfOrPayload.det))
+      ? nfOrPayload
+      : (nfOrPayload?.event && typeof nfOrPayload.event === 'object' ? nfOrPayload.event : nfOrPayload);
+
+  const dets = Array.isArray(root?.det) ? root.det : [];
+  const set = new Set();
+  for (const d of dets) {
+    const raw = d?.prod?.CFOP ?? d?.prod?.cfop ?? d?.CFOP ?? d?.cfop ?? null;
+    const cfop = String(raw || '').trim();
+    if (cfop) set.add(cfop);
+  }
+
+  // Fallback: campo avulso no webhook (raro)
+  if (!set.size) {
+    const avulso = String(
+      root?.cfop || root?.CFOP || nfOrPayload?.cfop || nfOrPayload?.CFOP || ''
+    ).trim();
+    if (avulso) set.add(avulso);
+  }
+
+  return set.size ? [...set].join(',') : null;
+}
+
+let _vendasCfopEnrichQueue = Promise.resolve();
+
+function enqueueVendasCfopEnrich(taskFn) {
+  _vendasCfopEnrichQueue = _vendasCfopEnrichQueue
+    .then(() => taskFn())
+    .catch((err) => {
+      console.error('[vendas/cfop] erro na fila de enrich:', err?.message || err);
+    });
+  return _vendasCfopEnrichQueue;
+}
+
+async function consultarNfOmieParaCfop({ chaveNfe = null, idNfOmie = null, numeroNota = null } = {}) {
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    throw new Error('OMIE_APP_KEY/OMIE_APP_SECRET ausentes');
+  }
+
+  const param = {};
+  const chave = String(chaveNfe || '').replace(/\D/g, '').trim();
+  if (chave) param.cChaveNFe = chave;
+  else if (idNfOmie) param.nIdNF = Number(idNfOmie);
+  else if (numeroNota) param.nNF = String(numeroNota).trim();
+  else throw new Error('sem chave/id/numero para ConsultarNF');
+
+  const res = await fetch('https://app.omie.com.br/api/v1/produtos/nfconsultar/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call: 'ConsultarNF',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [param],
+    }),
+  });
+  const text = await res.text();
+  let json = null;
+  try { json = text ? JSON.parse(text) : null; } catch (_) {}
+
+  if (!res.ok) {
+    const fault = String(json?.faultstring || text || '').slice(0, 300);
+    const err = new Error(`ConsultarNF HTTP ${res.status}: ${fault}`);
+    err.faultstring = fault;
+    err.status = res.status;
+    throw err;
+  }
+
+  return json || {};
+}
+
+/**
+ * Preenche cfop em "Vendas".notas_fiscais_omie via ConsultarNF (fora do request do webhook).
+ * Usa fila serial + delay para não estourar rate limit da Omie.
+ */
+function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = null, numeroNota = null } = {}) {
+  const id = String(identidade || '').trim();
+  if (!id) return;
+
+  enqueueVendasCfopEnrich(async () => {
+    await new Promise((r) => setTimeout(r, OMIE_REQUEST_DELAY_MS));
+
+    const client = await pool.connect();
+    try {
+      await ensureVendasNotasOmieTables(client);
+
+      const atual = await client.query(
+        `SELECT cfop, chave_nfe, id_nf_omie, numero_nota
+           FROM "Vendas".notas_fiscais_omie
+          WHERE identidade = $1
+          LIMIT 1`,
+        [id]
+      );
+      const row = atual.rows[0];
+      if (!row) return;
+      if (String(row.cfop || '').trim()) return;
+
+      const nf = await consultarNfOmieParaCfop({
+        chaveNfe: chaveNfe || row.chave_nfe,
+        idNfOmie: idNfOmie || row.id_nf_omie,
+        numeroNota: numeroNota || row.numero_nota,
+      });
+      const cfop = extractCfopsFromNfPayload(nf);
+      if (!cfop) {
+        console.warn('[vendas/cfop] ConsultarNF sem CFOP:', id);
+        return;
+      }
+
+      await client.query(
+        `UPDATE "Vendas".notas_fiscais_omie
+            SET cfop = $1, updated_at = NOW()
+          WHERE identidade = $2
+            AND COALESCE(TRIM(cfop), '') = ''`,
+        [cfop, id]
+      );
+      console.log('[vendas/cfop] preenchido:', { identidade: id, cfop });
+    } catch (err) {
+      const fault = String(err?.faultstring || err?.message || err);
+      const waitMatch = fault.match(/Aguarde\s+(\d+)\s+segundos?/i);
+      if (waitMatch) {
+        const waitMs = (Number(waitMatch[1]) + 2) * 1000;
+        console.warn(`[vendas/cfop] rate-limit Omie — aguardando ${waitMs}ms e reenfileirando`);
+        await new Promise((r) => setTimeout(r, waitMs));
+        agendarEnrichCfopNotaVenda({ identidade: id, chaveNfe, idNfOmie, numeroNota });
+        return;
+      }
+      console.error('[vendas/cfop] falha enrich:', id, fault.slice(0, 240));
+    } finally {
+      try { client.release(); } catch (_) {}
+    }
+  });
 }
 
 async function upsertNotaFiscalVendaEstado(client, dados = {}) {
@@ -20353,6 +20513,10 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
 
   const identidade = String(dados.identidade || '').trim();
   if (!identidade) return { ok: false, reason: 'missing_identidade' };
+
+  const cfopInformado = dados.cfop
+    ? String(dados.cfop).trim()
+    : extractCfopsFromNfPayload(dados.payload || {});
 
   const ativa = !['Cancelada'].includes(String(dados.statusUltimo || ''));
   await client.query(`
@@ -20362,6 +20526,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       acao_ultimo, id_nf_omie, serie, url_xml,
       ambiente, operacao, hora_emissao, id_pedido_omie,
       url_danfe, empresa_ie, empresa_uf, empresa_cnpj,
+      cfop,
       valor_total,
       cnpj_emitente, razao_emitente, data_emissao,
       message_id_ultimo, author_ultimo, payload_ultimo,
@@ -20373,9 +20538,10 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       $12,$13,$14,$15,
       $16,$17,$18,$19,
       $20,
-      $21,$22,$23,
-      $24,$25,$26,
-      $27,NOW()
+      $21,
+      $22,$23,$24,
+      $25,$26,$27,
+      $28,NOW()
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
@@ -20397,6 +20563,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       empresa_ie = COALESCE(EXCLUDED.empresa_ie, "Vendas".notas_fiscais_omie.empresa_ie),
       empresa_uf = COALESCE(EXCLUDED.empresa_uf, "Vendas".notas_fiscais_omie.empresa_uf),
       empresa_cnpj = COALESCE(EXCLUDED.empresa_cnpj, "Vendas".notas_fiscais_omie.empresa_cnpj),
+      cfop = COALESCE(EXCLUDED.cfop, "Vendas".notas_fiscais_omie.cfop),
       valor_total = COALESCE(EXCLUDED.valor_total, "Vendas".notas_fiscais_omie.valor_total),
       cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
       razao_emitente = COALESCE(EXCLUDED.razao_emitente, "Vendas".notas_fiscais_omie.razao_emitente),
@@ -20426,6 +20593,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     dados.empresaIe || null,
     dados.empresaUf || null,
     dados.empresaCnpj || null,
+    cfopInformado || null,
     dados.valorTotal || null,
     dados.cnpjEmitente || null,
     dados.razaoEmitente || null,
@@ -20436,7 +20604,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     ativa,
   ]);
 
-  return { ok: true, identidade };
+  return { ok: true, identidade, cfop: cfopInformado || null };
 }
 
 async function registrarEventoNotaFiscalVenda(client, dados = {}) {

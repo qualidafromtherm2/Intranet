@@ -132,6 +132,12 @@ function extractNota(nf = {}) {
     ? `chave:${chaveNfe}`
     : (numeroNota ? `NFe:${numeroNota}` : null);
 
+  const cfopSet = new Set();
+  for (const d of (Array.isArray(nf.det) ? nf.det : [])) {
+    const cfop = String(d?.prod?.CFOP || d?.prod?.cfop || '').trim();
+    if (cfop) cfopSet.add(cfop);
+  }
+
   return {
     identidade,
     topic,
@@ -150,6 +156,7 @@ function extractNota(nf = {}) {
     horaEmissao,
     idPedidoOmie,
     empresaCnpj: cnpj,
+    cfop: cfopSet.size ? [...cfopSet].join(',') : null,
     payload: nf,
   };
 }
@@ -167,6 +174,7 @@ async function upsertNFe(client, dados) {
       numero_nota, chave_nfe, numero_pedido,
       acao_ultimo, id_nf_omie, serie, ambiente,
       hora_emissao, id_pedido_omie, empresa_cnpj,
+      cfop,
       valor_total,
       cnpj_emitente, razao_emitente, data_emissao,
       message_id_ultimo, author_ultimo, payload_ultimo,
@@ -177,9 +185,10 @@ async function upsertNFe(client, dados) {
       $7,$8,$9,$10,
       $11,$12,$13,
       $14,
-      $15,$16,$17,
-      $18,'script-sync-omie',$19,
-      $20,NOW()
+      $15,
+      $16,$17,$18,
+      $19,'script-sync-omie',$20,
+      $21,NOW()
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
@@ -195,6 +204,7 @@ async function upsertNFe(client, dados) {
       hora_emissao    = COALESCE(EXCLUDED.hora_emissao,  "Vendas".notas_fiscais_omie.hora_emissao),
       id_pedido_omie  = COALESCE(EXCLUDED.id_pedido_omie,"Vendas".notas_fiscais_omie.id_pedido_omie),
       empresa_cnpj    = COALESCE(EXCLUDED.empresa_cnpj,  "Vendas".notas_fiscais_omie.empresa_cnpj),
+      cfop            = COALESCE(EXCLUDED.cfop,          "Vendas".notas_fiscais_omie.cfop),
       valor_total     = COALESCE(EXCLUDED.valor_total,   "Vendas".notas_fiscais_omie.valor_total),
       cnpj_emitente   = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
       razao_emitente  = COALESCE(EXCLUDED.razao_emitente,"Vendas".notas_fiscais_omie.razao_emitente),
@@ -218,6 +228,7 @@ async function upsertNFe(client, dados) {
     dados.horaEmissao,
     dados.idPedidoOmie,
     dados.empresaCnpj,
+    dados.cfop || null,
     dados.valorTotal,
     dados.cnpj,
     dados.razao,
@@ -249,6 +260,7 @@ async function ensureFlatColumns(client) {
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
     ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
   `);
 }
 
