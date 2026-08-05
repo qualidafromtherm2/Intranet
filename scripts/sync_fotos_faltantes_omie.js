@@ -22,6 +22,7 @@
 //   CONSULTAR=1        → fase extra ConsultarProduto (lenta; só se Listar não trouxer imagens[])
 //   SOMENTE_SEM_FOTO=1 → ignora produtos que já têm alguma foto (só zerados)
 //   OMIE_MIN_INTERVAL_MS → intervalo entre calls Omie (default 400, mínimo 300; Omie máx 4/s)
+//   FORCE_REIMPORT=1   → rebaixa/reenvia mesmo se já houver foto local (útil quando URL no SQL aponta R2 404)
 // ============================================================================
 
 require('dotenv/config');
@@ -41,6 +42,7 @@ const DRY_RUN = String(process.env.DRY_RUN || '').trim() === '1';
 const MAX_PRODUTOS = Number(process.env.MAX_PRODUTOS || 0);
 const CONSULTAR = String(process.env.CONSULTAR || '').trim() === '1';
 const SOMENTE_SEM_FOTO = String(process.env.SOMENTE_SEM_FOTO || '').trim() === '1';
+const FORCE_REIMPORT = String(process.env.FORCE_REIMPORT || '').trim() === '1';
 const REGISTROS_POR_PAGINA = 100;
 // Omie: máx. 4 req/s → default 400 ms (~2.5/s) com margem; override via OMIE_MIN_INTERVAL_MS
 const OMIE_MIN_INTERVAL_MS = Math.max(300, Number(process.env.OMIE_MIN_INTERVAL_MS || 400) || 400);
@@ -263,6 +265,7 @@ async function inserirImagem(reg) {
 function imagensFaltantes(estadoLocal, codigoProduto, imagensOmie) {
   const rec = estadoLocal.get(String(codigoProduto));
   if (!rec) return []; // produto ainda não está em produtos_omie
+  if (FORCE_REIMPORT) return imagensOmie.slice();
   if (SOMENTE_SEM_FOTO && rec.posicoes.size > 0) return [];
 
   return imagensOmie.filter((img) => !rec.posicoes.has(Number(img.pos)));
@@ -405,7 +408,7 @@ async function main() {
   console.log(`[sync-fotos-faltantes] bucket=${BUCKET} dry_run=${DRY_RUN}`);
   console.log(`[sync-fotos-faltantes] Rate Omie: 1 req / ${OMIE_MIN_INTERVAL_MS}ms (máx ~${(1000 / OMIE_MIN_INTERVAL_MS).toFixed(1)}/s)`);
   console.log(`[sync-fotos-faltantes] Produtos locais: ${estadoLocal.size} (com foto: ${comFoto}, sem foto: ${semFoto})`);
-  console.log(`[sync-fotos-faltantes] Modo: ${SOMENTE_SEM_FOTO ? 'só zerados' : 'gaps de posição + zerados'} | CONSULTAR=${CONSULTAR}`);
+  console.log(`[sync-fotos-faltantes] Modo: ${FORCE_REIMPORT ? 'FORCE_REIMPORT' : (SOMENTE_SEM_FOTO ? 'só zerados' : 'gaps de posição + zerados')} | CONSULTAR=${CONSULTAR}`);
 
   await faseListarProdutos(estadoLocal);
 

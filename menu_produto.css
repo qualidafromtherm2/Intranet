@@ -7427,6 +7427,37 @@ ul#comprasList li ,
   cursor: not-allowed;
 }
 
+.kanban-op-card.kanban-op-card-ri-bloqueado.kanban-op-card-ri-pode-agir {
+  cursor: pointer;
+}
+
+/* Celular / tablet estreito — Linha de produção: colunas empilhadas */
+@media (max-width: 768px) {
+  #montaProducaoPane #montaKanban,
+  #riRegistroInspecaoPane #riRegistroKanban {
+    flex-direction: column !important;
+    overflow-x: hidden !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+  }
+
+  #montaProducaoPane #montaKanban > div,
+  #riRegistroInspecaoPane #riRegistroKanban > div {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  #montaProducaoPane [id^="montaCol_"],
+  #riRegistroInspecaoPane [id^="riRegistroCol_"] {
+    max-height: 420px !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+}
+
 .kanban-prog-pedido-badge {
   display: inline-flex;
   align-items: center;
@@ -18275,6 +18306,56 @@ body.mobile-modal-open {
     min-width: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
+  }
+
+  /* —— Linha de produção / RI: kanbans empilhados no celular —— */
+  #montaProducaoPane #montaKanban,
+  #riRegistroInspecaoPane #riRegistroKanban {
+    flex-direction: column !important;
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+    gap: 12px !important;
+    align-items: stretch !important;
+    padding-bottom: 8px !important;
+  }
+
+  #montaProducaoPane #montaKanban > div,
+  #riRegistroInspecaoPane #riRegistroKanban > div {
+    flex: 1 1 auto !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* Coluna: ~3 cards/grupos visíveis; restante na barra de rolagem */
+  #montaProducaoPane [id^="montaCol_"],
+  #riRegistroInspecaoPane [id^="riRegistroCol_"],
+  #producaoKanban #kanbanPedidos,
+  #producaoKanban #kanbanProgramado,
+  #producaoKanban #kanbanSolicitado,
+  #producaoKanban #kanbanProduzindo,
+  #producaoKanban #kanbanAguardando,
+  #producaoKanban #kanbanInspecaoFinal,
+  #producaoKanban #kanbanEmbalagem {
+    max-height: 420px !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+  }
+
+  #montaProducaoPane .content-wrapper-header {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+
+  #montaProducaoPane .monta-header-actions {
+    width: 100%;
+    justify-content: flex-start !important;
+  }
+
+  #montaProducaoPane .monta-header-actions button {
+    min-height: 40px;
   }
 
   /* —— Armazéns / estoque —— */

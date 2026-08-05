@@ -327,14 +327,18 @@
        data-nav-key="side:producao:montagem"
        data-nav-parent="side:producao"
        data-nav-pos="side"
-       data-nav-label="Produção montagem"
+       data-nav-label="Linha de produção"
        data-nav-selector="#menu-monta-producao">
       <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
-      Produção montagem
+      Linha de produção
     </a>
+    <!-- RI unificado em Linha de produção (Ações do grupo). Mantido oculto p/ permissões legadas / config JS. -->
     <a href="#"
        id="menu-ri-registro-inspecao"
-       class="menu-link"
+       class="menu-link perm-hidden"
+       style="display:none !important;"
+       hidden
+       aria-hidden="true"
        data-nav-key="side:producao:ri-registro"
        data-nav-parent="side:producao"
        data-nav-pos="side"
@@ -12740,19 +12744,19 @@
           </div>
         </div>
 
-        <!-- Painel Produção: Montagem (kanbans pós-Programado) -->
+        <!-- Painel Produção: Linha de produção (kanbans pós-Programado + RI nas Ações) -->
         <div id="montaProducaoPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-wrapper-header">
               <div class="content-wrapper-context">
                 <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
                   <i class="fa-solid fa-screwdriver-wrench" style="color:#10b981;"></i>
-                  <span>Produção — Montagem</span>
+                  <span>Linha de produção</span>
                 </h3>
-                <div class="content-text">Kanbans Programado e postos de produção — mesmas OPs do Registrar produção.</div>
+                <div class="content-text">Kanbans Programado e postos de produção — RI disponível em Ações do grupo (Qualidade / Adm).</div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
-                <div style="display:flex;gap:8px;align-items:center;">
+                <div class="monta-header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
                   <button id="montaTurnoDiaBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-clock"></i> Turno do dia
@@ -12760,6 +12764,10 @@
                   <button id="montaTurnoPadraoBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 14px;background:rgba(255,255,255,.08);color:#e2e8f0;border:1px solid rgba(255,255,255,.15);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-sliders"></i> Padrão de turno
+                  </button>
+                  <button id="montaRiConfigBtn" type="button" title="Configuração RI"
+                    style="display:none;align-items:center;gap:8px;padding:7px 14px;background:rgba(99,102,241,.12);color:#c7d2fe;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-clipboard-check"></i> Config. RI
                   </button>
                   <button id="montaRecarregarBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
