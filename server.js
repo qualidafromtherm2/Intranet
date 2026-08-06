@@ -13809,6 +13809,22 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     );
 
     const destino = pirInicial ? 'identificacao' : 'pir';
+    if (!pirInicial) {
+      try {
+        const { dispararNotificacaoEntradaListaPir } = require('./utils/alertaPirWhatsapp');
+        dispararNotificacaoEntradaListaPir([{
+          id: idEtq,
+          codigo_produto: codProdRaw,
+          descricao_produto: descProdRaw,
+          qtd: qtdNum,
+          unidade: unidRaw,
+          lote,
+          numero_nfe: nfe,
+        }]);
+      } catch (notifErr) {
+        console.error('[etiquetas/recebimento/manual] alerta WhatsApp PIR:', notifErr?.message || notifErr);
+      }
+    }
     return res.json({
       ok: true,
       id: idEtq,
@@ -13974,7 +13990,17 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
           ]
         );
         idEtq = ins.rows[0]?.id;
-        gerados.push({ cod: codProdRaw, id: idEtq, pir: pirInicial });
+        gerados.push({
+          cod: codProdRaw,
+          id: idEtq,
+          pir: pirInicial,
+          codigo_produto: codProdRaw,
+          descricao_produto: descProdRaw,
+          qtd: qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
+          unidade: unidRaw,
+          lote,
+          numero_nfe: String(nfe),
+        });
       } catch (dbErr) {
         console.error('[etiquetas/recebimento/preview] falha ao salvar item:', codProdRaw, dbErr?.message || dbErr);
         continue;
@@ -14002,6 +14028,16 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       return res.status(409).json({
         error: `Todas as etiquetas já foram geradas anteriormente para esta NF-e/Pedido.${ignorados.length ? ` (${ignorados.length} item(s) ignorado(s))` : ''}`
       });
+    }
+
+    const novosPir = gerados.filter((g) => g && g.id && g.pir !== true && !g.atualizado);
+    if (novosPir.length) {
+      try {
+        const { dispararNotificacaoEntradaListaPir } = require('./utils/alertaPirWhatsapp');
+        dispararNotificacaoEntradaListaPir(novosPir);
+      } catch (notifErr) {
+        console.error('[etiquetas/recebimento/preview] alerta WhatsApp PIR:', notifErr?.message || notifErr);
+      }
     }
 
     // ── Chama Labelary com todos os blocos ZPL concatenados → PDF multi-página
