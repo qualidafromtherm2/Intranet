@@ -221,6 +221,13 @@
       <!-- Menu lateral -->
   <div class="left-side">
 
+        <!-- Início no dock (antes do hambúrguer, menu recolhido no desktop) -->
+        <button type="button" class="shell-nav-button sidebar-dock-home" id="side-inicio-dock"
+                data-mirror-nav="#menu-inicio" data-shell-label="In&iacute;cio"
+                title="In&iacute;cio" aria-label="In&iacute;cio">
+          <i class="fa-solid fa-house"></i>
+        </button>
+
         <!-- Botão Hambúrguer do Menu Lateral -->
         <button class="sidebar-hamburger" id="sidebarHamburger" title="Menu lateral">
           <i class="fa-solid fa-bars"></i>
@@ -331,6 +338,17 @@
        data-nav-selector="#menu-monta-producao">
       <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
       Linha de produção
+    </a>
+    <a href="#"
+       id="menu-preparacoes"
+       class="menu-link"
+       data-nav-key="side:producao:preparacoes"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Preparações"
+       data-nav-selector="#menu-preparacoes">
+      <i class="fa-solid fa-boxes-stacked" style="margin-right:8px;"></i>
+      Preparações
     </a>
     <!-- RI unificado em Linha de produção (Ações do grupo). Mantido oculto p/ permissões legadas / config JS. -->
     <a href="#"
@@ -7657,17 +7675,6 @@
                   </label>
                 </div>
 
-                <!-- Integração opcional com Google Agenda -->
-                <div id="agendaGrupoGoogleCalendar" style="grid-column:1/-1;border:1px solid var(--border-color);border-radius:10px;padding:10px 12px;background:var(--theme-hover);">
-                  <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-                    <label class="agenda-cafe-check" style="margin:0;">
-                      <span>Criar/atualizar evento no Google Agenda</span>
-                      <input id="agendaGoogleCalendarCheckbox" type="checkbox" />
-                    </label>
-                  </div>
-                  <div id="agendaGoogleCalendarStatus" style="margin-top:8px;font-size:12px;color:var(--inactive-color);">Verificando conexão com Google...</div>
-                </div>
-
                 <!-- Visitantes — apenas Visita -->
                 <div id="agendaGrupoVisitantes" style="display:none;grid-column:1/-1;">
                   <label>
@@ -8019,18 +8026,23 @@
               </button>
               <button type="button" id="chamadoTabAberto" class="chamado-tab-btn">
                 <i class="fa-regular fa-folder-open" aria-hidden="true"></i> Aberto
+                <span id="chamadoTabCountAberto" class="chamado-tab-badge" hidden>0</span>
               </button>
               <button type="button" id="chamadoTabRevisao" class="chamado-tab-btn">
                 <i class="fa-solid fa-comments" aria-hidden="true"></i> Necessário revisão
+                <span id="chamadoTabCountRevisao" class="chamado-tab-badge" hidden>0</span>
               </button>
               <button type="button" id="chamadoTabAguardando" class="chamado-tab-btn">
                 <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i> Aguardando aprovação
+                <span id="chamadoTabCountAguardando" class="chamado-tab-badge" hidden>0</span>
               </button>
               <button type="button" id="chamadoTabMeus" class="chamado-tab-btn">
                 <i class="fa-regular fa-user" aria-hidden="true"></i> Meus chamados
+                <span id="chamadoTabCountMeus" class="chamado-tab-badge" hidden>0</span>
               </button>
               <button type="button" id="chamadoTabFechado" class="chamado-tab-btn">
                 <i class="fa-solid fa-check" aria-hidden="true"></i> Fechado
+                <span id="chamadoTabCountFechado" class="chamado-tab-badge" hidden>0</span>
               </button>
             </nav>
 
@@ -12728,7 +12740,7 @@
                   </div>
                 </div>
 
-                <label for="producaoGerarOpPostosSelect" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">
+                <label id="producaoGerarOpPostosLabel" for="producaoGerarOpPostosSelect" style="display:block;margin-bottom:6px;font-size:12px;color:var(--inactive-color);">
                   Postos do kanban (após Programado)
                 </label>
                 <select id="producaoGerarOpPostosSelect" class="producao-gerar-op-postos-select"
@@ -12740,6 +12752,31 @@
                   <option value="Inspeção final">Inspeção final</option>
                   <option value="Embalagem">Embalagem</option>
                 </select>
+                <div id="producaoGerarOpPostosPrepAcoes" style="display:none;margin-top:8px;">
+                  <button type="button" id="producaoGerarOpCriarPostoBtn"
+                    style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:rgba(16,185,129,.12);border:1px solid rgba(16,185,129,.35);border-radius:8px;color:#6ee7b7;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-plus"></i> Criar posto de preparação
+                  </button>
+                  <div id="producaoGerarOpCriarPostoForm" style="display:none;margin-top:8px;padding:10px 12px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.1);border-radius:8px;">
+                    <label for="producaoGerarOpNovoPostoNome" style="display:block;margin-bottom:6px;font-size:11px;color:#94a3b8;">
+                      Nome do posto (ex.: Preparação elétrica)
+                    </label>
+                    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                      <input type="text" id="producaoGerarOpNovoPostoNome" maxlength="80" autocomplete="off"
+                        placeholder="Digite o nome do posto..."
+                        style="flex:1;min-width:180px;padding:8px 10px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:6px;color:#f1f5f9;font-size:13px;outline:none;">
+                      <button type="button" id="producaoGerarOpNovoPostoSalvar"
+                        style="padding:8px 12px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;">
+                        Salvar
+                      </button>
+                      <button type="button" id="producaoGerarOpNovoPostoCancelar" class="modal-secondary"
+                        style="padding:8px 12px;font-size:12px;">
+                        Cancelar
+                      </button>
+                    </div>
+                    <div id="producaoGerarOpNovoPostoMsg" style="display:none;margin-top:6px;font-size:11px;"></div>
+                  </div>
+                </div>
                 <div id="producaoGerarOpPostosLista" style="display:flex;flex-direction:column;gap:6px;margin-top:8px;"></div>
 
                 <label for="producaoGerarOpObservacao" style="display:block;margin:14px 0 6px;font-size:12px;color:var(--inactive-color);">
@@ -12911,16 +12948,16 @@
           </div>
         </div>
 
-        <!-- Painel Produção: Linha de produção (kanbans pós-Programado + RI nas Ações) -->
+        <!-- Painel Produção: Linha de produção / Preparações (mesmo kanban; filtro PP no JS) -->
         <div id="montaProducaoPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-wrapper-header">
               <div class="content-wrapper-context">
                 <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-screwdriver-wrench" style="color:#10b981;"></i>
-                  <span>Linha de produção</span>
+                  <i id="montaPaneIcon" class="fa-solid fa-screwdriver-wrench" style="color:#10b981;"></i>
+                  <span id="montaPaneTitulo">Linha de produção</span>
                 </h3>
-                <div class="content-text">Kanbans Programado e postos de produção — RI disponível em Ações do grupo (Qualidade / Adm).</div>
+                <div class="content-text" id="montaPaneSubtitulo">Kanbans Programado e postos de produção — RI disponível em Ações do grupo (Qualidade / Adm).</div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <div class="monta-header-actions" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
@@ -21201,7 +21238,6 @@ function attachDropZone(ul) {
       participantes: [...meetingFlow.data.participantes],
       descricao: null,
       visitantes: null,
-      agendarGoogle: false,
       linkReuniao: null,
       anexoUrl: null,
       anexoNome: null

@@ -501,6 +501,29 @@ async function exigirPermissaoNav(req, res, navKey, mensagem, queryable = pool) 
   return false;
 }
 
+/** Carrinho de separação OU fluxo SAC/AT de solicitação de envio (VIPP/manual). */
+async function exigirPermissaoSeparacaoOuFluxoEnvio(req, res, origemEnvio, queryable = pool) {
+  const internalToken = String(req.get?.('x-internal-api-token') || '');
+  if (internalToken && internalToken === process.env.INTERNAL_API_TOKEN) return true;
+  const userId = req.session?.user?.id;
+  if (!userId) {
+    res.status(401).json({ ok: false, error: 'Não autenticado.' });
+    return false;
+  }
+  if (await usuarioTemPermissaoNav(userId, SYSTEM_PERMISSION_KEYS.separacao, queryable)) return true;
+  const origem = String(origemEnvio || '').trim().toUpperCase();
+  if (origem === 'SAC' || origem === 'AT') {
+    const temSacEnvio = await usuarioTemPermissaoNav(userId, 'side:sac:solicitacao-envio', queryable);
+    const temAt = await usuarioTemPermissaoNav(userId, 'side:sac:at', queryable);
+    if (temSacEnvio || temAt) return true;
+  }
+  res.status(403).json({
+    ok: false,
+    error: 'Seu usuário não possui permissão para solicitar separação neste fluxo de envio.'
+  });
+  return false;
+}
+
 function protegerPgClientAtivo(client, origem = 'pool.connect') {
   if (!client || typeof client.on !== 'function' || client[PG_ACTIVE_CLIENT_ERROR_HANDLER]) {
     return client;
@@ -4472,7 +4495,7 @@ app.post('/api/rh/reservas', async (req, res) => {
   const linkReuniao = String(body.linkReuniao || '').trim() || null;
   const anexoUrl = String(body.anexoUrl || '').trim() || null;
   const anexoNome = String(body.anexoNome || '').trim() || null;
-  const agendarGoogle = !!body.agendarGoogle;
+  const agendarGoogle = false; // Google Agenda desativado — aviso por e-mail Fromtherm
   const participantes = Array.isArray(body.participantes)
     ? Array.from(new Set(body.participantes.map((u) => String(u || '').trim()).filter(Boolean)))
     : [];
@@ -4646,7 +4669,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const linkReuniaoPut = String(body.linkReuniao || '').trim() || null;
   const anexoUrlPut = String(body.anexoUrl || '').trim() || null;
   const anexoNomePut = String(body.anexoNome || '').trim() || null;
-  const agendarGoogle = !!body.agendarGoogle;
+  const agendarGoogle = false; // Google Agenda desativado — aviso por e-mail Fromtherm
   const escopoSolicitado = String(body.aplicarEm || '').trim().toLowerCase();
   const aplicarEm = escopoSolicitado === 'este_dia'
     ? 'este_dia'
@@ -4883,8 +4906,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
 
     await client.query('COMMIT');
 
-    const deveSincronizarGoogle = agendarGoogle || !!googleEventIdBaseSync;
-    let googleAgenda = { requested: deveSincronizarGoogle, ok: null, eventId: googleEventIdBaseSync, eventLink: null, message: null };
+    const deveSincronizarGoogle = false; // Google Agenda desativado — aviso por e-mail Fromtherm
+    let googleAgenda = { requested: false, ok: null, eventId: googleEventIdBaseSync, eventLink: null, message: null };
 
     if (deveSincronizarGoogle) {
       try {
@@ -21961,15 +21984,15 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
 app.post('/api/logistica/separacao', express.json(), async (req, res) => {
   try {
     await ensureSchemaMigrated();
-    if (!await exigirPermissaoNav(
+    const { codigo, descricao, quantidade, unidade, origem_envio, origem_vipp } = req.body || {};
+    // Fluxo VIPP/SAC/AT: permite quem tem Solicitação de envio/AT, sem atalho do carrinho.
+    if (!await exigirPermissaoSeparacaoOuFluxoEnvio(
       req,
       res,
-      SYSTEM_PERMISSION_KEYS.separacao,
-      'Seu usuário não possui permissão para solicitar separação.'
+      origem_envio || origem_vipp || null
     )) return;
     const id_user   = req.session.user.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
-    const { codigo, descricao, quantidade, unidade } = req.body || {};
     if (!codigo || !quantidade || Number(quantidade) <= 0) {
       return res.status(400).json({ ok: false, error: 'Dados inválidos: código e quantidade são obrigatórios.' });
     }
@@ -24177,14 +24200,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     const id_user   = req.session?.user?.id;
     const nome_user = req.session?.user?.username || req.session?.user?.nome || 'desconhecido';
     if (!id_user) return res.status(401).json({ ok: false, error: 'Não autenticado.' });
-    if (!await exigirPermissaoNav(
-      req,
-      res,
-      SYSTEM_PERMISSION_KEYS.separacao,
-      'Seu usuário não possui permissão para solicitar separação.',
-      client
-    )) return;
     const { solicitado_para, motivo, data_prevista, horario, observacao, item_ids, forcar_novo_sep, os_num, id_vipp, conteudo, origem_vipp, local_estoque, local_estoque_nome, metodo_envio } = req.body || {};
+    // Fluxo VIPP/SAC/AT: permite quem tem Solicitação de envio/AT, sem atalho do carrinho.
+    if (!await exigirPermissaoSeparacaoOuFluxoEnvio(req, res, origem_vipp, client)) return;
     // Quando item_ids for fornecido (ex: VIPP), processa apenas esses itens do carrinho
     const filtroIds = Array.isArray(item_ids) && item_ids.length > 0
       ? item_ids.map(id => parseInt(id, 10)).filter(id => !isNaN(id))
