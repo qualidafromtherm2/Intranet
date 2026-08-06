@@ -11641,7 +11641,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
                  split_part(TRIM(endereco), '-', 3) || '-001'
          WHERE endereco IS NOT NULL
            AND TRIM(endereco) <> ''
-           AND TRIM(endereco) !~ '^[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{3}$'
+           AND TRIM(UPPER(endereco)) !~ '^[0-9]{2}-[0-9]{2}-[0-9]{2}-([0-9]{3}|[A-Z][0-9]{2})$'
            AND TRIM(endereco) ~ '^[0-9]{2}-[0-9]{2}-[0-9]{2}-.+$'
            AND array_length(string_to_array(TRIM(endereco), '-'), 1) >= 4
       `);
@@ -11736,7 +11736,8 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         ('produto',          'Produto grande (impressão rápida)',       70, 110, 20, 4, 0, 0),
         ('produto_pequena',  'Produto pequena (impressão rápida)',      50, 30, 20, 4, 0, 0),
         ('contagem',         'Contagem (impressão rápida)',             50, 30, 20, 4, 0, 0),
-        ('endereco',         'Etiqueta de endereço',                    70, 110, 20, 4, 0, 0)
+        ('endereco',         'Etiqueta de endereço',                    70, 110, 20, 4, 0, 0),
+        ('endereco_caixa',   'Endereço de caixa 50x30',                 50,  30, 20, 4, 0, 0)
       ON CONFLICT (chave) DO NOTHING
     `);
     await pool.query(`
@@ -11747,14 +11748,15 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         WHEN 'produto_pequena' THEN 'Produto pequena (impressão rápida)'
         WHEN 'contagem' THEN 'Contagem (impressão rápida)'
         WHEN 'endereco' THEN 'Etiqueta de endereço'
+        WHEN 'endereco_caixa' THEN 'Endereço de caixa 50x30'
         ELSE nome
       END
-      WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+      WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco','endereco_caixa')
     `).catch(() => {});
     await pool.query(`
       UPDATE etiqueta."ETQ_layout_config"
          SET tipo_base = chave, perfil = false
-       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco')
+       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco','endereco_caixa')
          AND (tipo_base IS NULL OR tipo_base = '')
     `).catch(() => {});
     // Preferências de impressora do usuário (antes ficava em localStorage)
@@ -12944,6 +12946,7 @@ const ETQ_LAYOUT_TIPOS = [
   { chave: 'produto_pequena', nome: 'Impressão rápida — produto pequeno', vinculoImpressora: true },
   { chave: 'contagem', nome: 'Impressão rápida — contagem', vinculoImpressora: true },
   { chave: 'endereco', nome: 'Endereço de armazenagem', vinculoImpressora: false },
+  { chave: 'endereco_caixa', nome: 'Endereço de caixa 50x30', vinculoImpressora: false },
 ];
 
 /** Defaults de campos visuais por tipo de etiqueta (modo fácil). */
@@ -12987,6 +12990,10 @@ const ETQ_LAYOUT_CAMPOS_DEFAULT = {
     { id: 'qr', tipo: 'qr', x: 40, y: 120, magnificacao: 6, conteudo: '{{endereco}}' },
     { id: 'codigo', tipo: 'texto', x: 40, y: 400, fonteH: 30, fonteW: 30, conteudo: '{{codigo}}' },
     { id: 'desc', tipo: 'bloco', x: 40, y: 450, fonteH: 24, fonteW: 24, largura: 480, maxLinhas: 3, conteudo: '{{descricao}}' },
+  ],
+  endereco_caixa: [
+    { id: 'qr', tipo: 'qr', x: 127, y: 8, magnificacao: 5, conteudo: '{{endereco}}' },
+    { id: 'endereco', tipo: 'bloco', x: 0, y: 174, fonteH: 28, fonteW: 23, largura: 399, maxLinhas: 1, alinhamento: 'C', conteudo: '{{endereco}}' },
   ],
 };
 
@@ -13071,7 +13078,10 @@ function _etqCamposParaZpl(campos, vars, { chave = '', widthMm, heightMm, dpi = 
       const maxLinhas = ehDescricaoRecebimento
         ? Math.max(maxLinhasConfiguradas, linhasAteRodape)
         : maxLinhasConfiguradas;
-      lines.push(`^FO${x},${y}^A0${ori},${fh},${fw}^FB${largura},${maxLinhas},0,L,0^FD${conteudo}^FS`);
+      const alinhamento = ['L', 'C', 'R', 'J'].includes(String(c.alinhamento || '').toUpperCase())
+        ? String(c.alinhamento).toUpperCase()
+        : 'L';
+      lines.push(`^FO${x},${y}^A0${ori},${fh},${fw}^FB${largura},${maxLinhas},0,${alinhamento},0^FD${conteudo}^FS`);
     } else if (tipo === 'texto_rot') {
       lines.push(`^FO${x},${y}^A0R,${fh},${fw}^FD${conteudo}^FS`);
     } else {
@@ -16892,6 +16902,23 @@ ${codeLine}^FO20,200^FB1500,1,0,L,0^A0R,50,50^FD${_impressaoRapidaData()}^FS
   return Array.from({ length: total }, () => bloco).join('\n');
 }
 
+function _gerarZplEnderecoCaixa({ endereco, copias = 1, layout }) {
+  const end = assertEnderecoEtq(endereco);
+  const total = Math.max(1, Math.min(20, Number(copias) || 1));
+  const fromLayout = layout ? _etqGerarZplDoLayout(layout, { endereco: end, qr: end }) : null;
+  const bloco = fromLayout || [
+    '^XA',
+    '^FXSGF_PROFILE_MANAGED^FS',
+    '^CI28',
+    '^PW399',
+    '^LL240',
+    '^FO127,8^BQN,2,5^FDLA,' + end + '^FS',
+    '^FO0,174^A0N,28,23^FB399,1,0,C,0^FD' + end + '^FS',
+    '^XZ',
+  ].join('\n');
+  return Array.from({ length: total }, () => bloco).join('\n');
+}
+
 // Etiquetas operacionais simples: nao cria ETQ_rec_impresso nem vinculo de endereco.
 app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => {
   try {
@@ -16900,7 +16927,7 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
     const copias = Math.floor(Number(req.body?.copias) || 0);
     const destinoAgente = String(req.body?.destino_agente || '').trim() || null;
     const impressora = String(req.body?.impressora || '').trim() || null;
-    if (!['produto', 'contagem'].includes(acao)) return res.status(400).json({ error: 'Acao de impressao invalida.' });
+    if (!['produto', 'contagem', 'endereco_caixa'].includes(acao)) return res.status(400).json({ error: 'Acao de impressao invalida.' });
     if (copias < 1 || copias > 100) return res.status(400).json({ error: 'Informe de 1 a 100 copias.' });
 
     let zpl = '';
@@ -16925,13 +16952,17 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
         });
         quantidade += quickCopias;
       }
-    } else {
+    } else if (acao === 'contagem') {
       const qtd = Math.floor(Number(req.body?.quantidade) || 0);
       if (qtd < 1) return res.status(400).json({ error: 'Quantidade de contagem invalida.' });
       const layoutCont = await _etqResolverLayoutDaImpressora(destinoAgente, impressora, 'contagem');
       zpl = _gerarZplImpressaoRapidaContagem({
         quantidade: qtd, unidade: req.body?.unidade, copias, codigo, layout: layoutCont,
       });
+    } else {
+      const endereco = assertEnderecoEtq(req.body?.endereco);
+      const layoutEndereco = await _etqResolverLayoutDaImpressora(destinoAgente, impressora, 'endereco_caixa');
+      zpl = _gerarZplEnderecoCaixa({ endereco, copias, layout: layoutEndereco });
     }
 
     const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.usuario || '').trim();
@@ -16943,7 +16974,8 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
     res.json({ ok: true, fila_id: fila.rows[0].id, quantidade, via: 'fila' });
   } catch (err) {
     console.error('[etiquetas/impressao-rapida]', err);
-    res.status(500).json({ error: err?.message || 'Falha ao gerar impressao rapida.' });
+    const status = err?.code === 'ETQ_ENDERECO_INVALIDO' ? 400 : 500;
+    res.status(status).json({ error: err?.message || 'Falha ao gerar impressao rapida.' });
   }
 });
 

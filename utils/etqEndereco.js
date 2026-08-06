@@ -1,10 +1,11 @@
 /**
- * Endereço de porta-pallet / ETQ_rec_impresso.
- * Formato obrigatório: 01-02-19-002  →  XX-XX-XX-XXX (só dígitos)
+ * Endereço interno / ETQ_rec_impresso.
+ * Porta-pallet: 01-02-19-002. Caixa: 01-02-19-P01.
  */
 
-const ETQ_ENDERECO_RE = /^(\d{2})-(\d{2})-(\d{2})-(\d{3})$/;
-const MSG_FORMATO = 'Inserir no formato correto.';
+const ETQ_ENDERECO_RE = /^(\d{2})-(\d{2})-(\d{2})-(?:\d{3}|[A-Z]\d{2})$/;
+const ETQ_CAIXA_RE = /^(\d{2})-(\d{2})-(\d{2})-([A-Z]\d{2})$/;
+const MSG_FORMATO = 'Use o formato 01-03-21-002 ou 01-03-21-P01.';
 
 function normalizarEnderecoEtqRaw(valor) {
   return String(valor || '')
@@ -86,7 +87,7 @@ function decomporEnderecoInvalido(valor) {
   const [rua, nivel, edificio, ...resto] = partes;
   if (!/^\d{2}$/.test(rua) || !/^\d{2}$/.test(nivel) || !/^\d{2}$/.test(edificio)) return null;
   const restoTxt = resto.join('-');
-  if (!restoTxt || /^\d{3}$/.test(restoTxt)) return null;
+  if (!restoTxt || /^(?:\d{3}|[A-Z]\d{2})$/.test(restoTxt)) return null;
   return {
     endereco: `${rua}-${nivel}-${edificio}-001`,
     complementoExtra: restoTxt,
@@ -145,6 +146,7 @@ function atribuirFifoCores(itens, getData = (i) => i.data_emissao) {
 
 module.exports = {
   ETQ_ENDERECO_RE,
+  ETQ_CAIXA_RE,
   MSG_FORMATO,
   normalizarEnderecoEtqRaw,
   isEnderecoEtqValido,
