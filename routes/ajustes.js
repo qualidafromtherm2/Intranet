@@ -15,6 +15,7 @@ const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const omieCall = require('../utils/omieCall');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
+const { exigirSupervisorMovimentacao } = require('../utils/permissoesOperacionaisProduto');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { agendarReconciliacaoEstoqueOmie } = require('../utils/reconciliarEstoqueOmie');
 const { anexarHoraObs } = require('../utils/anexarHoraObs');
@@ -656,7 +657,7 @@ router.get('/', async (_req, res) => {
 
 // POST /api/ajustes — cria solicitação de ajuste
 // Body: { tipo_operacao, local_estoque, data_movimentacao?, solicitante?, obs?, itens:[{codigo,descricao?,qtd,cmc?,codigo_produto?,codOmie?}] }
-router.post('/', express.json(), async (req, res) => {
+router.post('/', express.json(), exigirSupervisorMovimentacao, async (req, res) => {
   try {
     if (!await exigirPermissaoNav(
       req,

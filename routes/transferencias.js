@@ -5,6 +5,7 @@ const { dbQuery, dbGetClient } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 const { registrarEventoReq: monEventoReq } = require('../utils/monitoramento');
 const { validarPermissaoMovimentacao } = require('../utils/movimentacaoPermissoes');
+const { autorizarSupervisorMovimentacao } = require('../utils/permissoesOperacionaisProduto');
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { resolverProdutoOmieAtivo } = require('../utils/produtoOmieAtivo');
 const { anexarHoraObs } = require('../utils/anexarHoraObs');
@@ -427,6 +428,8 @@ router.post('/', express.json(), async (req, res) => {
     if (!origem || !destino) {
       return res.status(400).json({ error: 'Informe origem e destino da transferência.' });
     }
+    if (chavePermissaoTransferencia(origem, destino) === 'side:log:solicitacao-ajuste'
+      && !await autorizarSupervisorMovimentacao(req, res)) return;
     const usuarioSessao = String(req.session?.user?.username || solicitante || '').trim();
     const permissao = await validarPermissaoMovimentacao({
       username: usuarioSessao,

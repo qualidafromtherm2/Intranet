@@ -4,32 +4,29 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const {
-  usuarioPodeGerenciarEnderecos,
-  exigirGestaoEnderecos
-} = require('../utils/produtoEnderecosPermissoes');
+  usuarioEhMembroLogistica,
+  usuarioEhSupervisorMovimentacao
+} = require('../utils/permissoesOperacionaisProduto');
 
-test('permite somente os quatro usuários definidos para gestão de endereços', () => {
-  ['Jair.R', 'leandro.S', 'Denis.M', 'alexsandro.j'].forEach((username) => {
-    assert.equal(usuarioPodeGerenciarEnderecos(username), true, username);
+test('enderecos ficam disponiveis para qualquer membro da Logistica', () => {
+  ['Logistica', 'LOGÍSTICA', 'Equipe de Logística'].forEach((setor) => {
+    assert.equal(usuarioEhMembroLogistica({ setor }), true, setor);
   });
-  ['Leandro.B', 'Leandro C.', 'Eduardo6760', 'admin', ''].forEach((username) => {
-    assert.equal(usuarioPodeGerenciarEnderecos(username), false, username);
+  ['Qualidade', 'Compras', '', null].forEach((setor) => {
+    assert.equal(usuarioEhMembroLogistica({ setor }), false, String(setor));
   });
 });
 
-test('middleware rejeita sessão não autorizada no servidor', () => {
-  let statusCode = 0;
-  let payload;
-  const res = {
-    status(code) { statusCode = code; return this; },
-    json(body) { payload = body; return this; }
-  };
-  exigirGestaoEnderecos({ session: { user: { username: 'Leandro.B' } } }, res, () => assert.fail('não deveria avançar'));
-  assert.equal(statusCode, 403);
-  assert.match(payload.error, /não possui permissão/i);
+test('movimentacoes permitem somente supervisores de Logistica ou Qualidade', () => {
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Supervisor de Logística', setor: 'Logística' }), true);
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Supervisor de Qualidade', setor: 'Qualidade' }), true);
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Supervisor', setor: 'Logística' }), true);
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Supervisor', setor: 'Qualidade' }), true);
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Assistente de Logística', setor: 'Logística' }), false);
+  assert.equal(usuarioEhSupervisorMovimentacao({ funcao_nome: 'Supervisor de Produção', setor: 'Produção' }), false);
 });
 
-test('rotas de endereços exigem permissão, trava transacional e não chamam a Omie', () => {
+test('rotas de enderecos exigem membro da Logistica, trava transacional e nao chamam a Omie', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
   const start = source.indexOf("app.get('/api/logistica/produtos/:codigo/enderecos'");
   const end = source.indexOf('// GET /api/etiquetas/rec-impresso/enderecos-por-produto', start);
@@ -43,4 +40,12 @@ test('rotas de endereços exigem permissão, trava transacional e não chamam a 
   assert.match(routes, /_processarMovimentacaoEtqInterna/);
   assert.match(routes, /tipoMov:\s*'TRF'/);
   assert.doesNotMatch(routes, /omieCall|IncluirAjusteEstoque|fetch\s*\(/);
+});
+
+test('criacao de ajustes e transferencias comuns exige supervisor operacional', () => {
+  const ajustes = fs.readFileSync(path.resolve(__dirname, '..', 'routes', 'ajustes.js'), 'utf8');
+  const transferencias = fs.readFileSync(path.resolve(__dirname, '..', 'routes', 'transferencias.js'), 'utf8');
+  assert.match(ajustes, /router\.post\('\/', express\.json\(\), exigirSupervisorMovimentacao/);
+  assert.match(transferencias, /autorizarSupervisorMovimentacao\(req, res\)/);
+  assert.match(transferencias, /chavePermissaoTransferencia\(origem, destino\) === 'side:log:solicitacao-ajuste'/);
 });
