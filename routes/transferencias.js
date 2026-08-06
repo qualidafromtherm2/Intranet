@@ -606,11 +606,15 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
 
     const { rows } = await dbQuery(updateSql, [STATUS_TRANSFERIDO, aprovadoPor, id]);
 
-    [registroAtual.origem, registroAtual.destino].forEach((localCodigo, index) => {
+    [
+      { localCodigo: registroAtual.origem, deltaEsperado: -Number(registroAtual.qtd) },
+      { localCodigo: registroAtual.destino, deltaEsperado: Number(registroAtual.qtd) }
+    ].forEach(({ localCodigo, deltaEsperado }, index) => {
       agendarReconciliacaoEstoqueOmie({
         codigoProduto: registroAtual.codigo_produto,
         codigo: registroAtual.codigo,
-        localCodigo
+        localCodigo,
+        deltaEsperado
       }, 3000 + (index * 750));
     });
 
@@ -730,11 +734,15 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
     `, [STATUS_REVERTIDO, reversao.id, usuario, motivo, id]);
     await client.query('COMMIT');
 
-    [original.destino, original.origem].forEach((localCodigo, index) => {
+    [
+      { localCodigo: original.destino, deltaEsperado: -Number(original.qtd) },
+      { localCodigo: original.origem, deltaEsperado: Number(original.qtd) }
+    ].forEach(({ localCodigo, deltaEsperado }, index) => {
       agendarReconciliacaoEstoqueOmie({
         codigoProduto: original.codigo_produto,
         codigo: original.codigo,
-        localCodigo
+        localCodigo,
+        deltaEsperado
       }, 3000 + (index * 750));
     });
 

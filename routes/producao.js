@@ -204,6 +204,31 @@ function escapeLikePattern(term) {
 }
 
 /* ---------------------------------------------------------------
+ * Schema Producao.postos_preparacao — postos criados no Gerar OP (PP)
+ * --------------------------------------------------------------- */
+let postosPrepSchemaOk = false;
+
+async function garantirSchemaPostosPreparacao() {
+  if (postosPrepSchemaOk) return;
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS "Producao"."postos_preparacao" (
+      id          BIGSERIAL PRIMARY KEY,
+      nome        TEXT NOT NULL,
+      created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      created_by  TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_postos_preparacao_nome_ci
+      ON "Producao"."postos_preparacao" (UPPER(TRIM(nome)));
+  `);
+  postosPrepSchemaOk = true;
+}
+
+function normalizarNomePostoPreparacao(nome) {
+  return String(nome || '').replace(/\s+/g, ' ').trim();
+}
+
+/* ---------------------------------------------------------------
  * Schema Producao.OP_producao — OPs geradas manualmente
  * --------------------------------------------------------------- */
 let opProducaoSchemaOk = false;
@@ -2003,6 +2028,89 @@ router.get('/kanban-programacao', async (req, res) => {
     return res.json({ success: true, total: rows.length, registros: rows });
   } catch (err) {
     console.error('[producao] Erro ao listar kanban programacao:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * GET /api/producao/postos-preparacao
+ * Lista postos de preparação cadastrados (guias da tela Preparações).
+ * --------------------------------------------------------------- */
+router.get('/postos-preparacao', async (req, res) => {
+  try {
+    await garantirSchemaPostosPreparacao();
+    const { rows } = await dbQuery(`
+      SELECT id, nome, created_at
+      FROM "Producao"."postos_preparacao"
+      ORDER BY LOWER(TRIM(nome)) ASC, id ASC
+    `);
+    return res.json({
+      success: true,
+      postos: (rows || []).map((r) => ({
+        id: r.id,
+        nome: String(r.nome || '').trim(),
+        created_at: r.created_at || null,
+      })).filter((p) => p.nome),
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao listar postos preparação:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/postos-preparacao
+ * Cria posto de preparação (nome livre, único case-insensitive).
+ * Body: { nome: string }
+ * --------------------------------------------------------------- */
+router.post('/postos-preparacao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaPostosPreparacao();
+    const nome = normalizarNomePostoPreparacao(req.body?.nome);
+    if (!nome) {
+      return res.status(400).json({ success: false, error: 'Informe o nome do posto de preparação.' });
+    }
+    if (nome.length > 80) {
+      return res.status(400).json({ success: false, error: 'Nome do posto muito longo (máx. 80 caracteres).' });
+    }
+
+    const createdBy = String(
+      req.user?.usuario || req.user?.login || req.session?.usuario || req.session?.user?.usuario || ''
+    ).trim() || null;
+
+    try {
+      const { rows } = await dbQuery(`
+        INSERT INTO "Producao"."postos_preparacao" (nome, created_by)
+        VALUES ($1, $2)
+        RETURNING id, nome, created_at
+      `, [nome, createdBy]);
+      const row = rows[0];
+      return res.json({
+        success: true,
+        created: true,
+        posto: { id: row.id, nome: row.nome, created_at: row.created_at },
+      });
+    } catch (err) {
+      if (err && (err.code === '23505' || /unique|duplicate/i.test(String(err.message || '')))) {
+        const { rows } = await dbQuery(`
+          SELECT id, nome, created_at
+          FROM "Producao"."postos_preparacao"
+          WHERE UPPER(TRIM(nome)) = UPPER(TRIM($1))
+          LIMIT 1
+        `, [nome]);
+        if (rows[0]) {
+          return res.json({
+            success: true,
+            created: false,
+            posto: { id: rows[0].id, nome: rows[0].nome, created_at: rows[0].created_at },
+            message: 'Posto já existia.',
+          });
+        }
+      }
+      throw err;
+    }
+  } catch (err) {
+    console.error('[producao] Erro ao criar posto preparação:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

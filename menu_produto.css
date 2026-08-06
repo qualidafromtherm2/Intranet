@@ -2808,6 +2808,32 @@ max-width: 480px;          /* 260 ? 480 px; ajuste se quiser */
   align-items: center;
 }
 
+.sidebar-dock-home {
+  display: none;
+  flex: 0 0 44px;
+  width: 44px;
+  min-height: 44px;
+  margin: 0 0 4px;
+  padding: 0;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--theme-color, #f0f0f0);
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 16px;
+  position: relative;
+  z-index: 1001;
+}
+.sidebar-dock-home:hover {
+  background: var(--hover-menu-bg, rgba(255, 255, 255, 0.08));
+}
+.sidebar-dock-home i {
+  margin: 0 !important;
+  font-size: 16px;
+}
+
 .sidebar-hamburger {
   background: var(--primary-color);
   border: none;
@@ -10053,12 +10079,13 @@ table.tabela td.num {
 }
 
 .chamado-tab-btn {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 7px;
   min-height: 36px;
-  padding: 7px 13px;
+  padding: 7px 18px 7px 13px;
   border: 0;
   border-bottom: 3px solid transparent;
   background: transparent;
@@ -10071,6 +10098,30 @@ table.tabela td.num {
 .chamado-tab-btn.chamado-tab-active {
   color: #0f766e;
   border-bottom-color: #14b8a6;
+}
+
+.chamado-tab-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 9px;
+  background: #0f766e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-family: system-ui, -apple-system, sans-serif;
+  font-style: normal;
+}
+.chamado-tab-btn.chamado-tab-active .chamado-tab-badge {
+  background: #0d9488;
 }
 
 .chamado-modal-body {
@@ -22597,6 +22648,14 @@ html.light-mode #minhasComprasWrapper {
     overflow: hidden;
   }
 
+  /* Casinha acima do hambúrguer no rail recolhido */
+  .sidebar-dock-home {
+    display: flex;
+  }
+  .left-side:has(#sidebarContent:not(.collapsed)) .sidebar-dock-home {
+    display: none;
+  }
+
   .sidebar-hamburger {
     flex: 0 0 44px;
     background: transparent;
@@ -22615,7 +22674,7 @@ html.light-mode #minhasComprasWrapper {
     pointer-events: auto;
     transform: none;
     left: 0;
-    top: 52px;
+    top: 96px;
     bottom: 0;
     width: var(--shell-sidebar-width);
     padding: 4px 8px 8px;
@@ -22630,8 +22689,8 @@ html.light-mode #minhasComprasWrapper {
 
   .sidebar-content.collapsed::-webkit-scrollbar { display: none; }
   .sidebar-content.collapsed .side-title { display: none; }
-  /* No dock recolhido, a Home é o único atalho persistente. As rotinas
-     continuam disponíveis no painel expandido e nos módulos da página inicial. */
+  /* No dock recolhido, a Home fica no botão acima do hambúrguer. */
+  .sidebar-content.collapsed > .side-primary-wrapper,
   .sidebar-content.collapsed > .side-wrapper { display: none !important; }
   .sidebar-content.collapsed .side-wrapper + .side-wrapper { margin-top: 4px; }
   .sidebar-content.collapsed .side-menu { gap: 4px; }
