@@ -12078,6 +12078,69 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
             });
           }
         }
+
+        // Status de entrega (sent/delivered/read/failed) — necessário para diagnosticar
+        // template aceito pela API mas não entregue no celular.
+        const statuses = Array.isArray(value?.statuses) ? value.statuses : [];
+        for (const st of statuses) {
+          const wamid = String(st?.id || '').trim();
+          const status = String(st?.status || '').trim().toLowerCase();
+          if (!wamid || !status) continue;
+          const recipient = String(st?.recipient_id || '').trim();
+          const recipientDigits = normalizePhoneDigits(recipient);
+          const err0 = Array.isArray(st?.errors) && st.errors[0] ? st.errors[0] : null;
+          const errTxt = err0
+            ? `code=${err0.code || ''} ${err0.title || err0.message || ''}`.trim()
+            : null;
+          const statusKey = `${wamid}:${status}:${String(st?.timestamp || Date.now())}`;
+
+          if (status === 'failed') {
+            console.error(
+              '[whatsapp/webhook] entrega FALHOU',
+              `to=${recipientDigits || recipient || '?'}`,
+              errTxt || JSON.stringify(st?.errors || st)
+            );
+          } else {
+            console.log(
+              '[whatsapp/webhook] status',
+              status,
+              `to=${recipientDigits || recipient || '?'}`,
+              `wamid=${wamid.slice(0, 28)}…`
+            );
+          }
+
+          try {
+            await pool.query(
+              `INSERT INTO sac.whatsapp_webhook_messages (
+                 wa_message_id,
+                 from_phone,
+                 from_phone_digits,
+                 profile_name,
+                 direction,
+                 message_type,
+                 message_text,
+                 phone_number_id,
+                 display_phone_number,
+                 payload_json
+               ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               ON CONFLICT (wa_message_id) DO NOTHING`,
+              [
+                statusKey,
+                recipient || null,
+                recipientDigits || null,
+                null,
+                'status',
+                status,
+                errTxt || status,
+                String(metadata?.phone_number_id || '').trim() || null,
+                String(metadata?.display_phone_number || '').trim() || null,
+                st || {}
+              ]
+            );
+          } catch (stErr) {
+            console.warn('[whatsapp/webhook] falha ao gravar status:', stErr?.message || stErr);
+          }
+        }
       }
     }
 
