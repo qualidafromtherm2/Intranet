@@ -38,6 +38,7 @@ const {
 const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
   assertEnderecoEtq,
+  extrairVaoEnderecoEtq,
   resolverEnderecoEtq,
   enderecoEtqParaMovimentacao,
   atribuirFifoCores,
@@ -12937,6 +12938,7 @@ const ETQ_LAYOUT_SAMPLE_DEFAULT = {
   unidade: 'UN',
   seq: '1',
   endereco: '01-02-03-001',
+  vao: 'P01',
 };
 
 const ETQ_LAYOUT_TIPOS = [
@@ -12992,8 +12994,9 @@ const ETQ_LAYOUT_CAMPOS_DEFAULT = {
     { id: 'desc', tipo: 'bloco', x: 40, y: 450, fonteH: 24, fonteW: 24, largura: 480, maxLinhas: 3, conteudo: '{{descricao}}' },
   ],
   endereco_caixa: [
-    { id: 'qr', tipo: 'qr', x: 127, y: 8, magnificacao: 5, conteudo: '{{endereco}}' },
-    { id: 'endereco', tipo: 'bloco', x: 0, y: 174, fonteH: 28, fonteW: 23, largura: 399, maxLinhas: 1, alinhamento: 'C', conteudo: '{{endereco}}' },
+    { id: 'qr', tipo: 'qr', x: 10, y: 10, magnificacao: 5, conteudo: '{{endereco}}' },
+    { id: 'vao', tipo: 'bloco', x: 140, y: 36, fonteH: 84, fonteW: 74, largura: 250, maxLinhas: 1, alinhamento: 'C', conteudo: '{{vao}}' },
+    { id: 'endereco', tipo: 'bloco', x: 0, y: 190, fonteH: 30, fonteW: 24, largura: 399, maxLinhas: 1, alinhamento: 'C', conteudo: '{{endereco}}' },
   ],
 };
 
@@ -13177,7 +13180,7 @@ function _etqLayoutRowToClient(r) {
     tipoBase: r.tipo_base || r.chave,
     isProfile: r.perfil === true,
     ativo: r.ativo !== false,
-    placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco'],
+    placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco', 'vao'],
     atualizadoEm: r.atualizado_em,
     atualizadoPor: r.atualizado_por || null,
   };
@@ -13264,6 +13267,22 @@ async function _etqSeedLayoutDefaultsSeVazio() {
     );
     for (const row of rows) {
       const campos = Array.isArray(row.campos) ? row.campos : [];
+      const layoutCaixaLegado = row.chave === 'endereco_caixa'
+        && !campos.some((campo) => campo?.id === 'vao');
+      if (layoutCaixaLegado) {
+        await pool.query(
+          `UPDATE etiqueta."ETQ_layout_config"
+              SET campos = $2::jsonb,
+                  amostra = COALESCE(amostra, '{}'::jsonb) || $3::jsonb,
+                  atualizado_em = now()
+            WHERE chave = $1`,
+          [row.chave, JSON.stringify(ETQ_LAYOUT_CAMPOS_DEFAULT.endereco_caixa), JSON.stringify({
+            endereco: '01-02-03-P01',
+            vao: 'P01',
+          })]
+        );
+        continue;
+      }
       if (campos.length || (row.zpl_template && String(row.zpl_template).trim())) continue;
       const def = ETQ_LAYOUT_CAMPOS_DEFAULT[row.chave];
       if (!def) continue;
@@ -16904,16 +16923,18 @@ ${codeLine}^FO20,200^FB1500,1,0,L,0^A0R,50,50^FD${_impressaoRapidaData()}^FS
 
 function _gerarZplEnderecoCaixa({ endereco, copias = 1, layout }) {
   const end = assertEnderecoEtq(endereco);
+  const vao = extrairVaoEnderecoEtq(end);
   const total = Math.max(1, Math.min(20, Number(copias) || 1));
-  const fromLayout = layout ? _etqGerarZplDoLayout(layout, { endereco: end, qr: end }) : null;
+  const fromLayout = layout ? _etqGerarZplDoLayout(layout, { endereco: end, qr: end, vao }) : null;
   const bloco = fromLayout || [
     '^XA',
     '^FXSGF_PROFILE_MANAGED^FS',
     '^CI28',
     '^PW399',
     '^LL240',
-    '^FO127,8^BQN,2,5^FDLA,' + end + '^FS',
-    '^FO0,174^A0N,28,23^FB399,1,0,C,0^FD' + end + '^FS',
+    '^FO10,10^BQN,2,5^FDLA,' + end + '^FS',
+    '^FO140,36^A0N,84,74^FB250,1,0,C,0^FD' + vao + '^FS',
+    '^FO0,190^A0N,30,24^FB399,1,0,C,0^FD' + end + '^FS',
     '^XZ',
   ].join('\n');
   return Array.from({ length: total }, () => bloco).join('\n');

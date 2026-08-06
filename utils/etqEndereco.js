@@ -30,6 +30,12 @@ function assertEnderecoEtq(valor) {
   return end;
 }
 
+/** Último segmento que identifica o vão/caixa: P01, B01 ou 002. */
+function extrairVaoEnderecoEtq(valor) {
+  const end = assertEnderecoEtq(valor);
+  return end.slice(end.lastIndexOf('-') + 1);
+}
+
 /**
  * Movimentação de saldo: aceita formato padrão OU endereço já cadastrado (legado, ex. 04-03).
  * conhecidos: lista de endereços exatos do ETQ_rec_impresso para o produto.
@@ -151,6 +157,7 @@ module.exports = {
   normalizarEnderecoEtqRaw,
   isEnderecoEtqValido,
   assertEnderecoEtq,
+  extrairVaoEnderecoEtq,
   resolverEnderecoEtq,
   enderecoEtqParaMovimentacao,
   decomporEnderecoInvalido,

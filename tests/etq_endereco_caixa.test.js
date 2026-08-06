@@ -7,6 +7,7 @@ const {
   ETQ_ENDERECO_RE,
   ETQ_CAIXA_RE,
   assertEnderecoEtq,
+  extrairVaoEnderecoEtq,
   resolverEnderecoEtq,
   decomporEnderecoInvalido,
 } = require('../utils/etqEndereco');
@@ -16,6 +17,8 @@ test('aceita porta-pallet numérico e endereço de caixa alfanumérico', () => {
   assert.equal(assertEnderecoEtq(' 01-03-21-p01 '), '01-03-21-P01');
   assert.equal(ETQ_ENDERECO_RE.test('01-03-21-P01'), true);
   assert.equal(ETQ_CAIXA_RE.test('01-03-21-P01'), true);
+  assert.equal(extrairVaoEnderecoEtq('01-03-21-p01'), 'P01');
+  assert.equal(extrairVaoEnderecoEtq('01-03-21-002'), '002');
 });
 
 test('rejeita código de caixa incompleto ou com tamanho incorreto', () => {
@@ -44,6 +47,8 @@ test('integra alteração de caixa, etiqueta 50x30 e proteção da migração an
   assert.match(server, /'endereco_caixa'\s*,\s*'Endereço de caixa 50x30'\s*,\s*50,\s*30/);
   assert.match(server, /\^PW399/);
   assert.match(server, /\^LL240/);
+  assert.match(server, /conteudo:\s*'\{\{vao\}\}'/);
+  assert.match(server, /extrairVaoEnderecoEtq\(end\)/);
   assert.match(server, /\(\[0-9\]\{3\}\|\[A-Z\]\[0-9\]\{2\}\)/);
   assert.match(frontend, /data-action="caixa"/);
   assert.match(frontend, /data-caixa-imprimir/);
