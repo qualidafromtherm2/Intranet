@@ -11685,6 +11685,9 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     // Migração: PIR — só libera etiqueta após registro de inspeção
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS pir BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Recebimento sem NF-e: motivo obrigatório + rastreio da entrada Omie
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS omie_ent_codigo TEXT`);
     // Fora de MP com pir=false ficava invisível (PIR padrão só MP; Identificação só pir=true).
     // Libera esses itens para Identificação do produto.
     try {
@@ -13839,13 +13842,45 @@ async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
   return Buffer.from(await labelaryResp.arrayBuffer());
 }
 
+// GET /api/etiquetas/recebimento/manual/ultimo-motivo?codigo_produto=...
+// Devolve o último motivo_sem_nfe registrado para o produto (preenche o formulário).
+app.get('/api/etiquetas/recebimento/manual/ultimo-motivo', async (req, res) => {
+  try {
+    const codigo = String(req.query.codigo_produto || req.query.codigo || '').trim();
+    if (!codigo) {
+      return res.status(400).json({ ok: false, error: 'Informe o código do produto.' });
+    }
+    await pool.query(
+      `ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT`
+    ).catch(() => {});
+    const { rows } = await pool.query(
+      `SELECT motivo_sem_nfe
+         FROM etiqueta."ETQ_recebimento"
+        WHERE TRIM(codigo_produto) = TRIM($1)
+          AND motivo_sem_nfe IS NOT NULL
+          AND TRIM(motivo_sem_nfe) <> ''
+        ORDER BY id DESC
+        LIMIT 1`,
+      [codigo]
+    );
+    return res.json({
+      ok: true,
+      motivo: rows[0]?.motivo_sem_nfe ? String(rows[0].motivo_sem_nfe) : '',
+    });
+  } catch (err) {
+    console.error('[etiquetas/recebimento/manual/ultimo-motivo]', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar último motivo.' });
+  }
+});
+
 // POST /api/etiquetas/recebimento/manual
 // Entrada sem NF-e/pedido (Lista de produtos → Escolha a ação).
-// Body: { codigo_produto, descricao_produto, qtd, unidade, nfe?, pedido? }
-// Destino:
-//   MP → pir=false → lista PIR (+ WhatsApp)
-//   fora de MP / vai_direto → pir=true → Identificação do produto
+// Body: { codigo_produto, descricao_produto, qtd, unidade, nfe?, pedido?, motivo }
+// 1) Gera ENT real na Omie no armazém Recebimento de Produtos
+// 2) Cria registro em ETQ_recebimento (PIR ou Identificação)
 app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) => {
+  const _sep = '─'.repeat(60);
+  const COD_RECEBIMENTO = '10408201806'; // Recebimento de Produtos
   try {
     const body = req.body || {};
     const codProdRaw = String(body.codigo_produto || body.codigo || '').trim();
@@ -13854,6 +13889,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     const unidRaw = String(body.unidade || 'UN').trim() || 'UN';
     const nfeInformada = String(body.nfe || body.numero_nfe || '').trim();
     const pedidoInformado = String(body.pedido || body.numero_pedido || '').trim();
+    const motivoSemNfe = String(body.motivo || body.motivo_sem_nfe || '').trim();
     const usuario = body.usuario
       || req.session?.usuario
       || req.session?.user?.login
@@ -13863,9 +13899,15 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     if (!codProdRaw) {
       return res.status(400).json({ ok: false, error: 'Informe o código do produto.' });
     }
+    if (!motivoSemNfe) {
+      return res.status(400).json({ ok: false, error: 'Informe o motivo do recebimento sem NF-e.' });
+    }
     const qtdNum = qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) : NaN;
     if (!Number.isFinite(qtdNum) || qtdNum <= 0) {
       return res.status(400).json({ ok: false, error: 'Informe uma quantidade válida maior que zero.' });
+    }
+    if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+      return res.status(500).json({ ok: false, error: 'Credenciais da Omie ausentes. Não é possível criar a entrada de estoque.' });
     }
 
     // Sem NF-e/pedido real: gera identificadores únicos para permitir várias entradas do mesmo produto
@@ -13888,11 +13930,97 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
       String(agora.getMonth() + 1).padStart(2, '0'),
       agora.getFullYear(),
     ].join('/');
+    const dataOmie = dataExibir;
 
     await pool.query(`
       ALTER TABLE public.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT`).catch(() => {});
+    await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS omie_ent_codigo TEXT`).catch(() => {});
+
+    const { rows: prodRows } = await pool.query(
+      `SELECT p.codigo_produto AS id_prod,
+              p.codigo,
+              COALESCE(
+                NULLIF(e.cmc, 0),
+                NULLIF(e.preco_unitario, 0),
+                NULLIF(p.valor_unitario, 0),
+                0.01
+              ) AS valor_unit
+         FROM public.produtos_omie p
+         LEFT JOIN logistica.estoque_atual e
+           ON e.codigo = p.codigo AND e.local_codigo = $2
+        WHERE TRIM(p.codigo) = TRIM($1)
+           OR TRIM(p.codigo_produto::text) = TRIM($1)
+        LIMIT 1`,
+      [codProdRaw, COD_RECEBIMENTO]
+    );
+    if (!prodRows.length || !prodRows[0].id_prod) {
+      return res.status(400).json({
+        ok: false,
+        error: `Produto ${codProdRaw} não encontrado no cadastro Omie (produtos_omie). Não é possível gerar a entrada de estoque.`,
+      });
+    }
+    const idProd = Number(prodRows[0].id_prod);
+    const valorUnit = parseFloat(prodRows[0].valor_unit) || 0.01;
+    if (!Number.isFinite(idProd) || idProd <= 0) {
+      return res.status(400).json({ ok: false, error: 'ID do produto na Omie inválido.' });
+    }
+
+    // 1) Entrada real na Omie — armazém Recebimento de Produtos (necessário para Guardar materiais / TRF)
+    const obsOmie = anexarHoraObs(
+      `Recebimento sem NF-e. Motivo: ${motivoSemNfe} | NF: ${nfe} | Pedido: ${pedido} | Lote: ${lote}`
+        + (usuario ? ` | Por: ${usuario}` : '')
+    );
+    const omiePayload = {
+      call: 'IncluirAjusteEstoque',
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [{
+        codigo_local_estoque: COD_RECEBIMENTO,
+        id_prod: idProd,
+        data: dataOmie,
+        tipo: 'ENT',
+        quan: qtdNum,
+        valor: valorUnit,
+        obs: obsOmie,
+        origem: 'AJU',
+        motivo: 'INV',
+      }],
+    };
+    console.log(`\n┌${_sep}\n│ [RECEB-MANUAL] Omie ENT ${codProdRaw}: local=${COD_RECEBIMENTO} qtd=${qtdNum}\n│ Motivo: ${motivoSemNfe}\n└${_sep}`);
+    let omieResp;
+    try {
+      omieResp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
+    } catch (omieErr) {
+      const fault = omieErr?.faultstring || omieErr?.message || String(omieErr);
+      console.warn(`\n┌${_sep}\n│ [RECEB-MANUAL] ⚠ Omie ENT falhou: ${fault}\n└${_sep}`);
+      return res.status(502).json({
+        ok: false,
+        error: `Omie recusou a entrada no armazém Recebimento de Produtos: ${fault}`,
+      });
+    }
+    if (omieResp?.faultstring) {
+      return res.status(502).json({
+        ok: false,
+        error: `Omie recusou a entrada: ${omieResp.faultstring}`,
+      });
+    }
+    if (omieResp?.codigo_status != null && String(omieResp.codigo_status) !== '0') {
+      return res.status(502).json({
+        ok: false,
+        error: String(omieResp.descricao_status || 'Omie rejeitou a entrada de estoque.'),
+      });
+    }
+    const omieEntCodigo = String(
+      omieResp?.codigo_lancamento_omie
+      || omieResp?.nCodAjuste
+      || omieResp?.codigo_ajuste
+      || omieResp?.id_ajuste
+      || ''
+    ).trim() || null;
+    console.log(`\n┌${_sep}\n│ [RECEB-MANUAL] ✓ ENT Omie ok  cod=${codProdRaw}  qtd=${qtdNum}  omie=${omieEntCodigo || '-'}\n└${_sep}`);
 
     const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
     const { pirInicial, ehMp } = await resolverDestinoPirRecebimento(pool, codProdRaw);
@@ -13901,24 +14029,32 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     const codProd = sanitize(codProdRaw, 30);
     const descProd = sanitize(descProdRaw, 70);
     const loteTxt = sanitize(lote, 40);
+    const motivoDb = sanitize(motivoSemNfe, 500);
 
     const layoutRecebimento = await _carregarLayoutEtiqueta('recebimento');
 
+    // 2) Só após ENT na Omie: cria etiqueta / fila PIR ou Identificação
     const ins = await pool.query(
       `INSERT INTO etiqueta."ETQ_recebimento"
          (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-          qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+          qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir,
+          motivo_sem_nfe, omie_ent_codigo)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
        RETURNING id, pir`,
       [
         nfe, pedido, lote,
         codProdRaw, descProdRaw,
         qtdNum, unidRaw, dataExibir, '', usuario, pirInicial,
+        motivoDb, omieEntCodigo,
       ]
     );
     const idEtq = ins.rows[0]?.id;
     if (!idEtq) {
-      return res.status(500).json({ ok: false, error: 'Falha ao criar etiqueta de recebimento.' });
+      return res.status(500).json({
+        ok: false,
+        error: 'Entrada Omie ok, mas falhou ao criar etiqueta de recebimento. Contate o suporte.',
+        omie_ent_codigo: omieEntCodigo,
+      });
     }
 
     const zpl = _gerarZplRecebimentoBloco({
@@ -13957,11 +14093,13 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
       lote,
       numero_nfe: nfe,
       numero_pedido: pedido,
+      motivo_sem_nfe: motivoDb,
+      omie_ent_codigo: omieEntCodigo,
       mensagem: pirInicial
         ? (ehMp
-          ? 'Entrada criada. Produto configurado para ir direto à Identificação do produto.'
-          : 'Entrada criada. Produto fora de MP enviado à Identificação do produto.')
-        : 'Entrada criada. Produto enviado para a lista PIR (Qualidade Fábrica).',
+          ? 'Entrada Omie + etiqueta criadas. Produto configurado para ir direto à Identificação do produto.'
+          : 'Entrada Omie + etiqueta criadas. Produto fora de MP enviado à Identificação do produto.')
+        : 'Entrada Omie + etiqueta criadas. Produto enviado para a lista PIR (Qualidade Fábrica).',
     });
   } catch (err) {
     console.error('[etiquetas/recebimento/manual]', err);
@@ -15035,6 +15173,7 @@ app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (r
         WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1)
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
         GROUP BY TRIM(i.endereco)
+       HAVING SUM(COALESCE(i.qtd, 0)) > 0
         ORDER BY TRIM(i.endereco)`,
       [codigo]
     );
@@ -15345,7 +15484,7 @@ app.get('/api/etiquetas/rec-impresso/:id', async (req, res) => {
 });
 
 // PATCH /api/etiquetas/rec-impresso/:id/endereco
-// Body: { endereco: "01-02-19-002", complemento? } — registra o local de armazenamento e faz TRF Omie
+// Body: { endereco: "01-02-19-002", complemento? } — TRF Omie primeiro; só então grava o endereço
 // :id aceita PK (1850) ou rótulo de volume (1850.1)
 app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req, res) => {
   const _sep = '─'.repeat(60);
@@ -15361,7 +15500,108 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     const complemento = String(req.body?.complemento || '').trim();
     if (!id) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
 
-    // 1. Salva endereço (e complemento opcional) e preenche codigo/descricao se vazios
+    // 1. Lê o impresso (sem gravar endereço ainda — Omie precisa ter sucesso primeiro)
+    const { rows: impressoRows } = await pool.query(
+      `SELECT i.id, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto,
+              NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo
+         FROM etiqueta."ETQ_rec_impresso" i
+        WHERE i.id = $1
+        LIMIT 1`,
+      [id]
+    );
+    if (!impressoRows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    const impresso = impressoRows[0];
+    const { origem_id, qtd } = impresso;
+
+    // 2. Busca dados do produto no recebimento para o TRF Omie
+    const { rows: recRows } = await pool.query(
+      `SELECT codigo_produto, numero_nfe, lote FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
+      [origem_id]
+    );
+
+    // 3. TRF Omie: RECEBIMENTO (10408201806) → PORTA PALLET ALMOXARIFADO (10717096386)
+    //    Obrigatório ter sucesso antes de marcar o material como guardado.
+    if (recRows.length) {
+      const { codigo_produto, numero_nfe, lote } = recRows[0];
+      const COD_ORIGEM  = '10408201806'; // Recebimento de Produtos
+      const COD_DESTINO = '10717096386'; // Porta Pallet (Almoxarifado)
+      if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+        return res.status(500).json({
+          error: 'Credenciais da Omie ausentes. Endereço não foi salvo.',
+        });
+      }
+      const { rows: prodRows } = await pool.query(
+        `SELECT p.codigo_produto AS id_prod,
+                COALESCE(
+                  NULLIF(e.cmc, 0),
+                  NULLIF(e.preco_unitario, 0),
+                  NULLIF(p.valor_unitario, 0),
+                  0.01
+                ) AS valor_unit
+           FROM public.produtos_omie p
+           LEFT JOIN logistica.estoque_atual e
+             ON e.codigo = p.codigo AND e.local_codigo = $2
+           WHERE p.codigo = $1
+           LIMIT 1`,
+        [codigo_produto, COD_ORIGEM]
+      );
+
+      if (!prodRows.length) {
+        return res.status(400).json({
+          error: `Produto ${codigo_produto} não encontrado em produtos_omie. Transferência Omie não realizada; endereço não foi salvo.`,
+        });
+      }
+
+      const idProd  = Number(prodRows[0].id_prod);
+      const valor   = parseFloat(prodRows[0].valor_unit) || 0.01;
+      const qtdNum  = parseFloat(qtd) || 1;
+      const hoje    = new Date();
+      const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
+      const obs     = anexarHoraObs(`Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`);
+
+      const omiePayload = {
+        call: 'IncluirAjusteEstoque',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{
+          codigo_local_estoque:          COD_ORIGEM,
+          id_prod:                       idProd,
+          data:                          dataOmie,
+          tipo:                          'TRF',
+          quan:                          qtdNum,
+          valor,
+          obs,
+          origem:                        'AJU',
+          motivo:                        'TRF',
+          codigo_local_estoque_destino:  COD_DESTINO
+        }]
+      };
+
+      console.log(`\n┌${_sep}\n│ [ARMAZENAR] Omie TRF ${codigo_produto}: ${COD_ORIGEM} → ${COD_DESTINO} (${qtdNum} un)\n│ NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | Endereço: ${endereco}\n└${_sep}`);
+      let omieResp;
+      try {
+        omieResp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
+      } catch (omieErr) {
+        const fault = omieErr?.faultstring || omieErr?.message || String(omieErr);
+        console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${fault}\n└${_sep}`);
+        return res.status(502).json({
+          error: `Omie recusou a transferência (Recebimento → Almoxarifado): ${fault}. Endereço não foi salvo.`,
+        });
+      }
+      if (omieResp?.faultstring) {
+        return res.status(502).json({
+          error: `Omie recusou a transferência: ${omieResp.faultstring}. Endereço não foi salvo.`,
+        });
+      }
+      if (omieResp?.codigo_status != null && String(omieResp.codigo_status) !== '0') {
+        return res.status(502).json({
+          error: `${omieResp.descricao_status || 'Omie rejeitou a transferência'}. Endereço não foi salvo.`,
+        });
+      }
+      console.log(`\n┌${_sep}\n│ [ARMAZENAR] ✓ TRF Omie concluída  id_rec=${id}  rotulo=${impresso.id_rotulo || id}  cod=${codigo_produto}  qtd=${qtdNum}\n└${_sep}`);
+    }
+
+    // 4. Só após TRF Ok (ou sem vínculo de recebimento): salva endereço
     const result = await pool.query(
       `UPDATE etiqueta."ETQ_rec_impresso" i
           SET endereco = $1,
@@ -15384,73 +15624,6 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       [endereco, complemento || null, id]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
-    const { origem_id, qtd } = result.rows[0];
-
-    // 2. Busca dados do produto no recebimento para o TRF Omie
-    const { rows: recRows } = await pool.query(
-      `SELECT codigo_produto, numero_nfe, lote FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
-      [origem_id]
-    );
-
-    // 3. TRF Omie: RECEBIMENTO (10408201806) → PORTA PALLET ALMOXARIFADO (10717096386)
-    if (recRows.length) {
-      const { codigo_produto, numero_nfe, lote } = recRows[0];
-      const COD_ORIGEM  = '10408201806'; // Recebimento de Produtos
-      const COD_DESTINO = '10717096386'; // Porta Pallet (Almoxarifado)
-      try {
-        const { rows: prodRows } = await pool.query(
-          `SELECT p.codigo_produto AS id_prod,
-                  COALESCE(
-                    NULLIF(e.cmc, 0),
-                    NULLIF(e.preco_unitario, 0),
-                    NULLIF(p.valor_unitario, 0),
-                    0.01
-                  ) AS valor_unit
-           FROM public.produtos_omie p
-           LEFT JOIN logistica.estoque_atual e
-             ON e.codigo = p.codigo AND e.local_codigo = $2
-           WHERE p.codigo = $1
-           LIMIT 1`,
-          [codigo_produto, COD_ORIGEM]
-        );
-
-        if (prodRows.length) {
-          const idProd  = Number(prodRows[0].id_prod);
-          const valor   = parseFloat(prodRows[0].valor_unit) || 0.01;
-          const qtdNum  = parseFloat(qtd) || 1;
-          const hoje    = new Date();
-          const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
-          const obs     = anexarHoraObs(`Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`);
-
-          const omiePayload = {
-            call: 'IncluirAjusteEstoque',
-            app_key: OMIE_APP_KEY,
-            app_secret: OMIE_APP_SECRET,
-            param: [{
-              codigo_local_estoque:          COD_ORIGEM,
-              id_prod:                       idProd,
-              data:                          dataOmie,
-              tipo:                          'TRF',
-              quan:                          qtdNum,
-              valor,
-              obs,
-              origem:                        'AJU',
-              motivo:                        'TRF',
-              codigo_local_estoque_destino:  COD_DESTINO
-            }]
-          };
-
-          console.log(`\n┌${_sep}\n│ [ARMAZENAR] Omie TRF ${codigo_produto}: ${COD_ORIGEM} → ${COD_DESTINO} (${qtdNum} un)\n│ NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | Endereço: ${endereco}\n└${_sep}`);
-          await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', omiePayload);
-          console.log(`\n┌${_sep}\n│ [ARMAZENAR] ✓ TRF Omie concluída  id_rec=${id}  rotulo=${result.rows[0].id_rotulo || id}  cod=${codigo_produto}  qtd=${qtdNum}\n└${_sep}`);
-        } else {
-          console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Produto ${codigo_produto} não encontrado em produtos_omie — TRF Omie ignorada\n└${_sep}`);
-        }
-      } catch (omieErr) {
-        console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${omieErr?.faultstring || omieErr?.message || omieErr}\n└${_sep}`);
-        // Não bloqueia o fluxo se a integração Omie falhar
-      }
-    }
 
     res.json({
       ok: true,
