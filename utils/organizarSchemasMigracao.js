@@ -134,6 +134,60 @@ async function moveTableWithCompatView(client, fromSchema, tableName, toSchema, 
   return 'moved';
 }
 
+async function moveFunctionsBetweenSchemas(client, fromSchema, toSchema) {
+  if (!(await schemaExists(client, fromSchema))) return 0;
+  await ensureSchema(client, toSchema);
+  const r = await client.query(
+    `SELECT p.proname, pg_get_function_identity_arguments(p.oid) AS args
+       FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = $1 AND p.prokind = 'f'`,
+    [fromSchema]
+  );
+  let n = 0;
+  for (const row of r.rows) {
+    try {
+      // Se já existe no destino com mesma assinatura, pula
+      const exists = await client.query(
+        `SELECT 1 FROM pg_proc p
+           JOIN pg_namespace n ON n.oid = p.pronamespace
+          WHERE n.nspname = $1 AND p.proname = $2
+            AND pg_get_function_identity_arguments(p.oid) = $3
+          LIMIT 1`,
+        [toSchema, row.proname, row.args]
+      );
+      if (exists.rowCount) continue;
+      await client.query(
+        `ALTER FUNCTION ${qi(fromSchema)}.${qi(row.proname)}(${row.args}) SET SCHEMA ${qi(toSchema)}`
+      );
+      n += 1;
+    } catch (err) {
+      console.warn(
+        `[schemas] não moveu função ${fromSchema}.${row.proname}:`,
+        err.message
+      );
+    }
+  }
+  return n;
+}
+
+/**
+ * Se a tabela ficou no schema antigo (PascalCase) e o código usa o novo,
+ * cria VIEW no schema novo apontando para o antigo (ponte temporária).
+ */
+async function ensureForwardBridgeView(client, fromSchema, tableName, toSchema) {
+  const srcKind = await relationKind(client, fromSchema, tableName);
+  if (srcKind !== 'r') return false;
+  const destKind = await relationKind(client, toSchema, tableName);
+  if (destKind === 'r') return false;
+  await ensureSchema(client, toSchema);
+  await client.query(
+    `CREATE OR REPLACE VIEW ${qi(toSchema)}.${qi(tableName)} AS
+     SELECT * FROM ${qi(fromSchema)}.${qi(tableName)}`
+  );
+  return true;
+}
+
 /**
  * Renomeia schema inteiro (tabelas + funções) e recria views no nome antigo.
  */
@@ -163,22 +217,49 @@ async function renameSchemaWithCompat(client, fromSchema, toSchema) {
     for (const t of tables) {
       await ensureCompatView(client, fromSchema, t, toSchema, t);
     }
+    await moveFunctionsBetweenSchemas(client, fromSchema, toSchema);
     return { status: 'renamed', tables: tables.length };
   }
 
-  // Ambos existem: mover tabelas restantes do from → to
+  // Ambos existem: mover tabelas restantes do from → to (uma a uma)
   const tables = await listBaseTables(client, fromSchema);
   let moved = 0;
+  let bridged = 0;
   for (const t of tables) {
-    const st = await moveTableWithCompatView(client, fromSchema, t, toSchema, t);
-    if (st === 'moved' || st === 'renamed') moved += 1;
+    try {
+      const st = await moveTableWithCompatView(client, fromSchema, t, toSchema, t);
+      if (st === 'moved' || st === 'renamed') moved += 1;
+    } catch (err) {
+      console.warn(`[schemas] merge ${fromSchema}.${t} → ${toSchema}:`, err.message);
+      // Ponte para o código novo não quebrar enquanto houver conflito
+      try {
+        if (await ensureForwardBridgeView(client, fromSchema, t, toSchema)) bridged += 1;
+      } catch (e2) {
+        console.warn(`[schemas] bridge ${toSchema}.${t} falhou:`, e2.message);
+      }
+    }
   }
-  // views para o que já estava no destino
+  await moveFunctionsBetweenSchemas(client, fromSchema, toSchema);
+
+  // views de compat no schema antigo para o que já estava no destino
   const destTables = await listBaseTables(client, toSchema);
   for (const t of destTables) {
     await ensureCompatView(client, fromSchema, t, toSchema, t);
   }
-  return { status: moved ? 'merged' : 'already', tables: destTables.length, moved };
+  // se ainda sobrou tabela física no antigo, garanta bridge no novo
+  for (const t of await listBaseTables(client, fromSchema)) {
+    try {
+      if (await ensureForwardBridgeView(client, fromSchema, t, toSchema)) bridged += 1;
+    } catch (_) {
+      /* ignore */
+    }
+  }
+  return {
+    status: moved || bridged ? 'merged' : 'already',
+    tables: destTables.length,
+    moved,
+    bridged,
+  };
 }
 
 /** Wrappers de funções Vendas → vendas (chamadas antigas continuam). */
@@ -315,36 +396,62 @@ async function organizarSchemasMigracao(db) {
     const results = [];
     const schemaResults = [];
     let droppedApkAt = false;
+    // Sem transação global: uma falha (ex.: Chatbot com conflito) não pode
+    // impedir a fusão de Vendas/Producao — isso quebrou o relatório em produção.
     try {
-      if (ownsClient) await client.query('BEGIN');
-
       for (const s of SCHEMA_RENAMES) {
-        const r = await renameSchemaWithCompat(client, s.from, s.to);
-        schemaResults.push({ from: s.from, to: s.to, ...r });
+        try {
+          const r = await renameSchemaWithCompat(client, s.from, s.to);
+          schemaResults.push({ from: s.from, to: s.to, ...r });
+        } catch (err) {
+          console.error(`[schemas] falha ao renomear/fundir ${s.from}→${s.to}:`, err.message);
+          schemaResults.push({ from: s.from, to: s.to, status: 'error', error: err.message });
+        }
       }
 
       for (const m of MOVES) {
-        const status = await moveTableWithCompatView(
-          client,
-          m.from,
-          m.table,
-          m.to,
-          m.newName || m.table
-        );
-        results.push({
-          from: `${m.from}.${m.table}`,
-          to: `${m.to}.${m.newName || m.table}`,
-          status,
-        });
+        try {
+          const status = await moveTableWithCompatView(
+            client,
+            m.from,
+            m.table,
+            m.to,
+            m.newName || m.table
+          );
+          results.push({
+            from: `${m.from}.${m.table}`,
+            to: `${m.to}.${m.newName || m.table}`,
+            status,
+          });
+        } catch (err) {
+          console.error(
+            `[schemas] falha ao mover ${m.from}.${m.table}:`,
+            err.message
+          );
+          results.push({
+            from: `${m.from}.${m.table}`,
+            to: `${m.to}.${m.newName || m.table}`,
+            status: 'error',
+            error: err.message,
+          });
+        }
       }
 
-      await ensureVendasFunctionWrappers(client);
+      try {
+        await ensureVendasFunctionWrappers(client);
+      } catch (err) {
+        console.warn('[schemas] wrappers Vendas:', err.message);
+      }
 
       // Projeto antigo de jogos AT — não usado pela intranet
-      if (await schemaExists(client, 'apk_at')) {
-        await client.query(`DROP SCHEMA IF EXISTS apk_at CASCADE`);
-        droppedApkAt = true;
-        console.log('[schemas] removido schema apk_at (projeto antigo / não usado)');
+      try {
+        if (await schemaExists(client, 'apk_at')) {
+          await client.query(`DROP SCHEMA IF EXISTS apk_at CASCADE`);
+          droppedApkAt = true;
+          console.log('[schemas] removido schema apk_at (projeto antigo / não usado)');
+        }
+      } catch (err) {
+        console.warn('[schemas] drop apk_at:', err.message);
       }
 
       // Comentários nos schemas (orientação no DBeaver / psql)
@@ -379,22 +486,15 @@ async function organizarSchemasMigracao(db) {
         public: 'Núcleo — auth, sessão, menu (nav), cron; demais módulos saíram',
       };
       for (const [schema, comment] of Object.entries(schemaComments)) {
-        if (await schemaExists(client, schema)) {
-          const lit = `'${String(comment).replace(/'/g, "''")}'`;
-          await client.query(`COMMENT ON SCHEMA ${qi(schema)} IS ${lit}`);
-        }
-      }
-
-      if (ownsClient) await client.query('COMMIT');
-    } catch (err) {
-      if (ownsClient) {
         try {
-          await client.query('ROLLBACK');
+          if (await schemaExists(client, schema)) {
+            const lit = `'${String(comment).replace(/'/g, "''")}'`;
+            await client.query(`COMMENT ON SCHEMA ${qi(schema)} IS ${lit}`);
+          }
         } catch (_) {
           /* ignore */
         }
       }
-      throw err;
     } finally {
       if (ownsClient && client.release) client.release();
     }

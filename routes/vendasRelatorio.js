@@ -26,7 +26,15 @@ function formatCfopDisplay(digits) {
 
 async function ensureVendasRelatorioSchema() {
   if (_ensureSchemaPromise) return _ensureSchemaPromise;
-  _ensureSchemaPromise = pool.query(`
+  _ensureSchemaPromise = (async () => {
+    // Funde "Vendas" → vendas se ainda estiverem separados (caso de produção)
+    try {
+      const { organizarSchemasMigracao } = require('../utils/organizarSchemasMigracao');
+      await organizarSchemasMigracao(pool);
+    } catch (err) {
+      console.warn('[vendas] migração de schemas:', err?.message || err);
+    }
+    await pool.query(`
     CREATE SCHEMA IF NOT EXISTS vendas;
     CREATE TABLE IF NOT EXISTS vendas.relatorio_gerencial (
       id BIGSERIAL PRIMARY KEY,
@@ -72,7 +80,8 @@ async function ensureVendasRelatorioSchema() {
     );
     ALTER TABLE vendas.vendedores_omie
       ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
-  `).then(() => undefined).catch((err) => {
+  `);
+  })().catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
   });
