@@ -189,6 +189,7 @@ async function ensureForwardBridgeView(client, fromSchema, tableName, toSchema) 
   if (srcKind !== 'r') return false;
   const destKind = await relationKind(client, toSchema, tableName);
   if (destKind === 'r') return false;
+  if (destKind === 'v') return true; // já ponte; evita AccessExclusiveLock
   await ensureSchema(client, toSchema);
   await client.query(
     `CREATE OR REPLACE VIEW ${qi(toSchema)}.${qi(tableName)} AS
