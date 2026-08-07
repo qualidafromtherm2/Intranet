@@ -21,6 +21,7 @@ const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
 const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
 const { obterPermissaoSeparacao, assertAcessoSeparacao } = require('./utils/separacaoPermissoes');
 const { exigirGestaoEnderecos } = require('./utils/produtoEnderecosPermissoes');
+const { exigirAuditoriaProduto } = require('./utils/produtoAuditoriaPermissoes');
 const { anexarHoraObs } = require('./utils/anexarHoraObs');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
@@ -15009,6 +15010,175 @@ app.get('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, asyn
   }
 });
 
+async function _carregarAuditoriaSaldoEndereco(client, codigo, { bloquear = false } = {}) {
+  const codigoTexto = String(codigo || '').trim();
+  const codigoOmie = await _resolveProdutoOmieCodigoProduto(client, codigoTexto);
+  if (!codigoOmie) return null;
+
+  const { rows: produtos } = await client.query(
+    `SELECT codigo, codigo_produto::text AS codigo_produto, descricao,
+            COALESCE(NULLIF(TRIM(unidade), ''), 'UN') AS unidade
+       FROM public.produtos_omie
+      WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto_integracao = $1
+      LIMIT 1`,
+    [codigoTexto]
+  );
+  const produto = produtos[0] || {
+    codigo: codigoTexto,
+    codigo_produto: String(codigoOmie),
+    descricao: codigoTexto,
+    unidade: 'UN'
+  };
+  const idsBusca = Array.from(new Set([String(codigoOmie).trim(), codigoTexto, String(produto.codigo || '').trim()].filter(Boolean)));
+
+  const { rows: estoqueRows } = await client.query(
+    `SELECT COALESCE(MAX(saldo) FILTER (
+              WHERE local_codigo::text = '10717096386' OR local_nome ILIKE '%PORTA PALLET%'
+            ), 0)::numeric AS saldo_omie
+       FROM logistica.estoque_atual
+      WHERE codigo = $1`,
+    [String(produto.codigo || codigoTexto).trim()]
+  );
+  const lockSql = bloquear ? ' FOR UPDATE' : '';
+  const { rows: linhas } = await client.query(
+    `SELECT id, TRIM(endereco) AS endereco, COALESCE(qtd, 0)::numeric AS qtd,
+            COALESCE(NULLIF(TRIM(unidade), ''), $2) AS unidade,
+            impresso_em, usuario_criacao
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE TRIM(COALESCE(codigo_produto, '')) = ANY($1::text[])
+        AND endereco IS NOT NULL AND TRIM(endereco) <> ''
+      ORDER BY TRIM(endereco), id${lockSql}`,
+    [idsBusca, produto.unidade || 'UN']
+  );
+  const porEndereco = new Map();
+  for (const linha of linhas) {
+    const chave = String(linha.endereco || '').trim();
+    if (!porEndereco.has(chave)) {
+      porEndereco.set(chave, {
+        endereco: chave,
+        saldo: 0,
+        registros: 0,
+        atualizado_em: linha.impresso_em || null,
+        usuario: linha.usuario_criacao || null
+      });
+    }
+    const item = porEndereco.get(chave);
+    item.saldo += Number(linha.qtd || 0);
+    item.registros += 1;
+    if (linha.impresso_em && (!item.atualizado_em || new Date(linha.impresso_em) > new Date(item.atualizado_em))) {
+      item.atualizado_em = linha.impresso_em;
+      item.usuario = linha.usuario_criacao || item.usuario;
+    }
+  }
+  const enderecos = Array.from(porEndereco.values());
+  const saldoOmie = Number(estoqueRows[0]?.saldo_omie || 0);
+  const saldoEnderecado = enderecos.reduce((total, item) => total + Number(item.saldo || 0), 0);
+  return {
+    produto,
+    codigo_omie: String(codigoOmie),
+    saldo_omie: saldoOmie,
+    saldo_enderecado: saldoEnderecado,
+    ajuste_necessario: saldoOmie - saldoEnderecado,
+    divergente: Math.abs(saldoOmie - saldoEnderecado) > 0.0001,
+    enderecos
+  };
+}
+
+app.get('/api/logistica/produtos/:codigo/auditoria-saldo-endereco', exigirAuditoriaProduto, async (req, res) => {
+  try {
+    const auditoria = await _carregarAuditoriaSaldoEndereco(pool, req.params.codigo);
+    if (!auditoria) return res.status(404).json({ ok: false, error: 'Produto nao encontrado.' });
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, ...auditoria });
+  } catch (err) {
+    console.error('[produtos/auditoria-saldo] consultar', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao auditar saldo enderecado.' });
+  }
+});
+
+app.post('/api/logistica/produtos/:codigo/auditoria-saldo-endereco/ajustar', exigirAuditoriaProduto, express.json(), async (req, res) => {
+  const client = await pool.connect();
+  try {
+    let endereco;
+    try {
+      endereco = assertEnderecoEtq(req.body?.endereco);
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err?.message || ETQ_ENDERECO_MSG_FORMATO });
+    }
+    const justificativa = String(req.body?.justificativa || '').trim();
+    if (justificativa.length < 8) {
+      return res.status(400).json({ ok: false, error: 'Informe uma justificativa com pelo menos 8 caracteres.' });
+    }
+
+    await client.query('BEGIN');
+    const antes = await _carregarAuditoriaSaldoEndereco(client, req.params.codigo, { bloquear: true });
+    if (!antes) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ ok: false, error: 'Produto nao encontrado.' });
+    }
+    const delta = Number(antes.ajuste_necessario || 0);
+    if (Math.abs(delta) <= 0.0001) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ ok: false, error: 'Os saldos ja estao conferidos. Atualize a lista antes de tentar novamente.' });
+    }
+
+    const usuario = resolverUsuarioAuditoria(req);
+    let movimento;
+    if (delta > 0) {
+      const hoje = new Date();
+      const dataEmissao = `${String(hoje.getDate()).padStart(2, '0')}/${String(hoje.getMonth() + 1).padStart(2, '0')}/${hoje.getFullYear()}`;
+      movimento = await _etqCreditarEndereco(client, {
+        codigo: antes.codigo_omie,
+        codigoTexto: antes.produto.codigo,
+        descricao: antes.produto.descricao,
+        endereco,
+        qtd: delta,
+        usuario,
+        complemento: `Auditoria de saldo: ${justificativa}`,
+        dataEmissao,
+        codProd: antes.produto.codigo,
+        descProd: antes.produto.descricao,
+        sanitize: (valor, max = 999) => String(valor || '').slice(0, max).replace(/[\\^~]/g, ' ')
+      });
+    } else {
+      movimento = await _etqDebitarEndereco(client, {
+        codigo: antes.codigo_omie,
+        endereco,
+        qtd: Math.abs(delta),
+        usuario
+      });
+    }
+    await client.query('COMMIT');
+
+    const depois = await _carregarAuditoriaSaldoEndereco(pool, req.params.codigo);
+    void monEventoReq(req, {
+      categoria: 'AUDITORIA',
+      acao: 'saldo_endereco_reconciliado',
+      codigo_produto: antes.produto.codigo,
+      codigo_produto_omie: antes.codigo_omie,
+      sucesso: true,
+      detalhe: {
+        endereco,
+        justificativa,
+        usuario,
+        saldo_omie: antes.saldo_omie,
+        saldo_enderecado_antes: antes.saldo_enderecado,
+        delta_aplicado: delta,
+        saldo_enderecado_depois: depois?.saldo_enderecado,
+        movimento
+      }
+    });
+    return res.json({ ok: true, endereco, delta_aplicado: delta, antes, depois });
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    console.error('[produtos/auditoria-saldo] ajustar', err);
+    const status = /Saldo insuficiente/i.test(String(err?.message || '')) ? 409 : 500;
+    return res.status(status).json({ ok: false, error: err?.message || 'Falha ao reconciliar saldo enderecado.' });
+  } finally {
+    client.release();
+  }
+});
+
 app.delete('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, express.json(), async (req, res) => {
   const client = await pool.connect();
   try {
@@ -16029,18 +16199,20 @@ function _logisticaNomeUsuarioReq(req) {
 }
 
 /** Texto enviado no campo obs do ajuste TRF Omie (separação / retificação / devolução). Evita caracteres não-ASCII (ex.: →). */
-function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, nomeDest, usuario, retificacao = false, devolucao = false }) {
-  const sepNum = String(n_solic || '').trim();
-  const sepPart = sepNum ? `${sepNum} ` : '';
+function _omieObsTrfSeparacaoLogistica({ n_solic, codigo, origem, destino, qtd, unidade, nomeDest, destinatario, usuario, retificacao = false, devolucao = false }) {
+  const sepRaw = String(n_solic || '').trim();
+  const sepNum = sepRaw ? (/^SEP-/i.test(sepRaw) ? sepRaw : `SEP-${sepRaw.replace(/^SEP\s*/i, '')}`) : 'SEP';
   const userPart = String(usuario || '').trim();
   const destPart = String(nomeDest || '').trim();
+  const paraPart = String(destinatario || '').trim();
+  const qtdPart = `${Number(qtd || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 })}${unidade ? ` ${String(unidade).trim().toUpperCase()}` : ''}`;
   let text;
   if (devolucao) {
-    text = `Devolucao SEP ${sepPart}logistica ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
+    text = `${sepNum} | Devolucao | ${codigo} | ${qtdPart} | ${destPart || destino} > Almoxarifado${userPart ? ` | Por: ${userPart}` : ''}`;
   } else if (retificacao) {
-    text = `Retificar SEP ${sepPart}logística ${codigo}: estorno ${destino} ${origem} (${qtd})${userPart ? ` por ${userPart}` : ''}`;
+    text = `${sepNum} | Retificacao | ${codigo} | ${qtdPart} | ${destPart || destino} > Almoxarifado${userPart ? ` | Por: ${userPart}` : ''}`;
   } else {
-    text = `SEP ${sepPart}logística ${codigo}: ${origem} ${destino} (${qtd})${destPart ? ` ${destPart}` : ''}${userPart ? ` por ${userPart}` : ''}`;
+    text = `${sepNum} | Saida por separacao | ${codigo} | ${qtdPart} | Almoxarifado > ${destPart || destino}${paraPart ? ` | Para: ${paraPart}` : ''}${userPart ? ` | Por: ${userPart}` : ''}`;
   }
   return text.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
@@ -16173,7 +16345,9 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
   if (!ids.length) return;
 
   const { rows } = await client.query(
-    `SELECT i.id, i.n_solic, i.cod_local, i.nome_local, c.codigo_produto, c.quantidade::numeric AS qty
+    `SELECT i.id, i.n_solic, i.cod_local, i.nome_local,
+            c.codigo_produto, c.quantidade::numeric AS qty, c.unidade,
+            COALESCE(NULLIF(TRIM(c.retirada_por), ''), NULLIF(TRIM(c.nome_user), '')) AS destinatario
        FROM solicitacao_produto.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
@@ -16204,6 +16378,8 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
         destino,
         codigoTexto,
         n_solic: String(row.n_solic || '').trim(),
+        unidade: String(row.unidade || '').trim(),
+        destinatario: String(row.destinatario || '').trim(),
         qtd: 0,
         ids: []
       });
@@ -16247,7 +16423,9 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
           origem,
           destino: g.destino,
           qtd: g.qtd,
+          unidade: g.unidade,
           nomeDest,
+          destinatario: g.destinatario,
           usuario: nome_user
         })
       });
@@ -16269,7 +16447,9 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
           origem,
           destino: g.destino,
           qtd: g.qtd,
+          unidade: g.unidade,
           nomeDest,
+          destinatario: g.destinatario,
           usuario: nome_user
         })
       });
