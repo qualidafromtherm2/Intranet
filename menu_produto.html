@@ -13383,6 +13383,31 @@
   </div>
 </div>
 
+<!-- Retornar etiqueta → devolve o saldo para Identificação do produto -->
+<div id="etqRetornarModal" class="etq-reprint-format-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="etqRetornarTitulo">
+  <div class="etq-reprint-format-box">
+    <div class="etq-reprint-format-header">
+      <div>
+        <small>RETORNAR ETIQUETA</small>
+        <h3 id="etqRetornarTitulo">Voltar para Identificação do produto?</h3>
+      </div>
+      <button id="etqRetornarFechar" type="button" aria-label="Cancelar retorno">&times;</button>
+    </div>
+    <p>O saldo volta para Etiquetas disponíveis e a etiqueta sai desta lista. Lá você pode imprimir de novo usando múltiplo.</p>
+    <div class="etq-reprint-format-options">
+      <button type="button" data-etq-retornar="uma">
+        <i class="fa-solid fa-rotate-left"></i>
+        <span><strong>Só esta etiqueta</strong><small>Devolve apenas o ID selecionado</small></span>
+      </button>
+      <button type="button" data-etq-retornar="todas">
+        <i class="fa-solid fa-layer-group"></i>
+        <span><strong>Todas deste produto</strong><small>Junta o saldo do mesmo produto e lote</small></span>
+      </button>
+    </div>
+    <button id="etqRetornarCancelar" class="etq-reprint-format-cancel" type="button">Cancelar</button>
+  </div>
+</div>
+
 <div id="etqArmazenarModal" class="etq-scan-modal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
   <div class="etq-scan-box" style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:92vw;max-width:460px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
     <!-- Cabeçalho -->
@@ -13444,32 +13469,6 @@
     <div style="padding:0 18px 10px;">
       <input id="etqArmazenarComplemento" type="text" placeholder="Complemento (opcional)..."
         style="width:100%;background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:8px 12px;color:#94a3b8;font-size:.82rem;outline:none;box-sizing:border-box;" autocomplete="off" />
-    </div>
-    <!-- Retornar etiqueta → Etiquetas disponíveis -->
-    <div id="etqArmazenarRetornarWrap" style="display:none;padding:0 18px 16px;border-top:1px solid #334155;padding-top:12px;">
-      <button id="etqBtnRetornarEtiqueta" type="button"
-        style="width:100%;display:flex;align-items:center;justify-content:center;gap:8px;background:linear-gradient(135deg,#7c3aed 0%,#6d28d9 100%);color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:700;cursor:pointer;">
-        <i class="fa-solid fa-rotate-left"></i> Retornar etiqueta
-      </button>
-      <div id="etqRetornarEscolha" style="display:none;margin-top:10px;padding:12px;background:#0f172a;border:1px solid #334155;border-radius:10px;">
-        <div style="color:#e2e8f0;font-size:.86rem;font-weight:600;margin-bottom:10px;text-align:center;">
-          Voltar saldo para Etiquetas disponíveis?
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px;">
-          <button id="etqRetornarUma" type="button"
-            style="background:#334155;color:#f1f5f9;border:1px solid #475569;border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;">
-            Só esta etiqueta
-          </button>
-          <button id="etqRetornarTodas" type="button"
-            style="background:#1e3a5f;color:#93c5fd;border:1px solid #2563eb;border-radius:8px;padding:9px 12px;font-size:13px;font-weight:600;cursor:pointer;">
-            Todas deste produto
-          </button>
-          <button id="etqRetornarCancelar" type="button"
-            style="background:transparent;color:#94a3b8;border:none;padding:6px;font-size:12px;cursor:pointer;">
-            Cancelar
-          </button>
-        </div>
-      </div>
     </div>
   </div>
 </div>

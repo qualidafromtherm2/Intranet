@@ -257,18 +257,99 @@ app.use(session({
 }));
 
 // ──────────────────────────────────────────────────────────────────────────
-// 🛡️ Helmet — headers de segurança (CSP desabilitado p/ não quebrar inline)
+// 🛡️ Helmet — headers de segurança
 // ──────────────────────────────────────────────────────────────────────────
 try {
   const helmet = require('helmet');
   app.use(helmet({
-    contentSecurityPolicy: false,           // a UI usa muito inline; ativar depois
+    contentSecurityPolicy: false,           // configurado separadamente abaixo
     crossOriginEmbedderPolicy: false,
     crossOriginResourcePolicy: { policy: 'cross-origin' },
   }));
+
+  // ── CSP (Content Security Policy) ──
+  // CSP_MODE: 'report' (padrão — só registra violações) | 'enforce' (bloqueia) | 'off'
+  // A UI usa muito script/estilo inline, então 'unsafe-inline' continua liberado:
+  // o ganho aqui é limitar de quais domínios externos o navegador aceita script,
+  // barrar <object>/<embed>, clickjacking (frame-ancestors) e troca de <base>.
+  const CSP_MODE = String(process.env.CSP_MODE || 'report').toLowerCase();
+  if (CSP_MODE === 'report' || CSP_MODE === 'enforce') {
+    app.use(helmet.contentSecurityPolicy({
+      useDefaults: false,
+      reportOnly: CSP_MODE === 'report',
+      directives: {
+        defaultSrc: ["'self'"],
+        baseUri: ["'self'"],
+        objectSrc: ["'none'"],
+        frameAncestors: ["'self'"],
+        frameSrc: ["'self'"],
+        formAction: ["'self'"],
+        scriptSrc: [
+          "'self'", "'unsafe-inline'", "'unsafe-eval'",
+          'https://cdnjs.cloudflare.com',   // Font Awesome, PapaParse, html2pdf
+          'https://cdn.jsdelivr.net',       // Chart.js
+          'https://code.jquery.com',        // jQuery
+          'https://cdn.sheetjs.com',        // XLSX (fallback do /vendor/xlsx)
+          'https://unpkg.com',              // Leaflet (mapa de técnicos)
+          'https://www.gstatic.com',        // Google Charts
+        ],
+        styleSrc: [
+          "'self'", "'unsafe-inline'",
+          'https://cdnjs.cloudflare.com',
+          'https://unpkg.com',
+          'https://fonts.googleapis.com',
+        ],
+        fontSrc: ["'self'", 'data:', 'https://cdnjs.cloudflare.com', 'https://fonts.gstatic.com'],
+        imgSrc: ["'self'", 'data:', 'blob:', 'https:'],   // fotos no Supabase, tiles OSM, logos
+        mediaSrc: ["'self'", 'data:', 'blob:', 'https:'],
+        connectSrc: ["'self'", 'https:'],                 // Omie, Supabase, GitHub, CEP, cotação
+        workerSrc: ["'self'", 'blob:'],
+        reportUri: ['/api/csp-report'],
+      },
+    }));
+    console.log(`[csp] Content-Security-Policy ATIVO em modo ${CSP_MODE === 'report' ? 'RELATÓRIO (não bloqueia)' : 'BLOQUEIO'}.`);
+  } else {
+    console.warn('[csp] CSP_MODE=off — Content-Security-Policy desligado.');
+  }
 } catch (e) {
   console.warn('[helmet] não carregado:', e.message);
 }
+
+// ──────────────────────────────────────────────────────────────────────────
+// 📋 Recebe as violações de CSP do navegador (modo relatório)
+//    Agrega por diretiva+recurso e loga no máximo 1x por minuto por combinação,
+//    para não inundar o log do Render.
+// ──────────────────────────────────────────────────────────────────────────
+const _cspVistos = new Map();
+app.post(
+  '/api/csp-report',
+  express.json({ type: ['application/csp-report', 'application/reports+json', 'application/json'], limit: '32kb' }),
+  (req, res) => {
+    try {
+      const corpo = req.body || {};
+      // report-uri manda { 'csp-report': {...} }; report-to manda um array de reports
+      const relatos = Array.isArray(corpo) ? corpo.map(r => r?.body || r) : [corpo['csp-report'] || corpo];
+      for (const r of relatos) {
+        if (!r) continue;
+        const diretiva = String(r['effective-directive'] || r.effectiveDirective || r['violated-directive'] || '?').slice(0, 60);
+        const recurso  = String(r['blocked-uri'] || r.blockedURL || '?').slice(0, 200);
+        const pagina   = String(r['document-uri'] || r.documentURL || '?').slice(0, 200);
+        const chave = `${diretiva}|${recurso}`;
+        const agora = Date.now();
+        const anterior = _cspVistos.get(chave) || { ts: 0, n: 0 };
+        anterior.n++;
+        if (agora - anterior.ts > 60000) {
+          console.warn(`[csp-report] ${diretiva} bloquearia ${recurso} (página: ${pagina}) — ${anterior.n} ocorrência(s)`);
+          anterior.ts = agora;
+          anterior.n = 0;
+        }
+        _cspVistos.set(chave, anterior);
+        if (_cspVistos.size > 500) _cspVistos.clear();
+      }
+    } catch (_) { /* relatório malformado — ignora */ }
+    res.status(204).end();
+  }
+);
 
 // ──────────────────────────────────────────────────────────────────────────
 // 🚦 Rate-limit no login (anti brute-force)
@@ -297,6 +378,7 @@ const REQUIRE_API_AUTH = String(process.env.REQUIRE_API_AUTH ?? '1') !== '0';
 const API_PUBLIC_PREFIXES = [
   '/api/auth/',          // login, status, logout, first-password, tema
   '/api/client-log',     // log de erros do front (já validado/limitado)
+  '/api/csp-report',     // violações de CSP enviadas pelo navegador (sem cookie)
   '/api/produtos/stream',// SSE do progresso de sync (somente leitura)
   '/api/produtos/lista', // catálogo de produtos (leitura)
   '/api/produtos/detalhe', // detalhe do produto (leitura)

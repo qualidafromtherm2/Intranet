@@ -20797,10 +20797,10 @@ html.light-mode #minhasComprasWrapper {
 #etqImpressoModal.etiquetas-page .etq-table-head,
 #etqImpressoModal.etiquetas-page .etq-store-row {
   display: grid !important;
-  grid-template-columns: 68px minmax(250px, 1.45fr) minmax(170px, .8fr) minmax(190px, 1fr) 110px minmax(180px, .85fr) 160px;
+  grid-template-columns: 68px minmax(250px, 1.45fr) minmax(170px, .8fr) minmax(190px, 1fr) 110px minmax(180px, .85fr) 232px;
   align-items: center;
   column-gap: 14px;
-  min-width: 1120px;
+  min-width: 1190px;
 }
 
 #etqImpressoModal.etiquetas-page .etq-table-head {
@@ -20910,13 +20910,20 @@ html.light-mode #minhasComprasWrapper {
   font-weight: 750;
 }
 
+/* Ação: Reimprimir + Retornar na 1ª linha, Guardar material ocupando a 2ª. */
 #etqImpressoModal.etiquetas-page .etq-table-actions {
-  display: flex !important;
+  display: grid !important;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   justify-content: flex-end;
-  gap: 7px;
+  gap: 6px;
+}
+
+#etqImpressoModal.etiquetas-page .etq-btn-guardar {
+  grid-column: 1 / -1;
 }
 
 #etqImpressoModal.etiquetas-page .etq-btn-guardar,
+#etqImpressoModal.etiquetas-page .etq-btn-retornar,
 #etqImpressoModal.etiquetas-page .etq-btn-reimprimir {
   display: inline-flex;
   align-items: center;
@@ -20940,7 +20947,14 @@ html.light-mode #minhasComprasWrapper {
   border-color: #8bb9e3;
 }
 
+#etqImpressoModal.etiquetas-page .etq-btn-retornar {
+  color: #6b21a8;
+  background: #f6f0ff;
+  border-color: #c4b0e8;
+}
+
 #etqImpressoModal.etiquetas-page .etq-btn-reimprimir:disabled,
+#etqImpressoModal.etiquetas-page .etq-btn-retornar:disabled,
 #etqImpressoModal.etiquetas-page .etq-btn-guardar:disabled {
   opacity: .65;
   cursor: wait;
@@ -20985,9 +20999,10 @@ html.light-mode #minhasComprasWrapper {
   }
 
   #etqImpressoModal.etiquetas-page .etq-btn-reimprimir,
+  #etqImpressoModal.etiquetas-page .etq-btn-retornar,
   #etqImpressoModal.etiquetas-page .etq-btn-guardar {
     display: inline-flex;
-    min-width: 112px;
+    min-width: 0;
   }
 }
 
@@ -21081,6 +21096,7 @@ html.light-mode #minhasComprasWrapper {
   }
 
   #etqImpressoModal.etiquetas-page .etq-btn-reimprimir,
+  #etqImpressoModal.etiquetas-page .etq-btn-retornar,
   #etqImpressoModal.etiquetas-page .etq-btn-guardar {
     flex: 1 1 0;
     min-width: 0;
@@ -21412,12 +21428,6 @@ html.light-mode #minhasComprasWrapper {
 
 .etq-scan-location-empty.is-error { color: #b42318; }
 
-#etqArmazenarModal #etqArmazenarRetornarWrap {
-  margin-top: 10px;
-  padding: 10px 16px 14px !important;
-  border-top-color: #dbe3ec !important;
-}
-
 @media (max-width: 768px) {
   .etq-page-shortcut {
     position: fixed;
@@ -21565,6 +21575,7 @@ html.light-mode #minhasComprasWrapper {
   }
 
   #etqImpressoModal.etiquetas-page .etq-btn-guardar,
+  #etqImpressoModal.etiquetas-page .etq-btn-retornar,
   #etqImpressoModal.etiquetas-page .etq-btn-reimprimir {
     width: 100%;
     min-height: 44px;
