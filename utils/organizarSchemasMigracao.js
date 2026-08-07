@@ -84,17 +84,24 @@ async function moveTableWithCompatView(client, fromSchema, tableName, toSchema, 
       );
       await client.query(`DROP TABLE ${qi(toSchema)}.${qi(newName)} CASCADE`);
       destKind = null;
-    } else if (srcN === 0n) {
+    } else if (srcN === 0n || srcN === destN || destN >= srcN) {
+      // Destino (schema novo do código) prevalece. Contagens iguais = cópia
+      // residual do merge; não pode throw (quebrava SAC/rotas no ensure).
       console.warn(
-        `[schemas] origem vazia ${fromSchema}.${tableName}; mantendo ${toSchema}.${newName}`
+        `[schemas] conflito resolvido: mantém ${toSchema}.${newName} (${destN}), ` +
+          `remove ${fromSchema}.${tableName} (${srcN}) e cria VIEW de compat`
       );
       await client.query(`DROP TABLE ${qi(fromSchema)}.${qi(tableName)} CASCADE`);
       await ensureCompatView(client, fromSchema, tableName, toSchema, newName);
       return 'dest-kept';
     } else {
-      throw new Error(
-        `[schemas] conflito: ${fromSchema}.${tableName} (${srcN}) e ${toSchema}.${newName} (${destN}) ambos com dados`
+      // Origem tem mais linhas — descarta destino vazio/parcial e move a origem
+      console.warn(
+        `[schemas] conflito: origem maior ${fromSchema}.${tableName} (${srcN}) > ` +
+          `${toSchema}.${newName} (${destN}); movendo origem`
       );
+      await client.query(`DROP TABLE ${qi(toSchema)}.${qi(newName)} CASCADE`);
+      destKind = null;
     }
   }
 
@@ -385,6 +392,31 @@ const SCHEMA_RENAMES = [
 
 let _migracaoPromise = null;
 
+/** Schemas que o código referencia — criar cedo para ensures de boot não falharem. */
+const TARGET_SCHEMAS = [
+  'produto',
+  'producao',
+  'vendas',
+  'chatbot',
+  'usuario',
+  'suporte',
+  'logistica',
+  'sac',
+  'rh',
+  'omie',
+  'compras',
+  'engenharia',
+  'qualidade',
+  'configuracoes',
+  'auditoria',
+  'etiqueta',
+  'frete',
+  'masp',
+  'iapp',
+  'estrutura',
+  'testes',
+];
+
 async function organizarSchemasMigracao(db) {
   if (!db) return { ok: false, reason: 'no-db' };
   if (_migracaoPromise) return _migracaoPromise;
@@ -399,6 +431,16 @@ async function organizarSchemasMigracao(db) {
     // Sem transação global: uma falha (ex.: Chatbot com conflito) não pode
     // impedir a fusão de Vendas/Producao — isso quebrou o relatório em produção.
     try {
+      // 1º: schemas vazios — rotas que rodam ensure no require() não quebram
+      // com "schema X does not exist" enquanto as tabelas ainda estão em public.
+      for (const s of TARGET_SCHEMAS) {
+        try {
+          await ensureSchema(client, s);
+        } catch (_) {
+          /* ignore */
+        }
+      }
+
       for (const s of SCHEMA_RENAMES) {
         try {
           const r = await renameSchemaWithCompat(client, s.from, s.to);

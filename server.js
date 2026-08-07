@@ -28789,6 +28789,12 @@ app.post('/api/engenharia/atividade-produto-status/bulk', express.json(), async 
 // Cria schema e tabela de solicitações de compras com número de pedido
 async function ensureComprasSchema() {
   try {
+    try {
+      const { organizarSchemasMigracao } = require('./utils/organizarSchemasMigracao');
+      await organizarSchemasMigracao(pool);
+    } catch (_) {
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS produto`);
+    }
     await pool.query(`CREATE SCHEMA IF NOT EXISTS compras`);
 
     // Cria tabela se não existir

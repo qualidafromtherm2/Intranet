@@ -14,6 +14,7 @@ const { dbQuery } = require('../src/db.js');
 // Garante que a tabela existe na primeira execução
 (async () => {
   try {
+    await dbQuery(`CREATE SCHEMA IF NOT EXISTS usuario`);
     await dbQuery(`
       CREATE TABLE IF NOT EXISTS usuario.usuario_preferencias (
         login        TEXT        NOT NULL,

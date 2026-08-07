@@ -113,8 +113,38 @@ async function ensureEtqMigracaoSkuFantasma() {
   }
 }
 
-ensureProdutosOmieWebhookOnlyGuard();
-ensureOmieUpsertProdutoDedupSku().then(() => ensureEtqMigracaoSkuFantasma());
+// Espera a migração de schemas (ou cria schema produto) antes dos ensures de boot.
+// Sem isso, no deploy o require() rodava antes de organizarSchemasMigracao e
+// gerava "schema produto does not exist" em várias páginas.
+(async () => {
+  try {
+    const { pool } = require('../src/db');
+    if (pool) {
+      const { organizarSchemasMigracao } = require('../utils/organizarSchemasMigracao');
+      await organizarSchemasMigracao(pool);
+    } else {
+      await dbQuery(`CREATE SCHEMA IF NOT EXISTS produto`);
+    }
+  } catch (err) {
+    console.warn('[produtos] aguardando schemas:', err?.message || err);
+    try { await dbQuery(`CREATE SCHEMA IF NOT EXISTS produto`); } catch (_) { /* ignore */ }
+  }
+  await ensureProdutosOmieWebhookOnlyGuard();
+  await ensureOmieUpsertProdutoDedupSku();
+  await ensureEtqMigracaoSkuFantasma();
+  await ensureVwListaProdutos().catch((err) => {
+    console.warn('[produtos] falha ao atualizar vw_lista_produtos:', err?.message || err);
+  });
+  await ensureProdutosOmieCustomizadoColumn().catch((err) => {
+    console.warn('[produtos] ensure produto_customizado:', err?.message || err);
+  });
+  await ensureProdutosOmiePirVaiDiretoColumn().catch((err) => {
+    console.warn('[produtos] ensure pir_vai_direto_identificacao:', err?.message || err);
+  });
+  await ensureProdutosOmieItemLimitadoColumn().catch((err) => {
+    console.warn('[produtos] ensure item_limitado:', err?.message || err);
+  });
+})();
 
 // === Helpers =================================================================
 function ensureIntegrationKey(item) {
@@ -1163,10 +1193,6 @@ async function ensureVwListaProdutos() {
   await ensureVwListaProdutosPromise;
 }
 
-ensureVwListaProdutos().catch((err) => {
-  console.warn('[produtos] falha ao atualizar vw_lista_produtos:', err?.message || err);
-});
-
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {
     ensureProdutosOmieMultiploColumnPromise = dbQuery(`
@@ -1219,17 +1245,6 @@ async function ensureProdutosOmieItemLimitadoColumn() {
   }
   await ensureProdutosOmieItemLimitadoColumnPromise;
 }
-
-// Garante coluna ao subir o módulo
-ensureProdutosOmieCustomizadoColumn().catch((err) => {
-  console.warn('[produtos] ensure produto_customizado:', err?.message || err);
-});
-ensureProdutosOmiePirVaiDiretoColumn().catch((err) => {
-  console.warn('[produtos] ensure pir_vai_direto_identificacao:', err?.message || err);
-});
-ensureProdutosOmieItemLimitadoColumn().catch((err) => {
-  console.warn('[produtos] ensure item_limitado:', err?.message || err);
-});
 
 async function atualizarMultiploProdutoOmie(codigo, multiplo) {
   const client = await dbGetClient();
