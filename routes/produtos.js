@@ -452,7 +452,11 @@ router.get('/lista', async (req, res) => {
           COALESCE(er.estoque_negativo, false) AS estoque_negativo_local,
           COALESCE(er.saldo_expedicao, 0) < 0 AS expedicao_negativa_local,
           COALESCE(endr.saldo_enderecado, 0) > 0.0001
-            AND COALESCE(er.saldo_almox, 0) <= 0.0001 AS saldo_endereco_sem_omie_local
+            AND COALESCE(er.saldo_almox, 0) <= 0.0001 AS saldo_endereco_sem_omie_local,
+          ABS(COALESCE(er.saldo_almox, 0) - COALESCE(endr.saldo_enderecado, 0)) > 0.0001
+            AS saldo_divergente_endereco_local,
+          COALESCE(endr.saldo_enderecado, 0) - COALESCE(er.saldo_almox, 0)
+            AS diferenca_saldo_endereco_local
         FROM vw_lista_produtos v
         LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
         LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
@@ -488,6 +492,8 @@ router.get('/lista', async (req, res) => {
           estoque_negativo_local AS estoque_negativo,
           expedicao_negativa_local AS expedicao_negativa,
           saldo_endereco_sem_omie_local AS saldo_endereco_sem_omie,
+          saldo_divergente_endereco_local AS saldo_divergente_endereco,
+          diferenca_saldo_endereco_local AS diferenca_saldo_endereco,
           item_limitado_local AS item_limitado,
           inativo,
           bloqueado,

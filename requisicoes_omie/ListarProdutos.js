@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260804-divergencia-estoque';
+} from './filtro_produto.js?v=20260807-central-relatorios';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -352,6 +352,8 @@ function normalizeCatalogoProdutos(produtos = []) {
     saldo_enderecado: p.saldo_enderecado ?? 0,
     expedicao_negativa: p.expedicao_negativa || false,
     saldo_endereco_sem_omie: p.saldo_endereco_sem_omie || false,
+    saldo_divergente_endereco: p.saldo_divergente_endereco || false,
+    diferenca_saldo_endereco: p.diferenca_saldo_endereco ?? 0,
     estoque_minimo: p.estoque_minimo
   }));
 }

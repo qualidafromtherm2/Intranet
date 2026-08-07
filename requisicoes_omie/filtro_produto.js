@@ -15,6 +15,7 @@ let activeProximoEstoqueMinPercent = 10;
 let activeEstoqueNegativo = false;
 let activeExpedicaoNegativa = false;
 let activeSaldoEnderecoSemOmie = false;
+let activeSaldoDivergenteEndereco = false;
 let activeHideObsolete    = false;
 let activeHideEngineering = false;
 let activeLocalValues     = [];
@@ -48,7 +49,7 @@ async function getLocaisInventario() {
 
 let codeInput, familySelect, tipoItemSelect, filterBtn, filterOverlay, filterLocalSel, filterOrigemSel, filterCompraSel;
 let filterShowInactiveCb, filterSemEstoqueMinCb, filterAbaixoEstoqueMinCb, filterAcimaEstoqueMinCb;
-let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterExpedicaoNegativaCb, filterSaldoEnderecoSemOmieCb, filterHideObsoleteCb, filterHideEngineeringCb;
+let filterProximoEstoqueMinCb, filterProximoEstoqueMinPercentInput, filterEstoqueNegativoCb, filterExpedicaoNegativaCb, filterSaldoEnderecoSemOmieCb, filterSaldoDivergenteEnderecoCb, filterHideObsoleteCb, filterHideEngineeringCb;
 let _onFiltered;
 
 function getSelectedValues(select) {
@@ -111,6 +112,31 @@ function atualizarResumoFiltrosMobile() {
   });
 }
 
+function atualizarContadorFiltrosPainel() {
+  const painel = document.getElementById('filterPanel');
+  const contador = document.getElementById('productFilterActiveCount');
+  if (!painel || !contador) return;
+  const marcados = painel.querySelectorAll('input[type="checkbox"]:checked').length;
+  const selecoes = [familySelect, tipoItemSelect, filterOrigemSel, filterCompraSel, filterLocalSel]
+    .filter(Boolean)
+    .reduce((total, select) => total + getSelectedValues(select).length, 0);
+  const total = marcados + selecoes;
+  contador.textContent = total
+    ? `${total} filtro${total > 1 ? 's' : ''} selecionado${total > 1 ? 's' : ''}`
+    : 'Nenhum filtro ativo';
+}
+
+function prepararContadorFiltrosPainel() {
+  const painel = document.getElementById('filterPanel');
+  if (!painel || painel.dataset.filterCounterBound === '1') return;
+  painel.addEventListener('change', () => {
+    atualizarResumoFiltrosMobile();
+    atualizarContadorFiltrosPainel();
+  });
+  painel.dataset.filterCounterBound = '1';
+  atualizarContadorFiltrosPainel();
+}
+
 /**
  * Extrai os 2 caracteres apos o primeiro ponto do codigo do produto.
  * Ex.: "04.MP.N.90557" -> "MP"
@@ -159,6 +185,7 @@ export function initFiltros({
   filterEstoqueNegativoCb = document.getElementById('filterEstoqueNegativo');
   filterExpedicaoNegativaCb = document.getElementById('filterExpedicaoNegativa');
   filterSaldoEnderecoSemOmieCb = document.getElementById('filterSaldoEnderecoSemOmie');
+  filterSaldoDivergenteEnderecoCb = document.getElementById('filterSaldoDivergenteEndereco');
   filterHideObsoleteCb   = document.getElementById('filterHideObsolete');
   filterHideEngineeringCb = document.getElementById('filterHideEngineering');
   filterLocalSel           = document.getElementById('filterLocalSelect');
@@ -166,6 +193,7 @@ export function initFiltros({
   filterCompraSel          = document.getElementById('filterSituacaoCompra');
   _onFiltered    = onFiltered;
   prepararFiltrosMobile();
+  prepararContadorFiltrosPainel();
 
   const syncProximoPercentState = () => {
     if (!filterProximoEstoqueMinPercentInput) return;
@@ -222,6 +250,7 @@ export function initFiltros({
       activeEstoqueNegativo = false;
       activeExpedicaoNegativa = false;
       activeSaldoEnderecoSemOmie = false;
+      activeSaldoDivergenteEndereco = false;
       activeHideObsolete    = false;
       activeHideEngineering = false;
       if (filterShowInactiveCb)    filterShowInactiveCb.checked    = false;
@@ -237,6 +266,7 @@ export function initFiltros({
       if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = false;
       if (filterExpedicaoNegativaCb) filterExpedicaoNegativaCb.checked = false;
       if (filterSaldoEnderecoSemOmieCb) filterSaldoEnderecoSemOmieCb.checked = false;
+      if (filterSaldoDivergenteEnderecoCb) filterSaldoDivergenteEnderecoCb.checked = false;
       if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = false;
       if (filterHideEngineeringCb) filterHideEngineeringCb.checked = false;
       setSelectedValues(filterLocalSel, []);
@@ -246,6 +276,7 @@ export function initFiltros({
       activeOrigemValues = [];
       activeCompraValues = [];
       atualizarResumoFiltrosMobile();
+      atualizarContadorFiltrosPainel();
       fecharModalFiltro(true);
     });
   }
@@ -271,11 +302,13 @@ export function initFiltros({
       activeEstoqueNegativo = filterEstoqueNegativoCb?.checked || false;
       activeExpedicaoNegativa = filterExpedicaoNegativaCb?.checked || false;
       activeSaldoEnderecoSemOmie = filterSaldoEnderecoSemOmieCb?.checked || false;
+      activeSaldoDivergenteEndereco = filterSaldoDivergenteEnderecoCb?.checked || false;
       activeHideObsolete    = filterHideObsoleteCb?.checked    || false;
       activeHideEngineering = filterHideEngineeringCb?.checked || false;
       activeLocalValues     = getSelectedValues(filterLocalSel);
       activeOrigemValues    = getSelectedValues(filterOrigemSel);
       activeCompraValues    = getSelectedValues(filterCompraSel);
+      atualizarContadorFiltrosPainel();
       fecharModalFiltro(true);
     });
   }
@@ -299,6 +332,7 @@ function abrirModalFiltro() {
   if (filterEstoqueNegativoCb) filterEstoqueNegativoCb.checked = activeEstoqueNegativo;
   if (filterExpedicaoNegativaCb) filterExpedicaoNegativaCb.checked = activeExpedicaoNegativa;
   if (filterSaldoEnderecoSemOmieCb) filterSaldoEnderecoSemOmieCb.checked = activeSaldoEnderecoSemOmie;
+  if (filterSaldoDivergenteEnderecoCb) filterSaldoDivergenteEnderecoCb.checked = activeSaldoDivergenteEndereco;
   if (filterHideObsoleteCb)    filterHideObsoleteCb.checked    = activeHideObsolete;
   if (filterHideEngineeringCb) filterHideEngineeringCb.checked = activeHideEngineering;
   setSelectedValues(filterLocalSel, activeLocalValues);
@@ -310,6 +344,7 @@ function abrirModalFiltro() {
   popularLocais();
   prepararFiltrosMobile();
   atualizarResumoFiltrosMobile();
+  atualizarContadorFiltrosPainel();
   filterOverlay.style.display = 'flex';
 }
 
@@ -534,6 +569,10 @@ function applyFilters() {
 
   if (activeSaldoEnderecoSemOmie) {
     filtered = filtered.filter(i => i.saldo_endereco_sem_omie === true || i.saldo_endereco_sem_omie === 'true');
+  }
+
+  if (activeSaldoDivergenteEndereco) {
+    filtered = filtered.filter(i => i.saldo_divergente_endereco === true || i.saldo_divergente_endereco === 'true');
   }
 
   // Ocultar produtos com prefixo OBSOLETO

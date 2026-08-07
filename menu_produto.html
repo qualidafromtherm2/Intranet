@@ -8223,16 +8223,18 @@
                 </button>
               </div>
               <!-- Modal Filtro de Produtos -->
-              <div id="filterPanelOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;">
-                <div id="filterPanel" style="background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;">
+              <div id="filterPanelOverlay" class="product-filter-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:9998;align-items:center;justify-content:center;">
+                <div id="filterPanel" class="product-filter-panel" role="dialog" aria-modal="true" aria-labelledby="productFilterTitle" style="background:#fff;border-radius:12px;padding:24px;min-width:320px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.25);position:relative;">
                   <div class="product-filter-header" style="display:flex;justify-content:space-between;align-items:center;margin-bottom:18px;">
-                    <span style="font-weight:700;font-size:16px;color:#111;">Filtrar Produtos</span>
+                    <div class="product-filter-heading">
+                      <span class="product-filter-heading-icon" aria-hidden="true"><i class="fa-solid fa-chart-column"></i></span>
+                      <span><strong id="productFilterTitle">Central de filtros e relat&oacute;rios</strong><small>Gere listas operacionais combinando relat&oacute;rios e dados do cadastro.</small></span>
+                    </div>
+                    <span id="productFilterActiveCount" class="product-filter-active-count" aria-live="polite">Nenhum filtro ativo</span>
                     <button id="filterPanelCloseBtn" style="background:none;border:none;cursor:pointer;color:#9ca3af;font-size:22px;line-height:1;padding:2px 6px;" title="Fechar">&#x2715;</button>
                   </div>
+                  <div class="product-filter-section-heading"><i class="fa-solid fa-file-lines" aria-hidden="true"></i><span><strong>Relat&oacute;rios r&aacute;pidos</strong><small>Selecione uma ou mais situa&ccedil;&otilde;es para montar o resultado.</small></span></div>
                   <div class="product-filter-quick" style="display:flex;flex-direction:column;gap:8px;padding:12px 0 14px;border-bottom:1px solid #e5e7eb;margin-bottom:4px;">
-                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
-                      <input type="checkbox" id="filterShowInactive" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Mostrar inativos
-                    </label>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
                       <input type="checkbox" id="filterSemEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Sem estoque mínimo
                     </label>
@@ -8244,12 +8246,12 @@
                     </label>
                     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                       <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
-                        <input type="checkbox" id="filterProximoEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#f59e0b;">Próximo do estoque mínimo
+                        <input type="checkbox" id="filterProximoEstoqueMin" style="width:15px;height:15px;cursor:pointer;accent-color:#f59e0b;">Pr&oacute;ximo do m&iacute;nimo (ainda acima)
                       </label>
                       <label for="filterProximoEstoqueMinPercent" style="display:flex;align-items:center;gap:5px;font-size:12px;color:#6b7280;">
                         até
                         <input type="number" id="filterProximoEstoqueMinPercent" min="1" max="100" step="1" value="10" inputmode="numeric" style="width:62px;padding:5px 7px;border:1px solid #d1d5db;border-radius:6px;color:#374151;background:#fff;font-size:12px;">
-                        % acima
+                        % acima do m&iacute;nimo
                       </label>
                     </div>
                     <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
@@ -8262,6 +8264,13 @@
                         <small style="font-size:11px;font-weight:400;color:#9a3412;line-height:1.3;">Somente produtos com saldo negativo em 5. EXPEDI&Ccedil;&Atilde;O.</small>
                       </span>
                     </label>
+                    <label class="product-filter-divergence-card" style="display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;color:#374151;cursor:pointer;padding:9px 10px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;">
+                      <input type="checkbox" id="filterSaldoDivergenteEndereco" style="width:15px;height:15px;margin-top:1px;cursor:pointer;accent-color:#dc2626;">
+                      <span style="display:flex;flex-direction:column;gap:2px;color:#991b1b !important;">
+                        <span>Omie diferente dos endere&ccedil;os</span>
+                        <small style="font-size:11px;font-weight:400;color:#991b1b;line-height:1.3;">Compara o saldo do #ALMOX com a soma de todos os endere&ccedil;os.</small>
+                      </span>
+                    </label>
                     <label style="display:flex;align-items:flex-start;gap:8px;font-size:13px;font-weight:600;color:#374151;cursor:pointer;padding:9px 10px;border:1px solid #fca5a5;border-radius:8px;background:#fef2f2;">
                       <input type="checkbox" id="filterSaldoEnderecoSemOmie" style="width:15px;height:15px;margin-top:1px;cursor:pointer;accent-color:#dc2626;">
                       <span style="display:flex;flex-direction:column;gap:2px;color:#991b1b !important;">
@@ -8269,13 +8278,14 @@
                         <small style="font-size:11px;font-weight:400;color:#991b1b;line-height:1.3;">Localiza produtos que precisam de confer&ecirc;ncia entre o #ALMOX e os endere&ccedil;os.</small>
                       </span>
                     </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
-                      <input type="checkbox" id="filterHideObsolete" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Ocultar obsoletos
-                    </label>
-                    <label style="display:flex;align-items:center;gap:8px;font-size:13px;font-weight:500;color:#374151;cursor:pointer;">
-                      <input type="checkbox" id="filterHideEngineering" style="width:15px;height:15px;cursor:pointer;accent-color:#3b82f6;">Ocultar engenharia
-                    </label>
                   </div>
+                  <div class="product-filter-section-heading product-filter-visibility-heading"><i class="fa-solid fa-eye" aria-hidden="true"></i><span><strong>Visibilidade do cadastro</strong><small>Defina quais grupos podem aparecer no resultado.</small></span></div>
+                  <div class="product-filter-visibility-grid">
+                    <label><input type="checkbox" id="filterShowInactive"><span>Mostrar inativos</span></label>
+                    <label><input type="checkbox" id="filterHideObsolete"><span>Ocultar obsoletos</span></label>
+                    <label><input type="checkbox" id="filterHideEngineering"><span>Ocultar engenharia</span></label>
+                  </div>
+                  <div class="product-filter-section-heading product-filter-fields-heading"><i class="fa-solid fa-sliders" aria-hidden="true"></i><span><strong>Crit&eacute;rios do produto</strong><small>Refine por cadastro, compra e local de estoque.</small></span></div>
                   <div class="product-filter-fields" style="display:flex;flex-direction:column;gap:14px;">
                     <div>
                       <label for="familySelect" style="display:block;font-size:13px;font-weight:600;color:#374151;margin-bottom:5px;">Família:</label>
@@ -8310,8 +8320,9 @@
                     </div>
                   </div>
                   <div class="product-filter-actions" style="display:flex;gap:8px;margin-top:22px;justify-content:flex-end;">
-                    <button id="filterPanelLimparBtn" style="padding:9px 18px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:14px;cursor:pointer;">Limpar</button>
-                    <button id="filterPanelAplicarBtn" style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:600;font-size:14px;cursor:pointer;">Aplicar</button>
+                    <span class="product-filter-actions-copy"><strong>O resultado aparecer&aacute; na lista de produtos.</strong><small>Voc&ecirc; pode combinar relat&oacute;rios e crit&eacute;rios.</small></span>
+                    <button id="filterPanelLimparBtn" style="padding:9px 18px;border:1.5px solid #d1d5db;border-radius:8px;background:#f9fafb;color:#374151;font-weight:600;font-size:14px;cursor:pointer;"><i class="fa-solid fa-eraser"></i> Limpar tudo</button>
+                    <button id="filterPanelAplicarBtn" style="padding:9px 22px;border:none;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);color:#fff;font-weight:600;font-size:14px;cursor:pointer;"><i class="fa-solid fa-chart-column"></i> Ver resultados</button>
                   </div>
                 </div>
               </div>
