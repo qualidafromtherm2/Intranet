@@ -2184,6 +2184,12 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
     const url = rows[0]?.url_imagem || null;
     res.json({ ok: true, url_imagem: url });
   } catch (err) {
+    // Sem conexão no pool (timeout) → responde vazio em vez de 500 em cascata nas miniaturas.
+    const msg = String(err?.message || '');
+    if (/timeout exceeded when trying to connect|Connection terminated|too many clients/i.test(msg)) {
+      console.warn('[API] /api/produtos/imagem: pool ocupado, devolvendo sem imagem');
+      return res.json({ ok: true, url_imagem: null, defer: true });
+    }
     console.error('[API] /api/produtos/imagem erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem do produto' });
   }
@@ -15718,8 +15724,8 @@ async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
 const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
 const LOGISTICA_PRODUCAO_LOCAL_COD = '10431538872'; // 3. ESTOQUE PRODUÇÃO
 const LOGISTICA_PRODUCAO_LOCAL_NOME = '3. ESTOQUE PRODUÇÃO';
-const LOGISTICA_AT_LOCAL_COD = '10445659161'; // 10. SAC ASSISTENCIA E GARANTIAS
-const LOGISTICA_AT_LOCAL_NOME = '10. SAC ASSISTENCIA E GARANTIAS';
+const LOGISTICA_AT_LOCAL_COD = '10887875683'; // AKESA PJ
+const LOGISTICA_AT_LOCAL_NOME = 'AKESA PJ';
 
 /**
  * Destino para SEP derivada (SEP-NNNN.X) ao ir para Stund-by:

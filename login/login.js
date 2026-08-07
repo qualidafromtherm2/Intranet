@@ -267,7 +267,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       let pr = v.pr || null;
       let atualizado = null; // true/false/null (não sabe)
       try {
-        const gh = await fetch('https://api.github.com/repos/qualidafromtherm2/Intranet/commits?sha=main&per_page=30');
+        const gh = await fetch('https://api.github.com/repos/qualidafromtherm2/Intranet/commits?sha=main&per_page=30', {
+          credentials: 'omit',
+          headers: { Accept: 'application/vnd.github+json' },
+        });
         if (gh.ok) {
           const commits = await gh.json();
           const shaMain = String(commits[0]?.sha || '');
