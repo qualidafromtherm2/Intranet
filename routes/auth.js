@@ -79,6 +79,14 @@ router.post('/first-password', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Parâmetros inválidos' });
     }
 
+    const senhaNova = String(newPassword);
+    if (senhaNova.length < 6 || senhaNova === '123') {
+      return res.status(400).json({ ok: false, error: 'A nova senha deve ter no mínimo 6 caracteres e ser diferente de "123".' });
+    }
+
+    // Resposta única para usuário inexistente e senha já trocada — não revela quais contas existem.
+    const recusar = () => res.status(401).json({ ok: false, error: 'Não é possível definir a senha inicial desta conta.' });
+
     // 1) Busca o usuário na auth_user (o teu backend usa esse schema)
     const sel = await pool.query(
       `SELECT id, username, password_hash
@@ -88,7 +96,7 @@ router.post('/first-password', async (req, res) => {
       [username]
     );
     if (sel.rows.length === 0) {
-      return res.status(404).json({ ok: false, error: 'Usuário não encontrado' });
+      return recusar();
     }
     const u = sel.rows[0];
 
@@ -102,7 +110,7 @@ router.post('/first-password', async (req, res) => {
     );
     const is123 = !!chk.rows[0]?.is123;
     if (!is123) {
-      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+      return recusar();
     }
 
     // 3) Atualiza para a nova senha (hash via pgcrypto/bcrypt no Postgres)

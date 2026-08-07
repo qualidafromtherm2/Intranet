@@ -223,6 +223,7 @@ Retorne SEMPRE um JSON estrito com este formato:
 - Use somente tabelas e colunas presentes no schema informado.
 - Quando houver ambiguidade, escolha o caminho mais conservador e descreva em assumptions.
 - Não invente tabelas ou campos que não estão no schema.
+- Nunca consulte senhas, hashes, tokens, chaves de API ou tabelas de sessão.
 </sql_rules>
 `;
 
@@ -3793,6 +3794,13 @@ function aplicarLimiteSql(sql, maxRows = REPORT_MAX_ROWS) {
   return sql;
 }
 
+// 🔒 Credenciais e sessões nunca podem chegar ao gerador de SQL nem ao resultado.
+const SQL_COLUNAS_BLOQUEADAS = /(senha|password|passwd|token|secret|api_key|apikey|private_key|hash)/i;
+const SQL_TABELAS_BLOQUEADAS = new Set([
+  'public.session',
+]);
+const SQL_IDENTIFICADORES_PROIBIDOS = /\b(senha|password|passwd|password_hash|token|secret|api_key|apikey|private_key|pg_shadow|pg_authid|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|dblink|lo_import|lo_export|current_setting|set_config)\b/i;
+
 function validarSqlSomenteLeitura(sql) {
   if (!sql) return 'SQL vazio.';
   if (sql.includes(';')) return 'A consulta deve conter apenas um comando.';
@@ -3801,6 +3809,12 @@ function validarSqlSomenteLeitura(sql) {
     return 'A consulta contém comandos não permitidos.';
   }
   if (/\bpg_sleep\s*\(/i.test(sql)) return 'A consulta contém função não permitida.';
+  if (SQL_IDENTIFICADORES_PROIBIDOS.test(sql)) {
+    return 'A consulta tenta acessar dados sigilosos (credenciais/sessões).';
+  }
+  if (/\b(public\.)?session\b/i.test(sql)) {
+    return 'A consulta tenta acessar dados sigilosos (credenciais/sessões).';
+  }
   return null;
 }
 
@@ -3830,6 +3844,8 @@ async function obterSchemaTexto(opts = {}) {
   const porTabela = new Map();
   for (const r of rows) {
     const chave = `${r.table_schema}.${r.table_name}`;
+    if (SQL_TABELAS_BLOQUEADAS.has(chave)) continue;
+    if (SQL_COLUNAS_BLOQUEADAS.test(r.column_name)) continue;
     if (!porTabela.has(chave)) porTabela.set(chave, []);
     porTabela.get(chave).push(`${r.column_name}:${r.data_type}`);
   }

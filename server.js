@@ -11597,6 +11597,17 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     // Migração: PIR — só libera etiqueta após registro de inspeção
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS pir BOOLEAN NOT NULL DEFAULT FALSE`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS oculto BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Fora de MP com pir=false ficava invisível (PIR padrão só MP; Identificação só pir=true).
+    // Libera esses itens para Identificação do produto.
+    try {
+      const { liberarEtiquetasForaMpPresas } = require('./utils/etqRecebimentoPir');
+      const liberados = await liberarEtiquetasForaMpPresas(pool);
+      if (liberados > 0) {
+        console.log(`[etiqueta] Liberados ${liberados} item(ns) fora de MP presos na fila PIR → Identificação`);
+      }
+    } catch (libErr) {
+      console.warn('[etiqueta] liberar fora de MP:', libErr?.message || libErr);
+    }
     // Migração: remove colunas antigas de timestamp de impressão
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_em`).catch(() => {});
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" DROP COLUMN IF EXISTS impresso_modal_em`).catch(() => {});
@@ -11934,6 +11945,9 @@ app.post('/api/etiquetas/agente/heartbeat', express.json(), async (req, res) => 
 // GET /api/etiquetas/agentes-disponiveis — lista agentes online com suas impressoras
 // Quando o Map local está vazio (instância local/dev), lê do banco compartilhado.
 app.get('/api/etiquetas/agentes-disponiveis', async (req, res) => {
+  if (!req.session?.user?.id && !hasAgentStaticAccess(req)) {
+    return res.status(401).json({ error: 'Não autenticado' });
+  }
   const agora       = Date.now();
   const disponiveis = [];
   // 1. Lê in-memory (produção, onde o heartbeat chegou nesta instância)
@@ -13740,9 +13754,9 @@ async function _zplCombinadoParaPdf(zplCombinado, labelSize = '4x0.9') {
 // POST /api/etiquetas/recebimento/manual
 // Entrada sem NF-e/pedido (Lista de produtos → Escolha a ação).
 // Body: { codigo_produto, descricao_produto, qtd, unidade, nfe?, pedido? }
-// Cria ETQ_recebimento respeitando pir_vai_direto_identificacao:
-//   vai_direto=true → pir=true → Identificação do produto
-//   vai_direto=false → pir=false → lista PIR
+// Destino:
+//   MP → pir=false → lista PIR (+ WhatsApp)
+//   fora de MP / vai_direto → pir=true → Identificação do produto
 app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) => {
   try {
     const body = req.body || {};
@@ -13792,18 +13806,8 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
 
-    let pirInicial = false;
-    try {
-      const flag = await pool.query(
-        `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto
-           FROM public.produtos_omie
-          WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
-             OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
-          LIMIT 1`,
-        [codProdRaw]
-      );
-      pirInicial = flag.rows[0]?.vai_direto === true;
-    } catch (_) { /* segue com pir=false */ }
+    const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
+    const { pirInicial, ehMp } = await resolverDestinoPirRecebimento(pool, codProdRaw);
 
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const codProd = sanitize(codProdRaw, 30);
@@ -13838,7 +13842,8 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     );
 
     const destino = pirInicial ? 'identificacao' : 'pir';
-    if (!pirInicial) {
+    // WhatsApp só para MP (itens que aparecem na lista PIR padrão)
+    if (!pirInicial && ehMp) {
       try {
         const { dispararNotificacaoEntradaListaPir } = require('./utils/alertaPirWhatsapp');
         dispararNotificacaoEntradaListaPir([{
@@ -13849,6 +13854,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
           unidade: unidRaw,
           lote,
           numero_nfe: nfe,
+          eh_mp: true,
         }]);
       } catch (notifErr) {
         console.error('[etiquetas/recebimento/manual] alerta WhatsApp PIR:', notifErr?.message || notifErr);
@@ -13859,11 +13865,14 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
       id: idEtq,
       pir: pirInicial,
       destino,
+      eh_mp: ehMp,
       lote,
       numero_nfe: nfe,
       numero_pedido: pedido,
       mensagem: pirInicial
-        ? 'Entrada criada. Produto configurado para ir direto à Identificação do produto.'
+        ? (ehMp
+          ? 'Entrada criada. Produto configurado para ir direto à Identificação do produto.'
+          : 'Entrada criada. Produto fora de MP enviado à Identificação do produto.')
         : 'Entrada criada. Produto enviado para a lista PIR (Qualidade Fábrica).',
     });
   } catch (err) {
@@ -13988,18 +13997,14 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
         continue;
       }
 
-      // Produto marcado para pular PIR → já nasce liberado em Identificação
+      // Destino: MP → PIR; fora de MP / vai_direto → Identificação
       let pirInicial = false;
+      let ehMp = false;
       try {
-        const flag = await pool.query(
-          `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto
-             FROM public.produtos_omie
-            WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
-               OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
-            LIMIT 1`,
-          [codProdRaw]
-        );
-        pirInicial = flag.rows[0]?.vai_direto === true;
+        const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
+        const destinoPir = await resolverDestinoPirRecebimento(pool, codProdRaw);
+        pirInicial = destinoPir.pirInicial;
+        ehMp = destinoPir.ehMp === true;
       } catch (_) { /* segue com pir=false */ }
 
       // ── Salva no banco primeiro para obter o ID ───────────────────────────
@@ -14023,6 +14028,7 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
           cod: codProdRaw,
           id: idEtq,
           pir: pirInicial,
+          eh_mp: ehMp,
           codigo_produto: codProdRaw,
           descricao_produto: descProdRaw,
           qtd: qtdRaw !== '' ? Number(String(qtdRaw).replace(',', '.')) || null : null,
@@ -14059,7 +14065,8 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       });
     }
 
-    const novosPir = gerados.filter((g) => g && g.id && g.pir !== true && !g.atualizado);
+    // WhatsApp só para MP novos na lista PIR padrão
+    const novosPir = gerados.filter((g) => g && g.id && g.pir !== true && !g.atualizado && g.eh_mp === true);
     if (novosPir.length) {
       try {
         const { dispararNotificacaoEntradaListaPir } = require('./utils/alertaPirWhatsapp');
@@ -14119,21 +14126,19 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     // qtd=0 = todas as etiquetas já impressas — não listar
     const saldoCond = `COALESCE(er.qtd, 0) > 0`;
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
+    const soMp = req.query.so_mp === '1' || req.query.so_mp === 'true';
     // MP = família Omie MP OU código no padrão xx.MP.x.xxxxx (2º segmento = MP)
     const isMpSql = `(
       UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
       OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
       OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
     )`;
-    // Entrada manual (Recebimento sem NF-e) aparece mesmo fora de MP
-    const entradaManualSql = `(
-      UPPER(TRIM(COALESCE(er.numero_pedido, ''))) LIKE 'MANUAL%'
-      OR UPPER(TRIM(COALESCE(er.numero_nfe, ''))) LIKE 'SEM-NFE%'
-    )`;
-    // Padrão: só MP (+ manuais). Com sem_mp=1: itens que NÃO são MP (+ manuais)
-    const familiaMpCond = semMp
-      ? `(${entradaManualSql} OR (
-           NOT EXISTS (
+    // Padrão: todos (MP e fora de MP). sem_mp=1 → só fora de MP. so_mp=1 → só MP.
+    let familiaMpCond = 'TRUE';
+    let filtroFamilia = 'todos';
+    if (semMp) {
+      filtroFamilia = 'sem_mp';
+      familiaMpCond = `NOT EXISTS (
              SELECT 1 FROM public.produtos_omie po
               WHERE ${isMpSql}
                 AND (
@@ -14141,9 +14146,10 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
                   OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                 )
            )
-           AND UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) <> 'MP'
-         ))`
-      : `(${entradaManualSql} OR (
+           AND UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) <> 'MP'`;
+    } else if (soMp) {
+      filtroFamilia = 'mp';
+      familiaMpCond = `(
            EXISTS (
              SELECT 1 FROM public.produtos_omie po
               WHERE ${isMpSql}
@@ -14153,7 +14159,8 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
                 )
            )
            OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
-         ))`;
+         )`;
+    }
     const idImpressoSub = `(SELECT id FROM etiqueta."ETQ_rec_impresso" ri WHERE ri.origem_id = er.id ORDER BY ri.id DESC LIMIT 1) AS id_impresso`;
     let rows;
     if (q) {
@@ -14166,7 +14173,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
           WHERE ${ocultoCond}
             AND ${pirCond}
             AND ${saldoCond}
-            AND ${familiaMpCond}
+            AND (${familiaMpCond})
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`,
@@ -14182,13 +14189,13 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
           WHERE ${ocultoCond}
             AND ${pirCond}
             AND ${saldoCond}
-            AND ${familiaMpCond}
+            AND (${familiaMpCond})
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
       );
       rows = result.rows;
     }
-    res.json({ etiquetas: rows, filtro: semMp ? 'sem_mp' : 'mp' });
+    res.json({ etiquetas: rows, filtro: filtroFamilia });
   } catch (err) {
     console.error('[etiquetas/pendentes]', err);
     res.status(500).json({ error: err?.message || 'Falha ao buscar etiquetas' });
@@ -17824,7 +17831,7 @@ app.post('/api/logs/arrasto', express.json(), (req, res) => {
 });
 
 // Multer para upload de imagens
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 12 * 1024 * 1024 } });
 
 
 /* ============================================================================

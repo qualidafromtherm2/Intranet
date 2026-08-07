@@ -1,11 +1,14 @@
 'use strict';
 
 /**
- * Alerta WhatsApp quando um item novo entra na lista PIR
- * (etiqueta.ETQ_recebimento com pir=false → Qualidade Fábrica → PIR).
+ * Alerta WhatsApp quando um item novo entra na lista PIR padrão
+ * (etiqueta.ETQ_recebimento com pir=false e família/código MP
+ *  → Qualidade Fábrica → PIR).
  *
  * Destinatários: usuários com public.auth_user_profile.funcao_id = 4
  * (Supervisor de qualidade) e telefone_contato preenchido.
+ *
+ * Itens fora de MP não disparam alerta — vão direto à Identificação.
  */
 
 const { dbQuery } = require('../src/db');
@@ -15,6 +18,7 @@ const {
   whatsappConfigurado,
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
+const { codigoTemSegmentoMp, produtoEhFamiliaMp } = require('./etqRecebimentoPir');
 
 const TAG = '[AlertaPirWhatsApp]';
 const FUNCAO_ID_DESTINO = Number(process.env.ALERTA_PIR_FUNCAO_ID || 4) || 4;
@@ -131,12 +135,62 @@ async function marcarEnviados(ids, enviadosPara) {
   );
 }
 
+/** Mantém só itens MP (lista PIR padrão). Aceita eh_mp do caller ou consulta o banco. */
+async function filtrarItensMpParaAlerta(lista) {
+  const comFlag = lista.filter((it) => it.eh_mp === true || it.ehMp === true);
+  const semFlag = lista.filter((it) => it.eh_mp !== true && it.ehMp !== true);
+  if (!semFlag.length) return comFlag;
+
+  const ids = semFlag.map((it) => it.id).filter((id) => Number(id) > 0);
+  const mpIds = new Set();
+  if (ids.length) {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT er.id,
+                UPPER(TRIM(COALESCE(po.codint_familia, ''))) AS codint_familia,
+                po.codigo,
+                po.codigo_produto::text AS codigo_produto,
+                er.codigo_produto AS etq_codigo
+           FROM etiqueta."ETQ_recebimento" er
+           LEFT JOIN LATERAL (
+             SELECT p.codint_familia, p.codigo, p.codigo_produto
+               FROM public.produtos_omie p
+              WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+                 OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
+              LIMIT 1
+           ) po ON TRUE
+          WHERE er.id = ANY($1::bigint[])`,
+        [ids]
+      );
+      for (const row of rows) {
+        if (produtoEhFamiliaMp(row, row.etq_codigo) || codigoTemSegmentoMp(row.etq_codigo)) {
+          mpIds.add(Number(row.id));
+        }
+      }
+    } catch (err) {
+      console.error(TAG, 'Falha ao filtrar MP:', err?.message || err);
+      for (const it of semFlag) {
+        if (codigoTemSegmentoMp(it.codigo_produto)) mpIds.add(Number(it.id));
+      }
+    }
+  } else {
+    for (const it of semFlag) {
+      if (codigoTemSegmentoMp(it.codigo_produto)) mpIds.add(Number(it.id));
+    }
+  }
+
+  return [
+    ...comFlag,
+    ...semFlag.filter((it) => mpIds.has(Number(it.id))),
+  ];
+}
+
 /**
- * Notifica Supervisores de qualidade sobre itens novos na lista PIR.
- * @param {Array<{id, codigo_produto, descricao_produto, qtd, unidade, lote, numero_nfe}>} itens
+ * Notifica Supervisores de qualidade sobre itens novos na lista PIR (só MP).
+ * @param {Array<{id, codigo_produto, descricao_produto, qtd, unidade, lote, numero_nfe, eh_mp?}>} itens
  */
 async function notificarEntradaListaPir(itens) {
-  const lista = (Array.isArray(itens) ? itens : [itens])
+  const listaBruta = (Array.isArray(itens) ? itens : [itens])
     .filter((it) => it && Number(it.id) > 0)
     .map((it) => ({
       id: Number(it.id),
@@ -146,9 +200,17 @@ async function notificarEntradaListaPir(itens) {
       unidade: it.unidade,
       lote: String(it.lote || '').trim(),
       numero_nfe: String(it.numero_nfe || '').trim(),
+      eh_mp: it.eh_mp === true || it.ehMp === true,
+      ehMp: it.eh_mp === true || it.ehMp === true,
     }));
 
-  if (!lista.length) return { ok: false, reason: 'sem_itens' };
+  if (!listaBruta.length) return { ok: false, reason: 'sem_itens' };
+
+  const lista = await filtrarItensMpParaAlerta(listaBruta);
+  if (!lista.length) {
+    console.log(TAG, 'Nenhum item MP para alertar (fora de MP ignorado).');
+    return { ok: true, skipped: true, reason: 'sem_itens_mp' };
+  }
 
   if (!whatsappConfigurado()) {
     console.log(TAG, 'WhatsApp não configurado — alerta ignorado.');

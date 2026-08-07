@@ -46,6 +46,7 @@ test('movimentacoes aguardam saldo absoluto e nao calculam delta nos fluxos prin
 test('backend publica versao do saldo e reconcilia origem e destino', () => {
   const server = ler('server.js');
   const transferencias = ler('routes/transferencias.js');
+  const reconcile = ler('utils/reconciliarEstoqueOmie.js');
   const batch = trecho(server, "app.get('/api/logistica/estoque/batch'", "app.get('/api/logistica/endereco-pp/batch'");
   assert.match(batch, /e\.updated_at/);
   assert.match(batch, /updated_at:\s*row\.updated_at/);
@@ -53,4 +54,7 @@ test('backend publica versao do saldo e reconcilia origem e destino', () => {
   assert.match(transferencias, /agendarReconciliacaoEstoqueOmie/);
   assert.match(transferencias, /deltaEsperado: -Number\(registroAtual\.qtd\)/);
   assert.match(transferencias, /deltaEsperado: Number\(registroAtual\.qtd\)/);
+  assert.match(reconcile, /aplicarDeltaEstoqueLocal/);
+  assert.match(reconcile, /movimento_local/);
+  assert.match(reconcile, /gravado: false/);
 });

@@ -59,19 +59,13 @@ async function consultarPosicaoEstoqueOmie({
   };
 }
 
-async function reconciliarEstoqueAtualOmie({
+async function gravarPosicaoEstoqueLocal({
+  posicao,
   codigoProduto,
   codigo,
-  localCodigo,
-  fetchImpl = global.fetch,
   query = defaultDbQuery,
-  appKey = OMIE_APP_KEY,
-  appSecret = OMIE_APP_SECRET
+  origem = 'omie_reconcile'
 }) {
-  const posicao = await consultarPosicaoEstoqueOmie({
-    codigoProduto, codigo, localCodigo, fetchImpl, appKey, appSecret
-  });
-
   await query(
     `INSERT INTO logistica.estoque_atual (
        local_codigo, local_nome, omie_prod_id, codigo, descricao,
@@ -83,7 +77,7 @@ async function reconciliarEstoqueAtualOmie({
        (SELECT nome FROM omie_locais_estoque WHERE local_codigo::text = $1 LIMIT 1),
        $2, $3,
        (SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
-       $4, $5, $6, $7, $8, $9, NOW(), 'omie_reconcile'
+       $4, $5, $6, $7, $8, $9, NOW(), $10
      )
      ON CONFLICT ON CONSTRAINT uq_estoque_atual_prod_local
      DO UPDATE SET
@@ -105,11 +99,48 @@ async function reconciliarEstoqueAtualOmie({
       posicao.reservado,
       posicao.pendente,
       posicao.estoque_minimo,
-      posicao.cmc
+      posicao.cmc,
+      origem
     ]
   );
+}
 
-  return posicao;
+async function reconciliarEstoqueAtualOmie({
+  codigoProduto,
+  codigo,
+  localCodigo,
+  fetchImpl = global.fetch,
+  query = defaultDbQuery,
+  appKey = OMIE_APP_KEY,
+  appSecret = OMIE_APP_SECRET,
+  saldoAntes = null,
+  deltaEsperado = null,
+  forcarGravacao = false
+}) {
+  const posicao = await consultarPosicaoEstoqueOmie({
+    codigoProduto, codigo, localCodigo, fetchImpl, appKey, appSecret
+  });
+
+  const delta = Number(deltaEsperado);
+  const exigeConfirmacao = !forcarGravacao
+    && Number.isFinite(delta)
+    && delta !== 0
+    && saldoAntes !== null
+    && Number.isFinite(Number(saldoAntes));
+
+  if (exigeConfirmacao && !saldoMudouNaDirecaoEsperada(saldoAntes, posicao.saldo, delta)) {
+    return { ...posicao, gravado: false, pendente: true };
+  }
+
+  await gravarPosicaoEstoqueLocal({
+    posicao,
+    codigoProduto,
+    codigo,
+    query,
+    origem: 'omie_reconcile'
+  });
+
+  return { ...posicao, gravado: true, pendente: false };
 }
 
 function saldoMudouNaDirecaoEsperada(saldoAntes, saldoAtual, deltaEsperado, tolerancia = 0.0001) {
@@ -138,6 +169,50 @@ async function buscarSaldoLocal({ codigo, localCodigo, query = defaultDbQuery })
   return Number.isFinite(saldo) ? saldo : null;
 }
 
+/**
+ * Aplica o delta da movimentação no SQL local assim que a Omie aceita o ajuste.
+ * Evita a tela ficar com saldo antigo enquanto PosicaoEstoque ainda atrasa.
+ */
+async function aplicarDeltaEstoqueLocal({
+  codigoProduto,
+  codigo,
+  localCodigo,
+  deltaEsperado,
+  query = defaultDbQuery
+}) {
+  const delta = Number(deltaEsperado);
+  const local = String(localCodigo || '').trim();
+  const cod = String(codigo || '').trim();
+  if (!local || !cod || !Number.isFinite(delta) || delta === 0) return null;
+
+  const { rows } = await query(
+    `INSERT INTO logistica.estoque_atual (
+       local_codigo, local_nome, omie_prod_id, codigo, descricao,
+       saldo, fisico, reservado, pendente, estoque_minimo, cmc,
+       updated_at, origem
+     )
+     VALUES (
+       $1,
+       (SELECT nome FROM omie_locais_estoque WHERE local_codigo::text = $1 LIMIT 1),
+       $2, $3,
+       (SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
+       $4, $4, 0, 0, 0, 0,
+       NOW(), 'movimento_local'
+     )
+     ON CONFLICT ON CONSTRAINT uq_estoque_atual_prod_local
+     DO UPDATE SET
+       omie_prod_id = COALESCE(EXCLUDED.omie_prod_id, logistica.estoque_atual.omie_prod_id),
+       saldo = COALESCE(logistica.estoque_atual.saldo, 0) + $4,
+       fisico = COALESCE(logistica.estoque_atual.fisico, 0) + $4,
+       updated_at = NOW(),
+       origem = 'movimento_local'
+     RETURNING saldo, fisico, local_codigo`,
+    [local, Number(codigoProduto) || null, cod, delta]
+  );
+
+  return rows?.[0] || null;
+}
+
 function aguardar(ms) {
   return new Promise((resolve) => {
     const timer = setTimeout(resolve, ms);
@@ -147,25 +222,55 @@ function aguardar(ms) {
 
 function agendarReconciliacaoEstoqueOmie(dados, delayMs = 3000) {
   void (async () => {
-    const saldoAntes = await buscarSaldoLocal(dados).catch(() => null);
+    const query = dados?.query || defaultDbQuery;
     const deltaEsperado = Number(dados?.deltaEsperado);
-    const intervalos = [Math.max(0, Number(delayMs) || 0), 5000, 10000];
+    const saldoAntes = await buscarSaldoLocal({
+      codigo: dados?.codigo,
+      localCodigo: dados?.localCodigo,
+      query
+    }).catch(() => null);
+
+    if (Number.isFinite(deltaEsperado) && deltaEsperado !== 0) {
+      await aplicarDeltaEstoqueLocal({
+        codigoProduto: dados?.codigoProduto,
+        codigo: dados?.codigo,
+        localCodigo: dados?.localCodigo,
+        deltaEsperado,
+        query
+      }).catch((err) => {
+        console.error('[estoque][reconcile] Falha ao aplicar delta local:', err?.message || err);
+      });
+    }
+
+    // Tentativas curtas + uma tardia: Omie às vezes demora >20s para refletir PosicaoEstoque.
+    const intervalos = [Math.max(0, Number(delayMs) || 0), 5000, 10000, 20000, 40000];
     let ultimaPosicao = null;
+    let confirmado = false;
 
     for (const espera of intervalos) {
       await aguardar(espera);
-      ultimaPosicao = await reconciliarEstoqueAtualOmie(dados);
-      if (!Number.isFinite(deltaEsperado) || deltaEsperado === 0 || saldoAntes === null) return;
-      if (saldoMudouNaDirecaoEsperada(saldoAntes, ultimaPosicao.saldo, deltaEsperado)) return;
+      ultimaPosicao = await reconciliarEstoqueAtualOmie({
+        ...dados,
+        query,
+        saldoAntes,
+        deltaEsperado,
+        forcarGravacao: false
+      });
+      if (ultimaPosicao?.gravado) {
+        confirmado = true;
+        break;
+      }
     }
 
-    console.warn('[estoque][reconcile] Omie ainda não refletiu o movimento esperado.', {
-      codigo: dados?.codigo,
-      localCodigo: dados?.localCodigo,
-      saldoAntes,
-      saldoAtual: ultimaPosicao?.saldo,
-      deltaEsperado
-    });
+    if (!confirmado) {
+      console.warn('[estoque][reconcile] Omie ainda não refletiu o movimento esperado; mantendo saldo local otimista.', {
+        codigo: dados?.codigo,
+        localCodigo: dados?.localCodigo,
+        saldoAntes,
+        saldoOmie: ultimaPosicao?.saldo,
+        deltaEsperado
+      });
+    }
   })().catch((err) => {
     console.error('[estoque][reconcile] Falha ao reconciliar posição após ajuste:', err?.message || err);
   });
@@ -175,5 +280,6 @@ module.exports = {
   consultarPosicaoEstoqueOmie,
   reconciliarEstoqueAtualOmie,
   agendarReconciliacaoEstoqueOmie,
+  aplicarDeltaEstoqueLocal,
   saldoMudouNaDirecaoEsperada
 };
