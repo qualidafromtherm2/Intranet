@@ -11248,8 +11248,8 @@ const AT_SESSION_SECRET = String(process.env.AT_SESSION_SECRET || '').trim();
 // ── Portal AT: solicitação de produtos / separação (CNPJs autorizados) ────────
 const AT_SEP_CNPJS_PERMITIDOS = new Set(['05240837000121', '48407161000120']);
 // Destino padrão Omie das SEPs criadas pelo portal at-link.html
-const AT_SEP_LOCAL_ESTOQUE = '10445659161'; // 10. SAC ASSISTENCIA E GARANTIAS
-const AT_SEP_LOCAL_NOME_PADRAO = '10. SAC ASSISTENCIA E GARANTIAS';
+const AT_SEP_LOCAL_ESTOQUE = '10887875683'; // AKESA PJ
+const AT_SEP_LOCAL_NOME_PADRAO = 'AKESA PJ';
 
 function _atNormCnpj(v) {
   return String(v || '').replace(/\D/g, '');
