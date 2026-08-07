@@ -53,6 +53,8 @@ async function ensureCompatView(client, fromSchema, fromName, toSchema, toName) 
 
   const srcKind = await relationKind(client, fromSchema, fromName);
   if (srcKind === 'r') return false;
+  // VIEW já existe: não dar CREATE OR REPLACE (AccessExclusiveLock trava o site)
+  if (srcKind === 'v') return true;
 
   await ensureSchema(client, fromSchema);
   await client.query(
@@ -391,6 +393,8 @@ const SCHEMA_RENAMES = [
 ];
 
 let _migracaoPromise = null;
+let _migracaoDone = false;
+let _migracaoResult = null;
 
 /** Schemas que o código referencia — criar cedo para ensures de boot não falharem. */
 const TARGET_SCHEMAS = [
@@ -419,6 +423,9 @@ const TARGET_SCHEMAS = [
 
 async function organizarSchemasMigracao(db) {
   if (!db) return { ok: false, reason: 'no-db' };
+  // Uma vez por processo: rotas (SAC, vendas, transferências…) chamavam de novo
+  // a cada request e travavam o Postgres com CREATE VIEW + pool esgotado.
+  if (_migracaoDone) return _migracaoResult || { ok: true, skipped: true };
   if (_migracaoPromise) return _migracaoPromise;
 
   _migracaoPromise = (async () => {
@@ -428,9 +435,30 @@ async function organizarSchemasMigracao(db) {
     const results = [];
     const schemaResults = [];
     let droppedApkAt = false;
+    let gotLock = false;
     // Sem transação global: uma falha (ex.: Chatbot com conflito) não pode
     // impedir a fusão de Vendas/Producao — isso quebrou o relatório em produção.
     try {
+      // Só um serviço (Intranet / intranet-api) migra por vez
+      try {
+        const lock = await client.query(
+          `SELECT pg_try_advisory_lock(87236401) AS ok`
+        );
+        gotLock = !!lock.rows[0]?.ok;
+        if (!gotLock) {
+          console.log('[schemas] outro processo já migra — só garante schemas vazios');
+          for (const s of TARGET_SCHEMAS) {
+            try { await ensureSchema(client, s); } catch (_) { /* ignore */ }
+          }
+          await new Promise((r) => setTimeout(r, 2000));
+          _migracaoDone = true;
+          _migracaoResult = { ok: true, skipped: true, reason: 'lock-held' };
+          return _migracaoResult;
+        }
+      } catch (_) {
+        /* sem advisory lock segue mesmo assim */
+      }
+
       // 1º: schemas vazios — rotas que rodam ensure no require() não quebram
       // com "schema X does not exist" enquanto as tabelas ainda estão em public.
       for (const s of TARGET_SCHEMAS) {
@@ -538,6 +566,13 @@ async function organizarSchemasMigracao(db) {
         }
       }
     } finally {
+      if (gotLock) {
+        try {
+          await client.query(`SELECT pg_advisory_unlock(87236401)`);
+        } catch (_) {
+          /* ignore */
+        }
+      }
       if (ownsClient && client.release) client.release();
     }
 
@@ -548,10 +583,19 @@ async function organizarSchemasMigracao(db) {
         `[schemas] migração: ${moved} tabela(s), ${renamedSchemas} schema(s) renomeado(s)/fundido(s)`
       );
     }
-    return { ok: true, results, schemaResults, droppedApkAt };
-  })().finally(() => {
-    _migracaoPromise = null;
-  });
+    _migracaoDone = true;
+    _migracaoResult = { ok: true, results, schemaResults, droppedApkAt };
+    return _migracaoResult;
+  })()
+    .catch((err) => {
+      // Falha: permite nova tentativa no próximo boot/request
+      _migracaoDone = false;
+      _migracaoResult = null;
+      throw err;
+    })
+    .finally(() => {
+      _migracaoPromise = null;
+    });
 
   return _migracaoPromise;
 }
