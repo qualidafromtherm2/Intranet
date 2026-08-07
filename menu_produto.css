@@ -23892,6 +23892,322 @@ html.light-mode #minhasComprasWrapper {
   }
 }
 
+/* ===== Configurador do agente de impressao ===== */
+#confAgentePane {
+  --conf-agent-surface: rgba(15, 23, 42, 0.66);
+  --conf-agent-surface-strong: rgba(15, 23, 42, 0.9);
+  --conf-agent-card: rgba(30, 41, 59, 0.78);
+  --conf-agent-border: rgba(148, 163, 184, 0.24);
+  --conf-agent-text: #f8fafc;
+  --conf-agent-muted: #a8b4c6;
+}
+
+.light-mode #confAgentePane {
+  --conf-agent-surface: #f4f7fb;
+  --conf-agent-surface-strong: #ffffff;
+  --conf-agent-card: #ffffff;
+  --conf-agent-border: #d9e2ee;
+  --conf-agent-text: #172033;
+  --conf-agent-muted: #66758a;
+}
+
+#confAgentePane .conf-agent-page {
+  display: grid;
+  gap: 16px;
+  padding-top: 16px;
+}
+
+#confAgentePane .conf-agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px 18px;
+  border: 1px solid var(--conf-agent-border);
+  border-radius: 8px;
+  background: var(--conf-agent-surface-strong);
+}
+
+#confAgentePane .conf-agent-heading,
+#confAgentePane .conf-agent-header-actions,
+#confAgentePane .conf-agent-action,
+#confAgentePane .conf-layout-card-top,
+#confAgentePane .conf-layout-card-actions,
+#confAgentePane .conf-layout-group-title,
+#confAgentePane .conf-layout-presets > summary {
+  display: flex;
+  align-items: center;
+}
+
+#confAgentePane .conf-agent-heading { gap: 12px; min-width: 0; }
+#confAgentePane .conf-agent-heading-icon {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  place-items: center;
+  border-radius: 8px;
+  background: #172554;
+  color: #7dd3fc;
+  font-size: 18px;
+}
+
+#confAgentePane .conf-agent-eyebrow,
+#confAgentePane .conf-agent-section-kicker {
+  display: block;
+  color: #14b8a6;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .08em;
+}
+
+#confAgentePane .conf-agent-heading h3,
+#confAgentePane .conf-agent-section-header h4 {
+  margin: 2px 0 0;
+  color: var(--conf-agent-text);
+}
+
+#confAgentePane .conf-agent-heading h3 { font-size: 19px; }
+#confAgentePane .conf-agent-heading p,
+#confAgentePane .conf-agent-section-header p {
+  margin: 3px 0 0;
+  color: var(--conf-agent-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+#confAgentePane .conf-agent-header-actions { gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+#confAgentePane .conf-agent-action,
+#confAgentePane .conf-agent-icon-button {
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: border-color .18s ease, background-color .18s ease, color .18s ease;
+}
+
+#confAgentePane .conf-agent-action { justify-content: center; gap: 8px; padding: 8px 12px; }
+#confAgentePane .conf-agent-action-primary { background: #2563eb; color: #fff; }
+#confAgentePane .conf-agent-action-secondary { border-color: var(--conf-agent-border); background: transparent; color: var(--conf-agent-text); }
+#confAgentePane .conf-agent-action-warning { background: #b45309; color: #fff; }
+#confAgentePane .conf-agent-action-success { background: #0f766e; color: #fff; }
+#confAgentePane .conf-agent-action:hover,
+#confAgentePane .conf-agent-icon-button:hover { filter: brightness(1.08); }
+#confAgentePane .conf-agent-action:focus-visible,
+#confAgentePane .conf-agent-icon-button:focus-visible,
+#confAgentePane .conf-layout-action:focus-visible { outline: 3px solid rgba(56, 189, 248, .35); outline-offset: 2px; }
+
+#confAgentePane .conf-agent-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+#confAgentePane .conf-agent-stat {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 11px 12px;
+  border: 1px solid var(--conf-agent-border);
+  border-radius: 8px;
+  background: var(--conf-agent-card);
+}
+
+#confAgentePane .conf-agent-stat-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 7px;
+}
+#confAgentePane .conf-agent-stat-icon.is-blue { background: #dbeafe; color: #1d4ed8; }
+#confAgentePane .conf-agent-stat-icon.is-green { background: #dcfce7; color: #15803d; }
+#confAgentePane .conf-agent-stat-icon.is-violet { background: #ede9fe; color: #6d28d9; }
+#confAgentePane .conf-agent-stat-icon.is-cyan { background: #cffafe; color: #0e7490; }
+#confAgentePane .conf-agent-stat strong { display: block; color: var(--conf-agent-text); font-size: 20px; line-height: 1; font-variant-numeric: tabular-nums; }
+#confAgentePane .conf-agent-stat span { color: var(--conf-agent-muted); font-size: 11px; }
+
+#confAgentePane .conf-agent-layout { display: grid; gap: 16px; }
+#confAgentePane .conf-agent-panel {
+  padding: 16px;
+  border: 1px solid var(--conf-agent-border);
+  border-radius: 8px;
+  background: var(--conf-agent-surface);
+}
+
+#confAgentePane .conf-agent-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+#confAgentePane .conf-agent-section-header h4 { font-size: 16px; }
+#confAgentePane .conf-agent-icon-button {
+  display: grid;
+  width: 40px;
+  padding: 0;
+  place-items: center;
+  border-color: var(--conf-agent-border);
+  background: var(--conf-agent-card);
+  color: var(--conf-agent-text);
+}
+
+#confAgentePane .conf-agent-loading,
+#confAgentePane .conf-agent-empty {
+  display: grid;
+  justify-items: center;
+  gap: 7px;
+  padding: 22px;
+  border: 1px dashed var(--conf-agent-border);
+  border-radius: 8px;
+  color: var(--conf-agent-muted);
+  text-align: center;
+  font-size: 12px;
+}
+#confAgentePane .conf-agent-empty i { font-size: 18px; color: #8b5cf6; }
+#confAgentePane .conf-agent-empty strong { color: var(--conf-agent-text); font-size: 13px; }
+
+#confAgentePane .conf-agent-layout-list,
+#confAgentePane .conf-agent-config-list { display: grid; gap: 14px; }
+#confAgentePane .conf-layout-group { display: grid; gap: 8px; }
+#confAgentePane .conf-layout-group + .conf-layout-group { padding-top: 4px; }
+#confAgentePane .conf-layout-group-title { justify-content: space-between; gap: 10px; }
+#confAgentePane .conf-layout-group-title strong { color: var(--conf-agent-text); font-size: 12px; }
+#confAgentePane .conf-layout-group-title span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(20, 184, 166, .14);
+  color: #0f9f91;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+#confAgentePane .conf-layout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(235px, 1fr));
+  gap: 9px;
+}
+
+#confAgentePane .conf-layout-card {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--conf-agent-border);
+  border-radius: 8px;
+  background: var(--conf-agent-card);
+}
+#confAgentePane .conf-layout-card.is-profile { border-top: 3px solid #14b8a6; }
+#confAgentePane .conf-layout-card.is-preset { border-top: 3px solid #64748b; }
+#confAgentePane .conf-layout-card-top { justify-content: space-between; gap: 8px; padding: 9px 10px 0; }
+#confAgentePane .conf-layout-kind,
+#confAgentePane .conf-layout-size,
+#confAgentePane .conf-layout-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 10px;
+  font-weight: 700;
+}
+#confAgentePane .conf-layout-kind { padding: 3px 7px; border-radius: 999px; }
+#confAgentePane .conf-layout-kind.is-profile { background: rgba(20, 184, 166, .14); color: #0f9f91; }
+#confAgentePane .conf-layout-kind.is-preset { background: rgba(100, 116, 139, .16); color: var(--conf-agent-muted); }
+#confAgentePane .conf-layout-size { color: var(--conf-agent-muted); font-variant-numeric: tabular-nums; }
+#confAgentePane .conf-layout-card-body { min-width: 0; padding: 10px; }
+#confAgentePane .conf-layout-card-body h5 {
+  overflow: hidden;
+  margin: 0;
+  color: var(--conf-agent-text);
+  font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#confAgentePane .conf-layout-card-body p { margin: 3px 0 9px; color: var(--conf-agent-muted); font-size: 11px; }
+#confAgentePane .conf-layout-meta { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+#confAgentePane .conf-layout-meta span { color: var(--conf-agent-muted); font-weight: 600; }
+#confAgentePane .conf-layout-meta .is-ready { color: #16a34a; }
+#confAgentePane .conf-layout-meta .is-pending { color: #b45309; }
+#confAgentePane .conf-layout-card-actions { gap: 4px; padding: 7px; border-top: 1px solid var(--conf-agent-border); }
+#confAgentePane .conf-layout-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 36px;
+  min-height: 34px;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--conf-agent-muted);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+#confAgentePane .conf-layout-action:hover { background: rgba(59, 130, 246, .12); color: #3b82f6; }
+#confAgentePane .conf-layout-action.is-danger { margin-left: auto; color: #dc2626; }
+#confAgentePane .conf-layout-action.is-danger:hover { background: rgba(220, 38, 38, .1); }
+
+#confAgentePane .conf-layout-presets { border-top: 1px solid var(--conf-agent-border); padding-top: 12px; }
+#confAgentePane .conf-layout-presets > summary {
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 0 10px;
+  border-radius: 7px;
+  color: var(--conf-agent-text);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  list-style: none;
+}
+#confAgentePane .conf-layout-presets > summary::-webkit-details-marker { display: none; }
+#confAgentePane .conf-layout-presets > summary:hover { background: rgba(148, 163, 184, .09); }
+#confAgentePane .conf-layout-presets > summary span { display: inline-flex; align-items: center; gap: 7px; }
+#confAgentePane .conf-layout-presets > summary strong { padding: 2px 8px; border-radius: 999px; background: rgba(100, 116, 139, .16); font-size: 10px; }
+#confAgentePane .conf-layout-presets[open] > summary { margin-bottom: 8px; }
+
+@media (max-width: 900px) {
+  #confAgentePane .conf-agent-header { align-items: flex-start; flex-direction: column; }
+  #confAgentePane .conf-agent-header-actions { width: 100%; justify-content: flex-start; }
+  #confAgentePane .conf-agent-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 560px) {
+  #confAgentePane .conf-agent-page { gap: 10px; padding: 8px 8px calc(80px + env(safe-area-inset-bottom)); }
+  #confAgentePane .conf-agent-header,
+  #confAgentePane .conf-agent-panel { padding: 12px; }
+  #confAgentePane .conf-agent-heading p { display: none; }
+  #confAgentePane .conf-agent-heading h3 { font-size: 17px; }
+  #confAgentePane .conf-agent-header-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  #confAgentePane .conf-agent-action { min-width: 0; min-height: 44px; padding: 7px; }
+  #confAgentePane .conf-agent-header-actions .conf-agent-action span { display: none; }
+  #confAgentePane .conf-agent-header-actions .conf-agent-action i { font-size: 16px; }
+  #confAgentePane .conf-agent-stats { gap: 7px; }
+  #confAgentePane .conf-agent-stat { padding: 9px; }
+  #confAgentePane .conf-agent-stat-icon { display: none; }
+  #confAgentePane .conf-agent-stat strong { font-size: 18px; }
+  #confAgentePane .conf-agent-stat span { line-height: 1.25; }
+  #confAgentePane .conf-agent-section-header { align-items: flex-start; }
+  #confAgentePane .conf-agent-section-header p { display: none; }
+  #confAgentePane .conf-agent-panel-library .conf-agent-section-header { align-items: center; }
+  #confAgentePane .conf-agent-panel-library .conf-agent-action span { display: inline; }
+  #confAgentePane .conf-layout-grid { grid-template-columns: 1fr; }
+  #confAgentePane .conf-layout-action { min-height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #confAgentePane .conf-agent-action,
+  #confAgentePane .conf-agent-icon-button { transition: none; }
+}
+
 /* Card "Solicitação" no fim da Lista de produtos (após filtro de busca) */
 #listaProdutosGrid .lista-solicitacao-compra-card:hover {
   box-shadow: 0 6px 18px rgba(245, 158, 11, 0.28);

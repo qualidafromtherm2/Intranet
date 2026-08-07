@@ -9861,67 +9861,85 @@
 
       <!-- Painel Conf. sistema → Configurar agente -->
       <div id="confAgentePane" class="tab-pane" style="display:none;">
-        <div class="content-wrapper">
-          <div class="content-wrapper-header">
-            <div class="content-wrapper-context">
-              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
-                <i class="fa-solid fa-print" style="color:#f59e0b;"></i>
-                <span>Agente de Impressão</span>
-              </h3>
-              <div class="content-text">Instale o agente no PC da impressora, configure dimensões da etiqueta e escolha quais impressoras aparecem na intranet. A configuração fica salva no servidor (SQL).</div>
+        <div class="content-wrapper conf-agent-page">
+          <header class="conf-agent-header">
+            <div class="conf-agent-heading">
+              <span class="conf-agent-heading-icon" aria-hidden="true"><i class="fa-solid fa-print"></i></span>
+              <div>
+                <span class="conf-agent-eyebrow">IMPRESSÃO E ETIQUETAS</span>
+                <h3>Configurador do agente</h3>
+                <p>Gerencie os computadores, impressoras e modelos de etiqueta em um só lugar.</p>
+              </div>
             </div>
-          </div>
+            <div class="conf-agent-header-actions" aria-label="Ações do configurador">
+              <button type="button" id="confAgenteBtnBaixar" class="conf-agent-action conf-agent-action-secondary">
+                <i class="fa-solid fa-download" aria-hidden="true"></i>
+                <span>Baixar agente</span>
+              </button>
+              <button type="button" id="confAgenteBtnAbrir" class="conf-agent-action conf-agent-action-primary">
+                <i class="fa-solid fa-display" aria-hidden="true"></i>
+                <span>Abrir agente</span>
+              </button>
+              <button type="button" id="confAgenteBtnImpressoras" class="conf-agent-action conf-agent-action-warning">
+                <i class="fa-solid fa-print" aria-hidden="true"></i>
+                <span>Impressoras</span>
+              </button>
+            </div>
+          </header>
 
           <div id="confAgenteAviso" style="display:none;margin-top:16px;padding:14px 16px;border-radius:12px;font-size:13px;font-weight:600;"></div>
 
-          <div class="content-section" style="margin-top:20px;">
-            <div style="display:flex;flex-direction:column;gap:10px;max-width:520px;">
-              <button type="button" id="confAgenteBtnBaixar" class="content-button" style="justify-content:flex-start;gap:12px;background:linear-gradient(135deg,#15803d 0%,#166534 100%);color:#fff;">
-                <i class="fa-solid fa-download"></i>
-                Baixar instalador (Windows)
-              </button>
-              <button type="button" id="confAgenteBtnAbrir" class="content-button" style="justify-content:flex-start;gap:12px;background:linear-gradient(135deg,#2563eb 0%,#1d4ed8 100%);color:#fff;">
-                <i class="fa-solid fa-display"></i>
-                Abrir configuração do agente
-              </button>
-              <button type="button" id="confAgenteBtnImpressoras" class="content-button" style="justify-content:flex-start;gap:12px;background:linear-gradient(135deg,#d97706 0%,#b45309 100%);color:#fff;">
-                <i class="fa-solid fa-print"></i>
-                Configurar impressoras
-              </button>
-            </div>
-          </div>
+          <section class="conf-agent-stats" aria-label="Resumo do configurador">
+            <article class="conf-agent-stat">
+              <span class="conf-agent-stat-icon is-blue"><i class="fa-solid fa-desktop" aria-hidden="true"></i></span>
+              <div><strong id="confAgenteStatAgentes">0</strong><span>Agentes</span></div>
+            </article>
+            <article class="conf-agent-stat">
+              <span class="conf-agent-stat-icon is-green"><i class="fa-solid fa-signal" aria-hidden="true"></i></span>
+              <div><strong id="confAgenteStatOnline">0</strong><span>Online agora</span></div>
+            </article>
+            <article class="conf-agent-stat">
+              <span class="conf-agent-stat-icon is-violet"><i class="fa-solid fa-layer-group" aria-hidden="true"></i></span>
+              <div><strong id="confAgenteStatPerfis">0</strong><span>Perfis personalizados</span></div>
+            </article>
+            <article class="conf-agent-stat">
+              <span class="conf-agent-stat-icon is-cyan"><i class="fa-solid fa-table-cells-large" aria-hidden="true"></i></span>
+              <div><strong id="confAgenteStatPresets">0</strong><span>Presets do sistema</span></div>
+            </article>
+          </section>
 
-          <div class="content-section" style="margin-top:28px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-              <h4 style="margin:0;font-size:1rem;color:var(--theme-color);">
-                <i class="fa-solid fa-database" style="color:#a78bfa;margin-right:8px;"></i>
-                Configurações salvas no SQL
-              </h4>
-              <button type="button" id="confAgenteBtnRefresh" class="content-button" style="background:#334155;color:#fff;">
-                <i class="fa-solid fa-rotate"></i> Atualizar
-              </button>
-            </div>
-            <div id="confAgenteConfigsLista" style="display:flex;flex-direction:column;gap:12px;">
-              <div style="color:var(--inactive-color);padding:20px;text-align:center;">Carregando...</div>
-            </div>
-          </div>
+          <div class="conf-agent-layout">
+            <section class="conf-agent-panel conf-agent-panel-library">
+              <div class="conf-agent-section-header">
+                <div>
+                  <span class="conf-agent-section-kicker">BIBLIOTECA DE ETIQUETAS</span>
+                  <h4>Perfis e formatos ZPL</h4>
+                  <p>Modelos organizados por finalidade, prontos para editar ou vincular às impressoras.</p>
+                </div>
+                <button type="button" id="confAgenteNovoPerfil" class="conf-agent-action conf-agent-action-success">
+                  <i class="fa-solid fa-plus" aria-hidden="true"></i> Novo perfil
+                </button>
+              </div>
+              <div id="confAgenteLayoutsLista" class="conf-agent-layout-list" aria-live="polite">
+                <div class="conf-agent-loading"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Carregando...</div>
+              </div>
+            </section>
 
-          <div class="content-section" style="margin-top:28px;">
-            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;">
-              <h4 style="margin:0;font-size:1rem;color:var(--theme-color);">
-                <i class="fa-solid fa-ruler-combined" style="color:#22d3ee;margin-right:8px;"></i>
-                Perfis e formatos ZPL
-              </h4>
-              <button type="button" id="confAgenteNovoPerfil" class="content-button" style="background:#0f766e;color:#fff;">
-                <i class="fa-solid fa-plus"></i> Novo perfil
-              </button>
-            </div>
-            <p style="margin:0 0 12px;font-size:13px;color:var(--inactive-color);">
-              Crie perfis por finalidade, monte o ZPL de cada tamanho e escolha o padrão de cada impressora para Identificação, Produto e Contagem.
-            </p>
-            <div id="confAgenteLayoutsLista" style="display:flex;flex-direction:column;gap:12px;">
-              <div style="color:var(--inactive-color);padding:20px;text-align:center;">Carregando...</div>
-            </div>
+            <section class="conf-agent-panel conf-agent-panel-devices">
+              <div class="conf-agent-section-header">
+                <div>
+                  <span class="conf-agent-section-kicker">COMPUTADORES E IMPRESSORAS</span>
+                  <h4>Agentes configurados</h4>
+                  <p>Ajustes salvos no SQL e perfis vinculados a cada impressora.</p>
+                </div>
+                <button type="button" id="confAgenteBtnRefresh" class="conf-agent-icon-button" aria-label="Atualizar configurações" title="Atualizar configurações">
+                  <i class="fa-solid fa-rotate" aria-hidden="true"></i>
+                </button>
+              </div>
+              <div id="confAgenteConfigsLista" class="conf-agent-config-list" aria-live="polite">
+                <div class="conf-agent-loading"><i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i> Carregando...</div>
+              </div>
+            </section>
           </div>
         </div>
       </div>
