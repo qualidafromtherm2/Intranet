@@ -2184,6 +2184,12 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
     const url = rows[0]?.url_imagem || null;
     res.json({ ok: true, url_imagem: url });
   } catch (err) {
+    // Sem conexão no pool (timeout) → responde vazio em vez de 500 em cascata nas miniaturas.
+    const msg = String(err?.message || '');
+    if (/timeout exceeded when trying to connect|Connection terminated|too many clients/i.test(msg)) {
+      console.warn('[API] /api/produtos/imagem: pool ocupado, devolvendo sem imagem');
+      return res.json({ ok: true, url_imagem: null, defer: true });
+    }
     console.error('[API] /api/produtos/imagem erro:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar imagem do produto' });
   }
