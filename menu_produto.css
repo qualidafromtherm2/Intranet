@@ -12,6 +12,174 @@
   box-shadow: 0 2px 8px rgba(16,185,129,0.15);
 }
 
+/* Ações do produto: três colunas no desktop, com redução progressiva. */
+#modalAcoesProdutoBox .produto-acoes-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+}
+
+/* Histórico operacional orientado a auditoria. */
+.movim-hist-panel {
+  width: min(1040px, 94vw) !important;
+}
+.movim-audit-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid #dbe4ef;
+  background: #f8fafc;
+}
+.movim-audit-toolbar > label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 42px;
+  padding: 0 12px;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  background: #fff;
+  color: #64748b;
+}
+.movim-audit-toolbar input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #0f172a;
+  font: inherit;
+}
+.movim-audit-filters { display: flex; gap: 7px; flex-wrap: wrap; }
+.movim-audit-filters button {
+  min-height: 34px;
+  padding: 0 11px;
+  border: 1px solid #cbd5e1;
+  border-radius: 999px;
+  background: #fff;
+  color: #475569;
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.movim-audit-filters button b { margin-left: 5px; color: #64748b; }
+.movim-audit-filters button.is-active { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; }
+.movim-audit-list { display: grid; gap: 10px; padding: 14px; }
+.movim-audit-card {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid #dbe4ef;
+  border-left: 4px solid #64748b;
+  border-radius: 12px;
+  background: #fff;
+  color: #0f172a;
+}
+.movim-audit-card[hidden] { display: none !important; }
+.movim-audit-card.is-recebimento { border-left-color: #059669; }
+.movim-audit-card.is-sep { border-left-color: #e11d48; }
+.movim-audit-card.is-transferencia { border-left-color: #2563eb; }
+.movim-audit-card.is-ajuste { border-left-color: #d97706; }
+.movim-audit-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border-radius: 11px;
+  background: #eef2ff;
+  color: #4338ca;
+}
+.movim-audit-main { min-width: 0; }
+.movim-audit-topline { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.movim-audit-kind { font-size: 14px; font-weight: 850; }
+.movim-audit-topline time { flex: 0 0 auto; color: #64748b; font-size: 12px; }
+.movim-audit-flow { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 7px; color: #475569; font-size: 12px; }
+.movim-audit-local { min-width: min(280px, 100%); }
+.movim-audit-reference { display: inline-flex; margin-top: 9px; padding: 4px 8px; border-radius: 6px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 800; }
+.movim-audit-main p { margin: 8px 0 0; color: #334155; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
+.movim-audit-people { display: flex; gap: 8px 18px; flex-wrap: wrap; margin-top: 9px; color: #475569; font-size: 12px; }
+
+/* Reconciliação temporária de saldo endereçado. */
+.produto-saldo-audit-overlay[hidden] { display: none !important; }
+.produto-saldo-audit-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10020;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(15, 23, 42, .68);
+  backdrop-filter: blur(3px);
+}
+.produto-saldo-audit-panel {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 96vw);
+  max-height: min(820px, 94vh);
+  overflow: hidden;
+  border-radius: 16px;
+  background: #f8fafc;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, .35);
+}
+.produto-saldo-audit-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  background: #0f1d36;
+  color: #fff;
+}
+.produto-saldo-audit-header span { color: #67e8f9; font-size: 10px; font-weight: 850; letter-spacing: .11em; }
+.produto-saldo-audit-header h2 { margin: 2px 0; font-size: 20px; }
+.produto-saldo-audit-header p { margin: 0; color: #cbd5e1; font-size: 12px; }
+.produto-saldo-audit-header button { width: 38px; height: 38px; border: 1px solid #334155; border-radius: 10px; background: #17243a; color: #fff; cursor: pointer; }
+.produto-saldo-audit-body { min-height: 210px; padding: 18px; overflow: auto; }
+.produto-saldo-audit-loading { display: grid; place-items: center; gap: 8px; min-height: 170px; color: #64748b; }
+.produto-saldo-audit-load-error { display: grid; place-items: center; gap: 6px; color: #b91c1c; text-align: center; }
+.produto-saldo-audit-load-error small { max-width: 460px; color: #64748b; }
+.produto-saldo-audit-content { display: grid; gap: 14px; }
+.produto-saldo-audit-summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.produto-saldo-audit-summary > div { padding: 13px; border: 1px solid #dbe4ef; border-radius: 11px; background: #fff; }
+.produto-saldo-audit-summary span { display: block; color: #64748b; font-size: 11px; font-weight: 750; }
+.produto-saldo-audit-summary strong { display: block; margin-top: 4px; color: #0f172a; font-size: 19px; }
+.produto-saldo-audit-explain { display: flex; gap: 11px; align-items: flex-start; padding: 13px; border: 1px solid #bae6fd; border-radius: 11px; background: #f0f9ff; color: #075985; }
+.produto-saldo-audit-explain.is-entry { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+.produto-saldo-audit-explain.is-exit, .produto-saldo-audit-explain.is-error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+.produto-saldo-audit-explain.is-ok { border-color: #a7f3d0; background: #ecfdf5; color: #065f46; }
+.produto-saldo-audit-explain strong, .produto-saldo-audit-explain span { display: block; }
+.produto-saldo-audit-explain span { margin-top: 3px; font-size: 12px; line-height: 1.4; }
+.produto-saldo-audit-address-title { grid-column: 1 / -1; color: #475569; font-size: 12px; font-weight: 800; }
+.produto-saldo-audit-addresses { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.produto-saldo-audit-addresses label { display: flex; gap: 9px; align-items: center; padding: 11px; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; cursor: pointer; }
+.produto-saldo-audit-addresses span, .produto-saldo-audit-addresses small { display: block; }
+.produto-saldo-audit-addresses small { margin-top: 2px; color: #64748b; }
+.produto-saldo-audit-new, .produto-saldo-audit-reason { display: grid; gap: 6px; color: #334155; font-size: 12px; font-weight: 800; }
+.produto-saldo-audit-new input, .produto-saldo-audit-reason textarea { padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #0f172a; font: inherit; }
+.produto-saldo-audit-status { min-height: 18px; color: #475569; font-size: 12px; font-weight: 700; }
+.produto-saldo-audit-status.is-ok { color: #047857; }
+.produto-saldo-audit-status.is-error { color: #b91c1c; }
+.produto-saldo-audit-footer { display: flex; justify-content: flex-end; gap: 9px; padding: 14px 18px; border-top: 1px solid #dbe4ef; background: #fff; }
+.produto-saldo-audit-footer button { min-height: 42px; padding: 0 16px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #334155; font-weight: 800; cursor: pointer; }
+.produto-saldo-audit-footer button.is-primary { border-color: #ea580c; background: #ea580c; color: #fff; }
+.produto-saldo-audit-footer button:disabled { opacity: .48; cursor: not-allowed; }
+
+@media (max-width: 820px) {
+  #modalAcoesProdutoBox .produto-acoes-grid { grid-template-columns: repeat(2, minmax(0, 1fr)) !important; }
+  .produto-saldo-audit-addresses { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 560px) {
+  #modalAcoesProdutoBox .produto-acoes-grid { grid-template-columns: 1fr !important; }
+  .produto-saldo-audit-overlay { padding: 0; place-items: stretch; }
+  .produto-saldo-audit-panel { width: 100%; max-height: 100dvh; min-height: 100dvh; border-radius: 0; }
+  .produto-saldo-audit-summary { grid-template-columns: 1fr; }
+  .produto-saldo-audit-footer { position: sticky; bottom: 0; }
+  .movim-audit-topline { align-items: flex-start; flex-direction: column; gap: 3px; }
+  .movim-audit-card { grid-template-columns: 34px minmax(0, 1fr); padding: 11px; }
+  .movim-audit-icon { width: 34px; height: 34px; }
+}
+
 /* Guardar materiais: escolha do formato antes de regenerar a reimpressão. */
 .etq-reprint-format-modal {
   position: fixed;
@@ -20489,7 +20657,7 @@ html.light-mode #minhasComprasWrapper {
 
 /* Divisão de volumes: dois caminhos explícitos e prévia antes de imprimir. */
 /* Tablet: mantém a leitura tabular, mas a ação operacional nunca sai da tela. */
-@media (min-width: 769px) and (max-width: 1100px) {
+@media (min-width: 769px) and (max-width: 1280px) {
   #etiquetasModal.etiquetas-page .etiquetas-grid,
   #etiquetasModal.etiquetas-page .etiquetas-grid.view-list {
     padding-right: 10px !important;
@@ -21411,7 +21579,7 @@ html.light-mode #minhasComprasWrapper {
 }
 
 /* Tablet: fixa as duas ações de armazenamento na borda visível. */
-@media (min-width: 769px) and (max-width: 1100px) {
+@media (min-width: 769px) and (max-width: 1280px) {
   #etqImpressoModal.etiquetas-page .etiquetas-grid {
     padding-right: 10px !important;
     padding-left: 10px !important;
@@ -21457,7 +21625,7 @@ html.light-mode #minhasComprasWrapper {
 }
 
 /* Em tablets estreitos, ações ganham uma linha própria e não dependem de scroll. */
-@media (min-width: 769px) and (max-width: 1100px) {
+@media (min-width: 769px) and (max-width: 1280px) {
   #etiquetasModal.etiquetas-page .etiquetas-grid,
   #etiquetasModal.etiquetas-page .etiquetas-grid.view-list,
   #etqImpressoModal.etiquetas-page .etiquetas-grid {

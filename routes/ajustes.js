@@ -19,6 +19,7 @@ const { exigirSupervisorMovimentacao } = require('../utils/permissoesOperacionai
 const { exigirPermissaoNav } = require('../utils/navPermissions');
 const { agendarReconciliacaoEstoqueOmie } = require('../utils/reconciliarEstoqueOmie');
 const { anexarHoraObs } = require('../utils/anexarHoraObs');
+const { exigirAuditoriaProduto } = require('../utils/produtoAuditoriaPermissoes');
 
 const STATUS_AGUARDANDO = 'Aguardando aprovação';
 const STATUS_EXECUTADO  = 'Executado';
@@ -513,7 +514,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
 // Omie devolve páginas em ordem cronológica (antigas primeiro). Sem filtro de data,
 // a página 1 fica só com movimentos velhos — por isso filtramos o período recente e
 // paginamos até juntar os registros (ordenados do mais novo para o mais antigo).
-router.get('/historico-omie', async (req, res) => {
+router.get('/historico-omie', exigirAuditoriaProduto, async (req, res) => {
   try {
     if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
       return res.status(500).json({ error: 'Credenciais da Omie ausentes.' });
