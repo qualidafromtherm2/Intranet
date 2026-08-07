@@ -376,7 +376,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     }
 
     const { rows: existingRows } = await dbQuery(
-      `SELECT id, status, criado_por FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+      `SELECT id, status, criado_por, comentarios FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
       [id]
     );
     const existing = existingRows[0];
@@ -441,8 +441,36 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     if (body.fechar === true || body.fechar === 'true') {
       status = 'fechado';
     }
-    if (body.enviar_aprovacao === true || body.enviar_aprovacao === 'true') {
+    const querEnviarAprovacao =
+      body.enviar_aprovacao === true || body.enviar_aprovacao === 'true';
+    if (querEnviarAprovacao) {
       status = 'aguardando_aprovacao';
+      const mensagem = textoUtf8(body.mensagem || body.solucao);
+      if (!mensagem) {
+        return res.status(400).json({
+          error: 'Descreva a solução para o solicitante poder aprovar com mais informações.',
+        });
+      }
+      const stAtual = normalizarStatusChamado(existing.status);
+      if (stAtual !== 'aberto' && stAtual !== 'em_andamento') {
+        return res.status(400).json({
+          error: 'Só é possível enviar para aprovação em chamado aberto.',
+        });
+      }
+      const comentarios = [
+        ...parseJsonArray(existing.comentarios),
+        {
+          id: uuidv4(),
+          texto: mensagem,
+          anexos: [],
+          tipo: 'solucao_aprovacao',
+          criado_por: usuario,
+          criado_por_nome: getNomeUsuario(req),
+          criado_em: new Date().toISOString(),
+        },
+      ];
+      params.push(JSON.stringify(comentarios));
+      sets.push(`comentarios = $${params.length}::jsonb`);
     }
     const querSolicitarInfo =
       body.solicitar_mais_info === true || body.solicitar_mais_info === 'true';
