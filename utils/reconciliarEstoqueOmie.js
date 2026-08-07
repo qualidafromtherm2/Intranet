@@ -1,6 +1,10 @@
 const { dbQuery: defaultDbQuery } = require('../src/db');
 const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
 
+/** Tempo máximo aguardando webhook Produto.MovimentacaoEstoque antes do fallback. */
+const WEBHOOK_TIMEOUT_MS = 15_000;
+const WEBHOOK_POLL_MS = 1_000;
+
 function dataAtualBr() {
   return new Date().toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
 }
@@ -169,9 +173,22 @@ async function buscarSaldoLocal({ codigo, localCodigo, query = defaultDbQuery })
   return Number.isFinite(saldo) ? saldo : null;
 }
 
+async function buscarPosicaoLocal({ codigo, localCodigo, query = defaultDbQuery }) {
+  const { rows } = await query(
+    `SELECT saldo, fisico, origem, updated_at
+       FROM logistica.estoque_atual
+      WHERE codigo = $1
+        AND local_codigo = $2
+      LIMIT 1`,
+    [String(codigo || '').trim(), String(localCodigo || '').trim()]
+  );
+  return rows?.[0] || null;
+}
+
 /**
  * Aplica o delta da movimentação no SQL local assim que a Omie aceita o ajuste.
  * Evita a tela ficar com saldo antigo enquanto PosicaoEstoque ainda atrasa.
+ * Não sobrescreve se o webhook já gravou a posição (evita aplicar delta em cima do saldo Omie).
  */
 async function aplicarDeltaEstoqueLocal({
   codigoProduto,
@@ -184,6 +201,11 @@ async function aplicarDeltaEstoqueLocal({
   const local = String(localCodigo || '').trim();
   const cod = String(codigo || '').trim();
   if (!local || !cod || !Number.isFinite(delta) || delta === 0) return null;
+
+  const existente = await buscarPosicaoLocal({ codigo: cod, localCodigo: local, query });
+  if (existente && String(existente.origem || '') === 'webhook') {
+    return existente;
+  }
 
   const { rows } = await query(
     `INSERT INTO logistica.estoque_atual (
@@ -206,11 +228,56 @@ async function aplicarDeltaEstoqueLocal({
        fisico = COALESCE(logistica.estoque_atual.fisico, 0) + $4,
        updated_at = NOW(),
        origem = 'movimento_local'
-     RETURNING saldo, fisico, local_codigo`,
+     WHERE COALESCE(logistica.estoque_atual.origem, '') <> 'webhook'
+     RETURNING saldo, fisico, local_codigo, origem`,
     [local, Number(codigoProduto) || null, cod, delta]
   );
 
-  return rows?.[0] || null;
+  if (rows?.length) return rows[0];
+
+  // Conflito com webhook entre o SELECT e o UPDATE: devolve a posição do webhook.
+  return buscarPosicaoLocal({ codigo: cod, localCodigo: local, query });
+}
+
+/**
+ * Confirmação principal: webhook Produto.MovimentacaoEstoque já gravou
+ * logistica.estoque_atual com origem='webhook' e saldo na direção esperada.
+ */
+async function aguardarConfirmacaoViaWebhook({
+  codigo,
+  localCodigo,
+  saldoAntes,
+  deltaEsperado,
+  query = defaultDbQuery,
+  timeoutMs = WEBHOOK_TIMEOUT_MS,
+  pollMs = WEBHOOK_POLL_MS,
+  aguardarFn = aguardar
+}) {
+  const delta = Number(deltaEsperado);
+  const exigeDelta = Number.isFinite(delta) && delta !== 0
+    && saldoAntes !== null
+    && Number.isFinite(Number(saldoAntes));
+
+  const limite = Date.now() + Math.max(0, Number(timeoutMs) || 0);
+  let ultima = null;
+
+  while (Date.now() <= limite) {
+    ultima = await buscarPosicaoLocal({ codigo, localCodigo, query });
+    if (ultima && String(ultima.origem || '') === 'webhook') {
+      if (!exigeDelta || saldoMudouNaDirecaoEsperada(saldoAntes, ultima.saldo, delta)) {
+        return {
+          confirmado: true,
+          via: 'webhook',
+          saldo: Number(ultima.saldo),
+          origem: 'webhook'
+        };
+      }
+    }
+    if (Date.now() + pollMs > limite) break;
+    await aguardarFn(pollMs);
+  }
+
+  return { confirmado: false, via: null, saldo: ultima != null ? Number(ultima.saldo) : null, origem: ultima?.origem || null };
 }
 
 function aguardar(ms) {
@@ -220,9 +287,16 @@ function aguardar(ms) {
   });
 }
 
-function agendarReconciliacaoEstoqueOmie(dados, delayMs = 3000) {
+/**
+ * Fluxo pós-movimentação (chamado #12):
+ * 1) atualização otimista local
+ * 2) confirmação principal via webhook Produto.MovimentacaoEstoque
+ * 3) uma única consulta PosicaoEstoque como fallback se o webhook não chegar a tempo
+ */
+function agendarReconciliacaoEstoqueOmie(dados, delayMs = 500) {
   void (async () => {
     const query = dados?.query || defaultDbQuery;
+    const aguardarFn = dados?.aguardarFn || aguardar;
     const deltaEsperado = Number(dados?.deltaEsperado);
     const saldoAntes = await buscarSaldoLocal({
       codigo: dados?.codigo,
@@ -242,35 +316,56 @@ function agendarReconciliacaoEstoqueOmie(dados, delayMs = 3000) {
       });
     }
 
-    // Tentativas curtas + uma tardia: Omie às vezes demora >20s para refletir PosicaoEstoque.
-    const intervalos = [Math.max(0, Number(delayMs) || 0), 5000, 10000, 20000, 40000];
-    let ultimaPosicao = null;
-    let confirmado = false;
+    await aguardarFn(Math.max(0, Number(delayMs) || 0));
 
-    for (const espera of intervalos) {
-      await aguardar(espera);
-      ultimaPosicao = await reconciliarEstoqueAtualOmie({
-        ...dados,
-        query,
-        saldoAntes,
-        deltaEsperado,
-        forcarGravacao: false
-      });
-      if (ultimaPosicao?.gravado) {
-        confirmado = true;
-        break;
-      }
-    }
+    const viaWebhook = await aguardarConfirmacaoViaWebhook({
+      codigo: dados?.codigo,
+      localCodigo: dados?.localCodigo,
+      saldoAntes,
+      deltaEsperado,
+      query,
+      timeoutMs: dados?.webhookTimeoutMs ?? WEBHOOK_TIMEOUT_MS,
+      pollMs: dados?.webhookPollMs ?? WEBHOOK_POLL_MS,
+      aguardarFn
+    });
 
-    if (!confirmado) {
-      console.warn('[estoque][reconcile] Omie ainda não refletiu o movimento esperado; mantendo saldo local otimista.', {
+    if (viaWebhook.confirmado) {
+      console.log('[estoque][reconcile] Confirmado via webhook Produto.MovimentacaoEstoque', {
         codigo: dados?.codigo,
         localCodigo: dados?.localCodigo,
-        saldoAntes,
-        saldoOmie: ultimaPosicao?.saldo,
+        saldo: viaWebhook.saldo,
         deltaEsperado
       });
+      return;
     }
+
+    // Fallback: uma única PosicaoEstoque (não faz mais retries em série).
+    const ultimaPosicao = await reconciliarEstoqueAtualOmie({
+      ...dados,
+      query,
+      saldoAntes,
+      deltaEsperado,
+      forcarGravacao: false
+    });
+
+    if (ultimaPosicao?.gravado) {
+      console.log('[estoque][reconcile] Confirmado via PosicaoEstoque (fallback)', {
+        codigo: dados?.codigo,
+        localCodigo: dados?.localCodigo,
+        saldo: ultimaPosicao.saldo,
+        deltaEsperado
+      });
+      return;
+    }
+
+    console.warn('[estoque][reconcile] Webhook e fallback PosicaoEstoque não confirmaram; mantendo saldo local otimista.', {
+      codigo: dados?.codigo,
+      localCodigo: dados?.localCodigo,
+      saldoAntes,
+      saldoOmie: ultimaPosicao?.saldo,
+      origemLocal: viaWebhook.origem,
+      deltaEsperado
+    });
   })().catch((err) => {
     console.error('[estoque][reconcile] Falha ao reconciliar posição após ajuste:', err?.message || err);
   });
@@ -281,5 +376,8 @@ module.exports = {
   reconciliarEstoqueAtualOmie,
   agendarReconciliacaoEstoqueOmie,
   aplicarDeltaEstoqueLocal,
-  saldoMudouNaDirecaoEsperada
+  aguardarConfirmacaoViaWebhook,
+  saldoMudouNaDirecaoEsperada,
+  WEBHOOK_TIMEOUT_MS,
+  WEBHOOK_POLL_MS
 };

@@ -613,12 +613,13 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       { localCodigo: registroAtual.origem, deltaEsperado: -Number(registroAtual.qtd) },
       { localCodigo: registroAtual.destino, deltaEsperado: Number(registroAtual.qtd) }
     ].forEach(({ localCodigo, deltaEsperado }, index) => {
+      // Otimista imediato; confirmação via webhook (fallback PosicaoEstoque único).
       agendarReconciliacaoEstoqueOmie({
         codigoProduto: registroAtual.codigo_produto,
         codigo: registroAtual.codigo,
         localCodigo,
         deltaEsperado
-      }, 3000 + (index * 750));
+      }, index * 200);
     });
 
     res.json({
@@ -746,7 +747,7 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
         codigo: original.codigo,
         localCodigo,
         deltaEsperado
-      }, 3000 + (index * 750));
+      }, index * 200);
     });
 
     res.json({ ok: true, original_id: id, reversao, omie: respostaOmie || null });

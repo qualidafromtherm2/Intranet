@@ -57,4 +57,8 @@ test('backend publica versao do saldo e reconcilia origem e destino', () => {
   assert.match(reconcile, /aplicarDeltaEstoqueLocal/);
   assert.match(reconcile, /movimento_local/);
   assert.match(reconcile, /gravado: false/);
+  assert.match(reconcile, /aguardarConfirmacaoViaWebhook/);
+  assert.match(reconcile, /Produto\.MovimentacaoEstoque/);
+  assert.match(reconcile, /PosicaoEstoque \(fallback\)/);
+  assert.doesNotMatch(reconcile, /const intervalos = \[Math\.max/);
 });
