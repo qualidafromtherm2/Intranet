@@ -674,7 +674,7 @@ router.get('/funcionarios/epi/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, tam_camiseta, tam_calca, tam_sapato, created_at, updated_at
-         FROM funcionarios.epi
+         FROM rh.epi
         WHERE user_id = $1
         LIMIT 1`,
       [userId]
@@ -697,7 +697,7 @@ router.post('/funcionarios/epi/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.epi (user_id, tam_camiseta, tam_calca, tam_sapato)
+      `INSERT INTO rh.epi (user_id, tam_camiseta, tam_calca, tam_sapato)
        VALUES ($1, $2, $3, $4)
        ON CONFLICT (user_id)
        DO UPDATE SET tam_camiseta = EXCLUDED.tam_camiseta,
@@ -726,7 +726,7 @@ router.get('/funcionarios/epi-entregas/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, item, tamanho, data_entrega, observacao, registrado_por, created_at
-         FROM funcionarios.epi_entrega
+         FROM rh.epi_entrega
         WHERE user_id = $1
         ORDER BY data_entrega DESC, id DESC`,
       [userId]
@@ -755,7 +755,7 @@ router.post('/funcionarios/epi-entregas/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.epi_entrega (user_id, item, tamanho, data_entrega, observacao, registrado_por)
+      `INSERT INTO rh.epi_entrega (user_id, item, tamanho, data_entrega, observacao, registrado_por)
        VALUES ($1, $2, $3, COALESCE($4::date, CURRENT_DATE), $5, $6)
        RETURNING *`,
       [userId, item, tamanho, data_entrega, observacao, registrado_por]
@@ -774,7 +774,7 @@ router.delete('/funcionarios/epi-entregas/:id', async (req, res) => {
   }
   try {
     const { rowCount } = await dbQuery(
-      'DELETE FROM funcionarios.epi_entrega WHERE id = $1',
+      'DELETE FROM rh.epi_entrega WHERE id = $1',
       [id]
     );
     if (!rowCount) {
@@ -799,7 +799,7 @@ router.get('/funcionarios/conversas/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, tema, descricao, registrado_por, created_at
-         FROM funcionarios.conversas
+         FROM rh.conversas
         WHERE user_id = $1
         ORDER BY created_at DESC, id DESC`,
       [userId]
@@ -826,7 +826,7 @@ router.post('/funcionarios/conversas/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.conversas (user_id, tema, descricao, registrado_por)
+      `INSERT INTO rh.conversas (user_id, tema, descricao, registrado_por)
        VALUES ($1, $2, $3, $4)
        RETURNING *`,
       [userId, tema, descricao, registrado_por]
@@ -845,7 +845,7 @@ router.delete('/funcionarios/conversas/:id', async (req, res) => {
   }
   try {
     const { rowCount } = await dbQuery(
-      'DELETE FROM funcionarios.conversas WHERE id = $1',
+      'DELETE FROM rh.conversas WHERE id = $1',
       [id]
     );
     if (!rowCount) {
@@ -876,10 +876,10 @@ router.get('/funcionarios/ferias-painel', async (_req, res) => {
         COALESCE(r.qtd_registros, 0) AS qtd_registros
       FROM public.auth_user u
       LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
-      LEFT JOIN funcionarios.ferias f ON f.user_id = u.id
+      LEFT JOIN rh.ferias f ON f.user_id = u.id
       LEFT JOIN LATERAL (
         SELECT SUM(fr.dias) AS total_dias, COUNT(*) AS qtd_registros
-        FROM funcionarios.ferias_registros fr
+        FROM rh.ferias_registros fr
         WHERE fr.user_id = u.id
       ) r ON true
       ORDER BY u.username
@@ -903,7 +903,7 @@ router.get('/funcionarios/ferias/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, data_admissao, data_limite_ferias, ferias_vencidas, created_at, updated_at
-         FROM funcionarios.ferias
+         FROM rh.ferias
         WHERE user_id = $1
         LIMIT 1`,
       [userId]
@@ -926,7 +926,7 @@ router.post('/funcionarios/ferias/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.ferias (user_id, data_admissao, data_limite_ferias, ferias_vencidas)
+      `INSERT INTO rh.ferias (user_id, data_admissao, data_limite_ferias, ferias_vencidas)
        VALUES ($1, $2::date, $3::date, $4)
        ON CONFLICT (user_id)
        DO UPDATE SET data_admissao       = EXCLUDED.data_admissao,
@@ -953,7 +953,7 @@ router.get('/funcionarios/ferias-anexos/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, nome_arquivo, url_arquivo, path_arquivo, enviado_por, created_at
-         FROM funcionarios.ferias_anexos
+         FROM rh.ferias_anexos
         WHERE user_id = $1
         ORDER BY created_at DESC, id DESC`,
       [userId]
@@ -981,7 +981,7 @@ router.post('/funcionarios/ferias-anexos/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.ferias_anexos (user_id, nome_arquivo, url_arquivo, path_arquivo, enviado_por)
+      `INSERT INTO rh.ferias_anexos (user_id, nome_arquivo, url_arquivo, path_arquivo, enviado_por)
        VALUES ($1, $2, $3, $4, $5)
        RETURNING *`,
       [userId, nomeArquivo, urlArquivo, pathArquivo, enviadoPor]
@@ -1000,7 +1000,7 @@ router.delete('/funcionarios/ferias-anexos/:id', async (req, res) => {
   }
   try {
     const { rowCount } = await dbQuery(
-      'DELETE FROM funcionarios.ferias_anexos WHERE id = $1',
+      'DELETE FROM rh.ferias_anexos WHERE id = $1',
       [id]
     );
     if (!rowCount) {
@@ -1058,7 +1058,7 @@ router.get('/funcionarios/ferias-registros/:userId', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, user_id, data_inicio, data_fim, dias, registrado_por, created_at
-         FROM funcionarios.ferias_registros
+         FROM rh.ferias_registros
         WHERE user_id = $1
         ORDER BY data_inicio DESC, id DESC`,
       [userId]
@@ -1091,7 +1091,7 @@ router.post('/funcionarios/ferias-registros/:userId', async (req, res) => {
 
   try {
     const { rows } = await dbQuery(
-      `INSERT INTO funcionarios.ferias_registros (user_id, data_inicio, data_fim, dias, registrado_por)
+      `INSERT INTO rh.ferias_registros (user_id, data_inicio, data_fim, dias, registrado_por)
        VALUES ($1, $2::date, $3::date, $4, $5)
        RETURNING *`,
       [userId, dataInicio, dataFim, dias, registradoPor]
@@ -1110,7 +1110,7 @@ router.delete('/funcionarios/ferias-registros/:id', async (req, res) => {
   }
   try {
     const { rowCount } = await dbQuery(
-      'DELETE FROM funcionarios.ferias_registros WHERE id = $1',
+      'DELETE FROM rh.ferias_registros WHERE id = $1',
       [id]
     );
     if (!rowCount) {

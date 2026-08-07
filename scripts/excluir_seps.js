@@ -60,7 +60,7 @@ async function countRows(client, sql, params) {
 const SQL_SS_RELACIONADO = `
   ss.n_solic = ANY($1::text[])
   OR EXISTS (
-    SELECT 1 FROM solicitacao_produto.itens_solicitados i
+    SELECT 1 FROM logistica.itens_solicitados i
     JOIN logistica.carrinho c ON c.id = i.id_carr
     WHERE i.n_solic = ANY($1::text[])
       AND ss.codigo_produto = c.codigo_produto
@@ -84,7 +84,7 @@ async function main() {
 
     const { rows: meta } = await client.query(
       `SELECT i.id, i.n_solic, i.status, i.id_carr, c.codigo_produto, c.nome_user
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
          LEFT JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.n_solic = ANY($1::text[])
         ORDER BY i.n_solic, i.id`,
@@ -109,7 +109,7 @@ async function main() {
 
     counts.solicitacoes_separacao = await countRows(
       client,
-      `SELECT COUNT(*)::int AS cnt FROM solicitacao_produto.solicitacoes_separacao ss WHERE ${SQL_SS_RELACIONADO}`,
+      `SELECT COUNT(*)::int AS cnt FROM logistica.solicitacoes_separacao ss WHERE ${SQL_SS_RELACIONADO}`,
       [SEPS]
     );
 
@@ -117,7 +117,7 @@ async function main() {
     if (solicIds.length && await tableExists(client, 'solicitacao_produto', 'registro_troca')) {
       counts.registro_troca = await countRows(
           client,
-          `SELECT COUNT(*)::int AS cnt FROM solicitacao_produto.registro_troca WHERE id_item_original = ANY($1::bigint[])`,
+          `SELECT COUNT(*)::int AS cnt FROM logistica.registro_troca WHERE id_item_original = ANY($1::bigint[])`,
           [solicIds]
         );
     }
@@ -126,7 +126,7 @@ async function main() {
       ? await countRows(
           client,
           `SELECT COUNT(*)::int AS cnt
-             FROM solicitacao_produto.movimentacoes_kanban_itens
+             FROM logistica.movimentacoes_kanban_itens
             WHERE ($1::bigint[] <> '{}' AND solic_id = ANY($1::bigint[]))
                OR ($2::bigint[] <> '{}' AND id_carr = ANY($2::bigint[]))`,
           [solicIds, carrIds]
@@ -144,7 +144,7 @@ async function main() {
     if (await tableExists(client, 'envios', 'solicitacoes')) {
       counts.envios_solicitacoes = await countRows(
         client,
-        `SELECT COUNT(*)::int AS cnt FROM envios.solicitacoes WHERE numero_sep = ANY($1::text[])`,
+        `SELECT COUNT(*)::int AS cnt FROM sac.envios_solicitacoes WHERE numero_sep = ANY($1::text[])`,
         [SEPS]
       );
     } else {
@@ -177,12 +177,12 @@ async function main() {
     if (solicIds.length) {
       if (await tableExists(client, 'solicitacao_produto', 'registro_troca')) {
         await client.query(
-          `DELETE FROM solicitacao_produto.registro_troca WHERE id_item_original = ANY($1::bigint[])`,
+          `DELETE FROM logistica.registro_troca WHERE id_item_original = ANY($1::bigint[])`,
           [solicIds]
         );
       }
       await client.query(
-        `DELETE FROM solicitacao_produto.movimentacoes_kanban_itens
+        `DELETE FROM logistica.movimentacoes_kanban_itens
           WHERE solic_id = ANY($1::bigint[])
              OR id_carr = ANY($2::bigint[])`,
         [solicIds, carrIds]
@@ -190,12 +190,12 @@ async function main() {
     }
 
     await client.query(
-      `DELETE FROM solicitacao_produto.solicitacoes_separacao ss WHERE ${SQL_SS_RELACIONADO}`,
+      `DELETE FROM logistica.solicitacoes_separacao ss WHERE ${SQL_SS_RELACIONADO}`,
       [SEPS]
     );
 
     await client.query(
-      `DELETE FROM solicitacao_produto.itens_solicitados WHERE n_solic = ANY($1::text[])`,
+      `DELETE FROM logistica.itens_solicitados WHERE n_solic = ANY($1::text[])`,
       [SEPS]
     );
 
@@ -204,7 +204,7 @@ async function main() {
         `DELETE FROM logistica.carrinho c
           WHERE c.id = ANY($1::bigint[])
             AND NOT EXISTS (
-              SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+              SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
             )`,
         [carrIds]
       );
@@ -212,7 +212,7 @@ async function main() {
 
     if (counts.envios_solicitacoes) {
       await client.query(
-        `DELETE FROM envios.solicitacoes WHERE numero_sep = ANY($1::text[])`,
+        `DELETE FROM sac.envios_solicitacoes WHERE numero_sep = ANY($1::text[])`,
         [SEPS]
       );
     }

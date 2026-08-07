@@ -1002,7 +1002,7 @@ async function resolverProdutosRelacionadosPorModelos(modelos = []) {
   const { rows } = await dbPool.query(
     `
     SELECT codigo_produto::text AS codigo_produto, codigo, descricao
-    FROM public.produtos_omie
+    FROM produto.produtos_omie
     WHERE regexp_replace(upper(COALESCE(codigo, '')), '[^A-Z0-9]+', '', 'g') LIKE ANY($1::text[])
     ORDER BY codigo
     `,
@@ -1940,8 +1940,8 @@ async function inferirRespostaConfiguracaoWifi(pergunta, trechos, { allowGeneric
           c.pagina_inicial,
           c.pagina_final,
           c.texto
-        FROM "Chatbot".manuais_instrucao_chunks c
-        JOIN "Chatbot".manuais_instrucao m
+        FROM chatbot.manuais_instrucao_chunks c
+        JOIN chatbot.manuais_instrucao m
           ON m.id = c.manual_id
         WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
           AND COALESCE(c.texto_normalizado, lower(COALESCE(c.texto, ''))) LIKE '%wifi%'
@@ -1968,8 +1968,8 @@ async function inferirRespostaConfiguracaoWifi(pergunta, trechos, { allowGeneric
         c.pagina_inicial,
         c.pagina_final,
         c.texto
-      FROM "Chatbot".manuais_instrucao_chunks c
-      JOIN "Chatbot".manuais_instrucao m
+      FROM chatbot.manuais_instrucao_chunks c
+      JOIN chatbot.manuais_instrucao m
         ON m.id = c.manual_id
       WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
         AND (
@@ -2062,8 +2062,8 @@ async function inferirRespostaTensaoModeloFti(pergunta, trechos) {
         c.pagina_inicial,
         c.pagina_final,
         c.texto
-      FROM "Chatbot".manuais_instrucao_chunks c
-      JOIN "Chatbot".manuais_instrucao m
+      FROM chatbot.manuais_instrucao_chunks c
+      JOIN chatbot.manuais_instrucao m
         ON m.id = c.manual_id
       WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
         AND lower(COALESCE(m.nome_arquivo, '')) LIKE '%fti - 25%'
@@ -2148,7 +2148,7 @@ async function buscarPreviewManualCacheado({ manualId, pagina, conteudoHashRef }
   const { rows } = await dbPool.query(
     `
       SELECT manual_id, pagina, conteudo_hash_ref, source_url, bucket, path_key, public_url
-      FROM "Chatbot".manual_preview_cache
+      FROM chatbot.manual_preview_cache
       WHERE manual_id = $1
         AND pagina = $2
         AND conteudo_hash_ref = $3
@@ -2173,7 +2173,7 @@ async function salvarPreviewManualCacheado({
 
   const { rows } = await dbPool.query(
     `
-      INSERT INTO "Chatbot".manual_preview_cache (
+      INSERT INTO chatbot.manual_preview_cache (
         manual_id,
         pagina,
         conteudo_hash_ref,
@@ -2384,7 +2384,7 @@ async function listarManuaisPrioritariosPorModelo(modelos) {
   const resultado = await dbPool.query(
     `
     SELECT id, nome_arquivo, COALESCE(nome_arquivo_normalizado, nome_arquivo, '') AS nome_arquivo_normalizado, produtos
-    FROM "Chatbot".manuais_instrucao
+    FROM chatbot.manuais_instrucao
     WHERE COALESCE(status_indexacao, 'pendente') = 'indexado'
     `
   );
@@ -2443,8 +2443,8 @@ async function buscarTrechosManuaisFts(perguntaNorm, limit, manualIds = []) {
         to_tsvector('simple', COALESCE(m.nome_arquivo_normalizado, '') || ' ' || COALESCE(c.texto_normalizado, '')),
         plainto_tsquery('simple', $1)
       ) AS score
-    FROM "Chatbot".manuais_instrucao_chunks c
-    JOIN "Chatbot".manuais_instrucao m
+    FROM chatbot.manuais_instrucao_chunks c
+    JOIN chatbot.manuais_instrucao m
       ON m.id = c.manual_id
     WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
       ${filtroManual}
@@ -2527,8 +2527,8 @@ async function buscarTrechosManuaisLike(tokens, limit, manualIds = []) {
       c.pagina_final,
       c.texto,
       (${scoreExpr})::float AS score
-    FROM "Chatbot".manuais_instrucao_chunks c
-    JOIN "Chatbot".manuais_instrucao m
+    FROM chatbot.manuais_instrucao_chunks c
+    JOIN chatbot.manuais_instrucao m
       ON m.id = c.manual_id
     WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
       ${filtroManual}
@@ -2589,8 +2589,8 @@ async function buscarTrechosManuaisPorPaginas(paginas, limit, manualIds = []) {
       c.pagina_final,
       c.texto,
       1000::float AS score
-    FROM "Chatbot".manuais_instrucao_chunks c
-    JOIN "Chatbot".manuais_instrucao m
+    FROM chatbot.manuais_instrucao_chunks c
+    JOIN chatbot.manuais_instrucao m
       ON m.id = c.manual_id
     WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
       ${filtroManual}
@@ -2911,8 +2911,8 @@ async function garantirTabelaMensagensErro() {
   if (!chatbotLogTableReadyPromise) {
     chatbotLogTableReadyPromise = (async () => {
       await dbPool.query(`
-        CREATE SCHEMA IF NOT EXISTS "Chatbot";
-        CREATE TABLE IF NOT EXISTS "Chatbot"."Mensagens_erro" (
+        CREATE SCHEMA IF NOT EXISTS chatbot;
+        CREATE TABLE IF NOT EXISTS chatbot."Mensagens_erro" (
           id BIGSERIAL PRIMARY KEY,
           criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
           rota TEXT NOT NULL,
@@ -2926,7 +2926,7 @@ async function garantirTabelaMensagensErro() {
       `);
       await dbPool.query(`
         CREATE INDEX IF NOT EXISTS idx_chatbot_mensagens_erro_criado_em
-          ON "Chatbot"."Mensagens_erro" (criado_em DESC)
+          ON chatbot."Mensagens_erro" (criado_em DESC)
       `);
       schemaCache.expiresAt = 0;
     })().catch((err) => {
@@ -2943,16 +2943,16 @@ async function garantirTabelasManuaisChatbot() {
   if (!chatbotManualTableReadyPromise) {
     chatbotManualTableReadyPromise = (async () => {
       await dbPool.query(`
-        CREATE SCHEMA IF NOT EXISTS "Chatbot";
+        CREATE SCHEMA IF NOT EXISTS chatbot;
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".manuais_instrucao (
+        CREATE TABLE IF NOT EXISTS chatbot.manuais_instrucao (
           id BIGSERIAL PRIMARY KEY,
           nome_arquivo TEXT NOT NULL,
           caminho_manual TEXT NOT NULL UNIQUE,
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        ALTER TABLE "Chatbot".manuais_instrucao
+        ALTER TABLE chatbot.manuais_instrucao
           ADD COLUMN IF NOT EXISTS nome_arquivo_normalizado TEXT,
           ADD COLUMN IF NOT EXISTS paginas INTEGER,
           ADD COLUMN IF NOT EXISTS conteudo_hash TEXT,
@@ -2960,9 +2960,9 @@ async function garantirTabelasManuaisChatbot() {
           ADD COLUMN IF NOT EXISTS status_indexacao TEXT NOT NULL DEFAULT 'pendente',
           ADD COLUMN IF NOT EXISTS erro_indexacao TEXT;
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".manuais_instrucao_chunks (
+        CREATE TABLE IF NOT EXISTS chatbot.manuais_instrucao_chunks (
           id BIGSERIAL PRIMARY KEY,
-          manual_id BIGINT NOT NULL REFERENCES "Chatbot".manuais_instrucao(id) ON DELETE CASCADE,
+          manual_id BIGINT NOT NULL REFERENCES chatbot.manuais_instrucao(id) ON DELETE CASCADE,
           chunk_ordem INTEGER NOT NULL,
           pagina_inicial INTEGER NOT NULL,
           pagina_final INTEGER NOT NULL,
@@ -2971,9 +2971,9 @@ async function garantirTabelasManuaisChatbot() {
           created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".manual_preview_cache (
+        CREATE TABLE IF NOT EXISTS chatbot.manual_preview_cache (
           id BIGSERIAL PRIMARY KEY,
-          manual_id BIGINT NOT NULL REFERENCES "Chatbot".manuais_instrucao(id) ON DELETE CASCADE,
+          manual_id BIGINT NOT NULL REFERENCES chatbot.manuais_instrucao(id) ON DELETE CASCADE,
           pagina INTEGER NOT NULL,
           conteudo_hash_ref TEXT NOT NULL DEFAULT '',
           source_url TEXT NULL,
@@ -2985,20 +2985,20 @@ async function garantirTabelasManuaisChatbot() {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_instrucao_caminho
-          ON "Chatbot".manuais_instrucao (caminho_manual);
+          ON chatbot.manuais_instrucao (caminho_manual);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_manual_ordem
-          ON "Chatbot".manuais_instrucao_chunks (manual_id, chunk_ordem);
+          ON chatbot.manuais_instrucao_chunks (manual_id, chunk_ordem);
         CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_manual
-          ON "Chatbot".manuais_instrucao_chunks (manual_id);
+          ON chatbot.manuais_instrucao_chunks (manual_id);
         CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_pagina
-          ON "Chatbot".manuais_instrucao_chunks (manual_id, pagina_inicial, pagina_final);
+          ON chatbot.manuais_instrucao_chunks (manual_id, pagina_inicial, pagina_final);
         CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_busca
-          ON "Chatbot".manuais_instrucao_chunks
+          ON chatbot.manuais_instrucao_chunks
           USING GIN (to_tsvector('simple', COALESCE(texto_normalizado, '')));
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manual_preview_cache_manual_pagina_hash
-          ON "Chatbot".manual_preview_cache (manual_id, pagina, conteudo_hash_ref);
+          ON chatbot.manual_preview_cache (manual_id, pagina, conteudo_hash_ref);
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manual_preview_cache_path_key
-          ON "Chatbot".manual_preview_cache (path_key);
+          ON chatbot.manual_preview_cache (path_key);
       `);
     })().catch((err) => {
       chatbotManualTableReadyPromise = null;
@@ -3014,9 +3014,9 @@ async function garantirTabelasConhecimentoChatbot() {
   if (!chatbotKnowledgeTableReadyPromise) {
     chatbotKnowledgeTableReadyPromise = (async () => {
       await dbPool.query(`
-        CREATE SCHEMA IF NOT EXISTS "Chatbot";
+        CREATE SCHEMA IF NOT EXISTS chatbot;
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".faq_aprovadas (
+        CREATE TABLE IF NOT EXISTS chatbot.faq_aprovadas (
           id BIGSERIAL PRIMARY KEY,
           pergunta TEXT NOT NULL,
           pergunta_normalizada TEXT NOT NULL,
@@ -3032,7 +3032,7 @@ async function garantirTabelasConhecimentoChatbot() {
           updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".memoria_usuario (
+        CREATE TABLE IF NOT EXISTS chatbot.memoria_usuario (
           id BIGSERIAL PRIMARY KEY,
           usuario TEXT NOT NULL,
           chave TEXT NOT NULL,
@@ -3043,7 +3043,7 @@ async function garantirTabelasConhecimentoChatbot() {
           atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
         );
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".lacunas_conhecimento (
+        CREATE TABLE IF NOT EXISTS chatbot.lacunas_conhecimento (
           id BIGSERIAL PRIMARY KEY,
           usuario TEXT NULL,
           pergunta TEXT NOT NULL,
@@ -3058,19 +3058,19 @@ async function garantirTabelasConhecimentoChatbot() {
         );
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_faq_pergunta_normalizada
-          ON "Chatbot".faq_aprovadas (pergunta_normalizada);
+          ON chatbot.faq_aprovadas (pergunta_normalizada);
         CREATE INDEX IF NOT EXISTS idx_chatbot_faq_area_prioridade
-          ON "Chatbot".faq_aprovadas (area, prioridade DESC);
+          ON chatbot.faq_aprovadas (area, prioridade DESC);
 
         CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_memoria_usuario_chave
-          ON "Chatbot".memoria_usuario (usuario, chave);
+          ON chatbot.memoria_usuario (usuario, chave);
         CREATE INDEX IF NOT EXISTS idx_chatbot_memoria_usuario_expira
-          ON "Chatbot".memoria_usuario (usuario, expira_em, atualizado_em DESC);
+          ON chatbot.memoria_usuario (usuario, expira_em, atualizado_em DESC);
 
         CREATE INDEX IF NOT EXISTS idx_chatbot_lacunas_status_criado_em
-          ON "Chatbot".lacunas_conhecimento (status, created_at DESC);
+          ON chatbot.lacunas_conhecimento (status, created_at DESC);
         CREATE INDEX IF NOT EXISTS idx_chatbot_lacunas_pergunta_normalizada
-          ON "Chatbot".lacunas_conhecimento (pergunta_normalizada);
+          ON chatbot.lacunas_conhecimento (pergunta_normalizada);
       `);
 
       for (const faq of CHATBOT_FAQ_SEED) {
@@ -3081,7 +3081,7 @@ async function garantirTabelasConhecimentoChatbot() {
 
         await dbPool.query(
           `
-          INSERT INTO "Chatbot".faq_aprovadas
+          INSERT INTO chatbot.faq_aprovadas
             (pergunta, pergunta_normalizada, resposta, area, produto_modelo, tags, prioridade, status_aprovacao, fonte, aprovado_por)
           VALUES ($1, $2, $3, $4, $5, $6::text[], $7, 'aprovado', $8, $9)
           ON CONFLICT (pergunta_normalizada) DO NOTHING
@@ -3123,9 +3123,9 @@ async function garantirTabelasHistoricoChatbot() {
   if (!chatbotConversationTableReadyPromise) {
     chatbotConversationTableReadyPromise = (async () => {
       await dbPool.query(`
-        CREATE SCHEMA IF NOT EXISTS "Chatbot";
+        CREATE SCHEMA IF NOT EXISTS chatbot;
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".conversas (
+        CREATE TABLE IF NOT EXISTS chatbot.conversas (
           conversation_id TEXT PRIMARY KEY,
           usuario TEXT NULL,
           origem TEXT NOT NULL DEFAULT 'manual_tecnico',
@@ -3134,9 +3134,9 @@ async function garantirTabelasHistoricoChatbot() {
           encerrado_em TIMESTAMPTZ NULL
         );
 
-        CREATE TABLE IF NOT EXISTS "Chatbot".conversa_mensagens (
+        CREATE TABLE IF NOT EXISTS chatbot.conversa_mensagens (
           id BIGSERIAL PRIMARY KEY,
-          conversation_id TEXT NOT NULL REFERENCES "Chatbot".conversas(conversation_id) ON DELETE CASCADE,
+          conversation_id TEXT NOT NULL REFERENCES chatbot.conversas(conversation_id) ON DELETE CASCADE,
           usuario TEXT NULL,
           papel TEXT NOT NULL,
           conteudo TEXT NOT NULL,
@@ -3146,9 +3146,9 @@ async function garantirTabelasHistoricoChatbot() {
         );
 
         CREATE INDEX IF NOT EXISTS idx_chatbot_conversas_usuario_atualizado_em
-          ON "Chatbot".conversas (usuario, atualizado_em DESC);
+          ON chatbot.conversas (usuario, atualizado_em DESC);
         CREATE INDEX IF NOT EXISTS idx_chatbot_conversa_mensagens_conversation_id_id
-          ON "Chatbot".conversa_mensagens (conversation_id, id);
+          ON chatbot.conversa_mensagens (conversation_id, id);
       `);
     })().catch((err) => {
       chatbotConversationTableReadyPromise = null;
@@ -3183,13 +3183,13 @@ async function registrarMensagemHistoricoChatbot({
 
   await dbPool.query(
     `
-    INSERT INTO "Chatbot".conversas
+    INSERT INTO chatbot.conversas
       (conversation_id, usuario, origem, atualizado_em)
     VALUES ($1, $2, $3, NOW())
     ON CONFLICT (conversation_id)
     DO UPDATE
-      SET usuario = COALESCE(EXCLUDED.usuario, "Chatbot".conversas.usuario),
-          origem = COALESCE(NULLIF(EXCLUDED.origem, ''), "Chatbot".conversas.origem),
+      SET usuario = COALESCE(EXCLUDED.usuario, chatbot.conversas.usuario),
+          origem = COALESCE(NULLIF(EXCLUDED.origem, ''), chatbot.conversas.origem),
           atualizado_em = NOW()
     `,
     [conversationIdFinal, usuario, origemFinal]
@@ -3197,7 +3197,7 @@ async function registrarMensagemHistoricoChatbot({
 
   await dbPool.query(
     `
-    INSERT INTO "Chatbot".conversa_mensagens
+    INSERT INTO chatbot.conversa_mensagens
       (conversation_id, usuario, papel, conteudo, origem, metadados)
     VALUES ($1, $2, $3, $4, $5, $6::jsonb)
     `,
@@ -3236,7 +3236,7 @@ async function encerrarHistoricoChatbot({
 
   await dbPool.query(
     `
-    UPDATE "Chatbot".conversas
+    UPDATE chatbot.conversas
        SET encerrado_em = COALESCE(encerrado_em, NOW()),
            atualizado_em = NOW()
      WHERE conversation_id = $1
@@ -3352,7 +3352,7 @@ async function buscarFaqAprovadaChatbot(pergunta) {
           ),
           plainto_tsquery('simple', $1)
         ) AS score
-      FROM "Chatbot".faq_aprovadas
+      FROM chatbot.faq_aprovadas
       WHERE COALESCE(status_aprovacao, 'aprovado') = 'aprovado'
         AND (
           pergunta_normalizada = $1
@@ -3398,7 +3398,7 @@ async function buscarFaqAprovadaChatbot(pergunta) {
         'like'::text AS busca_tipo,
         0 AS exact_match,
         (${scoreExpr})::float AS score
-      FROM "Chatbot".faq_aprovadas
+      FROM chatbot.faq_aprovadas
       WHERE COALESCE(status_aprovacao, 'aprovado') = 'aprovado'
         AND (${condicoes})
       ORDER BY prioridade DESC, score DESC, id ASC
@@ -3473,7 +3473,7 @@ async function carregarMemoriaUsuarioChatbot(req) {
   const resultado = await dbPool.query(
     `
     SELECT chave, valor_json, relevancia, expira_em, atualizado_em
-    FROM "Chatbot".memoria_usuario
+    FROM chatbot.memoria_usuario
     WHERE usuario = $1
       AND (expira_em IS NULL OR expira_em > NOW())
     ORDER BY relevancia DESC, atualizado_em DESC
@@ -3506,7 +3506,7 @@ async function salvarMemoriaUsuarioChatbot(req, itens = []) {
 
     await dbPool.query(
       `
-      INSERT INTO "Chatbot".memoria_usuario
+      INSERT INTO chatbot.memoria_usuario
         (usuario, chave, valor_json, relevancia, expira_em, atualizado_em)
       VALUES ($1, $2, $3::jsonb, $4, $5, NOW())
       ON CONFLICT (usuario, chave)
@@ -3563,7 +3563,7 @@ async function registrarLacunaConhecimentoChatbot({
     const usuario = resolverUsuarioMemoriaChatbot(req);
     await dbPool.query(
       `
-      INSERT INTO "Chatbot".lacunas_conhecimento
+      INSERT INTO chatbot.lacunas_conhecimento
         (usuario, pergunta, pergunta_normalizada, motivo_falha, resposta_fornecida, contexto, sugestao_fonte)
       VALUES ($1, $2, $3, $4, $5, $6::jsonb, $7)
       `,
@@ -3652,7 +3652,7 @@ async function registrarMensagemErroChatbot({
     await garantirTabelaMensagensErro();
     await dbPool.query(
       `
-      INSERT INTO "Chatbot"."Mensagens_erro"
+      INSERT INTO chatbot."Mensagens_erro"
         (rota, motivo, usuario, pergunta, resposta, http_status, detalhes)
       VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb)
       `,
@@ -4282,7 +4282,7 @@ async function carregarDetalheFaqMonitorChatbot({
 
   const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const totalResult = await dbPool.query(
-    `SELECT COUNT(*)::int AS total FROM "Chatbot".faq_aprovadas f ${whereSql}`,
+    `SELECT COUNT(*)::int AS total FROM chatbot.faq_aprovadas f ${whereSql}`,
     values
   );
   const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
@@ -4303,7 +4303,7 @@ async function carregarDetalheFaqMonitorChatbot({
       f.aprovado_por,
       f.created_at,
       f.updated_at
-    FROM "Chatbot".faq_aprovadas f
+    FROM chatbot.faq_aprovadas f
     ${whereSql}
     ORDER BY ${sortMap[safeSortBy]} ${safeSortDir.toUpperCase()}, f.id DESC
     LIMIT $${values.length + 1}
@@ -4319,7 +4319,7 @@ async function carregarDetalheFaqMonitorChatbot({
       COUNT(DISTINCT COALESCE(NULLIF(f.area, ''), 'geral'))::int AS area_count,
       COALESCE(ROUND(AVG(COALESCE(f.prioridade, 0))::numeric, 1), 0) AS average_priority,
       COUNT(*) FILTER (WHERE COALESCE(array_length(f.tags, 1), 0) > 0)::int AS tagged_count
-    FROM "Chatbot".faq_aprovadas f
+    FROM chatbot.faq_aprovadas f
     ${whereSql}
     `,
     values
@@ -4330,7 +4330,7 @@ async function carregarDetalheFaqMonitorChatbot({
       SELECT
         COALESCE(NULLIF(area, ''), 'geral') AS value,
         COUNT(*)::int AS total
-      FROM "Chatbot".faq_aprovadas
+      FROM chatbot.faq_aprovadas
       GROUP BY 1
       ORDER BY total DESC, value ASC
       LIMIT 30
@@ -4339,7 +4339,7 @@ async function carregarDetalheFaqMonitorChatbot({
       SELECT
         COALESCE(NULLIF(status_aprovacao, ''), 'aprovado') AS value,
         COUNT(*)::int AS total
-      FROM "Chatbot".faq_aprovadas
+      FROM chatbot.faq_aprovadas
       GROUP BY 1
       ORDER BY total DESC, value ASC
       LIMIT 20
@@ -4444,7 +4444,7 @@ async function carregarDetalheMensagensMonitorChatbot({
 
   const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const totalResult = await dbPool.query(
-    `SELECT COUNT(*)::int AS total FROM "Chatbot".conversa_mensagens m ${whereSql}`,
+    `SELECT COUNT(*)::int AS total FROM chatbot.conversa_mensagens m ${whereSql}`,
     values
   );
   const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
@@ -4457,7 +4457,7 @@ async function carregarDetalheMensagensMonitorChatbot({
         COUNT(*)::int AS mensagens_na_conversa,
         MIN(criado_em) AS primeira_mensagem_em,
         MAX(criado_em) AS ultima_mensagem_em
-      FROM "Chatbot".conversa_mensagens
+      FROM chatbot.conversa_mensagens
       GROUP BY 1
     )
     SELECT
@@ -4472,7 +4472,7 @@ async function carregarDetalheMensagensMonitorChatbot({
       COALESCE(cs.mensagens_na_conversa, 0) AS mensagens_na_conversa,
       cs.primeira_mensagem_em,
       cs.ultima_mensagem_em
-    FROM "Chatbot".conversa_mensagens m
+    FROM chatbot.conversa_mensagens m
     LEFT JOIN conv_stats cs
       ON cs.conversation_id = m.conversation_id
     ${whereSql}
@@ -4492,7 +4492,7 @@ async function carregarDetalheMensagensMonitorChatbot({
       COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'assistant')::int AS assistant_count,
       COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'user')::int AS user_message_count,
       COUNT(*) FILTER (WHERE COALESCE(NULLIF(m.papel, ''), 'sem_papel') = 'system')::int AS system_count
-    FROM "Chatbot".conversa_mensagens m
+    FROM chatbot.conversa_mensagens m
     ${whereSql}
     `,
     values
@@ -4503,7 +4503,7 @@ async function carregarDetalheMensagensMonitorChatbot({
       SELECT
         COALESCE(NULLIF(papel, ''), 'sem_papel') AS value,
         COUNT(*)::int AS total
-      FROM "Chatbot".conversa_mensagens
+      FROM chatbot.conversa_mensagens
       GROUP BY 1
       ORDER BY total DESC, value ASC
       LIMIT 20
@@ -4512,7 +4512,7 @@ async function carregarDetalheMensagensMonitorChatbot({
       SELECT
         COALESCE(NULLIF(origem, ''), 'sem_origem') AS value,
         COUNT(*)::int AS total
-      FROM "Chatbot".conversa_mensagens
+      FROM chatbot.conversa_mensagens
       GROUP BY 1
       ORDER BY total DESC, value ASC
       LIMIT 30
@@ -4614,7 +4614,7 @@ async function carregarDetalheMemoriaMonitorChatbot({
 
   const whereSql = filters.length ? `WHERE ${filters.join(' AND ')}` : '';
   const totalResult = await dbPool.query(
-    `SELECT COUNT(*)::int AS total FROM "Chatbot".memoria_usuario mu ${whereSql}`,
+    `SELECT COUNT(*)::int AS total FROM chatbot.memoria_usuario mu ${whereSql}`,
     values
   );
   const pagination = buildChatbotMonitorPagination(totalResult.rows?.[0]?.total || 0, page, pageSize);
@@ -4634,7 +4634,7 @@ async function carregarDetalheMemoriaMonitorChatbot({
         WHEN mu.expira_em IS NULL OR mu.expira_em > NOW() THEN TRUE
         ELSE FALSE
       END AS ativa
-    FROM "Chatbot".memoria_usuario mu
+    FROM chatbot.memoria_usuario mu
     ${whereSql}
     ORDER BY ${sortMap[safeSortBy]} ${safeSortDir.toUpperCase()} NULLS LAST, mu.id DESC
     LIMIT $${values.length + 1}
@@ -4651,7 +4651,7 @@ async function carregarDetalheMemoriaMonitorChatbot({
       COUNT(*) FILTER (WHERE mu.expira_em IS NOT NULL AND mu.expira_em <= NOW())::int AS expired_count,
       COUNT(DISTINCT COALESCE(NULLIF(mu.usuario, ''), 'anon'))::int AS user_count,
       COUNT(DISTINCT COALESCE(NULLIF(mu.chave, ''), 'sem_chave'))::int AS key_count
-    FROM "Chatbot".memoria_usuario mu
+    FROM chatbot.memoria_usuario mu
     ${whereSql}
     `,
     values
@@ -4661,7 +4661,7 @@ async function carregarDetalheMemoriaMonitorChatbot({
     SELECT
       COALESCE(NULLIF(chave, ''), 'sem_chave') AS value,
       COUNT(*)::int AS total
-    FROM "Chatbot".memoria_usuario
+    FROM chatbot.memoria_usuario
     GROUP BY 1
     ORDER BY total DESC, value ASC
     LIMIT 40
@@ -5358,16 +5358,16 @@ router.get('/monitor', async (req, res) => {
     ] = await Promise.all([
       dbPool.query(`
         SELECT
-          (SELECT COUNT(*)::int FROM "Chatbot".faq_aprovadas WHERE COALESCE(status_aprovacao, 'aprovado') = 'aprovado') AS faq_aprovadas,
-          (SELECT COUNT(*)::int FROM "Chatbot".faq_aprovadas WHERE created_at >= NOW() - INTERVAL '30 days' AND COALESCE(status_aprovacao, 'aprovado') = 'aprovado') AS faq_novas_30d,
-          (SELECT COUNT(*)::int FROM "Chatbot".manuais_instrucao WHERE COALESCE(status_indexacao, 'pendente') = 'indexado') AS manuais_indexados,
-          (SELECT COUNT(*)::int FROM "Chatbot".manuais_instrucao_chunks) AS trechos_indexados,
-          (SELECT COUNT(DISTINCT usuario)::int FROM "Chatbot".memoria_usuario WHERE expira_em IS NULL OR expira_em > NOW()) AS usuarios_memoria_ativa,
-          (SELECT COUNT(*)::int FROM "Chatbot".memoria_usuario WHERE expira_em IS NULL OR expira_em > NOW()) AS itens_memoria_ativos,
-          (SELECT COUNT(*)::int FROM "Chatbot".lacunas_conhecimento WHERE COALESCE(status, 'novo') NOT IN ('resolvido', 'resolvida', 'fechado', 'fechada', 'concluido', 'concluida', 'descartado')) AS lacunas_abertas,
-          (SELECT COUNT(*)::int FROM "Chatbot".lacunas_conhecimento WHERE created_at >= NOW() - INTERVAL '7 days') AS lacunas_7d,
-          (SELECT COUNT(*)::int FROM "Chatbot".lacunas_conhecimento WHERE atualizado_em >= NOW() - INTERVAL '30 days' AND lower(COALESCE(status, '')) IN ('resolvido', 'resolvida', 'fechado', 'fechada', 'concluido', 'concluida')) AS lacunas_resolvidas_30d,
-          (SELECT COUNT(*)::int FROM "Chatbot"."Mensagens_erro" WHERE criado_em >= NOW() - INTERVAL '30 days') AS erros_30d
+          (SELECT COUNT(*)::int FROM chatbot.faq_aprovadas WHERE COALESCE(status_aprovacao, 'aprovado') = 'aprovado') AS faq_aprovadas,
+          (SELECT COUNT(*)::int FROM chatbot.faq_aprovadas WHERE created_at >= NOW() - INTERVAL '30 days' AND COALESCE(status_aprovacao, 'aprovado') = 'aprovado') AS faq_novas_30d,
+          (SELECT COUNT(*)::int FROM chatbot.manuais_instrucao WHERE COALESCE(status_indexacao, 'pendente') = 'indexado') AS manuais_indexados,
+          (SELECT COUNT(*)::int FROM chatbot.manuais_instrucao_chunks) AS trechos_indexados,
+          (SELECT COUNT(DISTINCT usuario)::int FROM chatbot.memoria_usuario WHERE expira_em IS NULL OR expira_em > NOW()) AS usuarios_memoria_ativa,
+          (SELECT COUNT(*)::int FROM chatbot.memoria_usuario WHERE expira_em IS NULL OR expira_em > NOW()) AS itens_memoria_ativos,
+          (SELECT COUNT(*)::int FROM chatbot.lacunas_conhecimento WHERE COALESCE(status, 'novo') NOT IN ('resolvido', 'resolvida', 'fechado', 'fechada', 'concluido', 'concluida', 'descartado')) AS lacunas_abertas,
+          (SELECT COUNT(*)::int FROM chatbot.lacunas_conhecimento WHERE created_at >= NOW() - INTERVAL '7 days') AS lacunas_7d,
+          (SELECT COUNT(*)::int FROM chatbot.lacunas_conhecimento WHERE atualizado_em >= NOW() - INTERVAL '30 days' AND lower(COALESCE(status, '')) IN ('resolvido', 'resolvida', 'fechado', 'fechada', 'concluido', 'concluida')) AS lacunas_resolvidas_30d,
+          (SELECT COUNT(*)::int FROM chatbot."Mensagens_erro" WHERE criado_em >= NOW() - INTERVAL '30 days') AS erros_30d
       `),
       dbPool.query(`
         SELECT
@@ -5379,7 +5379,7 @@ router.get('/monitor', async (req, res) => {
           sugestao_fonte,
           COALESCE(contexto->>'origem', '') AS origem,
           created_at
-        FROM "Chatbot".lacunas_conhecimento
+        FROM chatbot.lacunas_conhecimento
         WHERE COALESCE(status, 'novo') NOT IN ('resolvido', 'resolvida', 'fechado', 'fechada', 'concluido', 'concluida', 'descartado')
         ORDER BY created_at DESC
         LIMIT 20
@@ -5393,7 +5393,7 @@ router.get('/monitor', async (req, res) => {
           usuario,
           pergunta,
           http_status
-        FROM "Chatbot"."Mensagens_erro"
+        FROM chatbot."Mensagens_erro"
         ORDER BY criado_em DESC
         LIMIT 20
       `),
@@ -5401,7 +5401,7 @@ router.get('/monitor', async (req, res) => {
         SELECT
           COALESCE(NULLIF(area, ''), 'geral') AS area,
           COUNT(*)::int AS total
-        FROM "Chatbot".faq_aprovadas
+        FROM chatbot.faq_aprovadas
         WHERE COALESCE(status_aprovacao, 'aprovado') = 'aprovado'
         GROUP BY 1
         ORDER BY total DESC, area ASC
@@ -5411,7 +5411,7 @@ router.get('/monitor', async (req, res) => {
         SELECT
           motivo_falha,
           COUNT(*)::int AS total
-        FROM "Chatbot".lacunas_conhecimento
+        FROM chatbot.lacunas_conhecimento
         WHERE created_at >= NOW() - INTERVAL '30 days'
         GROUP BY 1
         ORDER BY total DESC, motivo_falha ASC
@@ -5421,7 +5421,7 @@ router.get('/monitor', async (req, res) => {
         SELECT
           COALESCE(NULLIF(status_indexacao, ''), 'pendente') AS status,
           COUNT(*)::int AS total
-        FROM "Chatbot".manuais_instrucao
+        FROM chatbot.manuais_instrucao
         GROUP BY 1
         ORDER BY total DESC, status ASC
       `)
@@ -5562,7 +5562,7 @@ router.get('/monitor/details', async (req, res) => {
 router.get('/cron-config', async (req, res) => {
   try {
     const { rows } = await dbPool.query(
-      `SELECT id, acao, programacao, ativo FROM "Chatbot".cron_configuracao ORDER BY id`
+      `SELECT id, acao, programacao, ativo FROM chatbot.cron_configuracao ORDER BY id`
     );
     return res.json({ ok: true, data: rows });
   } catch (err) {
@@ -5588,7 +5588,7 @@ router.put('/cron-config/:id', express.json({ limit: '10kb' }), async (req, res)
   values.push(id);
 
   const { rowCount } = await dbPool.query(
-    `UPDATE "Chatbot".cron_configuracao SET ${fields.join(', ')} WHERE id = $${values.length}`,
+    `UPDATE chatbot.cron_configuracao SET ${fields.join(', ')} WHERE id = $${values.length}`,
     values
   ).catch(() => ({ rowCount: 0 }));
 

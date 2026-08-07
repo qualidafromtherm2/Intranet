@@ -49,7 +49,7 @@ async function resolverDestinoPirRecebimento(pool, codigoProduto) {
               UPPER(TRIM(COALESCE(codint_familia, ''))) AS codint_familia,
               codigo,
               codigo_produto::text AS codigo_produto
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE TRIM(COALESCE(codigo, '')) = TRIM($1)
            OR TRIM(COALESCE(codigo_produto::text, '')) = TRIM($1)
         LIMIT 1`,
@@ -80,7 +80,7 @@ async function liberarEtiquetasForaMpPresas(pool) {
      WHERE COALESCE(er.pir, false) = false
        AND NOT EXISTS (
          SELECT 1
-           FROM public.produtos_omie po
+           FROM produto.produtos_omie po
           WHERE (
                   TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                   OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))

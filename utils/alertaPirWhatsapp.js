@@ -154,7 +154,7 @@ async function filtrarItensMpParaAlerta(lista) {
            FROM etiqueta."ETQ_recebimento" er
            LEFT JOIN LATERAL (
              SELECT p.codint_familia, p.codigo, p.codigo_produto
-               FROM public.produtos_omie p
+               FROM produto.produtos_omie p
               WHERE TRIM(COALESCE(p.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
                  OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
               LIMIT 1

@@ -154,7 +154,7 @@ const VENDAS_CTES = `
   ${VENDAS_NF_POR_PEDIDO_CTE},
   pedidos_cfop_ignorado AS (
     SELECT DISTINCT codigo_pedido
-    FROM "Vendas".pedidos_venda_itens
+    FROM vendas.pedidos_venda_itens
     WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
   )
 `;
@@ -186,7 +186,7 @@ function buildBaseCte(etapaSql) {
         ) AS cliente,
         nf.data_emissao_dt,
         COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       LEFT JOIN nf_por_pedido nf
@@ -209,8 +209,8 @@ function buildItensCte(etapaSql) {
         COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
         COALESCE(i.quantidade, 0)::numeric(14,2) AS quantidade,
         COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-      FROM "Vendas".pedidos_venda_itens i
-      LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      FROM vendas.pedidos_venda_itens i
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
     ),
     base AS (
@@ -224,7 +224,7 @@ function buildItensCte(etapaSql) {
         ) AS cliente,
         nf.data_emissao_dt,
         COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       LEFT JOIN nf_por_pedido nf

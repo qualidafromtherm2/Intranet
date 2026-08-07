@@ -176,8 +176,8 @@ function appendFiltrosSql(filtros, params) {
     const idx = params.length;
     const exists = `EXISTS (
       SELECT 1
-        FROM "Vendas".pedidos_venda_itens ix
-        JOIN public.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
+        FROM vendas.pedidos_venda_itens ix
+        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
        WHERE ix.codigo_pedido = p.codigo_pedido
          AND TRIM(COALESCE(pox.codigo_familia::text, '')) = $${idx}
     )`;
@@ -191,8 +191,8 @@ function appendFiltrosSql(filtros, params) {
     const idx = params.length;
     const exists = `EXISTS (
       SELECT 1
-        FROM "Vendas".pedidos_venda_itens ix
-        JOIN public.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
+        FROM vendas.pedidos_venda_itens ix
+        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
        WHERE ix.codigo_pedido = p.codigo_pedido
          AND LPAD(TRIM(COALESCE(pox.tipoitem, '')), 2, '0') = $${idx}
     )`;

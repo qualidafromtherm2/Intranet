@@ -133,7 +133,7 @@ router.get('/buscar-por-codigo', requireAuth, async (req, res) => {
 
     // Localiza o produto pelo ID Omie (codigo_produto) ou SKU (codigo)
     const { rows: prodRows } = await dbQuery(
-      `SELECT codigo_produto, descricao FROM public.produtos_omie
+      `SELECT codigo_produto, descricao FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1)
            OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END

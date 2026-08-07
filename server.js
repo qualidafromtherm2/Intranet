@@ -1955,8 +1955,8 @@ async function withRetry(fn, tries = 3) {
   throw lastErr;
 }
 
-// === Busca de produtos SOMENTE em public.produtos_omie =======================
-// Espera { q } e retorna { itens: [{ codigo, descricao, fontes: ['public.produtos_omie'] }] }
+// === Busca de produtos SOMENTE em produto.produtos_omie =======================
+// Espera { q } e retorna { itens: [{ codigo, descricao, fontes: ['produto.produtos_omie'] }] }
 app.post('/api/produtos/busca', express.json(), async (req, res) => {
   try {
     console.log('\n[API] /api/produtos/busca -> recebido body:', req.body);
@@ -1967,7 +1967,7 @@ app.post('/api/produtos/busca', express.json(), async (req, res) => {
     }
 
     // Ajuste o schema abaixo se não for "public"
-    const schemaTable = 'public.produtos_omie';
+    const schemaTable = 'produto.produtos_omie';
 
     // DISTINCT/Group para evitar duplicatas; PP primeiro; limita volume
     const sql = `
@@ -2163,8 +2163,8 @@ app.get('/api/produtos/imagem/:codigo_produto', async (req, res) => {
     // a tela passa o código legível (ex.: 04.MP.N.90908) → resolve via produtos_omie.
     const { rows } = await pool.query(
       `SELECT TRIM(img.url_imagem) AS url_imagem
-         FROM public.produtos_omie_imagens img
-         LEFT JOIN public.produtos_omie p
+         FROM produto.produtos_omie_imagens img
+         LEFT JOIN produto.produtos_omie p
            ON img.codigo_produto::text IN (
                 p.codigo_produto::text,
                 TRIM(p.codigo),
@@ -2207,7 +2207,7 @@ app.get('/api/engenharia/em-criacao', async (req, res) => {
           codigo::text AS codigo,
           descricao::text AS descricao,
           codigo_familia::text AS familia
-        FROM public.produtos_omie
+        FROM produto.produtos_omie
         WHERE descricao ILIKE 'Em criação%'
         ORDER BY codigo ASC
         LIMIT 1000
@@ -2454,7 +2454,7 @@ app.get('/api/engenharia/produto-tarefas/:codigo', async (req, res) => {
     const { codigo } = req.params;
 
     // Busca produto para pegar a família
-    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
+    const produtoQuery = `SELECT codigo_familia FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
       LIMIT 1`;
@@ -2525,7 +2525,7 @@ app.get('/api/engenharia/produto-compras/:codigo', async (req, res) => {
     const { codigo } = req.params;
 
     // Busca produto para pegar a família
-    const produtoQuery = `SELECT codigo_familia FROM public.produtos_omie
+    const produtoQuery = `SELECT codigo_familia FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
       LIMIT 1`;
@@ -2678,12 +2678,12 @@ function _cadastroNormalizarDescricao(value) {
 }
 
 async function _cadastroGarantirReservas(client) {
-  await client.query(`CREATE TABLE IF NOT EXISTS public.produto_codigo_reserva (
+  await client.query(`CREATE TABLE IF NOT EXISTS produto.produto_codigo_reserva (
     codigo TEXT PRIMARY KEY, sequencial INT NOT NULL, prefixo TEXT NOT NULL,
     descricao_referencia TEXT, usuario TEXT, criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     confirmada BOOLEAN NOT NULL DEFAULT FALSE
   )`);
-  await client.query(`ALTER TABLE public.produto_codigo_reserva
+  await client.query(`ALTER TABLE produto.produto_codigo_reserva
     ADD COLUMN IF NOT EXISTS confirmada BOOLEAN NOT NULL DEFAULT FALSE`);
 }
 
@@ -2725,9 +2725,9 @@ app.post('/api/produtos/cadastro/preview', express.json(), async (req, res) => {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
     await _cadastroGarantirReservas(client);
     const { rows: existentes } = await client.query(`
-      SELECT codigo, descricao FROM public.produtos_omie WHERE codigo IS NOT NULL
+      SELECT codigo, descricao FROM produto.produtos_omie WHERE codigo IS NOT NULL
       UNION ALL
-      SELECT codigo, descricao_referencia AS descricao FROM public.produto_codigo_reserva
+      SELECT codigo, descricao_referencia AS descricao FROM produto.produto_codigo_reserva
       WHERE confirmada = TRUE
     `);
     const usados = new Set();
@@ -2784,7 +2784,7 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
     codigoReservadoAgora = '';
     try {
       const liberacao = await pool.query(
-        `DELETE FROM public.produto_codigo_reserva WHERE codigo = $1 AND confirmada = TRUE`,
+        `DELETE FROM produto.produto_codigo_reserva WHERE codigo = $1 AND confirmada = TRUE`,
         [codigoParaLiberar]
       );
       console.info(`[produtos/incluir-omie] reserva_liberada codigo=${codigoParaLiberar} removidas=${liberacao.rowCount}`);
@@ -2818,7 +2818,7 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
       await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
       await _cadastroGarantirReservas(client);
       const existente = await client.query(
-        `SELECT 1 FROM public.produtos_omie WHERE UPPER(codigo) = $1 LIMIT 1`,
+        `SELECT 1 FROM produto.produtos_omie WHERE UPPER(codigo) = $1 LIMIT 1`,
         [codigoNormalizado]
       );
       if (existente.rowCount) {
@@ -2828,7 +2828,7 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
 
       const usuario = String(req.session?.user?.username || req.session?.user?.login || '').trim();
       const reserva = await client.query(`
-        INSERT INTO public.produto_codigo_reserva
+        INSERT INTO produto.produto_codigo_reserva
           (codigo, sequencial, prefixo, descricao_referencia, usuario, confirmada, criado_em)
         VALUES ($1, $2, $3, $4, $5, TRUE, NOW())
         ON CONFLICT (codigo) DO UPDATE SET
@@ -2836,7 +2836,7 @@ app.post('/api/produtos/incluir-omie', async (req, res) => {
           usuario = EXCLUDED.usuario,
           confirmada = TRUE,
           criado_em = NOW()
-        WHERE public.produto_codigo_reserva.confirmada = FALSE
+        WHERE produto.produto_codigo_reserva.confirmada = FALSE
         RETURNING codigo
       `, [codigoNormalizado, Number(matchCodigo[2]), matchCodigo[1], descricao, usuario]);
       if (!reserva.rowCount) {
@@ -3250,7 +3250,7 @@ app.get('/api/compras/produtos-em-compra', async (_req, res) => {
           3 AS prioridade
         FROM compras.requisicoes_omie_itens ri
         JOIN compras.requisicoes_omie r ON r.cod_req_compra = ri.cod_req_compra
-        JOIN public.produtos_omie p ON p.codigo_produto = ri.cod_prod
+        JOIN produto.produtos_omie p ON p.codigo_produto = ri.cod_prod
         WHERE TRIM(COALESCE(p.codigo, '')) <> ''
           AND COALESCE(r.inativo, FALSE) = FALSE
           AND TRIM(COALESCE(r.numero, '')) <> ''
@@ -3451,7 +3451,7 @@ app.get('/api/compras/produtos-em-compra/:codigo', async (req, res) => {
           COALESCE(r.created_at, ri.created_at) AS created_at
         FROM compras.requisicoes_omie_itens ri
         JOIN compras.requisicoes_omie r ON r.cod_req_compra = ri.cod_req_compra
-        JOIN public.produtos_omie p ON p.codigo_produto = ri.cod_prod
+        JOIN produto.produtos_omie p ON p.codigo_produto = ri.cod_prod
         WHERE UPPER(TRIM(p.codigo)) = UPPER($1)
           AND COALESCE(r.inativo, FALSE) = FALSE
           AND TRIM(COALESCE(r.numero, '')) <> ''
@@ -3779,7 +3779,7 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
       for (let i = 0; i < 10; i++) {
         const { rows: prodRows } = await pool.query(
           `SELECT codigo_produto
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
            WHERE codigo = $1 OR codigo_produto_integracao = $1
            LIMIT 1`,
           [codigoAtual]
@@ -3846,7 +3846,7 @@ app.post('/api/compras/solicitacoes/:id/enviar-requisicao', express.json(), asyn
       try {
         const { rows: prodRows } = await pool.query(
           `SELECT codigo_produto
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
            WHERE codigo = $1 OR codigo_produto_integracao = $1
            LIMIT 1`,
           [produtoCodigo]
@@ -3930,7 +3930,7 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
     const buscarMaximoCodprov = async () => {
       const { rows: maxOmie } = await pool.query(
         `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo LIKE 'CODPROV - %'`
       );
       const { rows: maxSolic } = await pool.query(
@@ -3963,7 +3963,7 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
       const prefixo = `${montarCodigoBase(num)}%`;
       const { rows: existe } = await pool.query(
         `SELECT 1 FROM (
-           SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1
+           SELECT codigo FROM produto.produtos_omie WHERE codigo LIKE $1
            UNION ALL
            SELECT produto_codigo FROM compras.solicitacao_compras WHERE produto_codigo LIKE $1 AND id != $2
            UNION ALL
@@ -4013,7 +4013,7 @@ app.post('/api/compras/solicitacoes/:id/cadastrar-omie', express.json(), async (
         codigoIntegracao = `${codigoBase}.${i + 1}`;
         const { rows: prodRows } = await pool.query(
           `SELECT codigo_produto
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
            WHERE codigo = $1 OR codigo_produto_integracao = $1
            LIMIT 1`,
           [codigoIntegracao]
@@ -6076,7 +6076,7 @@ async function sincronizarProdutoParaPostgres(produto) {
   };
 
   const sql = `
-    INSERT INTO public.produtos_omie (
+    INSERT INTO produto.produtos_omie (
       codigo_produto, codigo_produto_integracao, codigo, descricao, descricao_familia, unidade,
       tipoitem, ncm, cfop, origem_mercadoria, cest, aliquota_ibpt,
       marca, modelo, descr_detalhada, obs_internas, inativo, bloqueado,
@@ -6535,7 +6535,7 @@ async function _pedidoSyncWorker() {
         : (j?.pedido_venda_produto ? [j.pedido_venda_produto] : []);
 
       if (ped.length) {
-        await dbQuery('select "Vendas".pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
+        await dbQuery('select vendas.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
         console.log(`[pedidoSyncQueue] ✓ upsert pedido ${codigoPedido || numeroPedido} (fila restante: ${_pedidoSyncQueue.length})`);
       }
     } catch (e) {
@@ -6596,7 +6596,7 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
       if (usarDb && (idPedido || numeroPedido) && etapa) {
         if (idPedido) {
           const r = await pool.query(
-            `UPDATE "Vendas".pedidos_venda
+            `UPDATE vendas.pedidos_venda
                SET etapa = $1, updated_at = now()
              WHERE codigo_pedido = $2`,
             [etapa, idPedido]
@@ -6605,7 +6605,7 @@ app.post(['/webhooks/omie/pedidos', '/api/webhooks/omie/pedidos'],
         }
         if (!ret.updated && numeroPedido) {
           const r = await pool.query(
-            `UPDATE "Vendas".pedidos_venda
+            `UPDATE vendas.pedidos_venda
                SET etapa = $1, updated_at = now()
              WHERE numero_pedido = $2`,
             [etapa, String(numeroPedido)]
@@ -6847,7 +6847,7 @@ app.post(['/webhooks/omie/produtos', '/api/webhooks/omie/produtos'],
           client.release();
         }
       } catch (syncErr) {
-        console.error(`[webhooks/omie/produtos] Erro ao atualizar public.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
+        console.error(`[webhooks/omie/produtos] Erro ao atualizar produto.produtos_omie (${codigoProduto}):`, syncErr?.message || syncErr);
       }
 
       // Imagens NÃO são mais atualizadas via Omie — Supabase é a fonte oficial.
@@ -10736,7 +10736,7 @@ app.get('/api/produtos/search', async (req, res) => {
         descricao,
         descricao_familia,
         codigo_produto
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
       WHERE ${whereSql}
       ORDER BY
         (CASE WHEN codigo ILIKE $${prefixIdx} THEN 0 ELSE 1 END),
@@ -10874,7 +10874,7 @@ async function abrirOrdemProducaoNaOmie({
     try {
       const { rows } = await poolInstance.query(
         `SELECT produto_codigo, c_cod_int_prod, n_cod_prod
-           FROM public.op_info
+           FROM producao.op_info
           WHERE c_cod_int_op = $1
              OR c_num_op = $1
              OR n_cod_op::text = $1
@@ -10912,7 +10912,7 @@ async function abrirOrdemProducaoNaOmie({
     try {
       const { rows } = await poolInstance.query(
         `SELECT codigo_produto
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
           WHERE TRIM(UPPER(codigo)) = TRIM(UPPER($1))
              OR TRIM(UPPER(codigo_produto_integracao::text)) = TRIM(UPPER($1))
           ORDER BY codigo_produto ASC
@@ -11075,14 +11075,14 @@ app.post('/api/preparacao/op/:op/iniciar', async (req, res) => {
     // 2) FORCE overlay = "Produzindo" (mesmo se a view já mudou; é idempotente)
     try {
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+        CREATE TABLE IF NOT EXISTS producao.op_status_overlay (
           op         text PRIMARY KEY,
           status     text NOT NULL,
           updated_at timestamptz NOT NULL DEFAULT now()
         )
       `);
       const up = await pool.query(
-        `INSERT INTO public.op_status_overlay (op, status, updated_at)
+        `INSERT INTO producao.op_status_overlay (op, status, updated_at)
          VALUES ($1, $2, now())
          ON CONFLICT (op) DO UPDATE
            SET status = EXCLUDED.status,
@@ -11139,7 +11139,7 @@ app.get('/api/produtos/codigos', async (req, res) => {
         COALESCE(v.descricao, p.descricao) AS descricao
       FROM want w
       LEFT JOIN public.vw_lista_produtos v ON v.codigo_produto::text = w.cp
-      LEFT JOIN public.produtos         p ON p.codigo_prod::text     = w.cp
+      LEFT JOIN produto.produtos         p ON p.codigo_prod::text     = w.cp
       `,
       [wanted]
     );
@@ -11176,7 +11176,7 @@ app.get('/api/produtos/por-codigo', async (req, res) => {
         COALESCE(v.descricao, p.descricao) AS descricao
       FROM want w
       LEFT JOIN public.vw_lista_produtos v ON v.codigo = w.c
-      LEFT JOIN public.produtos         p ON p.codigo = w.c
+      LEFT JOIN produto.produtos         p ON p.codigo = w.c
       `,
       [wanted]
     );
@@ -11256,7 +11256,7 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
     try {
       const { rows } = await pool.query(
         `SELECT produto_codigo, c_cod_int_prod, n_cod_prod
-           FROM public.op_info
+           FROM producao.op_info
           WHERE c_cod_int_op = $1
              OR c_num_op = $1
              OR n_cod_op::text = $1
@@ -11384,14 +11384,14 @@ app.post('/api/preparacao/op/:op/concluir', async (req, res) => {
     // 3) Overlay garante UI imediata
     try {
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+        CREATE TABLE IF NOT EXISTS producao.op_status_overlay (
           op         text PRIMARY KEY,
           status     text NOT NULL,
           updated_at timestamptz NOT NULL DEFAULT now()
         )
       `);
       const up = await pool.query(
-        `INSERT INTO public.op_status_overlay (op, status, updated_at)
+        `INSERT INTO producao.op_status_overlay (op, status, updated_at)
          VALUES ($1, $2, now())
          ON CONFLICT (op) DO UPDATE
            SET status = EXCLUDED.status,
@@ -11442,14 +11442,14 @@ app.get('/api/preparacao/debug/:op', async (req, res) => {
 
     const os = await pool.query(
       `SELECT produto_codigo, op, status, updated_at
-         FROM public.op_status
+         FROM producao.op_status
         WHERE op = $1
         ORDER BY updated_at DESC
         LIMIT 20`, [op]);
 
     const oi = await pool.query(
       `SELECT c_cod_int_op, c_num_op, n_cod_op, c_cod_int_prod, n_cod_prod, updated_at
-         FROM public.op_info
+         FROM producao.op_info
         WHERE c_cod_int_op = $1
            OR c_num_op = $1
            OR n_cod_op::text = $1
@@ -11901,7 +11901,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     const fixCodigoEtq = await pool.query(`
       UPDATE etiqueta."ETQ_rec_impresso" i
          SET codigo_produto = p.codigo_produto::text
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
        WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
          AND p.codigo_produto IS NOT NULL
          AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
@@ -11913,7 +11913,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       UPDATE etiqueta."ETQ_rec_impresso" i
          SET codigo_produto = p.codigo_produto::text
         FROM etiqueta."ETQ_recebimento" r
-        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+        JOIN produto.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
        WHERE r.id = i.origem_id
          AND TRIM(COALESCE(i.codigo_produto, '')) = TRIM(r.codigo_produto)
          AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)
@@ -11928,7 +11928,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
              descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), r.descricao_produto),
              fonte = COALESCE(NULLIF(TRIM(i.fonte), ''), 'recebimento')
         FROM etiqueta."ETQ_recebimento" r
-        JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+        JOIN produto.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
        WHERE r.id = i.origem_id
          AND (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '' OR TRIM(i.codigo_produto) = TRIM(r.codigo_produto))
          AND p.codigo_produto IS NOT NULL
@@ -11944,7 +11944,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
                NULLIF(TRIM(i.descricao_produto), ''),
                NULLIF(TRIM(p.descricao), '')
              )
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
        WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
          AND i.conteudo_zpl IS NOT NULL
          AND TRIM(i.conteudo_zpl) <> ''
@@ -13452,7 +13452,7 @@ function _friendlyLprError(msg) {
   return 'Falha na comunicação com a impressora. Verifique se ela está ligada e configurada corretamente.';
 }
 
-/** Resolve public.produtos_omie.codigo_produto (id Omie) a partir de codigo, id ou integracao.
+/** Resolve produto.produtos_omie.codigo_produto (id Omie) a partir de codigo, id ou integracao.
  * Preferência: ativo/desbloqueado (evita ID fantasma de cadastro recriado na Omie). */
 async function _resolveProdutoOmieCodigoProduto(db, codigoOuId) {
   const q = (sql, params) => (db || pool).query(sql, params);
@@ -13520,7 +13520,7 @@ async function _etqResolveProdutoCampos(db, { codigoTexto, codigoOmie, descricao
   let desc = String(descricao || ref?.descricao_produto || '').trim();
   if (!desc && codigo) {
     const { rows } = await (db || pool).query(
-      `SELECT descricao FROM public.produtos_omie
+      `SELECT descricao FROM produto.produtos_omie
         WHERE codigo_produto::text = $1 OR codigo = $2
         LIMIT 1`,
       [codigo, String(codigoTexto || '').trim()]
@@ -13934,7 +13934,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     const dataOmie = dataExibir;
 
     await pool.query(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
     await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT`).catch(() => {});
@@ -13949,7 +13949,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
                 NULLIF(p.valor_unitario, 0),
                 0.01
               ) AS valor_unit
-         FROM public.produtos_omie p
+         FROM produto.produtos_omie p
          LEFT JOIN logistica.estoque_atual e
            ON e.codigo = p.codigo AND e.local_codigo = $2
         WHERE TRIM(p.codigo) = TRIM($1)
@@ -14164,7 +14164,7 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
     const gerados     = [];
 
     await pool.query(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
 
@@ -14366,7 +14366,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     if (semMp) {
       filtroFamilia = 'sem_mp';
       familiaMpCond = `NOT EXISTS (
-             SELECT 1 FROM public.produtos_omie po
+             SELECT 1 FROM produto.produtos_omie po
               WHERE ${isMpSql}
                 AND (
                   TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
@@ -14378,7 +14378,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
       filtroFamilia = 'mp';
       familiaMpCond = `(
            EXISTS (
-             SELECT 1 FROM public.produtos_omie po
+             SELECT 1 FROM produto.produtos_omie po
               WHERE ${isMpSql}
                 AND (
                   TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(er.codigo_produto, ''))
@@ -14436,11 +14436,11 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
   try {
     // Garante coluna produto_customizado (idempotente)
     await pool.query(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
     await pool.query(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
 
@@ -14496,10 +14496,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
           FROM etiqueta."ETQ_recebimento" er
           LEFT JOIN LATERAL (
             SELECT p.codigo, p.codigo_produto, img.url_imagem, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
-              FROM public.produtos_omie p
+              FROM produto.produtos_omie p
               LEFT JOIN LATERAL (
                 SELECT TRIM(pi.url_imagem) AS url_imagem
-                  FROM public.produtos_omie_imagens pi
+                  FROM produto.produtos_omie_imagens pi
                  WHERE pi.codigo_produto::text IN (
                    p.codigo_produto::text,
                    TRIM(COALESCE(p.codigo, '')),
@@ -14973,7 +14973,7 @@ app.get('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, asyn
     const [{ rows: produtos }, { rows: enderecos }] = await Promise.all([
       pool.query(
         `SELECT codigo, descricao, COALESCE(NULLIF(TRIM(unidade), ''), 'UN') AS unidade
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
           WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto_integracao = $1
           LIMIT 1`,
         [codigo]
@@ -15260,7 +15260,7 @@ app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, ex
       return res.status(409).json({ ok: false, error: 'Este endereço não possui saldo para transferir.', saldo });
     }
     const { rows: produtos } = await client.query(
-      `SELECT codigo, descricao FROM public.produtos_omie
+      `SELECT codigo, descricao FROM produto.produtos_omie
         WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto::text = $2 LIMIT 1`,
       [codigo, String(codigoOmie).trim()]
     );
@@ -15338,7 +15338,7 @@ app.get('/api/etiquetas/rec-impresso/enderecos-referencia-por-produto', async (r
               COALESCE(NULLIF(TRIM(MAX(i.unidade)), ''), 'UN') AS unidade,
               MAX(i.complemento) AS complemento
          FROM etiqueta."ETQ_rec_impresso" i
-         JOIN public.produtos_omie p
+         JOIN produto.produtos_omie p
            ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
         WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1)
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
@@ -15407,7 +15407,7 @@ app.get('/api/etiquetas/rec-impresso/ids-fifo-batch', async (req, res) => {
               COALESCE(NULLIF(TRIM(i.unidade), ''), 'UN') AS unidade,
               TRIM(i.endereco) AS endereco
          FROM etiqueta."ETQ_rec_impresso" i
-         JOIN public.produtos_omie p
+         JOIN produto.produtos_omie p
            ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
         WHERE p.codigo = ANY($1::text[])
           AND COALESCE(i.qtd, 0) > 0
@@ -15639,7 +15639,7 @@ app.get('/api/etiquetas/rec-impresso/:id', async (req, res) => {
               TRIM(COALESCE(i.descricao_produto, '')) AS descricao,
               COALESCE(p.codigo, '') AS codigo
          FROM etiqueta."ETQ_rec_impresso" i
-         LEFT JOIN public.produtos_omie p
+         LEFT JOIN produto.produtos_omie p
            ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
         WHERE i.id = $1
         LIMIT 1`,
@@ -15708,7 +15708,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
                   NULLIF(p.valor_unitario, 0),
                   0.01
                 ) AS valor_unit
-           FROM public.produtos_omie p
+           FROM produto.produtos_omie p
            LEFT JOIN logistica.estoque_atual e
              ON e.codigo = p.codigo AND e.local_codigo = $2
            WHERE p.codigo = $1
@@ -15780,7 +15780,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
                 NULLIF(TRIM(i.codigo_produto), ''),
                 (SELECT p.codigo_produto::text
                    FROM etiqueta."ETQ_recebimento" r
-                   JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+                   JOIN produto.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
                   WHERE r.id = i.origem_id
                   LIMIT 1)
               ),
@@ -15848,7 +15848,7 @@ app.post('/api/etiquetas/rec-impresso/registrar-movimentacao', express.json(), a
     let descricao = descricaoRaw;
     if (!descricao) {
       const { rows: descRows } = await client.query(
-        `SELECT descricao FROM public.produtos_omie
+        `SELECT descricao FROM produto.produtos_omie
           WHERE codigo_produto::text = $1 OR codigo = $2 LIMIT 1`,
         [codigoOmie, codigoTexto]
       );
@@ -15991,7 +15991,7 @@ async function _etqEnderecosConhecidosProduto(client, codigoOmie, codigoTexto) {
   const { rows } = await client.query(
     `SELECT DISTINCT TRIM(i.endereco) AS endereco
        FROM etiqueta."ETQ_rec_impresso" i
-       JOIN public.produtos_omie p
+       JOIN produto.produtos_omie p
          ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
       WHERE (p.codigo = $1 OR p.codigo_produto::text = $1 OR p.codigo_produto_integracao = $1
              OR p.codigo_produto::text = $2 OR TRIM(p.codigo) = $2)
@@ -16008,12 +16008,12 @@ async function _etqIdsEquivalentesSku(client, codigoOmie) {
     `WITH base AS (
        SELECT TRIM(COALESCE(codigo, '')) AS codigo,
               TRIM(COALESCE(codigo_produto_integracao, '')) AS integ
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo_produto::text = $1
         LIMIT 1
      )
      SELECT DISTINCT p.codigo_produto::text AS id
-       FROM public.produtos_omie p
+       FROM produto.produtos_omie p
        CROSS JOIN base b
       WHERE (b.codigo <> '' AND TRIM(p.codigo) = b.codigo)
          OR (b.integ <> '' AND TRIM(COALESCE(p.codigo_produto_integracao, '')) = b.integ)
@@ -16082,7 +16082,7 @@ async function _logisticaResolverDestinoSepDerivada(client, { nSolicOrigem, sIds
   if (ids.length || carrIds.length) {
     const { rows } = await client.query(
       `SELECT cod_local, nome_local, motivo
-         FROM solicitacao_produto.itens_solicitados
+         FROM logistica.itens_solicitados
         WHERE ($1::bigint[] <> '{}'::bigint[] AND id = ANY($1::bigint[]))
            OR ($2::bigint[] <> '{}'::bigint[] AND id_carr = ANY($2::bigint[]))
         ORDER BY
@@ -16105,7 +16105,7 @@ async function _logisticaResolverDestinoSepDerivada(client, { nSolicOrigem, sIds
   if (baseN) {
     const { rows } = await client.query(
       `SELECT cod_local, nome_local, motivo
-         FROM solicitacao_produto.itens_solicitados
+         FROM logistica.itens_solicitados
         WHERE (n_solic = $1 OR n_solic LIKE ($1 || '.%'))
           AND cod_local IS NOT NULL AND TRIM(cod_local) <> ''
         ORDER BY
@@ -16137,7 +16137,7 @@ async function _logisticaResolverDestinoSepDerivada(client, { nSolicOrigem, sIds
 /** Backfill idempotente: SEP-NNNN.X já registradas sem destino → 3. ESTOQUE PRODUÇÃO. */
 async function _logisticaBackfillDestinoSepDerivadas(client = pool) {
   const { rowCount } = await client.query(
-    `UPDATE solicitacao_produto.itens_solicitados
+    `UPDATE logistica.itens_solicitados
         SET cod_local = $1,
             nome_local = $2
       WHERE n_solic ~ '^SEP-[0-9]+\\.[0-9]+$'
@@ -16241,7 +16241,7 @@ async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codig
   if (!valor || valor <= 0) {
     const { rows } = await pool.query(
       `SELECT COALESCE(NULLIF(valor_unitario, 0), 0.01) AS valor
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo = $1 OR codigo_produto::text = $2
         LIMIT 1`,
       [String(codigo_texto || '').trim(), String(id_prod)]
@@ -16293,11 +16293,11 @@ async function _omieIncluirTrfEstoqueSeparacao({ origem, destino, id_prod, codig
 
 async function _ensureOmieSepColumns(client) {
   const db = client || pool;
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
 }
 
 async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, destino, qtd, codigo_produto, codigo }) {
@@ -16309,7 +16309,7 @@ async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, d
 
   const { rows } = await client.query(
     `SELECT i.id, c.quantidade::numeric AS qty_carr
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
     [ids]
@@ -16321,7 +16321,7 @@ async function _logisticaPersistirTrfOmieSeparacao(client, solicIds, { origem, d
       itemQtd = ((parseFloat(row.qty_carr) || 0) / sumCarr) * qtdNum;
     }
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET omie_sep_origem = $2,
               omie_sep_destino = $3,
               omie_sep_qtd = $4,
@@ -16348,7 +16348,7 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
     `SELECT i.id, i.n_solic, i.cod_local, i.nome_local,
             c.codigo_produto, c.quantidade::numeric AS qty, c.unidade,
             COALESCE(NULLIF(TRIM(c.retirada_por), ''), NULLIF(TRIM(c.nome_user), '')) AS destinatario
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
     [ids]
@@ -16472,7 +16472,7 @@ async function _logisticaEstornarTrfOmieSeparacao(client, solicIds, { nome_user 
 
   const { rows } = await client.query(
     `SELECT id, n_solic, omie_sep_origem, omie_sep_destino, omie_sep_qtd, omie_sep_codigo_produto, omie_sep_codigo
-       FROM solicitacao_produto.itens_solicitados
+       FROM logistica.itens_solicitados
       WHERE id = ANY($1::bigint[])
         AND omie_sep_origem IS NOT NULL
         AND omie_sep_destino IS NOT NULL
@@ -16523,7 +16523,7 @@ async function _logisticaEstornarTrfOmieSeparacao(client, solicIds, { nome_user 
   }
 
   await client.query(
-    `UPDATE solicitacao_produto.itens_solicitados
+    `UPDATE logistica.itens_solicitados
         SET omie_sep_origem = NULL,
             omie_sep_destino = NULL,
             omie_sep_qtd = NULL,
@@ -16631,7 +16631,7 @@ async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver, { modoE
 
   if (fator >= 1 - 1e-9) {
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET etq_sep_endereco = NULL,
               etq_sep_codigo = NULL,
               etq_sep_qtd = NULL,
@@ -16650,7 +16650,7 @@ async function _etqDevolverDebitoSeparacaoQtd(client, item, qtdDevolver, { modoE
     const qtdRest = restante.reduce((s, p) => s + p.qtd, 0);
     const endResumo = restante.map(p => p.endereco).filter(Boolean).join(' + ');
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET etq_sep_endereco = $2,
               etq_sep_qtd = $3,
               etq_sep_detalhes = $4::jsonb
@@ -16777,7 +16777,7 @@ async function _logisticaObterQtyCodigoSeparacao(client, solicIds) {
   if (!ids.length) return { qtd: 0, codigo: null };
   const { rows } = await client.query(
     `SELECT SUM(c.quantidade::numeric) AS total, MIN(c.codigo_produto) AS codigo
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
     [ids]
@@ -16994,10 +16994,10 @@ async function _etqDebitarSeparacaoAlmox(client, { cod_local_origem, etq_id, end
 
 async function _ensureEtqSepColumns(client) {
   const db = client || pool;
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
-  await db.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await db.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
 }
 
 /** Grava endereço/qtd debitados em ETQ_rec_impresso para estorno ao retificar. */
@@ -17013,7 +17013,7 @@ async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo
 
   const { rows } = await client.query(
     `SELECT i.id, c.quantidade::numeric AS qty_carr
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
     [ids]
@@ -17030,7 +17030,7 @@ async function _etqPersistirDebitoSeparacao(client, solicIds, { endereco, codigo
     const itemQtd = qtdTotal * fator;
     const itemDets = dets.map(d => ({ endereco: d.endereco, qtd: (Number(d.qtd) || 0) * fator }));
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET etq_sep_endereco = $2,
               etq_sep_codigo = $3,
               etq_sep_qtd = $4,
@@ -17049,7 +17049,7 @@ async function _etqEstornarDebitoSeparacao(client, solicIds) {
 
   const { rows } = await client.query(
     `SELECT id, etq_sep_endereco, etq_sep_codigo, etq_sep_qtd, etq_sep_detalhes
-       FROM solicitacao_produto.itens_solicitados
+       FROM logistica.itens_solicitados
       WHERE id = ANY($1::bigint[])
         AND (
           (etq_sep_endereco IS NOT NULL AND COALESCE(etq_sep_qtd, 0) > 0)
@@ -17100,7 +17100,7 @@ async function _etqEstornarDebitoSeparacao(client, solicIds) {
   }
 
   await client.query(
-    `UPDATE solicitacao_produto.itens_solicitados
+    `UPDATE logistica.itens_solicitados
         SET etq_sep_endereco = NULL,
             etq_sep_codigo = NULL,
             etq_sep_qtd = NULL,
@@ -17689,7 +17689,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
       if (!descricao) {
         try {
           const { rows } = await pool.query(
-            `SELECT descricao FROM "IAPP_API".op_iapp_produto WHERE identificacao = $1 LIMIT 1`,
+            `SELECT descricao FROM producao.op_iapp_produto WHERE identificacao = $1 LIMIT 1`,
             [codigo]
           );
           descricao = rows[0]?.descricao || '';
@@ -17735,7 +17735,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
 
       const opIappRow = osId
         ? await pool.query(
-            `SELECT op_iapp_id FROM "IAPP_API".op_iapp_os WHERE os_id = $1 LIMIT 1`,
+            `SELECT op_iapp_id FROM producao.op_iapp_os WHERE os_id = $1 LIMIT 1`,
             [osId]
           )
         : { rows: [] };
@@ -17763,7 +17763,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         const codigoProdutoNum = idOmie ? Number(idOmie) : null;
         const numeroOpTxt = loteRaw;
         const updKanban = await pool.query(
-          `UPDATE "Producao"."Kanban_programacao"
+          `UPDATE producao."Kanban_programacao"
               SET codigo_produto = COALESCE($2, codigo_produto),
                   codigo = COALESCE(NULLIF($3, ''), codigo),
                   descricao = COALESCE(NULLIF($4, ''), descricao),
@@ -17781,7 +17781,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         );
         if (!updKanban.rowCount) {
           await pool.query(
-            `INSERT INTO "Producao"."Kanban_programacao"
+            `INSERT INTO producao."Kanban_programacao"
                (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
              VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
@@ -17789,7 +17789,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         }
       } else if (opIappId > 0) {
         await pool.query(
-          `UPDATE "IAPP_API".op_iapp_os
+          `UPDATE producao.op_iapp_os
               SET status_producao = 'Solicitado',
                   data_status_producao = NOW()
             WHERE op_iapp_id = $1
@@ -17800,7 +17800,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         const codigoProdutoNum = idOmie ? Number(idOmie) : null;
         const numeroOpTxt = loteRaw;
         const updKanban = await pool.query(
-          `UPDATE "Producao"."Kanban_programacao"
+          `UPDATE producao."Kanban_programacao"
               SET codigo_produto = COALESCE($2, codigo_produto),
                   codigo = COALESCE(NULLIF($3, ''), codigo),
                   descricao = COALESCE(NULLIF($4, ''), descricao),
@@ -17818,7 +17818,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         );
         if (!updKanban.rowCount) {
           await pool.query(
-            `INSERT INTO "Producao"."Kanban_programacao"
+            `INSERT INTO producao."Kanban_programacao"
                (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status, ri)
              VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
             [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
@@ -17826,7 +17826,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         }
       } else if (osId > 0) {
         await pool.query(
-          `UPDATE "IAPP_API".op_iapp_os
+          `UPDATE producao.op_iapp_os
               SET status_producao = 'Solicitado',
                   data_status_producao = NOW()
             WHERE os_id = $1`,
@@ -17851,7 +17851,7 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
 
         try {
           const kpRes = await pool.query(
-            `SELECT id FROM "Producao"."Kanban_programacao"
+            `SELECT id FROM producao."Kanban_programacao"
               WHERE ($1::bigint > 0 AND op_producao_id = $1)
                  OR ($2::bigint > 0 AND op_iapp_id = $2)
               ORDER BY id DESC LIMIT 1`,
@@ -18087,10 +18087,10 @@ app.get('/api/etiquetas/ocupacao', async (req, res) => {
         i.data_emissao,
         fot.url_imagem AS foto_url
       FROM etiqueta."ETQ_rec_impresso" i
-      LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
+      LEFT JOIN produto.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
       LEFT JOIN LATERAL (
         SELECT img.url_imagem
-          FROM public.produtos_omie_imagens img
+          FROM produto.produtos_omie_imagens img
          WHERE img.codigo_produto::text = TRIM(COALESCE(p.codigo_produto::text, i.codigo_produto))
            AND COALESCE(img.ativo, true) = true
          ORDER BY img.pos ASC NULLS LAST, img.id ASC
@@ -18147,10 +18147,10 @@ app.get('/api/etiquetas/ocupacao/detalhe', async (req, res) => {
         i.data_emissao,
         fot.url_imagem AS foto_url
       FROM etiqueta."ETQ_rec_impresso" i
-      LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
+      LEFT JOIN produto.produtos_omie p ON p.codigo_produto::text = TRIM(i.codigo_produto)
       LEFT JOIN LATERAL (
         SELECT img.url_imagem
-          FROM public.produtos_omie_imagens img
+          FROM produto.produtos_omie_imagens img
          WHERE img.codigo_produto::text = TRIM(COALESCE(p.codigo_produto::text, i.codigo_produto))
            AND COALESCE(img.ativo, true) = true
          ORDER BY img.pos ASC NULLS LAST, img.id ASC
@@ -18395,7 +18395,7 @@ async function detalharProdutosManuais(listaProdutos = []) {
 
   const { rows } = await pool.query(
     `SELECT codigo_produto::text AS codigo_produto, codigo, descricao
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE codigo_produto::text = ANY($1::text[])`,
     [codigosProduto]
   );
@@ -18415,12 +18415,12 @@ async function detalharProdutosManuais(listaProdutos = []) {
   }));
 }
 
-// GET /api/produtos/manuais/todos — lista manuais da tabela "Chatbot".manuais_instrucao
+// GET /api/produtos/manuais/todos — lista manuais da tabela chatbot.manuais_instrucao
 app.get('/api/produtos/manuais/todos', async (req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT id, nome_arquivo, caminho_manual, paginas, status_indexacao, created_at, produtos
-         FROM "Chatbot".manuais_instrucao
+         FROM chatbot.manuais_instrucao
         ORDER BY nome_arquivo`
     );
     const lista = await Promise.all(rows.map(async (r) => ({
@@ -18447,7 +18447,7 @@ app.post('/api/manuais-chatbot/:id/produtos', async (req, res) => {
     if (!manualId || !codigoProduto) return res.status(400).json({ error: 'manual id e codigo_produto obrigatórios' });
 
     // Busca array atual
-    const { rows } = await pool.query('SELECT produtos FROM "Chatbot".manuais_instrucao WHERE id = $1', [manualId]);
+    const { rows } = await pool.query('SELECT produtos FROM chatbot.manuais_instrucao WHERE id = $1', [manualId]);
     if (!rows.length) return res.status(404).json({ error: 'Manual não encontrado' });
     const lista = Array.isArray(rows[0].produtos) ? rows[0].produtos : [];
 
@@ -18457,7 +18457,7 @@ app.post('/api/manuais-chatbot/:id/produtos', async (req, res) => {
     }
 
     lista.push(codigoProduto);
-    await pool.query('UPDATE "Chatbot".manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
+    await pool.query('UPDATE chatbot.manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
     res.json({ ok: true, produtos: await detalharProdutosManuais(lista) });
   } catch (err) {
     console.error('[Manuais] POST produto erro:', err);
@@ -18472,12 +18472,12 @@ app.delete('/api/manuais-chatbot/:id/produtos/:codigoProduto', async (req, res) 
     const codigoProduto = String(req.params.codigoProduto || '').trim();
     if (!manualId || !codigoProduto) return res.status(400).json({ error: 'Parâmetros inválidos' });
 
-    const { rows } = await pool.query('SELECT produtos FROM "Chatbot".manuais_instrucao WHERE id = $1', [manualId]);
+    const { rows } = await pool.query('SELECT produtos FROM chatbot.manuais_instrucao WHERE id = $1', [manualId]);
     if (!rows.length) return res.status(404).json({ error: 'Manual não encontrado' });
     let lista = Array.isArray(rows[0].produtos) ? rows[0].produtos : [];
     lista = lista.filter(c => c !== codigoProduto);
 
-    await pool.query('UPDATE "Chatbot".manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
+    await pool.query('UPDATE chatbot.manuais_instrucao SET produtos = $2 WHERE id = $1', [manualId, JSON.stringify(lista)]);
     res.json({ ok: true, produtos: lista });
   } catch (err) {
     console.error('[Manuais] DELETE produto erro:', err);
@@ -18491,7 +18491,7 @@ app.get('/api/produtos/:codigo/manuais', async (req, res) => {
     const codigo = String(req.params.codigo || '').trim();
     if (!codigo) return res.status(400).json({ error: 'Código do produto obrigatório' });
     const { rows } = await pool.query(
-      `SELECT manuais FROM public.produtos_omie
+      `SELECT manuais FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1)
            OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
@@ -18523,7 +18523,7 @@ app.post('/api/produtos/:codigo/manuais', uploadManual.single('arquivo'), async 
     });
 
     await pool.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET manuais = COALESCE(manuais, '[]'::jsonb) || $1::jsonb
         WHERE TRIM(codigo_produto::text) = TRIM($2)
            OR TRIM(codigo) = TRIM($2)`,
@@ -18546,7 +18546,7 @@ app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
     if (!codigo || isNaN(index) || index < 0) return res.status(400).json({ error: 'Parâmetros inválidos' });
 
     const { rows } = await pool.query(
-      `SELECT manuais FROM public.produtos_omie
+      `SELECT manuais FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1)
            OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
@@ -18568,7 +18568,7 @@ app.delete('/api/produtos/:codigo/manuais/:index', async (req, res) => {
     }
 
     await pool.query(
-      `UPDATE public.produtos_omie SET manuais = $1::jsonb
+      `UPDATE produto.produtos_omie SET manuais = $1::jsonb
         WHERE TRIM(codigo_produto::text) = TRIM($2)
            OR TRIM(codigo) = TRIM($2)`,
       [JSON.stringify(manuais), codigo]
@@ -18709,14 +18709,14 @@ app.post('/api/preparacao/op/:op/mover', async (req, res) => {
     // 3) Overlay garante UI instantânea
     try {
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+        CREATE TABLE IF NOT EXISTS producao.op_status_overlay (
           op         text PRIMARY KEY,
           status     text NOT NULL,
           updated_at timestamptz NOT NULL DEFAULT now()
         )
       `);
       const up = await pool.query(
-        `INSERT INTO public.op_status_overlay (op, status, updated_at)
+        `INSERT INTO producao.op_status_overlay (op, status, updated_at)
          VALUES ($1, $2, now())
          ON CONFLICT (op) DO UPDATE
            SET status = EXCLUDED.status,
@@ -18924,7 +18924,7 @@ app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
     const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
 
     const sql = `
-      INSERT INTO "OrdemProducao".tab_op
+      INSERT INTO producao.tab_op
         (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
       VALUES
         ($1,$2,$3,$4,$5,$6,$7,$8)
@@ -19160,7 +19160,7 @@ async function gerarProximoNumeroOP(client, prefix = 'OP') {
   const { rows } = await client.query(
     `
   SELECT numero_op
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
       WHERE numero_op LIKE $1
       ORDER BY numero_op DESC
       LIMIT 1
@@ -19187,9 +19187,9 @@ async function gerarProximoNumeroOP(client, prefix = 'OP') {
 async function registrarAnexosOp(client, numeroOp, codigoProdutoId) {
   if (!numeroOp || !codigoProdutoId) return;
   await client.query(
-    `INSERT INTO "OrdemProducao".tab_op_anexos (numero_op, id_anexo)
+    `INSERT INTO producao.tab_op_anexos (numero_op, id_anexo)
        SELECT $1, id
-         FROM public.produtos_omie_anexos
+         FROM produto.produtos_omie_anexos
         WHERE codigo_produto = $2
           AND ativo IS TRUE`,
     [numeroOp, codigoProdutoId]
@@ -19200,9 +19200,9 @@ async function registrarAnexosOp(client, numeroOp, codigoProdutoId) {
 async function registrarImagensOp(client, numeroOp, codigoProdutoId) {
   if (!numeroOp || !codigoProdutoId) return;
   await client.query(
-    `INSERT INTO "OrdemProducao".tab_op_imagens (numero_op, id_imagem, visivel_producao, visivel_assistencia_tecnica)
+    `INSERT INTO producao.tab_op_imagens (numero_op, id_imagem, visivel_producao, visivel_assistencia_tecnica)
        SELECT $1, id, visivel_producao, visivel_assistencia_tecnica
-         FROM public.produtos_omie_imagens
+         FROM produto.produtos_omie_imagens
         WHERE codigo_produto = $2
           AND ativo IS TRUE
           AND COALESCE(visivel_assistencia_tecnica, true) = true`,
@@ -19334,7 +19334,7 @@ async function obterCodigoProdutoId(pg, codigo) {
     const { rows } = await pg.query(
       `
         SELECT codigo_produto
-          FROM public.produtos_omie
+          FROM produto.produtos_omie
          WHERE TRIM(UPPER(codigo)) = TRIM(UPPER($1))
             OR TRIM(UPPER(codigo_produto_integracao::text)) = TRIM(UPPER($1))
          ORDER BY codigo_produto ASC
@@ -19379,7 +19379,7 @@ async function obterVersaoEstrutura(client, codigo) {
 
 // Busca o "local de produção" preferencial a partir da tabela engenharia.omie_estrutura,
 // usando SEMPRE o Código OMIE (id_produto) como chave de localização.
-// - Primeiro resolve id_produto via public.produtos_omie (obterCodigoProdutoId)
+// - Primeiro resolve id_produto via produto.produtos_omie (obterCodigoProdutoId)
 // - Depois lê engenharia.omie_estrutura."local_produção" por id_produto
 // - Retorna string ou null se não houver valor
 async function obterLocalProducaoPorCodigo(client, codigo) {
@@ -19559,10 +19559,10 @@ app.post('/api/pcp/etiquetas/pai', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-  await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
+  await client.query('LOCK TABLE producao.tab_op IN SHARE ROW EXCLUSIVE MODE');
 
       const insertSql = `
-  INSERT INTO "OrdemProducao".tab_op
+  INSERT INTO producao.tab_op
           (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
         RETURNING id, data_criacao
@@ -19786,7 +19786,7 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-  await client.query('LOCK TABLE "OrdemProducao".tab_op IN SHARE ROW EXCLUSIVE MODE');
+  await client.query('LOCK TABLE producao.tab_op IN SHARE ROW EXCLUSIVE MODE');
 
   // Determina local de impressão priorizando engenharia.omie_estrutura.local_produção (por id_produto/"Código OMIE")
   const localPreferencial = await obterLocalProducaoPorCodigo(client, codigo);
@@ -19806,7 +19806,7 @@ app.post('/api/pcp/etiquetas/pp', async (req, res) => {
       }));
 
       const insertSql = `
-  INSERT INTO "OrdemProducao".tab_op
+  INSERT INTO producao.tab_op
           (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao, conteudo_zpl, usuario_criacao, observacoes)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
         RETURNING id, data_criacao
@@ -19942,7 +19942,7 @@ app.post('/api/etiquetas/aguardando/confirmar', express.json(), async (req, res)
       await client.query('BEGIN');
 
       const updateSql = `
-        UPDATE "OrdemProducao".tab_op
+        UPDATE producao.tab_op
            SET data_impressao = $2::timestamp,
                impressa = CASE WHEN $2 IS NULL THEN FALSE ELSE impressa END
          WHERE numero_op = $1
@@ -19977,7 +19977,7 @@ app.post('/api/etiquetas/aguardando/confirmar', express.json(), async (req, res)
           }
           // Busca códigos de produto para as OPs
           const { rows: mapRows } = await pool.query(
-            'SELECT numero_op, codigo_produto_id, codigo_produto FROM "OrdemProducao".tab_op WHERE numero_op = ANY($1)',
+            'SELECT numero_op, codigo_produto_id, codigo_produto FROM producao.tab_op WHERE numero_op = ANY($1)',
             [atualizados]
           );
           for (const r of mapRows) {
@@ -20193,7 +20193,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
     const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
 
     const sql = `
-      INSERT INTO "OrdemProducao".tab_op
+      INSERT INTO producao.tab_op
           (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao,
            conteudo_zpl, impressa, usuario_criacao, observacoes)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -20218,7 +20218,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
   // Próximo código sequencial PaaNNNNN (ignora se registros antigos têm ou não 'P')
   async function getNextPPCode(pg, ano2) {
     await pg.query(`
-      CREATE TABLE IF NOT EXISTS op_codigos_log (
+      CREATE TABLE IF NOT EXISTS producao.op_codigos_log (
         id          BIGSERIAL PRIMARY KEY,
         ccodintop   TEXT NOT NULL,
         created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -20227,7 +20227,7 @@ function gerarEtiquetaPP({ codMP, op, descricao = '' }) {
     const { rows } = await pg.query(`
       WITH x AS (
         SELECT (regexp_matches(UPPER(ccodintop), '^[P]?([0-9]{2})([0-9]{5})$')) AS m
-        FROM op_codigos_log
+        FROM producao.op_codigos_log
       ),
       y AS (
         SELECT (m)[1]::int AS yy, (m)[2]::int AS seq
@@ -20462,7 +20462,7 @@ async function salvarEtiquetaOP(pool, {
   const codigoProdutoId = await obterCodigoProdutoId(pool, codigo_produto);
 
   const sql = `
-    INSERT INTO "OrdemProducao".tab_op
+    INSERT INTO producao.tab_op
       (numero_op, codigo_produto, codigo_produto_id, tipo_etiqueta, local_impressao,
        conteudo_zpl, impressa, usuario_criacao, observacoes)
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -20567,8 +20567,8 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
         po.codigo_familia,
         po.descricao_familia,
         po.preco_definido
-      FROM public.omie_estoque_posicao p
-      LEFT JOIN public.produtos_omie po
+      FROM omie.omie_estoque_posicao p
+      LEFT JOIN produto.produtos_omie po
         ON po.codigo_produto = p.omie_prod_id
       WHERE p.local_codigo = $1
         AND COALESCE(p.saldo, 0) != 0
@@ -20605,7 +20605,7 @@ async function listarLocaisViaDb() {
       local_codigo,
       nome,
       COALESCE(ativo, true) AS ativo
-    FROM public.omie_locais_estoque
+    FROM omie.omie_locais_estoque
     ORDER BY nome NULLS LAST, local_codigo
   `);
 
@@ -21001,9 +21001,9 @@ async function ensureVendasNotasOmieTables(client) {
   if (_vendasNotasOmieTablesReady) return;
 
   await client.query(`
-    CREATE SCHEMA IF NOT EXISTS "Vendas";
+    CREATE SCHEMA IF NOT EXISTS vendas;
 
-    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie (
+    CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie (
       id BIGSERIAL PRIMARY KEY,
       identidade TEXT NOT NULL UNIQUE,
       tipo_documento VARCHAR(10) NOT NULL,
@@ -21036,12 +21036,12 @@ async function ensureVendasNotasOmieTables(client) {
       updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
     );
 
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_numero ON "Vendas".notas_fiscais_omie(numero_nota);
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_chave ON "Vendas".notas_fiscais_omie(chave_nfe);
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_pedido ON "Vendas".notas_fiscais_omie(numero_pedido);
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_topic ON "Vendas".notas_fiscais_omie(topic_ultimo);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_numero ON vendas.notas_fiscais_omie(numero_nota);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_chave ON vendas.notas_fiscais_omie(chave_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_pedido ON vendas.notas_fiscais_omie(numero_pedido);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_topic ON vendas.notas_fiscais_omie(topic_ultimo);
 
-    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie_eventos (
+    CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie_eventos (
       id BIGSERIAL PRIMARY KEY,
       identidade TEXT,
       tipo_documento VARCHAR(10),
@@ -21058,26 +21058,26 @@ async function ensureVendasNotasOmieTables(client) {
       erro TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_topic ON "Vendas".notas_fiscais_omie_eventos(topic);
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_numero ON "Vendas".notas_fiscais_omie_eventos(numero_nota);
-    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_chave ON "Vendas".notas_fiscais_omie_eventos(chave_nfe);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_topic ON vendas.notas_fiscais_omie_eventos(topic);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_numero ON vendas.notas_fiscais_omie_eventos(numero_nota);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_chave ON vendas.notas_fiscais_omie_eventos(chave_nfe);
     CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_fiscais_omie_eventos_message_topic
-      ON "Vendas".notas_fiscais_omie_eventos(message_id, topic)
+      ON vendas.notas_fiscais_omie_eventos(message_id, topic)
       WHERE message_id IS NOT NULL;
 
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
   `);
 
   _vendasNotasOmieTablesReady = true;
@@ -21158,7 +21158,7 @@ async function consultarNfOmieParaCfop({ chaveNfe = null, idNfOmie = null, numer
 }
 
 /**
- * Preenche cfop em "Vendas".notas_fiscais_omie via ConsultarNF (fora do request do webhook).
+ * Preenche cfop em vendas.notas_fiscais_omie via ConsultarNF (fora do request do webhook).
  * Usa fila serial + delay para não estourar rate limit da Omie.
  */
 function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = null, numeroNota = null } = {}) {
@@ -21174,7 +21174,7 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
 
       const atual = await client.query(
         `SELECT cfop, chave_nfe, id_nf_omie, numero_nota
-           FROM "Vendas".notas_fiscais_omie
+           FROM vendas.notas_fiscais_omie
           WHERE identidade = $1
           LIMIT 1`,
         [id]
@@ -21195,7 +21195,7 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
       }
 
       await client.query(
-        `UPDATE "Vendas".notas_fiscais_omie
+        `UPDATE vendas.notas_fiscais_omie
             SET cfop = $1, updated_at = NOW()
           WHERE identidade = $2
             AND COALESCE(TRIM(cfop), '') = ''`,
@@ -21231,7 +21231,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
 
   const ativa = !['Cancelada'].includes(String(dados.statusUltimo || ''));
   await client.query(`
-    INSERT INTO "Vendas".notas_fiscais_omie (
+    INSERT INTO vendas.notas_fiscais_omie (
       identidade, tipo_documento, topic_ultimo, status_ultimo,
       numero_nota, chave_nfe, numero_pedido,
       acao_ultimo, id_nf_omie, serie, url_xml,
@@ -21256,32 +21256,32 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
-      tipo_documento = COALESCE(EXCLUDED.tipo_documento, "Vendas".notas_fiscais_omie.tipo_documento),
+      tipo_documento = COALESCE(EXCLUDED.tipo_documento, vendas.notas_fiscais_omie.tipo_documento),
       topic_ultimo = EXCLUDED.topic_ultimo,
       status_ultimo = EXCLUDED.status_ultimo,
-      numero_nota = COALESCE(EXCLUDED.numero_nota, "Vendas".notas_fiscais_omie.numero_nota),
-      chave_nfe = COALESCE(EXCLUDED.chave_nfe, "Vendas".notas_fiscais_omie.chave_nfe),
-      numero_pedido = COALESCE(EXCLUDED.numero_pedido, "Vendas".notas_fiscais_omie.numero_pedido),
-      acao_ultimo = COALESCE(EXCLUDED.acao_ultimo, "Vendas".notas_fiscais_omie.acao_ultimo),
-      id_nf_omie = COALESCE(EXCLUDED.id_nf_omie, "Vendas".notas_fiscais_omie.id_nf_omie),
-      serie = COALESCE(EXCLUDED.serie, "Vendas".notas_fiscais_omie.serie),
-      url_xml = COALESCE(EXCLUDED.url_xml, "Vendas".notas_fiscais_omie.url_xml),
-      ambiente = COALESCE(EXCLUDED.ambiente, "Vendas".notas_fiscais_omie.ambiente),
-      operacao = COALESCE(EXCLUDED.operacao, "Vendas".notas_fiscais_omie.operacao),
-      hora_emissao = COALESCE(EXCLUDED.hora_emissao, "Vendas".notas_fiscais_omie.hora_emissao),
-      id_pedido_omie = COALESCE(EXCLUDED.id_pedido_omie, "Vendas".notas_fiscais_omie.id_pedido_omie),
-      url_danfe = COALESCE(EXCLUDED.url_danfe, "Vendas".notas_fiscais_omie.url_danfe),
-      empresa_ie = COALESCE(EXCLUDED.empresa_ie, "Vendas".notas_fiscais_omie.empresa_ie),
-      empresa_uf = COALESCE(EXCLUDED.empresa_uf, "Vendas".notas_fiscais_omie.empresa_uf),
-      empresa_cnpj = COALESCE(EXCLUDED.empresa_cnpj, "Vendas".notas_fiscais_omie.empresa_cnpj),
-      cfop = COALESCE(EXCLUDED.cfop, "Vendas".notas_fiscais_omie.cfop),
-      valor_total = COALESCE(EXCLUDED.valor_total, "Vendas".notas_fiscais_omie.valor_total),
-      cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
-      razao_emitente = COALESCE(EXCLUDED.razao_emitente, "Vendas".notas_fiscais_omie.razao_emitente),
-      data_emissao = COALESCE(EXCLUDED.data_emissao, "Vendas".notas_fiscais_omie.data_emissao),
-      message_id_ultimo = COALESCE(EXCLUDED.message_id_ultimo, "Vendas".notas_fiscais_omie.message_id_ultimo),
-      author_ultimo = COALESCE(EXCLUDED.author_ultimo, "Vendas".notas_fiscais_omie.author_ultimo),
-      payload_ultimo = COALESCE(EXCLUDED.payload_ultimo, "Vendas".notas_fiscais_omie.payload_ultimo),
+      numero_nota = COALESCE(EXCLUDED.numero_nota, vendas.notas_fiscais_omie.numero_nota),
+      chave_nfe = COALESCE(EXCLUDED.chave_nfe, vendas.notas_fiscais_omie.chave_nfe),
+      numero_pedido = COALESCE(EXCLUDED.numero_pedido, vendas.notas_fiscais_omie.numero_pedido),
+      acao_ultimo = COALESCE(EXCLUDED.acao_ultimo, vendas.notas_fiscais_omie.acao_ultimo),
+      id_nf_omie = COALESCE(EXCLUDED.id_nf_omie, vendas.notas_fiscais_omie.id_nf_omie),
+      serie = COALESCE(EXCLUDED.serie, vendas.notas_fiscais_omie.serie),
+      url_xml = COALESCE(EXCLUDED.url_xml, vendas.notas_fiscais_omie.url_xml),
+      ambiente = COALESCE(EXCLUDED.ambiente, vendas.notas_fiscais_omie.ambiente),
+      operacao = COALESCE(EXCLUDED.operacao, vendas.notas_fiscais_omie.operacao),
+      hora_emissao = COALESCE(EXCLUDED.hora_emissao, vendas.notas_fiscais_omie.hora_emissao),
+      id_pedido_omie = COALESCE(EXCLUDED.id_pedido_omie, vendas.notas_fiscais_omie.id_pedido_omie),
+      url_danfe = COALESCE(EXCLUDED.url_danfe, vendas.notas_fiscais_omie.url_danfe),
+      empresa_ie = COALESCE(EXCLUDED.empresa_ie, vendas.notas_fiscais_omie.empresa_ie),
+      empresa_uf = COALESCE(EXCLUDED.empresa_uf, vendas.notas_fiscais_omie.empresa_uf),
+      empresa_cnpj = COALESCE(EXCLUDED.empresa_cnpj, vendas.notas_fiscais_omie.empresa_cnpj),
+      cfop = COALESCE(EXCLUDED.cfop, vendas.notas_fiscais_omie.cfop),
+      valor_total = COALESCE(EXCLUDED.valor_total, vendas.notas_fiscais_omie.valor_total),
+      cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, vendas.notas_fiscais_omie.cnpj_emitente),
+      razao_emitente = COALESCE(EXCLUDED.razao_emitente, vendas.notas_fiscais_omie.razao_emitente),
+      data_emissao = COALESCE(EXCLUDED.data_emissao, vendas.notas_fiscais_omie.data_emissao),
+      message_id_ultimo = COALESCE(EXCLUDED.message_id_ultimo, vendas.notas_fiscais_omie.message_id_ultimo),
+      author_ultimo = COALESCE(EXCLUDED.author_ultimo, vendas.notas_fiscais_omie.author_ultimo),
+      payload_ultimo = COALESCE(EXCLUDED.payload_ultimo, vendas.notas_fiscais_omie.payload_ultimo),
       ativa = EXCLUDED.ativa,
       updated_at = NOW();
   `, [
@@ -21324,7 +21324,7 @@ async function registrarEventoNotaFiscalVenda(client, dados = {}) {
   if (!topic) return { ok: false, reason: 'missing_topic' };
 
   await client.query(`
-    INSERT INTO "Vendas".notas_fiscais_omie_eventos (
+    INSERT INTO vendas.notas_fiscais_omie_eventos (
       identidade, tipo_documento, topic, status,
       numero_nota, chave_nfe, numero_pedido,
       message_id, author, payload,
@@ -22348,12 +22348,15 @@ app.get('/api/logistica/locais-inventario', async (req, res) => {
 // ============= INICIALIZAÇÃO SCHEMA SOLICITACAO_PRODUTO =============
 async function initSolicitacaoProdutoSchema() {
   try {
+    const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('./utils/organizarSchemasMigracao');
+    await organizarSchemasMigracao(pool);
+
     // Cria schema
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS solicitacao_produto`);
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS logistica`);
 
     // Cria tabela Registro_troca
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS solicitacao_produto.Registro_troca (
+      CREATE TABLE IF NOT EXISTS logistica.registro_troca (
         id                  BIGSERIAL PRIMARY KEY,
         id_item_original    BIGINT,
         codigo_produto_ant  TEXT,
@@ -22403,7 +22406,7 @@ async function initSolicitacaoProdutoSchema() {
       if (oldData[0]?.exists) {
         // Cria a tabela no novo schema e copia dados
         await pool.query(`
-          CREATE TABLE IF NOT EXISTS solicitacao_produto.itens_solicitados (
+          CREATE TABLE IF NOT EXISTS logistica.itens_solicitados (
             id       BIGSERIAL PRIMARY KEY,
             id_carr  BIGINT,
             n_solic  TEXT,
@@ -22415,9 +22418,9 @@ async function initSolicitacaoProdutoSchema() {
         `);
 
         await pool.query(`
-          INSERT INTO solicitacao_produto.itens_solicitados (id, id_carr, n_solic, status, observacao, criado_em)
+          INSERT INTO logistica.itens_solicitados (id, id_carr, n_solic, status, observacao, criado_em)
           SELECT id, id_carr, n_solic, status, observacao, COALESCE(criado_em, now())
-          FROM solicitacao_produto.itens_solicitados
+          FROM logistica.itens_solicitados
           ON CONFLICT DO NOTHING
         `);
 
@@ -22425,7 +22428,7 @@ async function initSolicitacaoProdutoSchema() {
       } else {
         // Tabela nova, cria direto
         await pool.query(`
-          CREATE TABLE IF NOT EXISTS solicitacao_produto.itens_solicitados (
+          CREATE TABLE IF NOT EXISTS logistica.itens_solicitados (
             id       BIGSERIAL PRIMARY KEY,
             id_carr  BIGINT,
             n_solic  TEXT,
@@ -22444,7 +22447,7 @@ async function initSolicitacaoProdutoSchema() {
 
       if (sepData[0]?.exists) {
         await pool.query(`
-          CREATE TABLE IF NOT EXISTS solicitacao_produto.solicitacoes_separacao (
+          CREATE TABLE IF NOT EXISTS logistica.solicitacoes_separacao (
             id             BIGSERIAL PRIMARY KEY,
             id_user        TEXT NOT NULL,
             nome_user      TEXT NOT NULL,
@@ -22463,19 +22466,19 @@ async function initSolicitacaoProdutoSchema() {
         `);
 
         await pool.query(`
-          INSERT INTO solicitacao_produto.solicitacoes_separacao
+          INSERT INTO logistica.solicitacoes_separacao
             (id, id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
              data_prevista, horario, observacao, justificativa_nao_separacao, status, criado_em)
           SELECT id, id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
                  data_prevista, horario, observacao, justificativa_nao_separacao, status, criado_em
-          FROM solicitacao_produto.solicitacoes_separacao
+          FROM logistica.solicitacoes_separacao
           ON CONFLICT DO NOTHING
         `);
 
         console.log('[Schema] Migração de solicitacoes_separacao concluída');
       } else {
         await pool.query(`
-          CREATE TABLE IF NOT EXISTS solicitacao_produto.solicitacoes_separacao (
+          CREATE TABLE IF NOT EXISTS logistica.solicitacoes_separacao (
             id             BIGSERIAL PRIMARY KEY,
             id_user        TEXT NOT NULL,
             nome_user      TEXT NOT NULL,
@@ -22496,13 +22499,13 @@ async function initSolicitacaoProdutoSchema() {
 
     }
 
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
-    await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
-    await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+    await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await pool.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS solicitacao_produto.movimentacoes_kanban_itens (
+      CREATE TABLE IF NOT EXISTS logistica.movimentacoes_kanban_itens (
         id              BIGSERIAL PRIMARY KEY,
         id_carr         BIGINT NOT NULL,
         solic_id        BIGINT,
@@ -22514,8 +22517,9 @@ async function initSolicitacaoProdutoSchema() {
         observacao      TEXT
       )
     `);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_carr ON solicitacao_produto.movimentacoes_kanban_itens (id_carr)`);
-    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_em ON solicitacao_produto.movimentacoes_kanban_itens (movimentado_em DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_carr ON logistica.movimentacoes_kanban_itens (id_carr)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_mov_kanban_itens_em ON logistica.movimentacoes_kanban_itens (movimentado_em DESC)`);
+    await ensureSchemasCompatViews(pool);
   } catch (err) {
     console.error('[initSolicitacaoProdutoSchema] erro:', err.message);
   }
@@ -22523,30 +22527,30 @@ async function initSolicitacaoProdutoSchema() {
 
 // Colunas incrementais — idempotente, pode rodar a cada requisição
 async function ensureSolicitacaoProdutoQtyColumns() {
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
-  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
-  await pool.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS usuario_separando TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_endereco TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_codigo TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS etq_sep_detalhes JSONB`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_origem TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_destino TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_qtd NUMERIC(18,4)`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo_produto TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS omie_sep_codigo TEXT`);
+  await pool.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS data_prevista DATE`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS horario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS cod_omie TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS retirada_por TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await pool.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
-  await pool.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+  await pool.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
 }
 
 // Inicializa schema na primeira requisição
@@ -22585,7 +22589,7 @@ async function assertUsuarioSeparandoPodeAgir(client, solicIds, req) {
   const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '').trim();
   const { rows } = await client.query(
     `SELECT DISTINCT TRIM(usuario_separando) AS usuario_separando
-       FROM solicitacao_produto.itens_solicitados
+       FROM logistica.itens_solicitados
       WHERE id = ANY($1::bigint[])
         AND status IN ('Separação', 'Em Separação', 'Separado')
         AND usuario_separando IS NOT NULL
@@ -22607,10 +22611,10 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
   const nome_user = String(req.session?.user?.username || req.session?.user?.nome || '');
 
   await client.query(
-    `INSERT INTO solicitacao_produto.movimentacoes_kanban_itens
+    `INSERT INTO logistica.movimentacoes_kanban_itens
        (id_carr, solic_id, status_origem, status_destino, id_user, nome_user, observacao)
      SELECT i.id_carr, i.id, i.status, $2, $3, $4, $5
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
       WHERE i.id = ANY($1::bigint[])`,
     [ids, statusDestino, id_user, nome_user, observacao]
   );
@@ -22623,7 +22627,7 @@ async function registrarMovimentacaoKanbanItens(client, solicIds, statusDestino,
               i.omie_sep_origem, i.omie_sep_destino, i.omie_sep_qtd,
               i.etq_sep_endereco, i.etq_sep_qtd,
               c.codigo_produto, c.cod_omie, c.quantidade
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
          LEFT JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.id = ANY($1::bigint[])`,
       [ids]
@@ -22691,7 +22695,7 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
     }
     // Busca codigo_produto (Omie) na tabela de produtos
     const omieRes = await pool.query(
-      `SELECT codigo_produto FROM public.produtos_omie
+      `SELECT codigo_produto FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
         LIMIT 1`,
@@ -22707,7 +22711,7 @@ app.post('/api/logistica/separacao', express.json(), async (req, res) => {
           AND c.codigo_produto = $2
           AND COALESCE(c.unidade, 'UN') = COALESCE($3, 'UN')
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )
         ORDER BY c.criado_em ASC
         LIMIT 1`,
@@ -22753,7 +22757,7 @@ app.get('/api/logistica/solicitacoes-pendentes', async (req, res) => {
         MIN(c.horario)                                  AS horario,
         array_agg(i.id  ORDER BY c.criado_em ASC)       AS solic_ids,
         array_agg(c.id  ORDER BY c.criado_em ASC)       AS carr_ids
-      FROM solicitacao_produto.itens_solicitados i
+      FROM logistica.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
      WHERE i.status = 'pendente'
      GROUP BY COALESCE(c.retirada_por, c.nome_user), c.codigo_produto, c.descricao, c.unidade
@@ -22801,11 +22805,11 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     const { rows: elegiveis } = await pool.query(
       `WITH bases AS (
          SELECT DISTINCT n_solic
-           FROM solicitacao_produto.itens_solicitados
+           FROM logistica.itens_solicitados
           WHERE id = ANY($1::bigint[])
        )
        SELECT DISTINCT i.id
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
         WHERE i.status IN ('pendente', 'Stund-by')
           AND (
             i.id = ANY($1::bigint[])
@@ -22827,7 +22831,7 @@ app.patch('/api/logistica/itens_solicitados/separacao', async (req, res) => {
     if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await registrarMovimentacaoKanbanItens(pool, idsElegiveis, 'Separação', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Separação',
               usuario_separando = $2
         WHERE id = ANY($1::bigint[])`,
@@ -22858,7 +22862,7 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
 
     const { rows: itens } = await client.query(
       `SELECT id, status, usuario_separando
-         FROM solicitacao_produto.itens_solicitados
+         FROM logistica.itens_solicitados
         WHERE id = ANY($1::bigint[])
           AND status IN ('Separação', 'Separado')`,
       [ids]
@@ -22878,7 +22882,7 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
     await client.query(
       `UPDATE logistica.carrinho c
           SET quantidade = i.quantidade_solicitada
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
         WHERE i.id_carr = c.id
           AND i.id = ANY($1::bigint[])
           AND i.status = 'Separado'
@@ -22887,14 +22891,14 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
     );
 
     await client.query(
-      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+      `UPDATE logistica.solicitacoes_separacao ss
           SET quantidade = ss.quantidade_original,
               quantidade_original = NULL
         WHERE ss.quantidade_original IS NOT NULL
           AND ss.id IN (
             SELECT ss2.id
-              FROM solicitacao_produto.solicitacoes_separacao ss2
-              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              FROM logistica.solicitacoes_separacao ss2
+              JOIN logistica.itens_solicitados i ON i.id = ANY($1::bigint[])
               JOIN logistica.carrinho c ON c.id = i.id_carr
              WHERE ss2.codigo_produto = c.codigo_produto
                AND ss2.id_user = c.id_user
@@ -22906,7 +22910,7 @@ app.patch('/api/logistica/itens_solicitados/cancelar-separacao', async (req, res
 
     await registrarMovimentacaoKanbanItens(client, idsElegiveis, 'pendente', req);
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'pendente',
               usuario_separando = NULL,
               quantidade_solicitada = NULL,
@@ -22944,7 +22948,7 @@ app.patch('/api/logistica/itens_solicitados/assumir-separacao', async (req, res)
 
     const { rows: itens } = await pool.query(
       `SELECT id, status, usuario_separando
-         FROM solicitacao_produto.itens_solicitados
+         FROM logistica.itens_solicitados
         WHERE id = ANY($1::bigint[])
           AND status IN ('Separação', 'Em Separação', 'Separado')`,
       [ids]
@@ -22956,7 +22960,7 @@ app.patch('/api/logistica/itens_solicitados/assumir-separacao', async (req, res)
     const acesso = await assertAcessoSeparacao(pool, idsElegiveis, req);
     if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET usuario_separando = $2
         WHERE id = ANY($1::bigint[])`,
       [idsElegiveis, nome_user]
@@ -22983,7 +22987,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-pendente', async (req, res)
     if (!ids.length) return res.status(400).json({ ok: false, error: 'Nenhum ID válido.' });
     await registrarMovimentacaoKanbanItens(pool, ids, 'pendente', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = 'pendente' WHERE id = ANY($1::bigint[])`,
+      `UPDATE logistica.itens_solicitados SET status = 'pendente' WHERE id = ANY($1::bigint[])`,
       [ids]
     );
     console.log(`[logistica/reverter-pendente] ${ids.length} item(ns) revertido(s) para pendente por user ${id_user}`);
@@ -23018,7 +23022,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
     const { rows: restaurados } = await client.query(
       `UPDATE logistica.carrinho c
           SET quantidade = i.quantidade_solicitada
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
         WHERE i.id_carr = c.id
           AND i.id = ANY($1::bigint[])
           AND i.status = 'Separado'
@@ -23029,14 +23033,14 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
 
     // Reverte solicitacoes_separacao para quantidade_original, se existir
     await client.query(
-      `UPDATE solicitacao_produto.solicitacoes_separacao ss
+      `UPDATE logistica.solicitacoes_separacao ss
           SET quantidade = ss.quantidade_original,
               quantidade_original = NULL
         WHERE ss.quantidade_original IS NOT NULL
           AND ss.id IN (
             SELECT ss2.id
-              FROM solicitacao_produto.solicitacoes_separacao ss2
-              JOIN solicitacao_produto.itens_solicitados i ON i.id = ANY($1::bigint[])
+              FROM logistica.solicitacoes_separacao ss2
+              JOIN logistica.itens_solicitados i ON i.id = ANY($1::bigint[])
               JOIN logistica.carrinho c ON c.id = i.id_carr
              WHERE ss2.codigo_produto = c.codigo_produto
                AND ss2.id_user = c.id_user
@@ -23048,7 +23052,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-separacao', async (req, res
 
     await registrarMovimentacaoKanbanItens(client, ids, 'Separação', req);
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Separação',
               quantidade_solicitada = NULL,
               quantidade_separada = NULL
@@ -23081,7 +23085,7 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
     const statusDestino = skipSet.has(itemId) ? 'Concluído' : 'Separado';
     await registrarMovimentacaoKanbanItens(pool, [itemId], statusDestino, req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET status = $2 WHERE id = $1`,
+      `UPDATE logistica.itens_solicitados SET status = $2 WHERE id = $1`,
       [itemId, statusDestino]
     );
     console.log(`[logistica/separado] item #${itemId} marcado como ${statusDestino} por user ${id_user}`);
@@ -23092,20 +23096,20 @@ app.patch('/api/logistica/itens_solicitados/:id/separado', async (req, res) => {
   }
 });
 
-/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT), portal AT ou vínculo em envios.solicitacoes. */
+/** Itens cuja SEP veio do fluxo VIPP (motivo SAC/AT), portal AT ou vínculo em sac.envios_solicitacoes. */
 async function _logisticaSolicIdsVippSet(db, solicIds) {
   const ids = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!ids.length) return new Set();
   const { rows } = await db.query(
     `SELECT i.id
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])
         AND (
           i.motivo IN ('SAC', 'AT')
           OR c.id_user LIKE 'at:%'
           OR EXISTS (
-            SELECT 1 FROM envios.solicitacoes e
+            SELECT 1 FROM sac.envios_solicitacoes e
              WHERE e.numero_sep = i.n_solic
                AND NULLIF(TRIM(e.id_vipp), '') IS NOT NULL
           )
@@ -23127,7 +23131,7 @@ async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
   if (idsNormal.length) {
     await registrarMovimentacaoKanbanItens(client, idsNormal, 'Separado', req);
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Separado',
               quantidade_solicitada = NULL,
               quantidade_separada = NULL
@@ -23139,7 +23143,7 @@ async function _logisticaAplicarStatusPosSeparacao(client, solicIds, req) {
   if (idsVipp.length) {
     await registrarMovimentacaoKanbanItens(client, idsVipp, 'Concluído', req);
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Concluído',
               quantidade_solicitada = NULL,
               quantidade_separada = NULL,
@@ -23156,7 +23160,7 @@ async function _logisticaAplicarStatusPosSeparacaoPorCarr(client, carrIds, req) 
   const cIds = (carrIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (!cIds.length) return { vipp: 0, normal: 0 };
   const { rows } = await client.query(
-    `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+    `SELECT id FROM logistica.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
     [cIds]
   );
   const solicIds = rows.map(r => Number(r.id)).filter(Boolean);
@@ -23232,7 +23236,7 @@ async function syncSolicitacoesSeparacaoQuantidade(client, carrRow, novaQty, qty
   const nova = parseFloat(novaQty);
   const houveAlteracao = Number.isFinite(nova) && Math.abs(oldQty - nova) > 0.0001;
   await client.query(`
-    UPDATE solicitacao_produto.solicitacoes_separacao ss
+    UPDATE logistica.solicitacoes_separacao ss
        SET quantidade = $1,
            quantidade_original = CASE
              WHEN $6 THEN COALESCE(ss.quantidade_original, $4::numeric)
@@ -23240,7 +23244,7 @@ async function syncSolicitacoesSeparacaoQuantidade(client, carrRow, novaQty, qty
            END
      WHERE ss.id = (
        SELECT ss2.id
-         FROM solicitacao_produto.solicitacoes_separacao ss2
+         FROM logistica.solicitacoes_separacao ss2
         WHERE ss2.codigo_produto = $2
           AND ss2.id_user = $3
           AND (
@@ -23262,14 +23266,14 @@ async function registrarAlteracaoQuantidadeItem(client, { solicIds, carrId, qtyO
   const sIds = (solicIds || []).map(id => parseInt(id, 10)).filter(id => !isNaN(id));
   if (sIds.length) {
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET quantidade_solicitada = $1, quantidade_separada = $2
         WHERE id = ANY($3::bigint[])`,
       [orig, sep, sIds]
     );
   } else if (carrId) {
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET quantidade_solicitada = $1, quantidade_separada = $2
         WHERE id_carr = $3`,
       [orig, sep, carrId]
@@ -23286,7 +23290,7 @@ async function _logisticaReintegrarStandbySePossivel(client, solicIds) {
 
   const { rows: items } = await client.query(
     `SELECT i.id, i.n_solic, i.status, c.id AS carr_id, c.quantidade, c.codigo_produto
-       FROM solicitacao_produto.itens_solicitados i
+       FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.id = ANY($1::bigint[])`,
     [ids]
@@ -23306,7 +23310,7 @@ async function _logisticaReintegrarStandbySePossivel(client, solicIds) {
 
     const { rows: parents } = await client.query(
       `SELECT i.id, i.status, c.id AS carr_id, c.quantidade
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
          JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.n_solic = $1
           AND c.codigo_produto = $2
@@ -23325,12 +23329,12 @@ async function _logisticaReintegrarStandbySePossivel(client, solicIds) {
       [parentQty + qtyStandby, parent.carr_id]
     );
     await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET quantidade_solicitada = NULL, quantidade_separada = NULL
         WHERE id = $1`,
       [parent.id]
     );
-    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [item.id]);
+    await client.query(`DELETE FROM logistica.itens_solicitados WHERE id = $1`, [item.id]);
     await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [item.carr_id]);
 
     anyReintegrated = true;
@@ -23380,7 +23384,7 @@ app.post('/api/logistica/itens_solicitados/registrar-qtd-manual', express.json()
 
     if (sIds.length) {
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET quantidade_solicitada = $1,
                 quantidade_separada = $2,
                 observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
@@ -23389,7 +23393,7 @@ app.post('/api/logistica/itens_solicitados/registrar-qtd-manual', express.json()
       );
     } else {
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET quantidade_solicitada = $1,
                 quantidade_separada = $2,
                 observacao = CASE WHEN $4::text IS NOT NULL AND $5 > 0 THEN $4 ELSE observacao END
@@ -23440,7 +23444,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     let idsReint = sIds;
     if (!idsReint.length && cIds.length) {
       const { rows: solRows } = await client.query(
-        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+        `SELECT id FROM logistica.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
         [cIds]
       );
       idsReint = solRows.map(r => Number(r.id)).filter(Boolean);
@@ -23467,10 +23471,10 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         ignorar_saldo_etq: !!ignorar_saldo_etq
       });
     }
-    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
-    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
-    await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
-    await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
+    await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_solicitada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS quantidade_separada NUMERIC(18,4)`);
+    await client.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS quantidade_original NUMERIC(18,4)`);
 
     const { rows: carrs } = await client.query(
       `SELECT * FROM logistica.carrinho WHERE id = ANY($1::bigint[]) ORDER BY criado_em ASC`, [cIds]
@@ -23497,7 +23501,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       if (cIds.length > 1) {
         const extraIds = cIds.filter(id => id !== primaryId);
         await client.query(
-          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          `DELETE FROM logistica.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
           [extraIds]
         );
         await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraIds]);
@@ -23513,7 +23517,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
         if (etqDebit?.endereco || (Array.isArray(etqDebit?.detalhes) && etqDebit.detalhes.length)) await _etqPersistirDebitoSeparacao(client, sIds, etqDebit);
       } else {
         const { rows: solRows } = await client.query(
-          `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
+          `SELECT id FROM logistica.itens_solicitados WHERE id_carr = $1`,
           [primaryId]
         );
         const idsSep = solRows.map(r => r.id);
@@ -23539,7 +23543,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     let nSolic = null;
     if (sIds.length > 0) {
       const { rows: [fs] } = await client.query(
-        `SELECT n_solic FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [sIds[0]]
+        `SELECT n_solic FROM logistica.itens_solicitados WHERE id = $1`, [sIds[0]]
       );
       nSolic = fs?.n_solic || null;
     }
@@ -23549,7 +23553,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     if (nSolic) {
       const baseN = nSolic.replace(/\.\d+$/, '');
       const { rows: existSeps } = await client.query(
-        `SELECT n_solic FROM solicitacao_produto.itens_solicitados WHERE n_solic LIKE ($1 || '.%')`, [baseN]
+        `SELECT n_solic FROM logistica.itens_solicitados WHERE n_solic LIKE ($1 || '.%')`, [baseN]
       );
       let maxSuffix = 0;
       existSeps.forEach(r => {
@@ -23579,7 +23583,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
        base.unidade, qtyRemainder, base.data_prevista, base.horario, base.cod_omie]
     );
     await client.query(
-      `INSERT INTO solicitacao_produto.itens_solicitados
+      `INSERT INTO logistica.itens_solicitados
          (id_carr, n_solic, status, observacao, cod_local, nome_local, motivo)
        VALUES ($1,$2,'Stund-by',$3,$4,$5,$6)`,
       [newCarr.id, newNSolic, String(motivo || '').trim() || null, codLocalOrig, nomeLocalOrig, motivoOrig]
@@ -23594,7 +23598,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       const c   = carrs[i];
       const qty = parseFloat(c.quantidade);
       if (qty <= toRemove + 0.0001) {
-        await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`, [c.id]);
+        await client.query(`DELETE FROM logistica.itens_solicitados WHERE id_carr = $1`, [c.id]);
         await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [c.id]);
         toRemove -= qty;
         deletedIds.push(c.id);
@@ -23618,7 +23622,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       if (keptIds.length > 1) {
         const extraKept = keptIds.slice(1);
         await client.query(
-          `DELETE FROM solicitacao_produto.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
+          `DELETE FROM logistica.itens_solicitados WHERE id_carr = ANY($1::bigint[])`,
           [extraKept]
         );
         await client.query(`DELETE FROM logistica.carrinho WHERE id = ANY($1::bigint[])`, [extraKept]);
@@ -23634,7 +23638,7 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       });
 
       const { rows: solKeptRows } = await client.query(
-        `SELECT id FROM solicitacao_produto.itens_solicitados WHERE id_carr = $1`,
+        `SELECT id FROM logistica.itens_solicitados WHERE id_carr = $1`,
         [primaryKeptId]
       );
       const idsKeptSep = solKeptRows.map(r => r.id);
@@ -23686,7 +23690,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
       FROM logistica.carrinho c
       WHERE c.id_user = $1
         AND NOT EXISTS (
-          SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+          SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
         )
       GROUP BY COALESCE(c.retirada_por, c.nome_user)
       ORDER BY MIN(c.criado_em) ASC
@@ -23721,7 +23725,7 @@ app.get('/api/logistica/kanban', async (req, res) => {
           WHEN bool_or(i.status = 'Devolvido')           THEN 'Devolvido'
           ELSE 'Concluído'
         END AS col
-      FROM solicitacao_produto.itens_solicitados i
+      FROM logistica.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
         AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
@@ -23763,7 +23767,7 @@ async function _logisticaFetchEnderecoEtqMap(codigos) {
             COALESCE(NULLIF(TRIM(MAX(i.unidade)), ''), 'UN') AS unidade,
             MAX(i.complemento) AS complemento
        FROM etiqueta."ETQ_rec_impresso" i
-       JOIN public.produtos_omie p
+       JOIN produto.produtos_omie p
          ON TRIM(i.codigo_produto) IN (p.codigo_produto::text, TRIM(p.codigo))
       WHERE p.codigo = ANY($1::text[])
         AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
@@ -23825,11 +23829,11 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                c.cod_omie,
                COALESCE(c.retirada_por, c.nome_user) AS nome_user,
                rt.codigo_produto_ant, rt.descricao_ant, rt.codigo_produto_novo, rt.descricao_novo
-          FROM solicitacao_produto.itens_solicitados i
+          FROM logistica.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
-          LEFT JOIN solicitacao_produto.solicitacoes_separacao ss
+          LEFT JOIN logistica.solicitacoes_separacao ss
                  ON ss.n_solic = i.n_solic AND ss.codigo_produto = c.codigo_produto
-          LEFT JOIN solicitacao_produto.Registro_troca rt ON rt.id_item_original = i.id
+          LEFT JOIN logistica.registro_troca rt ON rt.id_item_original = i.id
          WHERE i.n_solic = $1
            AND ($2::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($2::text[]))
          ORDER BY i.id, c.criado_em ASC, rt.data_troca DESC NULLS LAST
@@ -23854,7 +23858,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
                  COALESCE(c.retirada_por, c.nome_user) AS nome_user,
                  NULL::text AS codigo_produto_ant, NULL::text AS descricao_ant,
                  NULL::text AS codigo_produto_novo, NULL::text AS descricao_novo
-            FROM solicitacao_produto.itens_solicitados i
+            FROM logistica.itens_solicitados i
             JOIN logistica.carrinho c ON c.id = i.id_carr
            WHERE i.n_solic ~ ($1 || '\\.[0-9]+$')
              AND ($2::text[] IS NULL OR CONCAT(TRIM(COALESCE(i.cod_local, '')), '|', TRIM(COALESCE(i.nome_local, ''))) = ANY($2::text[]))
@@ -23891,7 +23895,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
           FROM logistica.carrinho c
          WHERE c.id_user = $1
            AND NOT EXISTS (
-             SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+             SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
            )
          ORDER BY c.criado_em ASC
       `, [id_user]);
@@ -23916,7 +23920,7 @@ app.patch('/api/logistica/carrinho/:id/quantidade', express.json(), async (req, 
     // Verifica se o item ainda está em status editável (pendente ou carrinho)
     const { rows } = await pool.query(`
       SELECT i.status FROM logistica.carrinho c
-      LEFT JOIN solicitacao_produto.itens_solicitados i ON i.id_carr = c.id
+      LEFT JOIN logistica.itens_solicitados i ON i.id_carr = c.id
       WHERE c.id = $1 AND c.id_user = $2
     `, [carrId, id_user]);
     if (!rows.length) return res.status(403).json({ ok: false, error: 'Item não encontrado ou sem permissão.' });
@@ -23985,7 +23989,7 @@ app.get('/api/logistica/solicitacoes-kanban', async (req, res) => {
           WHEN bool_or(i.status = 'Devolvido')           THEN 'Devolvido'
           ELSE 'Concluído'
         END AS coluna
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.n_solic IS NOT NULL
           AND LOWER(TRIM(COALESCE(i.status, ''))) NOT IN ('excluido', 'excluído')
@@ -24045,7 +24049,7 @@ app.get('/api/logistica/solicitacoes-kanban-destinos', async (req, res) => {
         ARRAY_AGG(DISTINCT i.n_solic)                   AS seps,
         bool_or(COALESCE(i.urgente, false))             AS tem_urgente,
         MIN(c.criado_em)                                AS criado_em_min
-      FROM solicitacao_produto.itens_solicitados i
+      FROM logistica.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
         AND i.status IN ('pendente', 'Stund-by', 'Separação')
@@ -24088,7 +24092,7 @@ app.get('/api/logistica/planejar-sep/codigos', async (req, res) => {
              MAX(NULLIF(TRIM(c.descricao), '')) AS descricao,
              COUNT(DISTINCT i.n_solic)::int AS seps,
              SUM(COALESCE(i.quantidade_solicitada, c.quantidade, 0))::numeric AS quantidade
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
        ${whereSep}
        GROUP BY TRIM(c.codigo_produto)
@@ -24130,7 +24134,7 @@ app.get('/api/logistica/solicitacoes-pendentes-sep', async (req, res) => {
           WHEN bool_or(i.status = 'Separação') THEN 'Separação'
           ELSE 'Separado'
         END AS status
-      FROM solicitacao_produto.itens_solicitados i
+      FROM logistica.itens_solicitados i
       JOIN logistica.carrinho c ON c.id = i.id_carr
       WHERE i.n_solic IS NOT NULL
         AND i.status IN ('pendente', 'Separação', 'Separado')
@@ -24164,7 +24168,7 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (idsNormal.length) {
       await registrarMovimentacaoKanbanItens(pool, idsNormal, 'Aguardando retirada', req);
       await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET status = 'Aguardando retirada',
                 usuario_separando = NULL
           WHERE id = ANY($1::bigint[])`,
@@ -24174,7 +24178,7 @@ app.patch('/api/logistica/itens_solicitados/aguardando-retirada', async (req, re
     if (idsSkip.length) {
       await registrarMovimentacaoKanbanItens(pool, idsSkip, 'Concluído', req);
       await pool.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET status = 'Concluído',
                 usuario_separando = NULL
           WHERE id = ANY($1::bigint[])`,
@@ -24210,7 +24214,7 @@ app.patch('/api/logistica/itens_solicitados/reverter-conferido', async (req, res
 
     await registrarMovimentacaoKanbanItens(pool, ids, 'Separado', req);
     const { rowCount } = await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Separado'
         WHERE id = ANY($1::bigint[]) AND status = 'Aguardando retirada'`,
       [ids]
@@ -24238,7 +24242,7 @@ app.patch('/api/logistica/itens_solicitados/concluido', async (req, res) => {
     if (!acesso.ok) return res.status(acesso.status || 403).json(acesso);
     await registrarMovimentacaoKanbanItens(pool, ids, 'Concluído', req);
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'Concluído',
               usuario_separando = NULL
         WHERE id = ANY($1::bigint[])`, [ids]
@@ -24285,7 +24289,7 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
               i.etq_sep_endereco, i.etq_sep_codigo, i.etq_sep_qtd, i.etq_sep_detalhes,
               c.quantidade::numeric AS qty_carr,
               c.codigo_produto
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
          JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.id = $1
         FOR UPDATE OF i`,
@@ -24361,7 +24365,7 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
     if (total) {
       await registrarMovimentacaoKanbanItens(client, [solicId], 'Devolvido', req, obsMov);
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET status = 'Devolvido',
                 omie_sep_origem = NULL,
                 omie_sep_destino = NULL,
@@ -24379,7 +24383,7 @@ app.post('/api/logistica/itens_solicitados/devolver', express.json(), async (req
       const qtyRest = Math.max(0, qtyCarr - qtdDev);
       await registrarMovimentacaoKanbanItens(client, [solicId], 'Concluído', req, obsMov);
       await client.query(
-        `UPDATE solicitacao_produto.itens_solicitados
+        `UPDATE logistica.itens_solicitados
             SET omie_sep_qtd = $2,
                 motivo = $3
           WHERE id = $1`,
@@ -24432,14 +24436,14 @@ app.patch('/api/logistica/itens_solicitados/urgente', express.json(), async (req
     if (!lock.ok) return res.status(403).json(lock);
     const valor = !!urgente;
     await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados SET urgente = $1 WHERE id = ANY($2::bigint[])`,
+      `UPDATE logistica.itens_solicitados SET urgente = $1 WHERE id = ANY($2::bigint[])`,
       [valor, ids]
     );
     // Sincroniza com solicitacoes_separacao (n_solic + codigo_produto)
     await pool.query(`
-      UPDATE solicitacao_produto.solicitacoes_separacao ss
+      UPDATE logistica.solicitacoes_separacao ss
          SET urgente = $1
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.id = ANY($2::bigint[])
          AND ss.n_solic = i.n_solic
@@ -24487,7 +24491,7 @@ app.delete('/api/logistica/itens_solicitados/:id/sep', async (req, res) => {
     // Valida: item deve existir, estar pendente e pertencer ao usuário
     const { rows: check } = await client.query(`
       SELECT i.id, i.n_solic, i.status, c.id_user, c.codigo_produto
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.id = $1
     `, [solic_id]);
@@ -24497,10 +24501,10 @@ app.delete('/api/logistica/itens_solicitados/:id/sep', async (req, res) => {
     if (item.status !== 'pendente') { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: 'Item não está mais pendente.' }); }
 
     // Remove de itens_solicitados (carrinho fica livre)
-    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [solic_id]);
+    await client.query(`DELETE FROM logistica.itens_solicitados WHERE id = $1`, [solic_id]);
     // Remove registro correspondente em solicitacoes_separacao
     await client.query(`
-      DELETE FROM solicitacao_produto.solicitacoes_separacao
+      DELETE FROM logistica.solicitacoes_separacao
        WHERE n_solic = $1 AND codigo_produto = $2
     `, [item.n_solic, item.codigo_produto]);
 
@@ -24531,7 +24535,7 @@ app.delete('/api/logistica/sep/:n_solic', async (req, res) => {
     // Valida: todos os itens devem ser pendente e pertencer ao usuário
     const { rows: itens } = await client.query(`
       SELECT i.id, i.status, c.id_user
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.n_solic = $1
     `, [n_solic]);
@@ -24541,8 +24545,8 @@ app.delete('/api/logistica/sep/:n_solic', async (req, res) => {
     const allPendente = itens.every(it => it.status === 'pendente');
     if (!allPendente) { await client.query('ROLLBACK'); return res.status(400).json({ ok: false, error: 'A SEP possui itens que já saíram do status pendente.' }); }
 
-    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE n_solic = $1`, [n_solic]);
-    await client.query(`DELETE FROM solicitacao_produto.solicitacoes_separacao WHERE n_solic = $1`, [n_solic]);
+    await client.query(`DELETE FROM logistica.itens_solicitados WHERE n_solic = $1`, [n_solic]);
+    await client.query(`DELETE FROM logistica.solicitacoes_separacao WHERE n_solic = $1`, [n_solic]);
 
     await client.query('COMMIT');
     console.log(`[Sep/Delete SEP] n_solic=${n_solic} removida por id_user=${id_user}`);
@@ -24566,7 +24570,7 @@ app.patch('/api/logistica/sep/:n_solic/excluido', express.json(), async (req, re
     if (!n_solic) return res.status(400).json({ ok: false, error: 'n_solic inválido.' });
 
     const { rows } = await pool.query(
-      `UPDATE solicitacao_produto.itens_solicitados
+      `UPDATE logistica.itens_solicitados
           SET status = 'excluido'
         WHERE n_solic = $1
           AND status = 'Stund-by'
@@ -24603,10 +24607,10 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Garante que a coluna existe
     await client.query(
-      `ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`
+      `ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
     );
 
     // Busca o item que será marcado como "Não separado"
@@ -24615,7 +24619,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
              c.id AS carr_id, c.id_user, c.nome_user, c.retirada_por,
              c.codigo_produto, c.descricao, c.unidade, c.quantidade,
              c.data_prevista, c.horario, c.cod_omie
-        FROM solicitacao_produto.itens_solicitados i
+        FROM logistica.itens_solicitados i
         JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.id = $1
     `, [solic_id]);
@@ -24631,7 +24635,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
     // Obtém o próximo número de sub-SEP (SEPxxxx.1, SEPxxxx.2, etc.)
     const baseN = nSolicOrigem.replace(/\.\d+$/, '');
     const { rows: existSeps } = await client.query(`
-      SELECT n_solic FROM solicitacao_produto.itens_solicitados WHERE n_solic LIKE ($1 || '.%')
+      SELECT n_solic FROM logistica.itens_solicitados WHERE n_solic LIKE ($1 || '.%')
     `, [baseN]);
 
     let maxSuffix = 0;
@@ -24668,7 +24672,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Cria novo item_solicitado com a nova SEP e status "Stund-by" (sem separador ativo)
     await client.query(`
-      INSERT INTO solicitacao_produto.itens_solicitados
+      INSERT INTO logistica.itens_solicitados
         (id_carr, n_solic, status, observacao, usuario_separando, cod_local, nome_local, motivo)
       VALUES ($1, $2, 'Stund-by', $3, NULL, $4, $5, $6)
     `, [
@@ -24682,7 +24686,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
 
     // Registra na tabela solicitacoes_separacao com status "Não separado" e a justificativa
     await client.query(`
-      INSERT INTO solicitacao_produto.solicitacoes_separacao
+      INSERT INTO logistica.solicitacoes_separacao
         (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
          data_prevista, horario, status, justificativa_nao_separacao)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'Não separado', $10)
@@ -24691,7 +24695,7 @@ app.post('/api/logistica/itens_solicitados/nao-separar', express.json(), async (
         item.data_prevista, item.horario, justificativa || null]);
 
     // Remove item original da SEP atual
-    await client.query(`DELETE FROM solicitacao_produto.itens_solicitados WHERE id = $1`, [item.id]);
+    await client.query(`DELETE FROM logistica.itens_solicitados WHERE id = $1`, [item.id]);
     await client.query(`DELETE FROM logistica.carrinho WHERE id = $1`, [item.carr_id]);
 
     await client.query('COMMIT');
@@ -24725,7 +24729,7 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
 
     // Busca o item original
     const { rows: [item] } = await client.query(
-      `SELECT i.id, i.id_carr, c.codigo_produto, c.descricao, c.unidade, c.quantidade FROM solicitacao_produto.itens_solicitados i
+      `SELECT i.id, i.id_carr, c.codigo_produto, c.descricao, c.unidade, c.quantidade FROM logistica.itens_solicitados i
        JOIN logistica.carrinho c ON c.id = i.id_carr
        WHERE i.id = $1`, [solic_id]
     );
@@ -24733,7 +24737,7 @@ app.post('/api/logistica/itens_solicitados/trocar', express.json(), async (req, 
 
     // Registra a troca
     await client.query(
-      `INSERT INTO solicitacao_produto.Registro_troca
+      `INSERT INTO logistica.registro_troca
          (id_item_original, codigo_produto_ant, descricao_ant, codigo_produto_novo, descricao_novo,
           unidade_novo, quantidade_novo, id_user, nome_user, motivo)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
@@ -24772,7 +24776,7 @@ app.get('/api/logistica/produtos/buscar', async (req, res) => {
 
     const { rows } = await pool.query(
       `SELECT DISTINCT codigo, descricao, unidade
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE (codigo ILIKE $1 OR descricao ILIKE $2)
        LIMIT 50`,
       ['%' + q + '%', '%' + q + '%']
@@ -24804,7 +24808,7 @@ app.get('/api/logistica/carrinho', async (req, res) => {
          FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )
         ORDER BY c.criado_em ASC`,
       [id_user]
@@ -24831,7 +24835,7 @@ app.patch('/api/logistica/carrinho/:id/comentario', express.json(), async (req, 
         WHERE id = $2
           AND id_user = $3
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
           )`,
       [comentario, itemId, id_user]
     );
@@ -24870,7 +24874,7 @@ app.delete('/api/logistica/carrinho', async (req, res) => {
       `DELETE FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )`,
       [id_user]
     );
@@ -24912,19 +24916,19 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     // Garante coluna criado_em em itens_solicitados (para controle de janela 14h)
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`
     );
     await client.query(
-      `ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`
+      `ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`
     );
     await client.query(
       `ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`
@@ -24932,7 +24936,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     if (fluxoVipp) {
       const { rows: localRows } = await client.query(
-        `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+        `SELECT nome FROM omie.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
         [VIPP_COD_LOCAL_PADRAO]
       );
       vippNomeLocalPadrao = localRows[0]?.nome || null;
@@ -24946,7 +24950,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
       : (String(local_estoque_nome || '').trim() || null);
     if (!fluxoVipp && codLocalGravar && !nomeLocalGravar) {
       const { rows: localRows } = await client.query(
-        `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+        `SELECT nome FROM omie.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
         [codLocalGravar]
       );
       nomeLocalGravar = localRows[0]?.nome || null;
@@ -24958,7 +24962,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     // Garante tabela de solicitações
     await client.query(`
-      CREATE TABLE IF NOT EXISTS solicitacao_produto.solicitacoes_separacao (
+      CREATE TABLE IF NOT EXISTS logistica.solicitacoes_separacao (
         id             BIGSERIAL PRIMARY KEY,
         id_user        TEXT NOT NULL,
         nome_user      TEXT NOT NULL,
@@ -24977,7 +24981,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     `);
     // Garante coluna em tabela já existente
     await client.query(
-      `ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`
+      `ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`
     );
 
     // Grava data_prevista, horario e retirada_por nos itens do carrinho antes de processar
@@ -24986,14 +24990,14 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
           WHERE id_user = $4
             AND id = ANY($5::bigint[])
-            AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
+            AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
         [data_prevista || null, horario || null, solicitado_para || nome_user, id_user, filtroIds]
       );
     } else {
       await client.query(
         `UPDATE logistica.carrinho SET data_prevista = $1, horario = $2, retirada_por = $3
           WHERE id_user = $4
-            AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
+            AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)`,
         [data_prevista || null, horario || null, solicitado_para || nome_user, id_user]
       );
     }
@@ -25004,11 +25008,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
         ? `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente FROM logistica.carrinho
            WHERE id_user = $1
              AND id = ANY($2::bigint[])
-             AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
+             AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
            ORDER BY criado_em ASC`
         : `SELECT id, codigo_produto, descricao, unidade, quantidade, comentario, COALESCE(urgente, false) AS urgente FROM logistica.carrinho
            WHERE id_user = $1
-             AND NOT EXISTS (SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
+             AND NOT EXISTS (SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id)
            ORDER BY criado_em ASC`,
       filtroIds ? [id_user, filtroIds] : [id_user]
     );
@@ -25032,25 +25036,25 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     if (!forcar_novo_sep && !motivosSempreNovo.has(motivoSolicitacao)) {
       const { rows: existing } = await client.query(`
         SELECT DISTINCT i.n_solic
-          FROM solicitacao_produto.itens_solicitados i
+          FROM logistica.itens_solicitados i
           JOIN logistica.carrinho c ON c.id = i.id_carr
          WHERE i.n_solic IS NOT NULL
            AND i.n_solic ~ '^SEP-[0-9]+$'
            AND NOT EXISTS (
-             SELECT 1 FROM solicitacao_produto.itens_solicitados i2
+             SELECT 1 FROM logistica.itens_solicitados i2
               WHERE i2.n_solic = i.n_solic
                 AND i2.status NOT IN ('pendente', 'Stund-by')
            )
            AND NOT EXISTS (
              SELECT 1
-               FROM solicitacao_produto.itens_solicitados i3
+               FROM logistica.itens_solicitados i3
                JOIN logistica.carrinho c3 ON c3.id = i3.id_carr
               WHERE i3.n_solic = i.n_solic
                 AND COALESCE(NULLIF(TRIM(c3.retirada_por), ''), c3.nome_user) IS DISTINCT FROM $1
            )
            AND EXISTS (
              SELECT 1
-               FROM solicitacao_produto.itens_solicitados i4
+               FROM logistica.itens_solicitados i4
                JOIN logistica.carrinho c4 ON c4.id = i4.id_carr
               WHERE i4.n_solic = i.n_solic
                 AND COALESCE(NULLIF(TRIM(c4.retirada_por), ''), c4.nome_user) = $1
@@ -25064,18 +25068,18 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
 
     if (!nSolic) {
       // Gera próximo número sequencial (mínimo 1000, nunca repete).
-      // Considera itens_solicitados E envios.solicitacoes — se limpar só os itens,
+      // Considera itens_solicitados E sac.envios_solicitacoes — se limpar só os itens,
       // não reutiliza número que ainda existe em envios (evita numero_sep duplicado).
       const { rows: [seq] } = await client.query(`
         SELECT GREATEST(
           COALESCE((
             SELECT MAX(SUBSTRING(n_solic FROM 5)::integer)
-              FROM solicitacao_produto.itens_solicitados
+              FROM logistica.itens_solicitados
              WHERE n_solic ~ '^SEP-[0-9]+$'
           ), 999),
           COALESCE((
             SELECT MAX(SUBSTRING(numero_sep FROM 5)::integer)
-              FROM envios.solicitacoes
+              FROM sac.envios_solicitacoes
              WHERE numero_sep ~ '^SEP-[0-9]+$'
           ), 999)
         ) + 1 AS next_num
@@ -25087,14 +25091,14 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     // Insere cada item em solicitacoes_separacao e em itens_solicitados
     for (const item of itens) {
       await client.query(
-        `INSERT INTO solicitacao_produto.solicitacoes_separacao
+        `INSERT INTO logistica.solicitacoes_separacao
            (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade, data_prevista, horario, observacao, n_solic, urgente)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
         [id_user, nome_user, solicitado_para || nome_user, item.codigo_produto, item.descricao, item.unidade, item.quantidade,
          data_prevista || null, horario || null, item.comentario || null, nSolic, item.urgente || false]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local, urgente)
+        `INSERT INTO logistica.itens_solicitados (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local, urgente)
          VALUES ($1, $2, 'pendente', $3, $4, $5, $6, $7)`,
         [
           item.id,
@@ -25111,7 +25115,7 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     await client.query('COMMIT');
     console.log(`[Separação] Pedido ${nSolic} enviado por ${nome_user} (${itens.length} itens${nSolicReutilizada ? ', unificado com SEP aberta' : ''})`);
 
-    // Se veio do fluxo de envio (VIPP ou manual), registra em envios.solicitacoes
+    // Se veio do fluxo de envio (VIPP ou manual), registra em sac.envios_solicitacoes
     const metodoEnvio = String(metodo_envio || '').trim() || null;
     const idAtEnvio = (() => {
       const n = parseInt(String(req.body?.id_at ?? '').trim(), 10);
@@ -25129,11 +25133,11 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
     })();
     if (id_vipp || metodoEnvio) {
       try {
-        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
-        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
-        await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS id_at BIGINT`);
+        await pool.query(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS id_vipp TEXT`);
+        await pool.query(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS metodo_envio TEXT`);
+        await pool.query(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS id_at BIGINT`);
         const ins = await pool.query(
-          `INSERT INTO envios.solicitacoes (usuario, observacao, rastreio_status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio, id_at)
+          `INSERT INTO sac.envios_solicitacoes (usuario, observacao, rastreio_status, numero_sep, id_vipp, anexos, conferido, conteudo, metodo_envio, id_at)
            VALUES ($1, $2, 'Pendente', $3, $4, '{}', false, $5, $6, $7)
            RETURNING id`,
           [nome_user, os_num || observacao || null, nSolic, id_vipp ? String(id_vipp) : null, conteudo || null, metodoEnvio, idAtEnvio]
@@ -25147,9 +25151,9 @@ app.post('/api/logistica/separacao/enviar', express.json(), async (req, res) => 
             console.warn('[Separação/Envio] sync custo_pecas:', eSync.message);
           }
         }
-        console.log(`[Separação/Envio] Registro em envios.solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'} id_at=${idAtEnvio || '-'} envio=${novoEnvioId || '-'}`);
+        console.log(`[Separação/Envio] Registro em sac.envios_solicitacoes: SEP=${nSolic} VIPP=${id_vipp || '-'} metodo=${metodoEnvio || '-'} id_at=${idAtEnvio || '-'} envio=${novoEnvioId || '-'}`);
       } catch (e) {
-        console.warn('[Separação/Envio] Falha ao registrar em envios.solicitacoes:', e.message);
+        console.warn('[Separação/Envio] Falha ao registrar em sac.envios_solicitacoes:', e.message);
       }
     }
 
@@ -25200,7 +25204,7 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
        FROM logistica.estoque_atual e
        LEFT JOIN LATERAL (
          SELECT unidade
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo = e.codigo
          ORDER BY codigo_produto DESC
          LIMIT 1
@@ -25333,7 +25337,7 @@ app.post('/api/ops/all', express.json(), async (req, res) => {
         etapa,
         observacoes,
         usuario_criacao
-      FROM "OrdemProducao".tab_op
+      FROM producao.tab_op
       WHERE COALESCE(TRIM(UPPER(etapa)),'') <> 'EXCLUIDO'
       ORDER BY data_criacao DESC
     `);
@@ -25373,7 +25377,7 @@ app.post('/api/ops/atualizar-prazo', express.json(), async (req, res) => {
 
     // Atualiza o campo de observações com o prazo (ou crie um campo específico se necessário)
     const { rowCount } = await pool.query(`
-      UPDATE "OrdemProducao".tab_op
+      UPDATE producao.tab_op
       SET observacoes = COALESCE(observacoes, '') || ' | Prazo: ' || $2
       WHERE id = $1
     `, [opId, prazo]);
@@ -25406,7 +25410,7 @@ app.post('/api/ops/atualizar-data-impressao', express.json(), async (req, res) =
     const whereValue = id || numero_op;
 
     const { rowCount } = await pool.query(`
-      UPDATE "OrdemProducao".tab_op
+      UPDATE producao.tab_op
       SET data_impressao = $2
       WHERE ${whereClause}
     `, [whereValue, data_impressao]);
@@ -25717,9 +25721,9 @@ app.post(
     let _atalhosSchemaReady = false;
     async function ensurePreferenciaAtalhoSchema() {
       if (_atalhosSchemaReady) return;
-      await pool.query(`CREATE SCHEMA IF NOT EXISTS "User"`);
+      await pool.query(`CREATE SCHEMA IF NOT EXISTS usuario`);
       await pool.query(`
-        CREATE TABLE IF NOT EXISTS "User".preferencia_atalho (
+        CREATE TABLE IF NOT EXISTS usuario.preferencia_atalho (
           id           SERIAL PRIMARY KEY,
           user_id      INTEGER NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
           nav_key      TEXT NOT NULL,
@@ -25732,9 +25736,9 @@ app.post(
           created_at   TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
           CONSTRAINT uq_atalho_user_key UNIQUE (user_id, nav_key)
         )`);
-      await pool.query(`ALTER TABLE "User".preferencia_atalho ADD COLUMN IF NOT EXISTS flag_atalho BOOLEAN NOT NULL DEFAULT true`);
-      await pool.query(`ALTER TABLE "User".preferencia_atalho ADD COLUMN IF NOT EXISTS flag_inicio BOOLEAN NOT NULL DEFAULT false`);
-      await pool.query(`CREATE INDEX IF NOT EXISTS idx_atalho_user_id ON "User".preferencia_atalho (user_id)`);
+      await pool.query(`ALTER TABLE usuario.preferencia_atalho ADD COLUMN IF NOT EXISTS flag_atalho BOOLEAN NOT NULL DEFAULT true`);
+      await pool.query(`ALTER TABLE usuario.preferencia_atalho ADD COLUMN IF NOT EXISTS flag_inicio BOOLEAN NOT NULL DEFAULT false`);
+      await pool.query(`CREATE INDEX IF NOT EXISTS idx_atalho_user_id ON usuario.preferencia_atalho (user_id)`);
       _atalhosSchemaReady = true;
     }
 
@@ -25747,7 +25751,7 @@ app.post(
           `SELECT id, nav_key, nav_label, nav_selector, icon_class, sort_order,
                   COALESCE(flag_atalho, true)  AS flag_atalho,
                   COALESCE(flag_inicio, false) AS flag_inicio
-           FROM "User".preferencia_atalho
+           FROM usuario.preferencia_atalho
            WHERE user_id = $1
            ORDER BY sort_order, created_at`,
           [userId]
@@ -25774,14 +25778,14 @@ app.post(
 
         if (!flag_atalho && !flag_inicio) {
           const del = await pool.query(
-            `DELETE FROM "User".preferencia_atalho WHERE user_id = $1 AND nav_key = $2`,
+            `DELETE FROM usuario.preferencia_atalho WHERE user_id = $1 AND nav_key = $2`,
             [userId, nav_key]
           );
           return res.json({ ok: true, removed: del.rowCount > 0, atalho: null });
         }
 
         const { rows } = await pool.query(
-          `INSERT INTO "User".preferencia_atalho
+          `INSERT INTO usuario.preferencia_atalho
              (user_id, nav_key, nav_label, nav_selector, icon_class, sort_order, flag_atalho, flag_inicio)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
            ON CONFLICT (user_id, nav_key) DO UPDATE SET
@@ -25818,7 +25822,7 @@ app.post(
         const id = parseInt(req.params.id, 10);
         if (!id || isNaN(id)) return res.status(400).json({ ok: false, error: 'id inválido' });
         const { rowCount } = await pool.query(
-          `DELETE FROM "User".preferencia_atalho WHERE id = $1 AND user_id = $2`,
+          `DELETE FROM usuario.preferencia_atalho WHERE id = $1 AND user_id = $2`,
           [id, userId]
         );
         res.json({ ok: true, removed: rowCount > 0 });
@@ -26568,7 +26572,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
           if (codigoTxt) {
             try {
               const q = await pool.query(
-                `SELECT * FROM public.produtos_omie
+                `SELECT * FROM produto.produtos_omie
                   WHERE codigo = $1 OR codigo_produto_integracao = $1
                   LIMIT 1`,
                 [codigoTxt]
@@ -26706,7 +26710,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
             NULLIF(to_jsonb(p)->>'quantidade_estoque', ''),
             '0'
           ) AS saldo_estoque
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
         LEFT JOIN LATERAL (
           SELECT MAX(COALESCE(ea.estoque_minimo, 0)) AS minimo
           FROM logistica.estoque_atual ea
@@ -26768,7 +26772,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
 
       // Valida se o produto existe
       const checkResult = await pool.query(
-        `SELECT codigo FROM public.produtos_omie
+        `SELECT codigo FROM produto.produtos_omie
           WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
           ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
           LIMIT 1`,
@@ -26805,7 +26809,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         profundidadeNormalizada,
         pesoBrutoNormalizado
       ];
-      let sql = `UPDATE public.produtos_omie
+      let sql = `UPDATE produto.produtos_omie
                  SET descricao = COALESCE($1, descricao),
                      lead_time = $2,
                      estoque_minimo = $3,
@@ -26902,7 +26906,7 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
         if (codigoTxt) {
           try {
             const q = await pool.query(
-              `SELECT codigo_produto FROM public.produtos_omie
+              `SELECT codigo_produto FROM produto.produtos_omie
                 WHERE TRIM(codigo_produto::text) = TRIM($1)
                    OR TRIM(codigo) = TRIM($1)
                    OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
@@ -26972,7 +26976,7 @@ app.post('/api/omie/malha', express.json(), async (req, res) => {
     if (!codigo && idProduto) {
       const { rows } = await dbQuery(`
         SELECT codigo AS cod, descricao AS descr, unidade AS un, codigo_produto AS id
-        FROM public.produtos_omie
+        FROM produto.produtos_omie
         WHERE codigo_produto = $1
         LIMIT 1;
       `, [idProduto]);
@@ -26985,7 +26989,7 @@ app.post('/api/omie/malha', express.json(), async (req, res) => {
     if (codigo && !ident.codProduto) {
       const { rows } = await dbQuery(`
         SELECT codigo_produto AS id, codigo AS cod, descricao AS descr, unidade AS un
-        FROM public.produtos_omie
+        FROM produto.produtos_omie
         WHERE codigo = $1
         LIMIT 1;
       `, [codigo]);
@@ -27188,14 +27192,14 @@ app.post('/api/omie/malha/call', express.json(), async (req, res) => {
 // Resolve o ID OMIE do produto (para usar como idProdMalha / idProduto)
 // usando as fontes na ORDEM especificada pelo usuário:
 //
-//  1) public.produtos_omie
+//  1) produto.produtos_omie
 //       - código → codigo_produto
 //       - codigo_produto_integracao → codigo_produto
 //  2) engenharia.omie_estrutura
 //       - int_produto | cod_produto → id_produto
-//  3) public.omie_malha_cab
+//  3) omie.omie_malha_cab
 //       - produto_codigo → produto_id
-//  4) public.omie_estoque_posicao
+//  4) omie.omie_estoque_posicao
 //       - codigo → omie_prod_id
 //
 // Retorno: { ok:true, codigo, codigo_produto, origem }
@@ -27212,14 +27216,14 @@ app.get('/api/sql/produto-id/:codigo', async (req, res) => {
       const r = await client.query(`
         SELECT codigo::text AS codigo,
                codigo_produto::bigint AS id,
-               'public.produtos_omie(codigo→codigo_produto)' AS origem
-        FROM public.produtos_omie
+               'produto.produtos_omie(codigo→codigo_produto)' AS origem
+        FROM produto.produtos_omie
         WHERE codigo = $1
         UNION ALL
         SELECT codigo_produto_integracao::text AS codigo,
                codigo_produto::bigint AS id,
-               'public.produtos_omie(codigo_produto_integracao→codigo_produto)' AS origem
-        FROM public.produtos_omie
+               'produto.produtos_omie(codigo_produto_integracao→codigo_produto)' AS origem
+        FROM produto.produtos_omie
         WHERE codigo_produto_integracao = $1
         LIMIT 1;
       `, [codigo]);
@@ -27255,8 +27259,8 @@ app.get('/api/sql/produto-id/:codigo', async (req, res) => {
     {
       const r = await client.query(`
         SELECT produto_codigo::text AS codigo, produto_id::bigint AS id,
-               'public.omie_malha_cab(produto_codigo→produto_id)' AS origem
-        FROM public.omie_malha_cab
+               'omie.omie_malha_cab(produto_codigo→produto_id)' AS origem
+        FROM omie.omie_malha_cab
         WHERE produto_codigo = $1
         LIMIT 1;
       `, [codigo]);
@@ -27271,8 +27275,8 @@ app.get('/api/sql/produto-id/:codigo', async (req, res) => {
     {
       const r = await client.query(`
         SELECT codigo::text AS codigo, omie_prod_id::bigint AS id,
-               'public.omie_estoque_posicao(codigo→omie_prod_id)' AS origem
-        FROM public.omie_estoque_posicao
+               'omie.omie_estoque_posicao(codigo→omie_prod_id)' AS origem
+        FROM omie.omie_estoque_posicao
         WHERE codigo = $1
         LIMIT 1;
       `, [codigo]);
@@ -27716,7 +27720,7 @@ app.get('/api/preparacao/listar', async (req, res) => {
   try {
     // garante a tabela de overlay (legado ainda utilizado em outros fluxos)
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+      CREATE TABLE IF NOT EXISTS producao.op_status_overlay (
         op         text PRIMARY KEY,
         status     text NOT NULL,
         updated_at timestamptz NOT NULL DEFAULT now()
@@ -27738,7 +27742,7 @@ app.get('/api/preparacao/listar', async (req, res) => {
               COALESCE(e.data_impressao, e.data_criacao) DESC NULLS LAST,
               e.id DESC
           ) AS rn
-  FROM "OrdemProducao".tab_op e
+  FROM producao.tab_op e
         WHERE UPPER(e.local_impressao) IN (
           'QUADRO ELÉTRICO',
           'QUADRO ELETRICO'
@@ -27751,7 +27755,7 @@ app.get('/api/preparacao/listar', async (req, res) => {
         r.data_impressao,
         ov.status AS overlay_status
       FROM ranked r
-      LEFT JOIN public.op_status_overlay ov ON ov.op = r.numero_op
+      LEFT JOIN producao.op_status_overlay ov ON ov.op = r.numero_op
       WHERE r.rn = 1
       ORDER BY r.numero_op
     `);
@@ -27943,7 +27947,7 @@ app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
       const { rows: persRows } = await client.query(
         `
         SELECT id
-          FROM public.pcp_personalizacao
+          FROM producao.pcp_personalizacao
          WHERE TRIM(UPPER(numero_referencia)) = TRIM(UPPER($1))
          ORDER BY id
         `,
@@ -27960,7 +27964,7 @@ app.post('/api/preparacao/op/estrutura', express.json(), async (req, res) => {
               descricao_original,
               descricao_trocada,
               quantidade
-            FROM public.pcp_personalizacao_item
+            FROM producao.pcp_personalizacao_item
             WHERE personalizacao_id = ANY($1::bigint[])
           `,
           [personalizacaoIds]
@@ -28040,7 +28044,7 @@ app.post('/api/etiquetas/op/:op/etapa', express.json(), async (req, res) => {
   try {
     const { rows } = await client.query(
     `SELECT DISTINCT TRIM(UPPER(codigo_produto)) AS codigo_produto
-      FROM "OrdemProducao".tab_op
+      FROM producao.tab_op
         WHERE TRIM(UPPER(numero_op)) = $1` ,
       [op]
     );
@@ -28058,11 +28062,11 @@ app.post('/api/etiquetas/op/:op/etapa', express.json(), async (req, res) => {
 
     const params = produtoCodigo ? [etapa, op, produtoCodigo] : [etapa, op];
     const sql = produtoCodigo
-      ? `UPDATE "OrdemProducao".tab_op
+      ? `UPDATE producao.tab_op
             SET etapa = $1
           WHERE TRIM(UPPER(numero_op)) = $2
             AND TRIM(UPPER(codigo_produto)) = $3`
-      : `UPDATE "OrdemProducao".tab_op
+      : `UPDATE producao.tab_op
             SET etapa = $1
           WHERE TRIM(UPPER(numero_op)) = $2`;
 
@@ -28089,7 +28093,7 @@ app.post('/api/etiquetas/op/:op/reativar', express.json(), async (req, res) => {
   try {
     const { rows } = await client.query(
     `SELECT DISTINCT TRIM(UPPER(codigo_produto)) AS codigo_produto
-      FROM "OrdemProducao".tab_op
+      FROM producao.tab_op
         WHERE TRIM(UPPER(numero_op)) = $1`,
       [op]
     );
@@ -28106,13 +28110,13 @@ app.post('/api/etiquetas/op/:op/reativar', express.json(), async (req, res) => {
     }
 
     const sql = produtoCodigo
-  ? `UPDATE "OrdemProducao".tab_op
+  ? `UPDATE producao.tab_op
             SET etapa = NULL,
                 data_impressao = NULL,
                 impressa = FALSE
           WHERE TRIM(UPPER(numero_op)) = $1
             AND TRIM(UPPER(codigo_produto)) = $2`
-  : `UPDATE "OrdemProducao".tab_op
+  : `UPDATE producao.tab_op
             SET etapa = NULL,
                 data_impressao = NULL,
                 impressa = FALSE
@@ -28153,7 +28157,7 @@ app.post('/api/etiquetas/op/etapas', express.json(), async (req, res) => {
                      data_criacao  DESC NULLS LAST,
                      id DESC
           ) AS rn
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
         WHERE TRIM(UPPER(numero_op)) = ANY($1)
       )
       SELECT numero_op, etapa
@@ -28227,13 +28231,13 @@ async function runBackfillCodigos() {
         i.n_cod_op,
         i.n_cod_prod,
         COALESCE(p.codigo, p.codigo_familia, p.codigo_produto::text) AS novo_codigo
-      FROM public.op_info i
-      JOIN public.produtos p
+      FROM producao.op_info i
+      JOIN produto.produtos p
             ON p.codigo_produto::text = i.n_cod_prod::text
       WHERE (i.produto_codigo IS NULL OR i.produto_codigo ~ '^[0-9]+$')
         AND i.n_cod_prod IS NOT NULL
     )
-    UPDATE public.op_info i
+    UPDATE producao.op_info i
        SET produto_codigo = m.novo_codigo,
            updated_at     = now()
       FROM m
@@ -28268,7 +28272,7 @@ app.get('/api/preparacao/backfill-codigos', async (req, res) => {
 async function ensureOverlayTable() {
   // Cria se não existir (idempotente)
   await pool.query(`
-    CREATE TABLE IF NOT EXISTS public.op_status_overlay (
+    CREATE TABLE IF NOT EXISTS producao.op_status_overlay (
       op         text PRIMARY KEY,
       status     text NOT NULL,
       updated_at timestamptz NOT NULL DEFAULT now()
@@ -28318,8 +28322,8 @@ app.get('/api/comercial/pedidos/kanban', async (req, res) => {
           p.codigo_cliente,
           p.data_previsao,
           to_char(p.data_previsao, 'DD/MM/YYYY') AS data_previsao_br
-        FROM "Vendas".pedidos_venda_itens i
-        JOIN "Vendas".pedidos_venda p
+        FROM vendas.pedidos_venda_itens i
+        JOIN vendas.pedidos_venda p
           ON p.codigo_pedido = i.codigo_pedido
         WHERE p.etapa = '80'
         ORDER BY
@@ -28340,7 +28344,7 @@ app.get('/api/comercial/pedidos/kanban', async (req, res) => {
           impressa,
           usuario_criacao,
           etapa
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
         WHERE tipo_etiqueta = 'Aguardando prazo'
           AND (impressa IS DISTINCT FROM TRUE)
           AND data_impressao IS NULL
@@ -28364,7 +28368,7 @@ app.get('/api/comercial/pedidos/kanban', async (req, res) => {
           impressa,
           usuario_criacao,
           etapa
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
         WHERE tipo_etiqueta = 'Aguardando prazo'
           AND data_impressao IS NOT NULL
           AND (etapa IS NULL OR lower(etapa) NOT IN ('excluido','excluído'))
@@ -28387,7 +28391,7 @@ app.get('/api/comercial/pedidos/kanban', async (req, res) => {
           impressa,
           usuario_criacao,
           etapa
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
         WHERE tipo_etiqueta = 'Aguardando prazo'
           AND lower(COALESCE(etapa, '')) IN ('excluido','excluído')
         ORDER BY
@@ -28430,7 +28434,7 @@ app.post('/api/comercial/pedidos/importar', express.json(), async (req, res) => 
       const arr = Array.isArray(lote.pedido_venda_produto) ? lote.pedido_venda_produto : [];
 
       for (const pedido of arr) {
-        await pool.query('select "Vendas".pedido_upsert_from_payload($1::jsonb)', [pedido]);
+        await pool.query('select vendas.pedido_upsert_from_payload($1::jsonb)', [pedido]);
         importados++;
       }
     }
@@ -28606,7 +28610,7 @@ app.post('/webhooks/omie/pedidos', chkOmieToken, express.json(), async (req, res
 
     // grava no Postgres (funções que já criamos no SQL)
     if (usarDb) {
-      await dbQuery('select "Vendas".pedido_upsert_from_payload($1::jsonb)', [pedObj]);
+      await dbQuery('select vendas.pedido_upsert_from_payload($1::jsonb)', [pedObj]);
       await dbQuery('select public.pedido_itens_upsert_from_payload($1::jsonb)', [pedObj]);
       return res.json({ ok:true, mode:'postgres', codigo_pedido: pedObj?.cabecalho?.codigo_pedido });
     }
@@ -28643,7 +28647,7 @@ app.post('/api/webhooks/omie/pedidos', express.json({ limit: '5mb' }), async (re
     const body = req.body || {};
     const wrapper = body.pedido_venda_produto ? body : { pedido_venda_produto: [body] };
 
-    const r = await pool.query('SELECT "Vendas".pedidos_upsert_from_list($1::jsonb) AS n;', [wrapper]);
+    const r = await pool.query('SELECT vendas.pedidos_upsert_from_list($1::jsonb) AS n;', [wrapper]);
     const n = r.rows?.[0]?.n ?? 0;
 
     // responda rápido para não estourar timeout do Omie
@@ -29408,7 +29412,7 @@ async function ensureComprasSchema() {
 
         SELECT po.descricao
           INTO v_descricao
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
          WHERE po.codigo_produto::TEXT = NEW.codigo_produto_omie::TEXT
          LIMIT 1;
 
@@ -29468,11 +29472,11 @@ async function ensureComprasSchema() {
             AND table_name = 'produtos_omie'
         ) THEN
           DROP TRIGGER IF EXISTS trg_sync_desc_produto_omie_para_solicitacao
-          ON public.produtos_omie;
+          ON produto.produtos_omie;
 
           CREATE TRIGGER trg_sync_desc_produto_omie_para_solicitacao
           AFTER INSERT OR UPDATE OF descricao
-          ON public.produtos_omie
+          ON produto.produtos_omie
           FOR EACH ROW
           EXECUTE FUNCTION compras.fn_sync_desc_produto_omie_para_solicitacao();
         END IF;
@@ -29844,7 +29848,7 @@ async function ensureComprasSchema() {
         UPDATE compras.solicitacao_compras sc
            SET produto_descricao = po.descricao,
                updated_at = NOW()
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
          WHERE sc.codigo_produto_omie IS NOT NULL
            AND sc.codigo_produto_omie::TEXT = po.codigo_produto::TEXT
            AND COALESCE(sc.produto_descricao, '') IS DISTINCT FROM COALESCE(po.descricao, '');
@@ -32206,7 +32210,7 @@ app.get('/api/compras/proximo-codigo-provisorio', async (req, res) => {
     const { rows } = await pool.query(`
       WITH codigos AS (
         SELECT SUBSTRING(p.codigo FROM 'CODPROV\\s*-\\s*([0-9]+)')::INT AS numero
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
         WHERE p.codigo ILIKE 'CODPROV%'
 
         UNION ALL
@@ -32357,7 +32361,7 @@ app.get('/api/produtos-omie/buscar-codigo', async (req, res) => {
 
     const { rows } = await pool.query(`
       SELECT codigo_produto
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
       WHERE codigo = $1
       LIMIT 1
     `, [codigo]);
@@ -32967,7 +32971,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
     let codigoOmieValidado = item.codigo_omie || null;
     if (codigoOmieValidado) {
       const { rows: validacaoOmie } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie
+        `SELECT codigo_produto FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
         LIMIT 1`,
@@ -32980,7 +32984,7 @@ app.post('/api/compras/carrinho', express.json(), async (req, res) => {
       }
     } else if (produtoCodigo) {
       const { rows: buscaOmie } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie
+        `SELECT codigo_produto FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
         LIMIT 1`,
@@ -33096,7 +33100,7 @@ app.put('/api/compras/carrinho/:id', express.json(), async (req, res) => {
     let codigoOmieValidadoPUT = item.codigo_omie || null;
     if (produtoCodigoPUT) {
       const { rows: validacaoOmiePUT } = await pool.query(
-        `SELECT codigo_produto FROM public.produtos_omie
+        `SELECT codigo_produto FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
         LIMIT 1`,
@@ -33674,7 +33678,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
     const obterBaseCodprovDisponivel = async () => {
       const { rows: maxOmie } = await pool.query(
         `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo LIKE 'CODPROV - %'`
       );
       const { rows: maxSolic } = await pool.query(
@@ -33695,7 +33699,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
       const baseExiste = async (num) => {
         const prefixo = `${montarCodigoBase(num)}%`;
         const { rows: existe } = await pool.query(
-          `SELECT 1 FROM public.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
+          `SELECT 1 FROM produto.produtos_omie WHERE codigo LIKE $1 LIMIT 1`,
           [prefixo]
         );
         return existe.length > 0;
@@ -34004,7 +34008,7 @@ app.post('/api/compras/sem-cadastro', express.json(), async (req, res) => {
 
           const { rows: prodRows } = await pool.query(
             `SELECT codigo_produto
-             FROM public.produtos_omie
+             FROM produto.produtos_omie
              WHERE codigo = $1 OR codigo_produto_integracao = $1
              LIMIT 1`,
             [itemLinha.produto_codigo]
@@ -34411,7 +34415,7 @@ app.post('/api/compras/resolver-codigos-omie', express.json(), async (req, res) 
 
     const { rows } = await pool.query(
       `SELECT codigo, codigo_produto
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE codigo = ANY($1::text[])
           OR codigo_produto_integracao = ANY($1::text[])`,
       [codigosUnicos]
@@ -34480,7 +34484,7 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
     const buscarMaximoCodprov = async () => {
       const { rows: maxOmie } = await pool.query(
         `SELECT MAX(CAST(regexp_replace(codigo, '^\\D*(\\d+).*$','\\1') AS INTEGER)) AS max_num
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo LIKE 'CODPROV - %'`
       );
       const { rows: maxSolic } = await pool.query(
@@ -34515,7 +34519,7 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
       const prefixo = `${montarCodigoBase(num)}%`;
       const { rows: existe } = await pool.query(
         `SELECT 1 FROM (
-           SELECT codigo FROM public.produtos_omie WHERE codigo LIKE $1
+           SELECT codigo FROM produto.produtos_omie WHERE codigo LIKE $1
            UNION ALL
            SELECT produto_codigo FROM compras.solicitacao_compras WHERE produto_codigo LIKE $1
            UNION ALL
@@ -34566,7 +34570,7 @@ app.post('/api/compras/sem-cadastro/:id/cadastrar-omie', express.json(), async (
         codigoIntegracao = `${codigoBase}.${i + 1}`;
         const { rows: prodRows } = await pool.query(
           `SELECT codigo_produto
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
            WHERE codigo = $1 OR codigo_produto_integracao = $1
            LIMIT 1`,
           [codigoIntegracao]
@@ -34693,9 +34697,9 @@ async function finalizarPreCadastroSemCadastro(itemId) {
     await client.query(`SELECT pg_advisory_xact_lock(hashtext('produto_codigo_reserva'))`);
     await _cadastroGarantirReservas(client);
     const { rows: existentes } = await client.query(`
-      SELECT codigo, descricao FROM public.produtos_omie WHERE codigo IS NOT NULL
+      SELECT codigo, descricao FROM produto.produtos_omie WHERE codigo IS NOT NULL
       UNION ALL
-      SELECT codigo, descricao_referencia AS descricao FROM public.produto_codigo_reserva
+      SELECT codigo, descricao_referencia AS descricao FROM produto.produto_codigo_reserva
       WHERE confirmada = TRUE
     `);
     const usados = new Set();
@@ -34716,7 +34720,7 @@ async function finalizarPreCadastroSemCadastro(itemId) {
     while (usados.has(sequencial)) sequencial++;
     codigoFinal = `${prefixo}.${String(sequencial).padStart(5, '0')}`;
     await client.query(
-      `INSERT INTO public.produto_codigo_reserva (codigo, sequencial, prefixo, descricao_referencia, confirmada)
+      `INSERT INTO produto.produto_codigo_reserva (codigo, sequencial, prefixo, descricao_referencia, confirmada)
        VALUES ($1, $2, $3, $4, TRUE)
        ON CONFLICT (codigo) DO UPDATE SET confirmada = TRUE, descricao_referencia = EXCLUDED.descricao_referencia`,
       [codigoFinal, sequencial, prefixo, descricao]
@@ -34894,7 +34898,7 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
       try {
         const { rows: rowsEstoque } = await pool.query(`
           SELECT cmc
-          FROM public.omie_estoque_posicao
+          FROM omie.omie_estoque_posicao
           WHERE omie_prod_id = $1
           LIMIT 1
         `, [codigoOmie]);
@@ -35098,7 +35102,7 @@ async function garantirCodigoOmieParaItem(client, item, itemId) {
   for (let i = 0; i < 10; i++) {
     const { rows: prodRows } = await client.query(
       `SELECT codigo_produto
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE codigo = $1 OR codigo_produto_integracao = $1
        LIMIT 1`,
       [codigoAtual]
@@ -35164,7 +35168,7 @@ async function garantirCodigoOmieParaItem(client, item, itemId) {
     try {
       const { rows: prodRows } = await client.query(
         `SELECT codigo_produto
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo = $1 OR codigo_produto_integracao = $1
          LIMIT 1`,
         [produtoCodigo]
@@ -35228,7 +35232,7 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     if (item.codigo_omie) {
       try {
         const { rows } = await client.query(`
-          SELECT cmc FROM public.omie_estoque_posicao
+          SELECT cmc FROM omie.omie_estoque_posicao
           WHERE omie_prod_id = $1 LIMIT 1
         `, [item.codigo_omie]);
 
@@ -35507,10 +35511,10 @@ app.get('/api/compras/catalogo-omie', async (req, res) => {
           ELSE false
         END as abaixo_minimo,
         COALESCE(ea.locais, '[]'::json) as locais
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
       LEFT JOIN LATERAL (
         SELECT url_imagem
-        FROM public.produtos_omie_imagens
+        FROM produto.produtos_omie_imagens
         WHERE codigo_produto = p.codigo_produto
         ORDER BY pos
         LIMIT 1
@@ -35554,7 +35558,7 @@ app.get('/api/produtos/no-minimo', async (req, res) => {
         (up.estoque_minimo - up.fisico) AS deficit,
         up.data_posicao,
         up.ingested_at
-      FROM public.produtos_omie po
+      FROM produto.produtos_omie po
       JOIN LATERAL (
         SELECT
           COALESCE(p.fisico, 0) AS fisico,
@@ -35571,7 +35575,7 @@ app.get('/api/produtos/no-minimo', async (req, res) => {
           ) AS local_nome,
           p.data_posicao,
           p.ingested_at
-        FROM public.omie_estoque_posicao p
+        FROM omie.omie_estoque_posicao p
         WHERE COALESCE(p.omie_prod_id::text, p.codigo) = po.codigo_produto::text
         ORDER BY p.data_posicao DESC NULLS LAST, p.ingested_at DESC NULLS LAST, p.id DESC
         LIMIT 1
@@ -35622,7 +35626,7 @@ app.get('/api/logistica/produtos-no-minimo', async (req, res) => {
         (ep.minimo - COALESCE(ep.saldo_almox, 0))   AS deficit,
         COALESCE(ep.updated_at, NOW())               AS data_posicao
       FROM estoque_produto ep
-      JOIN public.produtos_omie po
+      JOIN produto.produtos_omie po
         ON UPPER(TRIM(po.codigo)) = ep.codigo_chave
       WHERE ep.minimo > 0
         AND COALESCE(ep.saldo_almox, 0) < ep.minimo
@@ -35656,7 +35660,7 @@ const _omieImageQueue = (() => {
 
 // GET /api/compras/imagem-fresca/:codigo_produto
 // As imagens agora vivem 100% no Supabase. Esta rota apenas lê a URL pública mais recente
-// armazenada em public.produtos_omie_imagens (alimentada pelo bucket produtos/Fotos_produto).
+// armazenada em produto.produtos_omie_imagens (alimentada pelo bucket produtos/Fotos_produto).
 app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
   try {
     const codigoProduto = String(req.params.codigo_produto || '').trim();
@@ -35664,7 +35668,7 @@ app.get('/api/compras/imagem-fresca/:codigo_produto', async (req, res) => {
 
     const { rows } = await pool.query(
       `SELECT TRIM(url_imagem) AS url_imagem
-         FROM public.produtos_omie_imagens
+         FROM produto.produtos_omie_imagens
         WHERE codigo_produto = $1
           AND COALESCE(ativo, true) = true
           AND TRIM(COALESCE(url_imagem, '')) <> ''
@@ -35767,7 +35771,7 @@ app.get('/api/compras/minhas', async (req, res) => {
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
           WHERE (
             po.codigo_produto::TEXT = COALESCE(
               NULLIF(sc.codigo_produto_omie::TEXT, ''),
@@ -36095,7 +36099,7 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
     try {
       const { rows: rowsEstoque } = await pool.query(`
         SELECT cmc
-        FROM public.omie_estoque_posicao
+        FROM omie.omie_estoque_posicao
         WHERE omie_prod_id = $1
         LIMIT 1
       `, [item.codigo_omie]);
@@ -36248,7 +36252,7 @@ async function criarRequisicaoOmieParaItens(itens) {
       try {
         const { rows: rowsEstoque } = await pool.query(`
           SELECT cmc
-          FROM public.omie_estoque_posicao
+          FROM omie.omie_estoque_posicao
           WHERE omie_prod_id = $1
           LIMIT 1
         `, [item.codigo_omie]);
@@ -36591,7 +36595,7 @@ app.get('/api/compras/todas', async (req, res) => {
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
           WHERE (
             po.codigo_produto::TEXT = COALESCE(
               NULLIF(sc.codigo_produto_omie::TEXT, ''),
@@ -36899,7 +36903,7 @@ app.get('/api/compras/grupo-itens', async (req, res) => {
         FROM compras.solicitacao_compras sc
         LEFT JOIN LATERAL (
           SELECT po.unidade
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
           WHERE (
             po.codigo_produto::TEXT = COALESCE(
               NULLIF(sc.codigo_produto_omie::TEXT, ''),
@@ -37008,7 +37012,7 @@ app.post('/api/compras/grupo-itens', express.json(), async (req, res) => {
           const { rows: produtoRows } = await pool.query(
             `
               SELECT codigo_produto
-              FROM public.produtos_omie
+              FROM produto.produtos_omie
               WHERE TRIM(codigo::text) = TRIM($1::text)
               ORDER BY codigo_produto ASC
               LIMIT 1
@@ -37343,7 +37347,7 @@ app.get('/api/compras/requisicoes', async (req, res) => {
           (COALESCE(ri.qtde, 0) * COALESCE(ri.preco_unit, 0)) AS n_val_tot,
           ri.obs_item
         FROM compras.requisicoes_omie_itens ri
-        LEFT JOIN public.produtos_omie p ON p.codigo_produto::text = ri.cod_prod::text
+        LEFT JOIN produto.produtos_omie p ON p.codigo_produto::text = ri.cod_prod::text
         WHERE ri.cod_req_compra::text = ANY($1::text[])
         ORDER BY ri.id
       `, [codigos]);
@@ -44178,7 +44182,7 @@ async function verificarEExecutarAgendamento() {
              proxima_execucao, ultima_execucao,
              -- Indica se está dentro da janela de execução (até 10 min de atraso)
              (proxima_execucao <= NOW() AND proxima_execucao >= NOW() - INTERVAL '10 minutes') AS deve_executar
-      FROM public.agendamento_sincronizacao
+      FROM configuracoes.agendamento_sincronizacao
       ORDER BY id DESC LIMIT 1
     `);
     if (!res.rows.length) return;
@@ -44194,7 +44198,7 @@ async function verificarEExecutarAgendamento() {
     // Atualiza proxima_execucao APENAS se ela ainda <= NOW() (não foi alterada por outra instância)
     const novaProxima = calcularProximaExecucaoAgendamento(cfg.dias_semana, cfg.horario);
     const lock = await client.query(`
-      UPDATE public.agendamento_sincronizacao
+      UPDATE configuracoes.agendamento_sincronizacao
       SET proxima_execucao = $1, ultima_execucao = NOW()
       WHERE id = $2 AND proxima_execucao <= NOW()
       RETURNING id
@@ -44258,6 +44262,8 @@ async function startServer() {
       await warmupPgPool();
       if (sessionPool) await warmupSessionPool();
       await ensureSessionTableReady();
+      const { organizarSchemasMigracao } = require('./utils/organizarSchemasMigracao');
+      await organizarSchemasMigracao(pool);
     } catch (err) {
       console.error('[db] falha ao preparar pool/session na subida:', err?.message || err);
     }
@@ -44606,7 +44612,7 @@ app.post('/api/pcp/estrutura', express.json(), async (req, res) => {
           (it.quantidade * (1 + COALESCE(it.perc_perda,0)/100.0))::NUMERIC(18,6) AS comp_qtd_bruta
         FROM omie_malha_item it
         JOIN omie_malha_cab  cab ON cab.produto_id = it.produto_id
-        LEFT JOIN public.produtos_omie po ON TRIM(UPPER(po.codigo)) = TRIM(UPPER(cab.produto_codigo))
+        LEFT JOIN produto.produtos_omie po ON TRIM(UPPER(po.codigo)) = TRIM(UPPER(cab.produto_codigo))
         LEFT JOIN LATERAL (
           SELECT descr_produto, id_produto, unidade
           FROM engenharia.omie_estrutura
@@ -44668,7 +44674,7 @@ app.post('/api/pcp/qtd_prod', express.json(), async (req, res) => {
              COALESCE((
                SELECT COUNT(*)
                FROM public.kanban_preparacao_view k
-               JOIN public.op_info oi ON oi.n_cod_op = k.n_cod_op
+               JOIN producao.op_info oi ON oi.n_cod_op = k.n_cod_op
                WHERE k.c_cod_int_prod::text = a.cod
                  AND oi.c_etapa IN ('20','40')
              ), 0) AS qtd_prod
@@ -45147,7 +45153,7 @@ async function omieExcluirTodaEstrutura(codProduto) {
 }
 
 // ─── Helper: inclui itens na estrutura de um produto na Omie ────────────────
-// Busca idProduto e idProdMalha de cada componente em public.produtos_omie.
+// Busca idProduto e idProdMalha de cada componente em produto.produtos_omie.
 // Chama IncluirEstrutura em lotes de 3 (respeitando limite 3 req/s da Omie).
 async function omieIncluirEstrutura(codProduto, mainItems) {
   const OMIE_URL  = 'https://app.omie.com.br/api/v1/geral/malha/';
@@ -45160,7 +45166,7 @@ async function omieIncluirEstrutura(codProduto, mainItems) {
 
   // 1) Busca idProduto do produto pai
   const paiRes = await pool.query(
-    `SELECT codigo_produto FROM public.produtos_omie
+    `SELECT codigo_produto FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1) OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
       LIMIT 1`,
@@ -45174,7 +45180,7 @@ async function omieIncluirEstrutura(codProduto, mainItems) {
   // 2) Busca idProdMalha de todos os componentes em uma só query
   const codigos = [...new Set(mainItems.map(it => it.comp_codigo))];
   const compRes = await pool.query(
-    `SELECT codigo, codigo_produto FROM public.produtos_omie WHERE codigo = ANY($1)`,
+    `SELECT codigo, codigo_produto FROM produto.produtos_omie WHERE codigo = ANY($1)`,
     [codigos]
   );
   const idPorCodigo = {};

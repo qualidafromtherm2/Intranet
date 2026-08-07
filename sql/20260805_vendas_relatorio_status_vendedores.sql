@@ -1,7 +1,7 @@
 -- Relatório Gerencial Vendas: status NF e cadastro de vendedores Omie
-CREATE SCHEMA IF NOT EXISTS "Vendas";
+CREATE SCHEMA IF NOT EXISTS vendas;
 
-CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_status (
+CREATE TABLE IF NOT EXISTS vendas.relatorio_gerencial_status (
   status VARCHAR(40) PRIMARY KEY,
   incluido BOOLEAN NOT NULL DEFAULT TRUE,
   descricao TEXT,
@@ -9,13 +9,13 @@ CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_status (
   atualizado_por TEXT
 );
 
-ALTER TABLE "Vendas".relatorio_gerencial_status
+ALTER TABLE vendas.relatorio_gerencial_status
   ADD COLUMN IF NOT EXISTS descricao TEXT;
 
 CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_status_incluido_idx
-  ON "Vendas".relatorio_gerencial_status (incluido);
+  ON vendas.relatorio_gerencial_status (incluido);
 
-CREATE TABLE IF NOT EXISTS "Vendas".vendedores_omie (
+CREATE TABLE IF NOT EXISTS vendas.vendedores_omie (
   codigo BIGINT PRIMARY KEY,
   nome TEXT,
   email TEXT,
@@ -23,10 +23,10 @@ CREATE TABLE IF NOT EXISTS "Vendas".vendedores_omie (
   atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
-ALTER TABLE "Vendas".vendedores_omie
+ALTER TABLE vendas.vendedores_omie
   ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
 
-INSERT INTO "Vendas".relatorio_gerencial_status (status, incluido, descricao) VALUES
+INSERT INTO vendas.relatorio_gerencial_status (status, incluido, descricao) VALUES
   ('Autorizada', TRUE, 'NF autorizada'),
   ('Cancelada', FALSE, 'NF cancelada'),
   ('Denegada', FALSE, 'NF denegada'),

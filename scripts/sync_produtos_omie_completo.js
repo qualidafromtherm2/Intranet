@@ -3,7 +3,7 @@
 // ============================================================================
 // Script de Sincronização Completa: Omie → PostgreSQL
 // ============================================================================
-// Sincroniza TODOS os produtos da Omie para a tabela public.produtos_omie
+// Sincroniza TODOS os produtos da Omie para a tabela produto.produtos_omie
 // Usa a mesma função omie_upsert_produto($1::jsonb) do webhook
 //
 // USO:
@@ -324,7 +324,7 @@ async function main() {
       console.log('');
     }
     
-    console.log('✅ Tabela public.produtos_omie atualizada com sucesso!\n');
+    console.log('✅ Tabela produto.produtos_omie atualizada com sucesso!\n');
     
     process.exit(0);
     

@@ -280,7 +280,7 @@ router.get('/operacoes', async (_req, res) => {
     const q = `
       SELECT "${idCol}"   AS id,
              "${labelCol}" AS operacao
-        FROM public.omie_operacao
+        FROM omie.omie_operacao
     ORDER BY "${labelCol}", "${idCol}"`;
     const { rows } = await pool.query(q);
     res.json(rows.map(r => ({
@@ -587,7 +587,7 @@ router.get('/separacao-destinos', async (_req, res) => {
       SELECT TRIM(cod_local) AS codigo,
              TRIM(nome_local) AS nome,
              CONCAT(TRIM(cod_local), '|', TRIM(nome_local)) AS chave
-        FROM solicitacao_produto.itens_solicitados
+        FROM logistica.itens_solicitados
        WHERE NULLIF(TRIM(cod_local), '') IS NOT NULL
          AND NULLIF(TRIM(nome_local), '') IS NOT NULL
        GROUP BY TRIM(cod_local), TRIM(nome_local)

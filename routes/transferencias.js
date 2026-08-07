@@ -35,8 +35,11 @@ let schemaTransferenciasOk = false;
 
 async function ensureTransferenciasSchema() {
   if (schemaTransferenciasOk) return;
+  const { pool } = require('../src/db');
+  const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('../utils/organizarSchemasMigracao');
+  if (pool) await organizarSchemasMigracao(pool);
   await dbQuery(`
-    ALTER TABLE mensagens.transferencias
+    ALTER TABLE logistica.transferencias
       ADD COLUMN IF NOT EXISTS data_movimentacao DATE,
       ADD COLUMN IF NOT EXISTS cmc NUMERIC(18,4),
       ADD COLUMN IF NOT EXISTS reprovado_por TEXT,
@@ -44,7 +47,7 @@ async function ensureTransferenciasSchema() {
       ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT
   `);
   await dbQuery(`
-    ALTER TABLE mensagens.transferencias
+    ALTER TABLE logistica.transferencias
       ADD COLUMN IF NOT EXISTS reversao_status TEXT,
       ADD COLUMN IF NOT EXISTS reversao_id BIGINT,
       ADD COLUMN IF NOT EXISTS revertida_por TEXT,
@@ -53,9 +56,10 @@ async function ensureTransferenciasSchema() {
       ADD COLUMN IF NOT EXISTS transferencia_origem_id BIGINT
   `);
   await dbQuery(`
-    ALTER TABLE mensagens.transferencias
+    ALTER TABLE logistica.transferencias
       DROP CONSTRAINT IF EXISTS transferencias_codigo_produto_fkey
   `);
+  if (pool) await ensureSchemasCompatViews(pool);
   schemaTransferenciasOk = true;
 }
 
@@ -352,7 +356,7 @@ router.get('/', async (_req, res) => {
                 reprovado_em,
                 motivo_reprovacao,
                 0 AS ordem_status
-           FROM mensagens.transferencias
+           FROM logistica.transferencias
           WHERE lower(coalesce(status, '')) NOT IN ('transferido', 'reprovado')
        ),
        historico AS (
@@ -372,7 +376,7 @@ router.get('/', async (_req, res) => {
                 reprovado_em,
                 motivo_reprovacao,
                 1 AS ordem_status
-           FROM mensagens.transferencias
+           FROM logistica.transferencias
           WHERE lower(coalesce(status, '')) IN ('transferido', 'reprovado')
           ORDER BY id DESC
           LIMIT 250
@@ -515,7 +519,7 @@ router.post('/', express.json(), async (req, res) => {
     }).join(', ');
 
     const insertSql = `
-      INSERT INTO mensagens.transferencias
+      INSERT INTO logistica.transferencias
         (codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc, solicitante, status)
       VALUES ${valuesSql}
       RETURNING id, codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc, solicitante, status, aprovado_pro
@@ -527,7 +531,7 @@ router.post('/', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[transferencias] falha ao registrar transferência', err);
     const detalhe = err.code === '23503' && err.constraint === 'transferencias_codigo_produto_fkey'
-      ? 'Produto sem cadastro valido em public.produtos_omie. Atualize o cadastro/cache de produtos antes de registrar a transferencia.'
+      ? 'Produto sem cadastro valido em produto.produtos_omie. Atualize o cadastro/cache de produtos antes de registrar a transferencia.'
       : (err.message || String(err));
     res.status(err.status || 500).json({
       error: 'Falha ao registrar transferência de itens.',
@@ -562,7 +566,7 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
              solicitante,
              status,
              aprovado_pro
-        FROM mensagens.transferencias
+        FROM logistica.transferencias
        WHERE id = $1
        LIMIT 1`;
 
@@ -590,7 +594,7 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     );
 
     const updateSql = `
-      UPDATE mensagens.transferencias
+      UPDATE logistica.transferencias
          SET status = $1,
              aprovado_pro = $2
        WHERE id = $3
@@ -677,7 +681,7 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
     const { rows } = await client.query(`
       SELECT id, codigo_produto, codigo, descricao, qtd, origem, destino,
              data_movimentacao, cmc, solicitante, status, reversao_status, reversao_id
-        FROM mensagens.transferencias
+        FROM logistica.transferencias
        WHERE id = $1
        FOR UPDATE
     `, [id]);
@@ -711,7 +715,7 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
       return res.status(403).json({ error: 'Somente o solicitante original ou um administrador pode reverter.' });
     }
 
-    await client.query(`UPDATE mensagens.transferencias SET reversao_status='Processando' WHERE id=$1`, [id]);
+    await client.query(`UPDATE logistica.transferencias SET reversao_status='Processando' WHERE id=$1`, [id]);
     const respostaOmie = await incluirAjusteEstoqueOmie({
       ...original,
       origem: original.destino,
@@ -721,7 +725,7 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
     }, usuario);
 
     const { rows: reversoes } = await client.query(`
-      INSERT INTO mensagens.transferencias
+      INSERT INTO logistica.transferencias
         (codigo_produto, codigo, descricao, qtd, origem, destino, data_movimentacao, cmc,
          solicitante, status, aprovado_pro, transferencia_origem_id, motivo_reversao)
       VALUES ($1,$2,$3,$4,$5,$6,CURRENT_DATE,$7,$8,$9,$8,$10,$11)
@@ -732,7 +736,7 @@ router.patch('/:id/reverter', express.json(), async (req, res) => {
     ]);
     const reversao = reversoes[0];
     await client.query(`
-      UPDATE mensagens.transferencias
+      UPDATE logistica.transferencias
          SET reversao_status=$1, reversao_id=$2, revertida_por=$3, revertida_em=NOW(), motivo_reversao=$4
        WHERE id=$5
     `, [STATUS_REVERTIDO, reversao.id, usuario, motivo, id]);
@@ -784,7 +788,7 @@ router.patch('/:id/reprovar', express.json(), async (req, res) => {
 
     const { rows: encontrados } = await dbQuery(
       `SELECT id, status
-         FROM mensagens.transferencias
+         FROM logistica.transferencias
         WHERE id = $1
         LIMIT 1`,
       [id]
@@ -800,7 +804,7 @@ router.patch('/:id/reprovar', express.json(), async (req, res) => {
     }
 
     const { rows } = await dbQuery(
-      `UPDATE mensagens.transferencias
+      `UPDATE logistica.transferencias
           SET status = $1,
               reprovado_por = $2,
               reprovado_em = NOW(),

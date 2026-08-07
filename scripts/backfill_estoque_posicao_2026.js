@@ -5,7 +5,7 @@
  * ============================================================================
  * Busca na API Omie (ListarPosEstoque) a posição de estoque para cada
  * combinação (data, local) do período 01/01/2026 até ontem que ainda
- * NÃO existe em public.omie_estoque_posicao.
+ * NÃO existe em omie.omie_estoque_posicao.
  *
  * Pode ser interrompido e retomado — skipa automaticamente pares já gravados.
  *
@@ -159,7 +159,7 @@ async function omieListarPosEstoque(localCodigo, dataISO) {
 async function gravarItens(localCodigo, dataISO, itens) {
   const clamp = n => Math.max(0, Number(n) || 0);
   const sql = `
-    INSERT INTO public.omie_estoque_posicao (
+    INSERT INTO omie.omie_estoque_posicao (
       data_posicao, ingested_at, local_codigo,
       omie_prod_id, cod_int, codigo, descricao,
       preco_unitario, saldo, cmc, pendente, estoque_minimo, reservado, fisico
@@ -217,7 +217,7 @@ async function gravarItens(localCodigo, dataISO, itens) {
 
   // 1) Locais ativos
   const { rows: locaisRows } = await pool.query(
-    'SELECT local_codigo FROM public.omie_locais_estoque WHERE ativo = TRUE ORDER BY local_codigo'
+    'SELECT local_codigo FROM omie.omie_locais_estoque WHERE ativo = TRUE ORDER BY local_codigo'
   );
   if (!locaisRows.length) {
     console.error('Nenhum local ativo encontrado em omie_locais_estoque. Abortando.');
@@ -233,7 +233,7 @@ async function gravarItens(localCodigo, dataISO, itens) {
   // 3) Pares já existentes no banco (para skip)
   const { rows: existentes } = await pool.query(`
     SELECT DISTINCT local_codigo, data_posicao::text AS data_posicao
-    FROM public.omie_estoque_posicao
+    FROM omie.omie_estoque_posicao
     WHERE data_posicao BETWEEN $1 AND $2
   `, [DATA_INICIO, DATA_FIM]);
   const jaExistem = new Set(existentes.map(r => `${r.data_posicao}|${r.local_codigo}`));

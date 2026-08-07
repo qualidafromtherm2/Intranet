@@ -4,9 +4,9 @@ let schemaOk = false;
 
 async function garantirSchemaControleOperacoes() {
   if (schemaOk) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS "Producao"."Controle_operacoes" (
+    CREATE TABLE IF NOT EXISTS producao."Controle_operacoes" (
       id                    BIGSERIAL PRIMARY KEY,
       kanban_programacao_id BIGINT,
       numero_op             TEXT,
@@ -16,9 +16,9 @@ async function garantirSchemaControleOperacoes() {
       fim                   TIMESTAMPTZ
     );
     CREATE INDEX IF NOT EXISTS idx_controle_op_kanban_prog
-      ON "Producao"."Controle_operacoes" (kanban_programacao_id);
+      ON producao."Controle_operacoes" (kanban_programacao_id);
     CREATE INDEX IF NOT EXISTS idx_controle_op_numero_op
-      ON "Producao"."Controle_operacoes" (numero_op);
+      ON producao."Controle_operacoes" (numero_op);
   `);
   schemaOk = true;
 }
@@ -26,7 +26,7 @@ async function garantirSchemaControleOperacoes() {
 async function buscarKanbanProgIdPorOp({ opProducaoId = 0, opIappId = 0, numeroOp = '' }) {
   const { rows } = await dbQuery(
     `SELECT id
-       FROM "Producao"."Kanban_programacao"
+       FROM producao."Kanban_programacao"
       WHERE ($1::bigint > 0 AND op_producao_id = $1)
          OR ($2::bigint > 0 AND op_iapp_id = $2)
          OR ($3::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))
@@ -50,7 +50,7 @@ async function registrarControleOperacaoImpressaoOp({
   const kpId = kanbanProgramacaoId
     || await buscarKanbanProgIdPorOp({ opProducaoId, opIappId, numeroOp });
   const { rows } = await dbQuery(
-    `INSERT INTO "Producao"."Controle_operacoes"
+    `INSERT INTO producao."Controle_operacoes"
        (kanban_programacao_id, numero_op, usuario, operacao, inicio)
      VALUES ($1, $2, $3, $4, NOW())
      RETURNING id`,

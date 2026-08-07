@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Preenche a coluna cfop em "Vendas".notas_fiscais_omie.
+ * Preenche a coluna cfop em vendas.notas_fiscais_omie.
  *
  * 1) Extrai do payload_ultimo (det[].prod.CFOP) — sem Omie
  * 2) Para as restantes, ConsultarNF com delay (rate-limit)
@@ -58,7 +58,7 @@ function extractCfopsFromNf(nf = {}) {
 
 async function ensureCfopColumn(client) {
   await client.query(`
-    ALTER TABLE "Vendas".notas_fiscais_omie
+    ALTER TABLE vendas.notas_fiscais_omie
       ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
   `);
 }
@@ -66,7 +66,7 @@ async function ensureCfopColumn(client) {
 async function fillFromPayload(client) {
   // Bulk: CFOP do 1º item (cobre a grande maioria das notas)
   const r1 = await client.query(`
-    UPDATE "Vendas".notas_fiscais_omie
+    UPDATE vendas.notas_fiscais_omie
        SET cfop = NULLIF(TRIM(payload_ultimo #>> '{det,0,prod,CFOP}'), ''),
            updated_at = NOW()
      WHERE COALESCE(TRIM(cfop), '') = ''
@@ -75,7 +75,7 @@ async function fillFromPayload(client) {
 
   // Ajuste leve: se houver 2º item com CFOP diferente, junta com vírgula
   const r2 = await client.query(`
-    UPDATE "Vendas".notas_fiscais_omie
+    UPDATE vendas.notas_fiscais_omie
        SET cfop = TRIM(BOTH ',' FROM (
              COALESCE(NULLIF(TRIM(payload_ultimo #>> '{det,0,prod,CFOP}'), ''), '')
              || CASE
@@ -133,7 +133,7 @@ async function omieConsultarNF(param, tentativa = 1) {
 async function fillFromOmie(client) {
   let sql = `
     SELECT id, identidade, chave_nfe, id_nf_omie, numero_nota
-      FROM "Vendas".notas_fiscais_omie
+      FROM vendas.notas_fiscais_omie
      WHERE COALESCE(TRIM(cfop), '') = ''
        AND tipo_documento = 'NFe'
        AND (
@@ -171,7 +171,7 @@ async function fillFromOmie(client) {
         continue;
       }
       await client.query(
-        `UPDATE "Vendas".notas_fiscais_omie
+        `UPDATE vendas.notas_fiscais_omie
             SET cfop = $1, updated_at = NOW()
           WHERE id = $2
             AND COALESCE(TRIM(cfop), '') = ''`,
@@ -220,7 +220,7 @@ async function main() {
       SELECT COUNT(*)::int AS total,
              COUNT(*) FILTER (WHERE COALESCE(TRIM(cfop),'') <> '')::int AS com_cfop,
              COUNT(*) FILTER (WHERE COALESCE(TRIM(cfop),'') = '')::int AS sem_cfop
-        FROM "Vendas".notas_fiscais_omie
+        FROM vendas.notas_fiscais_omie
     `);
     console.log('Resumo final:', resumo[0]);
   } finally {

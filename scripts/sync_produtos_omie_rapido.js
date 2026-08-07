@@ -198,7 +198,7 @@ async function main() {
     console.log(`   🔁 Duplicatas SKU inativadas: ${stats.duplicatas || 0}`);
     console.log(`   ⏱️  Duração: ${duracao}\n`);
     
-    console.log('✅ Tabela public.produtos_omie atualizada!\n');
+    console.log('✅ Tabela produto.produtos_omie atualizada!\n');
     
     process.exit(0);
     

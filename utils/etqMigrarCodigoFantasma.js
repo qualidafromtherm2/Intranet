@@ -56,8 +56,8 @@ async function migrarEtqSaldosSkuFantasma(client) {
             pa.codigo_produto::text AS id_ativo,
             LEFT(COALESCE(pa.descricao, ''), 120) AS descricao,
             array_agg(DISTINCT p.codigo_produto::text) AS ids_fantasma
-       FROM public.produtos_omie p
-       JOIN public.produtos_omie pa
+       FROM produto.produtos_omie p
+       JOIN produto.produtos_omie pa
          ON TRIM(pa.codigo) = TRIM(p.codigo)
         AND TRIM(COALESCE(pa.codigo, '')) <> ''
         AND COALESCE(NULLIF(UPPER(TRIM(pa.inativo)), ''), 'N') NOT IN ('S', 'SIM')

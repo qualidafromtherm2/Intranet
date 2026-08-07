@@ -80,7 +80,7 @@ async function gravarPosicaoEstoqueLocal({
        $1,
        (SELECT nome FROM omie_locais_estoque WHERE local_codigo::text = $1 LIMIT 1),
        $2, $3,
-       (SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
+       (SELECT descricao FROM produto.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
        $4, $5, $6, $7, $8, $9, NOW(), $10
      )
      ON CONFLICT ON CONSTRAINT uq_estoque_atual_prod_local
@@ -217,7 +217,7 @@ async function aplicarDeltaEstoqueLocal({
        $1,
        (SELECT nome FROM omie_locais_estoque WHERE local_codigo::text = $1 LIMIT 1),
        $2, $3,
-       (SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
+       (SELECT descricao FROM produto.produtos_omie WHERE codigo_produto = $2 LIMIT 1),
        $4, $4, 0, 0, 0, 0,
        NOW(), 'movimento_local'
      )

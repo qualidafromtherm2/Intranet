@@ -126,7 +126,7 @@ BEGIN
            descricao_produto = COALESCE(
              NULLIF((
                SELECT LEFT(COALESCE(pa.descricao, ''), 120)
-                 FROM public.produtos_omie pa
+                 FROM produto.produtos_omie pa
                 WHERE pa.codigo_produto = v_codigo_produto
                 LIMIT 1
              ), ''),
@@ -134,7 +134,7 @@ BEGIN
            )
      WHERE TRIM(COALESCE(e.codigo_produto, '')) IN (
        SELECT p.codigo_produto::text
-         FROM public.produtos_omie p
+         FROM produto.produtos_omie p
         WHERE p.codigo_produto <> v_codigo_produto
           AND (
             (COALESCE(v_codigo, '') <> '' AND TRIM(p.codigo) = v_codigo)

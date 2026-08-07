@@ -1,5 +1,5 @@
 /**
- * Identidade de produto em public.produtos_omie
+ * Identidade de produto em produto.produtos_omie
  *
  * codigo_produto = ID Omie fixo (ex.: 10409717177) — preferir sempre para localizar.
  * codigo         = SKU legível (pode mudar na Omie).
@@ -56,7 +56,7 @@ async function buscarProdutoOmiePorIdentidade(queryFn, identidade, selectCols = 
 
   const sql = `
     SELECT ${selectCols}
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
      WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
      ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
      LIMIT 1`;

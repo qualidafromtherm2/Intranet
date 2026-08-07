@@ -27,8 +27,8 @@ function formatCfopDisplay(digits) {
 async function ensureVendasRelatorioSchema() {
   if (_ensureSchemaPromise) return _ensureSchemaPromise;
   _ensureSchemaPromise = pool.query(`
-    CREATE SCHEMA IF NOT EXISTS "Vendas";
-    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial (
+    CREATE SCHEMA IF NOT EXISTS vendas;
+    CREATE TABLE IF NOT EXISTS vendas.relatorio_gerencial (
       id BIGSERIAL PRIMARY KEY,
       mes CHAR(7) NOT NULL UNIQUE,
       plano_acao JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -39,9 +39,9 @@ async function ensureVendasRelatorioSchema() {
       editado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_mes_idx
-      ON "Vendas".relatorio_gerencial (mes);
+      ON vendas.relatorio_gerencial (mes);
 
-    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_cfop (
+    CREATE TABLE IF NOT EXISTS vendas.relatorio_gerencial_cfop (
       cfop VARCHAR(10) PRIMARY KEY,
       incluido BOOLEAN NOT NULL DEFAULT TRUE,
       descricao TEXT,
@@ -49,9 +49,9 @@ async function ensureVendasRelatorioSchema() {
       atualizado_por TEXT
     );
     CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_cfop_incluido_idx
-      ON "Vendas".relatorio_gerencial_cfop (incluido);
+      ON vendas.relatorio_gerencial_cfop (incluido);
 
-    CREATE TABLE IF NOT EXISTS "Vendas".relatorio_gerencial_status (
+    CREATE TABLE IF NOT EXISTS vendas.relatorio_gerencial_status (
       status VARCHAR(40) PRIMARY KEY,
       incluido BOOLEAN NOT NULL DEFAULT TRUE,
       descricao TEXT,
@@ -59,18 +59,18 @@ async function ensureVendasRelatorioSchema() {
       atualizado_por TEXT
     );
     CREATE INDEX IF NOT EXISTS vendas_relatorio_gerencial_status_incluido_idx
-      ON "Vendas".relatorio_gerencial_status (incluido);
-    ALTER TABLE "Vendas".relatorio_gerencial_status
+      ON vendas.relatorio_gerencial_status (incluido);
+    ALTER TABLE vendas.relatorio_gerencial_status
       ADD COLUMN IF NOT EXISTS descricao TEXT;
 
-    CREATE TABLE IF NOT EXISTS "Vendas".vendedores_omie (
+    CREATE TABLE IF NOT EXISTS vendas.vendedores_omie (
       codigo BIGINT PRIMARY KEY,
       nome TEXT,
       email TEXT,
       inativo BOOLEAN NOT NULL DEFAULT FALSE,
       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
-    ALTER TABLE "Vendas".vendedores_omie
+    ALTER TABLE vendas.vendedores_omie
       ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
   `).then(() => undefined).catch((err) => {
     _ensureSchemaPromise = null;
@@ -83,19 +83,19 @@ async function ensureVendasRelatorioSchema() {
 async function syncRelatorioCfopCatalog() {
   await ensureVendasRelatorioSchema();
   await pool.query(`
-    INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, descricao)
+    INSERT INTO vendas.relatorio_gerencial_cfop (cfop, incluido, descricao)
     SELECT DISTINCT
       REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') AS cfop,
       (REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> '6905') AS incluido,
       NULL
-    FROM "Vendas".pedidos_venda_itens i
+    FROM vendas.pedidos_venda_itens i
     WHERE COALESCE(TRIM(i.cfop), '') <> ''
       AND REGEXP_REPLACE(TRIM(i.cfop), '\\D', '', 'g') <> ''
     ON CONFLICT (cfop) DO NOTHING
   `);
   try {
     await pool.query(`
-      UPDATE "Vendas".relatorio_gerencial_cfop c
+      UPDATE vendas.relatorio_gerencial_cfop c
          SET descricao = cfg.descricao
         FROM configuracoes.cfop cfg
        WHERE REGEXP_REPLACE(TRIM(cfg.codigo), '\\D', '', 'g') = c.cfop
@@ -111,11 +111,11 @@ async function syncRelatorioCfopCatalog() {
 async function syncRelatorioStatusCatalog() {
   await ensureVendasRelatorioSchema();
   await pool.query(`
-    INSERT INTO "Vendas".relatorio_gerencial_status (status, incluido)
+    INSERT INTO vendas.relatorio_gerencial_status (status, incluido)
     SELECT DISTINCT
       TRIM(n.status_ultimo) AS status,
       (TRIM(n.status_ultimo) = 'Autorizada') AS incluido
-    FROM "Vendas".notas_fiscais_omie n
+    FROM vendas.notas_fiscais_omie n
     WHERE COALESCE(TRIM(n.status_ultimo), '') <> ''
     ON CONFLICT (status) DO NOTHING
   `);
@@ -124,7 +124,7 @@ async function syncRelatorioStatusCatalog() {
 async function syncVendedoresOmieIfNeeded(force = false) {
   await ensureVendasRelatorioSchema();
   if (!force) {
-    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM "Vendas".vendedores_omie`);
+    const { rows } = await pool.query(`SELECT COUNT(*)::int AS n FROM vendas.vendedores_omie`);
     if ((rows[0]?.n || 0) > 0) return;
   }
   const appKey = process.env.OMIE_APP_KEY;
@@ -137,7 +137,7 @@ async function syncVendedoresOmieIfNeeded(force = false) {
   try {
     await client.query('BEGIN');
     if (force) {
-      await client.query(`DELETE FROM "Vendas".vendedores_omie`);
+      await client.query(`DELETE FROM vendas.vendedores_omie`);
     }
     while (pagina <= totalPaginas) {
       const data = await omieCall('https://app.omie.com.br/api/v1/geral/vendedores/', {
@@ -157,7 +157,7 @@ async function syncVendedoresOmieIfNeeded(force = false) {
         const email = String(v?.email ?? '').trim() || null;
         const inativo = String(v?.inativo ?? 'N').trim().toUpperCase() === 'S';
         await client.query(
-          `INSERT INTO "Vendas".vendedores_omie (codigo, nome, email, inativo, atualizado_em)
+          `INSERT INTO vendas.vendedores_omie (codigo, nome, email, inativo, atualizado_em)
            VALUES ($1, $2, $3, $4, NOW())
            ON CONFLICT (codigo) DO UPDATE SET
              nome = EXCLUDED.nome,
@@ -207,13 +207,13 @@ const VENDAS_NF_POR_PEDIDO_CTE = `
           ELSE NULL
         END
       ) AS data_emissao_dt
-    FROM "Vendas".notas_fiscais_omie
+    FROM vendas.notas_fiscais_omie
     WHERE COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') <> ''
       AND (
         status_ultimo IN (
-          SELECT s.status FROM "Vendas".relatorio_gerencial_status s WHERE s.incluido IS TRUE
+          SELECT s.status FROM vendas.relatorio_gerencial_status s WHERE s.incluido IS TRUE
         )
-        OR NOT EXISTS (SELECT 1 FROM "Vendas".relatorio_gerencial_status LIMIT 1)
+        OR NOT EXISTS (SELECT 1 FROM vendas.relatorio_gerencial_status LIMIT 1)
       )
     GROUP BY 1
   )
@@ -224,11 +224,11 @@ const VENDAS_CTES = `
   ${VENDAS_NF_POR_PEDIDO_CTE},
   pedidos_cfop_ignorado AS (
     SELECT DISTINCT i.codigo_pedido
-    FROM "Vendas".pedidos_venda_itens i
+    FROM vendas.pedidos_venda_itens i
     WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> ''
       AND REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
         SELECT c.cfop
-          FROM "Vendas".relatorio_gerencial_cfop c
+          FROM vendas.relatorio_gerencial_cfop c
          WHERE c.incluido IS FALSE
       )
   )
@@ -262,7 +262,7 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
         ) AS cliente,
         nf.data_emissao_dt,
         COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       LEFT JOIN nf_por_pedido nf
@@ -284,12 +284,12 @@ const ITENS_CTE = `
       COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
       COALESCE(i.quantidade, 0)::numeric(14,2) AS quantidade,
       COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-    FROM "Vendas".pedidos_venda_itens i
-    LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+    FROM vendas.pedidos_venda_itens i
+    LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
     WHERE (
       REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = ''
       OR REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
-        SELECT c.cfop FROM "Vendas".relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
+        SELECT c.cfop FROM vendas.relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
       )
     )
     __ITEM_SQL__
@@ -312,7 +312,7 @@ function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
         ) AS cliente,
         nf.data_emissao_dt,
         COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       LEFT JOIN nf_por_pedido nf
@@ -358,7 +358,7 @@ router.get('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
     await syncRelatorioCfopCatalog();
     const { rows } = await pool.query(`
       SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
-        FROM "Vendas".relatorio_gerencial_cfop c
+        FROM vendas.relatorio_gerencial_cfop c
        ORDER BY c.cfop
     `);
     return res.json({
@@ -396,7 +396,7 @@ router.put('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
         if (!cfop) continue;
         const incluido = item?.incluido !== false && item?.incluido !== 'false' && item?.incluido !== 0;
         await client.query(
-          `INSERT INTO "Vendas".relatorio_gerencial_cfop (cfop, incluido, atualizado_em, atualizado_por)
+          `INSERT INTO vendas.relatorio_gerencial_cfop (cfop, incluido, atualizado_em, atualizado_por)
            VALUES ($1, $2, NOW(), $3)
            ON CONFLICT (cfop) DO UPDATE SET
              incluido = EXCLUDED.incluido,
@@ -415,7 +415,7 @@ router.put('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
 
     const { rows } = await pool.query(`
       SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
-        FROM "Vendas".relatorio_gerencial_cfop c
+        FROM vendas.relatorio_gerencial_cfop c
        ORDER BY c.cfop
     `);
     return res.json({
@@ -441,7 +441,7 @@ router.get('/vendas/relatorio-gerencial/config/status', async (req, res) => {
     await syncRelatorioStatusCatalog();
     const { rows } = await pool.query(`
       SELECT s.status, s.incluido, s.atualizado_em, s.atualizado_por
-        FROM "Vendas".relatorio_gerencial_status s
+        FROM vendas.relatorio_gerencial_status s
        ORDER BY s.status
     `);
     return res.json({
@@ -477,7 +477,7 @@ router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
         if (!status) continue;
         const incluido = item?.incluido !== false && item?.incluido !== 'false' && item?.incluido !== 0;
         await client.query(
-          `INSERT INTO "Vendas".relatorio_gerencial_status (status, incluido, atualizado_em, atualizado_por)
+          `INSERT INTO vendas.relatorio_gerencial_status (status, incluido, atualizado_em, atualizado_por)
            VALUES ($1, $2, NOW(), $3)
            ON CONFLICT (status) DO UPDATE SET
              incluido = EXCLUDED.incluido,
@@ -496,7 +496,7 @@ router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
 
     const { rows } = await pool.query(`
       SELECT s.status, s.incluido, s.atualizado_em, s.atualizado_por
-        FROM "Vendas".relatorio_gerencial_status s
+        FROM vendas.relatorio_gerencial_status s
        ORDER BY s.status
     `);
     return res.json({
@@ -526,14 +526,14 @@ router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
     const [rAnos, rVendedores, rFamilias, rEstados, rTipos] = await Promise.all([
       pool.query(`
         SELECT DISTINCT EXTRACT(YEAR FROM p.updated_at)::int AS ano
-          FROM "Vendas".pedidos_venda p
+          FROM vendas.pedidos_venda p
          WHERE p.updated_at IS NOT NULL
          ORDER BY 1 DESC
          LIMIT 15
       `),
       pool.query(`
         SELECT codigo, nome
-          FROM "Vendas".vendedores_omie
+          FROM vendas.vendedores_omie
          WHERE inativo IS DISTINCT FROM TRUE
          ORDER BY nome NULLS LAST, codigo
       `),
@@ -541,7 +541,7 @@ router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
         SELECT DISTINCT
           TRIM(po.codigo_familia::text) AS codigo,
           COALESCE(NULLIF(TRIM(po.descricao_familia), ''), TRIM(po.codigo_familia::text)) AS descricao
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
          WHERE po.codigo_familia IS NOT NULL
            AND TRIM(po.codigo_familia::text) <> ''
          ORDER BY 2, 1
@@ -555,7 +555,7 @@ router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
       `),
       pool.query(`
         SELECT DISTINCT LPAD(TRIM(COALESCE(po.tipoitem, '')), 2, '0') AS codigo
-          FROM public.produtos_omie po
+          FROM produto.produtos_omie po
          WHERE TRIM(COALESCE(po.tipoitem, '')) <> ''
          ORDER BY 1
       `),
@@ -733,7 +733,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE incluido IS TRUE)::int AS incluidos,
           COUNT(*) FILTER (WHERE incluido IS FALSE)::int AS excluidos
-        FROM "Vendas".relatorio_gerencial_cfop
+        FROM vendas.relatorio_gerencial_cfop
       `),
       pool.query(`${baseCte}
         SELECT
@@ -749,7 +749,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
           COUNT(DISTINCT b.cliente) FILTER (WHERE b.cliente <> '(sem cliente)')::int AS clientes,
           COUNT(DISTINCT b.estado) FILTER (WHERE b.estado <> 'N/D')::int AS estados
         FROM base b
-        LEFT JOIN "Vendas".vendedores_omie v
+        LEFT JOIN vendas.vendedores_omie v
           ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
         GROUP BY b.codigo_vendedor, v.nome
         ORDER BY valor_total DESC, total_pedidos DESC, vendedor
@@ -781,7 +781,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
     const { rows: rTextos } = await pool.query(
       `SELECT plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades,
               editado_por, editado_em
-         FROM "Vendas".relatorio_gerencial
+         FROM vendas.relatorio_gerencial
         WHERE mes = $1`,
       [mesRaw]
     );
@@ -938,7 +938,7 @@ router.put('/vendas/relatorio-gerencial/textos', async (req, res) => {
     const usuarioLogado = usuarioDaSessao(req);
 
     const { rows } = await pool.query(
-      `INSERT INTO "Vendas".relatorio_gerencial (
+      `INSERT INTO vendas.relatorio_gerencial (
          mes, plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades, editado_por, editado_em
        ) VALUES ($1, $2::jsonb, $3, $4, $5, $6, NOW())
        ON CONFLICT (mes) DO UPDATE SET

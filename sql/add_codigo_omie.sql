@@ -1,5 +1,5 @@
 -- Adiciona coluna codigo_omie na tabela solicitacao_compras
--- Este campo armazena o codigo_produto da tabela public.produtos_omie
+-- Este campo armazena o codigo_produto da tabela produto.produtos_omie
 -- Será usado como codItem na integração com a Omie
 
 ALTER TABLE compras.solicitacao_compras 

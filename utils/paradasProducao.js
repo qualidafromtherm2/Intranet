@@ -4,20 +4,20 @@ let schemaOk = false;
 
 async function garantirSchemaParadas() {
   if (schemaOk) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS "Producao"."Motivo" (
+    CREATE TABLE IF NOT EXISTS producao."Motivo" (
       id           BIGSERIAL PRIMARY KEY,
       tipo_parada  TEXT NOT NULL,
       motivo       TEXT NOT NULL,
       created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_producao_motivo_tipo
-      ON "Producao"."Motivo" (tipo_parada);
+      ON producao."Motivo" (tipo_parada);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_producao_motivo_tipo_motivo_uq
-      ON "Producao"."Motivo" (LOWER(TRIM(tipo_parada)), LOWER(TRIM(motivo)));
+      ON producao."Motivo" (LOWER(TRIM(tipo_parada)), LOWER(TRIM(motivo)));
 
-    CREATE TABLE IF NOT EXISTS "Producao"."Paradas" (
+    CREATE TABLE IF NOT EXISTS producao."Paradas" (
       id                    BIGSERIAL PRIMARY KEY,
       kanban_programacao_id BIGINT,
       numero_op             TEXT,
@@ -30,9 +30,9 @@ async function garantirSchemaParadas() {
       created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_producao_paradas_kanban
-      ON "Producao"."Paradas" (kanban_programacao_id);
+      ON producao."Paradas" (kanban_programacao_id);
     CREATE INDEX IF NOT EXISTS idx_producao_paradas_numero_op
-      ON "Producao"."Paradas" (numero_op);
+      ON producao."Paradas" (numero_op);
   `);
   schemaOk = true;
 }
@@ -41,7 +41,7 @@ async function listarMotivos() {
   await garantirSchemaParadas();
   const { rows } = await dbQuery(
     `SELECT id, tipo_parada, motivo
-       FROM "Producao"."Motivo"
+       FROM producao."Motivo"
       ORDER BY tipo_parada, motivo`
   );
   return rows;
@@ -56,7 +56,7 @@ async function registrarMotivo({ tipoParada = '', motivo = '' }) {
   }
   const existente = await dbQuery(
     `SELECT id, tipo_parada, motivo
-       FROM "Producao"."Motivo"
+       FROM producao."Motivo"
       WHERE LOWER(TRIM(tipo_parada)) = LOWER(TRIM($1))
         AND LOWER(TRIM(motivo)) = LOWER(TRIM($2))
       LIMIT 1`,
@@ -64,7 +64,7 @@ async function registrarMotivo({ tipoParada = '', motivo = '' }) {
   );
   if (existente.rows[0]) return existente.rows[0];
   const { rows } = await dbQuery(
-    `INSERT INTO "Producao"."Motivo" (tipo_parada, motivo)
+    `INSERT INTO producao."Motivo" (tipo_parada, motivo)
      VALUES ($1, $2)
      RETURNING id, tipo_parada, motivo`,
     [tipo, mot]
@@ -86,7 +86,7 @@ async function registrarParada({
     await registrarMotivo({ tipoParada, motivo });
   }
   const { rows } = await dbQuery(
-    `INSERT INTO "Producao"."Paradas"
+    `INSERT INTO producao."Paradas"
        (kanban_programacao_id, numero_op, usuario, operacao, parada_inicio, parada_fim, tipo_parada, motivo)
      VALUES ($1, $2, $3, $4, NOW(), $5, $6, $7)
      RETURNING *`,
@@ -114,7 +114,7 @@ async function buscarParadaAberta({ kanbanProgramacaoId = null, numeroOp = '' })
             parada_inicio::text AS parada_inicio,
             parada_fim::text AS parada_fim,
             tipo_parada, motivo
-       FROM "Producao"."Paradas"
+       FROM producao."Paradas"
       WHERE parada_fim IS NULL
         AND (
           ($1::bigint IS NOT NULL AND kanban_programacao_id = $1)
@@ -133,7 +133,7 @@ async function retomarParada(paradaId) {
   if (!id) throw new Error('Parada inválida.');
 
   const { rows, rowCount } = await dbQuery(
-    `UPDATE "Producao"."Paradas"
+    `UPDATE producao."Paradas"
         SET parada_fim = NOW()
       WHERE id = $1
         AND parada_fim IS NULL
@@ -164,7 +164,7 @@ async function listarParadasAbertasPorOps(opsRefs = []) {
             parada_inicio::text AS parada_inicio,
             parada_fim::text AS parada_fim,
             tipo_parada, motivo
-       FROM "Producao"."Paradas"
+       FROM producao."Paradas"
       WHERE parada_fim IS NULL
         AND (
           (COALESCE(array_length($1::bigint[], 1), 0) > 0 AND kanban_programacao_id = ANY($1::bigint[]))

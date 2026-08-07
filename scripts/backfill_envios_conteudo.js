@@ -1,5 +1,5 @@
 // scripts/backfill_envios_conteudo.js
-// Backfill de envios.solicitacoes.conteudo via SEFAZ Paraná.
+// Backfill de sac.envios_solicitacoes.conteudo via SEFAZ Paraná.
 // Para cada registro com declaracao_url:
 //  1) baixa PDF
 //  2) extrai chave_dce
@@ -137,7 +137,7 @@ async function downloadPdf(url, { timeoutMs = 15000 } = {}) {
     where += ` AND id = ANY($1::int[])`;
     params.push(onlyIds);
   }
-  const sql = `SELECT id, chave_dce, declaracao_url, conteudo FROM envios.solicitacoes WHERE ${where} ORDER BY id`;
+  const sql = `SELECT id, chave_dce, declaracao_url, conteudo FROM sac.envios_solicitacoes WHERE ${where} ORDER BY id`;
   const { rows } = await pool.query(sql, params);
   console.log(`Registros candidatos: ${rows.length}${dryRun ? ' (DRY-RUN)' : ''}`);
 
@@ -167,7 +167,7 @@ async function downloadPdf(url, { timeoutMs = 15000 } = {}) {
         console.log(`#${id}: [DRY] chave=${chave} novoConteudo=${novoConteudo.slice(0, 120)}${novoConteudo.length > 120 ? '...' : ''}`);
       } else {
         await pool.query(
-          'UPDATE envios.solicitacoes SET conteudo = $1, chave_dce = COALESCE(chave_dce, $2) WHERE id = $3',
+          'UPDATE sac.envios_solicitacoes SET conteudo = $1, chave_dce = COALESCE(chave_dce, $2) WHERE id = $3',
           [novoConteudo, chave, id]
         );
         console.log(`#${id}: OK chave=${chave} itens=${JSON.parse(novoConteudo).length}`);

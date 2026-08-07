@@ -16,7 +16,7 @@ const VENDAS_NF_POR_PEDIDO_CTE = `
           ELSE NULL
         END
       ) AS data_emissao_dt
-    FROM "Vendas".notas_fiscais_omie
+    FROM vendas.notas_fiscais_omie
     WHERE COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') <> ''
     GROUP BY 1
   )

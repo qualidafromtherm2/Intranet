@@ -1,9 +1,9 @@
--- Migração: schema "User" + preferencia_atalho (atalhos flutuantes + cards Início)
+-- Migração: schema usuario + preferencia_atalho (atalhos flutuantes + cards Início)
 -- Execução: psql $DATABASE_URL -f scripts/create_user_atalhos.sql
 
-CREATE SCHEMA IF NOT EXISTS "User";
+CREATE SCHEMA IF NOT EXISTS usuario;
 
-CREATE TABLE IF NOT EXISTS "User".preferencia_atalho (
+CREATE TABLE IF NOT EXISTS usuario.preferencia_atalho (
   id           SERIAL PRIMARY KEY,
   user_id      INTEGER NOT NULL REFERENCES public.auth_user(id) ON DELETE CASCADE,
   nav_key      TEXT NOT NULL,
@@ -18,12 +18,12 @@ CREATE TABLE IF NOT EXISTS "User".preferencia_atalho (
 );
 
 -- Bases já existentes: adiciona colunas sem quebrar linhas antigas
-ALTER TABLE "User".preferencia_atalho
+ALTER TABLE usuario.preferencia_atalho
   ADD COLUMN IF NOT EXISTS flag_atalho BOOLEAN NOT NULL DEFAULT true;
-ALTER TABLE "User".preferencia_atalho
+ALTER TABLE usuario.preferencia_atalho
   ADD COLUMN IF NOT EXISTS flag_inicio BOOLEAN NOT NULL DEFAULT false;
 
-CREATE INDEX IF NOT EXISTS idx_atalho_user_id ON "User".preferencia_atalho (user_id);
+CREATE INDEX IF NOT EXISTS idx_atalho_user_id ON usuario.preferencia_atalho (user_id);
 
-COMMENT ON TABLE "User".preferencia_atalho
+COMMENT ON TABLE usuario.preferencia_atalho
   IS 'Preferências por usuário: atalho flutuante (flag_atalho) e card na Início celular (flag_inicio)';

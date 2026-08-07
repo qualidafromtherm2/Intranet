@@ -1,7 +1,7 @@
 'use strict';
 /**
  * Sincroniza notas fiscais via Omie (endpoint nfconsultar/ListarNF)
- * para a tabela "Vendas".notas_fiscais_omie.
+ * para a tabela vendas.notas_fiscais_omie.
  *
  * Uso:
  *   node scripts/sync_notas_fiscais_vendas_omie.js
@@ -9,7 +9,7 @@
  *   node scripts/sync_notas_fiscais_vendas_omie.js --apenas-pendentes
  *
  * Observação:
- * - Este script preenche apenas "Vendas".notas_fiscais_omie.
+ * - Este script preenche apenas vendas.notas_fiscais_omie.
  * - A tabela de eventos não é utilizada neste fluxo.
  *
  * Variáveis de ambiente necessárias (via .env ou ambiente):
@@ -169,7 +169,7 @@ async function upsertNFe(client, dados) {
   const messageId = `sync-omie-nfe-${dados.numeroNota || dados.chaveNfe || Date.now()}`;
 
   await client.query(`
-    INSERT INTO "Vendas".notas_fiscais_omie (
+    INSERT INTO vendas.notas_fiscais_omie (
       identidade, tipo_documento, topic_ultimo, status_ultimo,
       numero_nota, chave_nfe, numero_pedido,
       acao_ultimo, id_nf_omie, serie, ambiente,
@@ -194,21 +194,21 @@ async function upsertNFe(client, dados) {
     DO UPDATE SET
       topic_ultimo    = EXCLUDED.topic_ultimo,
       status_ultimo   = EXCLUDED.status_ultimo,
-      numero_nota     = COALESCE(EXCLUDED.numero_nota,   "Vendas".notas_fiscais_omie.numero_nota),
-      chave_nfe       = COALESCE(EXCLUDED.chave_nfe,     "Vendas".notas_fiscais_omie.chave_nfe),
-      numero_pedido   = COALESCE(EXCLUDED.numero_pedido, "Vendas".notas_fiscais_omie.numero_pedido),
-      acao_ultimo     = COALESCE(EXCLUDED.acao_ultimo,   "Vendas".notas_fiscais_omie.acao_ultimo),
-      id_nf_omie      = COALESCE(EXCLUDED.id_nf_omie,    "Vendas".notas_fiscais_omie.id_nf_omie),
-      serie           = COALESCE(EXCLUDED.serie,         "Vendas".notas_fiscais_omie.serie),
-      ambiente        = COALESCE(EXCLUDED.ambiente,      "Vendas".notas_fiscais_omie.ambiente),
-      hora_emissao    = COALESCE(EXCLUDED.hora_emissao,  "Vendas".notas_fiscais_omie.hora_emissao),
-      id_pedido_omie  = COALESCE(EXCLUDED.id_pedido_omie,"Vendas".notas_fiscais_omie.id_pedido_omie),
-      empresa_cnpj    = COALESCE(EXCLUDED.empresa_cnpj,  "Vendas".notas_fiscais_omie.empresa_cnpj),
-      cfop            = COALESCE(EXCLUDED.cfop,          "Vendas".notas_fiscais_omie.cfop),
-      valor_total     = COALESCE(EXCLUDED.valor_total,   "Vendas".notas_fiscais_omie.valor_total),
-      cnpj_emitente   = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
-      razao_emitente  = COALESCE(EXCLUDED.razao_emitente,"Vendas".notas_fiscais_omie.razao_emitente),
-      data_emissao    = COALESCE(EXCLUDED.data_emissao,  "Vendas".notas_fiscais_omie.data_emissao),
+      numero_nota     = COALESCE(EXCLUDED.numero_nota,   vendas.notas_fiscais_omie.numero_nota),
+      chave_nfe       = COALESCE(EXCLUDED.chave_nfe,     vendas.notas_fiscais_omie.chave_nfe),
+      numero_pedido   = COALESCE(EXCLUDED.numero_pedido, vendas.notas_fiscais_omie.numero_pedido),
+      acao_ultimo     = COALESCE(EXCLUDED.acao_ultimo,   vendas.notas_fiscais_omie.acao_ultimo),
+      id_nf_omie      = COALESCE(EXCLUDED.id_nf_omie,    vendas.notas_fiscais_omie.id_nf_omie),
+      serie           = COALESCE(EXCLUDED.serie,         vendas.notas_fiscais_omie.serie),
+      ambiente        = COALESCE(EXCLUDED.ambiente,      vendas.notas_fiscais_omie.ambiente),
+      hora_emissao    = COALESCE(EXCLUDED.hora_emissao,  vendas.notas_fiscais_omie.hora_emissao),
+      id_pedido_omie  = COALESCE(EXCLUDED.id_pedido_omie,vendas.notas_fiscais_omie.id_pedido_omie),
+      empresa_cnpj    = COALESCE(EXCLUDED.empresa_cnpj,  vendas.notas_fiscais_omie.empresa_cnpj),
+      cfop            = COALESCE(EXCLUDED.cfop,          vendas.notas_fiscais_omie.cfop),
+      valor_total     = COALESCE(EXCLUDED.valor_total,   vendas.notas_fiscais_omie.valor_total),
+      cnpj_emitente   = COALESCE(EXCLUDED.cnpj_emitente, vendas.notas_fiscais_omie.cnpj_emitente),
+      razao_emitente  = COALESCE(EXCLUDED.razao_emitente,vendas.notas_fiscais_omie.razao_emitente),
+      data_emissao    = COALESCE(EXCLUDED.data_emissao,  vendas.notas_fiscais_omie.data_emissao),
       message_id_ultimo = EXCLUDED.message_id_ultimo,
       author_ultimo   = EXCLUDED.author_ultimo,
       payload_ultimo  = EXCLUDED.payload_ultimo,
@@ -244,7 +244,7 @@ async function upsertNFe(client, dados) {
 // ─── Limpar testes ────────────────────────────────────────────────────────────
 async function limparTestes(client) {
   const r2 = await client.query(`
-    DELETE FROM "Vendas".notas_fiscais_omie
+    DELETE FROM vendas.notas_fiscais_omie
     WHERE COALESCE(message_id_ultimo,'') ILIKE 'teste-%'
        OR COALESCE(razao_emitente,'') ILIKE '%Fornecedor Teste%'
   `);
@@ -253,14 +253,14 @@ async function limparTestes(client) {
 
 async function ensureFlatColumns(client) {
   await client.query(`
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
   `);
 }
 
@@ -283,7 +283,7 @@ async function main() {
     if (apenasPendentes) {
       const pend = await client.query(`
         SELECT identidade
-        FROM "Vendas".notas_fiscais_omie
+        FROM vendas.notas_fiscais_omie
         WHERE identidade IS NOT NULL
           AND tipo_documento = 'NFe'
           AND (
@@ -376,7 +376,7 @@ async function main() {
 
     const resumo = await client.query(`
       SELECT COUNT(*)::int AS total_notas, COUNT(*) FILTER (WHERE ativa)::int AS ativas
-      FROM "Vendas".notas_fiscais_omie
+      FROM vendas.notas_fiscais_omie
     `);
     console.log('\n=== Resumo final ===');
     console.log(`Processados: ${totalProcessados} | Upserts OK: ${totalUpserts} | Ignorados: ${totalIgnorados} | Erros: ${totalErros}`);

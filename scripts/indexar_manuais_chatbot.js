@@ -19,16 +19,16 @@ function normalizarTextoBusca(texto) {
 
 async function garantirEstrutura(client) {
   await client.query(`
-    CREATE SCHEMA IF NOT EXISTS "Chatbot";
+    CREATE SCHEMA IF NOT EXISTS chatbot;
 
-    CREATE TABLE IF NOT EXISTS "Chatbot".manuais_instrucao (
+    CREATE TABLE IF NOT EXISTS chatbot.manuais_instrucao (
       id BIGSERIAL PRIMARY KEY,
       nome_arquivo TEXT NOT NULL,
       caminho_manual TEXT NOT NULL UNIQUE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    ALTER TABLE "Chatbot".manuais_instrucao
+    ALTER TABLE chatbot.manuais_instrucao
       ADD COLUMN IF NOT EXISTS nome_arquivo_normalizado TEXT,
       ADD COLUMN IF NOT EXISTS paginas INTEGER,
       ADD COLUMN IF NOT EXISTS conteudo_hash TEXT,
@@ -36,9 +36,9 @@ async function garantirEstrutura(client) {
       ADD COLUMN IF NOT EXISTS status_indexacao TEXT NOT NULL DEFAULT 'pendente',
       ADD COLUMN IF NOT EXISTS erro_indexacao TEXT;
 
-    CREATE TABLE IF NOT EXISTS "Chatbot".manuais_instrucao_chunks (
+    CREATE TABLE IF NOT EXISTS chatbot.manuais_instrucao_chunks (
       id BIGSERIAL PRIMARY KEY,
-      manual_id BIGINT NOT NULL REFERENCES "Chatbot".manuais_instrucao(id) ON DELETE CASCADE,
+      manual_id BIGINT NOT NULL REFERENCES chatbot.manuais_instrucao(id) ON DELETE CASCADE,
       chunk_ordem INTEGER NOT NULL,
       pagina_inicial INTEGER NOT NULL,
       pagina_final INTEGER NOT NULL,
@@ -48,13 +48,13 @@ async function garantirEstrutura(client) {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_instrucao_caminho
-      ON "Chatbot".manuais_instrucao (caminho_manual);
+      ON chatbot.manuais_instrucao (caminho_manual);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_manual_ordem
-      ON "Chatbot".manuais_instrucao_chunks (manual_id, chunk_ordem);
+      ON chatbot.manuais_instrucao_chunks (manual_id, chunk_ordem);
     CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_manual
-      ON "Chatbot".manuais_instrucao_chunks (manual_id);
+      ON chatbot.manuais_instrucao_chunks (manual_id);
     CREATE INDEX IF NOT EXISTS idx_chatbot_manuais_chunks_busca
-      ON "Chatbot".manuais_instrucao_chunks
+      ON chatbot.manuais_instrucao_chunks
       USING GIN (to_tsvector('simple', COALESCE(texto_normalizado, '')));
   `);
 }
@@ -168,7 +168,7 @@ async function indexarManual(client, manual) {
 
   await client.query(
     `
-      UPDATE "Chatbot".manuais_instrucao
+      UPDATE chatbot.manuais_instrucao
       SET status_indexacao = 'processando',
           erro_indexacao = NULL
       WHERE id = $1
@@ -180,12 +180,12 @@ async function indexarManual(client, manual) {
   const hash = crypto.createHash('sha256').update(pdfBuffer).digest('hex');
   const extraido = await extrairChunksDoPdf(pdfBuffer);
 
-  await client.query('DELETE FROM "Chatbot".manuais_instrucao_chunks WHERE manual_id = $1', [manualId]);
+  await client.query('DELETE FROM chatbot.manuais_instrucao_chunks WHERE manual_id = $1', [manualId]);
 
   for (const chunk of extraido.chunks) {
     await client.query(
       `
-        INSERT INTO "Chatbot".manuais_instrucao_chunks
+        INSERT INTO chatbot.manuais_instrucao_chunks
           (manual_id, chunk_ordem, pagina_inicial, pagina_final, texto, texto_normalizado)
         VALUES ($1, $2, $3, $4, $5, $6)
       `,
@@ -202,7 +202,7 @@ async function indexarManual(client, manual) {
 
   await client.query(
     `
-      UPDATE "Chatbot".manuais_instrucao
+      UPDATE chatbot.manuais_instrucao
       SET nome_arquivo_normalizado = $2,
           paginas = $3,
           conteudo_hash = $4,
@@ -238,7 +238,7 @@ async function main() {
 
     const { rows: manuais } = await client.query(`
       SELECT id, nome_arquivo, caminho_manual
-      FROM "Chatbot".manuais_instrucao
+      FROM chatbot.manuais_instrucao
       ORDER BY id
     `);
 
@@ -251,7 +251,7 @@ async function main() {
       } catch (err) {
         await client.query(
           `
-            UPDATE "Chatbot".manuais_instrucao
+            UPDATE chatbot.manuais_instrucao
             SET status_indexacao = 'erro',
                 erro_indexacao = $2
             WHERE id = $1

@@ -3,7 +3,7 @@
  * ============================================================
  * CRON RENDER — Sincronização Automática via Agendamento
  * ============================================================
- * Lê a configuração da tabela public.agendamento_sincronizacao
+ * Lê a configuração da tabela configuracoes.agendamento_sincronizacao
  * (configurada pela UI na página "Agendamento Automático") e
  * executa as sincronizações das tabelas marcadas.
  *
@@ -115,7 +115,7 @@ async function lerETravarAgendamento() {
       SELECT id, ativo, dias_semana, horario::text AS horario,
              tabelas, data_inicial, recebimentos_ignorar_etapa_80,
              proxima_execucao, ultima_execucao
-      FROM public.agendamento_sincronizacao
+      FROM configuracoes.agendamento_sincronizacao
       ORDER BY id DESC LIMIT 1
     `);
 
@@ -150,7 +150,7 @@ async function lerETravarAgendamento() {
       log(`Janela de execução expirou (${Math.round(diffMs / 60000)} min atrás). Recalculando próxima execução...`);
       const novaProxima = calcularProximaExecucao(cfg.dias_semana, cfg.horario, cfg.ativo);
       await client.query(`
-        UPDATE public.agendamento_sincronizacao
+        UPDATE configuracoes.agendamento_sincronizacao
         SET proxima_execucao = $1 WHERE id = $2
       `, [novaProxima, cfg.id]);
       log(`Nova proxima_execucao: ${novaProxima?.toISOString() || 'null'}`);
@@ -161,7 +161,7 @@ async function lerETravarAgendamento() {
     // (evita execução dupla se dois workers rodarem juntos)
     const novaProxima = calcularProximaExecucao(cfg.dias_semana, cfg.horario, cfg.ativo);
     const updateRes = await client.query(`
-      UPDATE public.agendamento_sincronizacao
+      UPDATE configuracoes.agendamento_sincronizacao
       SET proxima_execucao = $1,
           ultima_execucao  = NOW()
       WHERE id = $2
@@ -793,7 +793,7 @@ async function garantirGuardProdutosOmie() {
     BEGIN
       v_source := lower(trim(coalesce(current_setting('app.produtos_omie_write_source', true), '')));
       IF v_source NOT IN ('omie_webhook', 'omie_cron', 'omie_manual', 'omie_sync') THEN
-        RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
+        RAISE EXCEPTION 'Escrita em produto.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
           USING ERRCODE = '42501';
       END IF;
       IF TG_OP = 'DELETE' THEN
@@ -912,7 +912,7 @@ async function syncPedidosVenda(cfg) {
     for (const pedido of lista) {
       try {
         await pool.query(
-          'SELECT "Vendas".pedido_upsert_from_payload($1::jsonb)',
+          'SELECT vendas.pedido_upsert_from_payload($1::jsonb)',
           [pedido]
         );
         sincronizados++;

@@ -10,11 +10,11 @@ module.exports = (pool) => {
 
   async function ensureAgendamentoColumns(client) {
     await client.query(`
-      ALTER TABLE public.agendamento_sincronizacao
+      ALTER TABLE configuracoes.agendamento_sincronizacao
       ADD COLUMN IF NOT EXISTS tabelas TEXT[] DEFAULT ARRAY['produtos_omie', 'fornecedores', 'pedidos_compra', 'requisicoes_compra', 'recebimentos_nfe']::TEXT[];
     `);
     await client.query(`
-      ALTER TABLE public.agendamento_sincronizacao
+      ALTER TABLE configuracoes.agendamento_sincronizacao
       ADD COLUMN IF NOT EXISTS data_inicial DATE,
       ADD COLUMN IF NOT EXISTS recebimentos_ignorar_etapa_80 BOOLEAN DEFAULT false;
     `);
@@ -31,7 +31,7 @@ module.exports = (pool) => {
       await ensureAgendamentoColumns(client);
       const result = await client.query(`
         SELECT id, ativo, dias_semana, horario::text as horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80, ultima_execucao, proxima_execucao, updated_at
-        FROM public.agendamento_sincronizacao
+        FROM configuracoes.agendamento_sincronizacao
         ORDER BY id DESC
         LIMIT 1
       `);
@@ -39,7 +39,7 @@ module.exports = (pool) => {
       if (result.rows.length === 0) {
         // Criar configuração padrão se não existir
         const insertResult = await client.query(`
-          INSERT INTO public.agendamento_sincronizacao (ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80)
+          INSERT INTO configuracoes.agendamento_sincronizacao (ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80)
           VALUES (false, ARRAY[1, 5], '09:00:00', $1, NULL, false)
           RETURNING id, ativo, dias_semana, horario::text as horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80, ultima_execucao, proxima_execucao, updated_at
         `, [TABELAS_PADRAO]);
@@ -105,7 +105,7 @@ module.exports = (pool) => {
 
       // Atualizar ou inserir configuração
       const result = await client.query(`
-        INSERT INTO public.agendamento_sincronizacao (id, ativo, dias_semana, horario, tabelas, proxima_execucao, data_inicial, recebimentos_ignorar_etapa_80)
+        INSERT INTO configuracoes.agendamento_sincronizacao (id, ativo, dias_semana, horario, tabelas, proxima_execucao, data_inicial, recebimentos_ignorar_etapa_80)
         VALUES (1, $1, $2, $3, $4, $5, $6, $7)
         ON CONFLICT (id) DO UPDATE SET
           ativo = $1,
@@ -146,7 +146,7 @@ module.exports = (pool) => {
       // Buscar configuração
       const configResult = await client.query(`
         SELECT ativo, dias_semana, horario, tabelas, data_inicial, recebimentos_ignorar_etapa_80
-        FROM public.agendamento_sincronizacao
+        FROM configuracoes.agendamento_sincronizacao
         ORDER BY id DESC
         LIMIT 1
       `);
@@ -169,7 +169,7 @@ module.exports = (pool) => {
       const proximaExecucao = calcularProximaExecucao(config.dias_semana, config.horario, config.ativo);
       
       await client.query(`
-        UPDATE public.agendamento_sincronizacao
+        UPDATE configuracoes.agendamento_sincronizacao
         SET ultima_execucao = CURRENT_TIMESTAMP,
             proxima_execucao = $1
         WHERE id = 1

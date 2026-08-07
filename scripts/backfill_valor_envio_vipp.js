@@ -1,5 +1,5 @@
 /**
- * Preenche envios.solicitacoes.valor_envio a partir do VIPP (ValorDaPostagem)
+ * Preenche sac.envios_solicitacoes.valor_envio a partir do VIPP (ValorDaPostagem)
  * para registros que já têm código de rastreio (identificacao) e ainda não têm valor.
  *
  * Uso: node scripts/backfill_valor_envio_vipp.js
@@ -45,11 +45,11 @@ async function buscarValor(ect) {
 
 async function main() {
   if (!VIPP_TOKEN) throw new Error('VIPP_TOKEN ausente no .env');
-  await pool.query(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
+  await pool.query(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
 
   const { rows } = await pool.query(
     `SELECT id, identificacao
-       FROM envios.solicitacoes
+       FROM sac.envios_solicitacoes
       WHERE valor_envio IS NULL
         AND NULLIF(TRIM(identificacao), '') IS NOT NULL
       ORDER BY id DESC
@@ -70,7 +70,7 @@ async function main() {
         continue;
       }
       await pool.query(
-        `UPDATE envios.solicitacoes SET valor_envio = $1 WHERE id = $2 AND valor_envio IS NULL`,
+        `UPDATE sac.envios_solicitacoes SET valor_envio = $1 WHERE id = $2 AND valor_envio IS NULL`,
         [valor, r.id]
       );
       console.log(`  #${r.id} ${ect} → R$ ${valor.toFixed(2)}`);

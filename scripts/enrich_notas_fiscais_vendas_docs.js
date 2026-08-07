@@ -4,7 +4,7 @@
  * Enriquecimento de notas fiscais de vendas com dados por documento (Omie dfedocs/ObterNfe).
  *
  * Objetivos principais:
- * - Preencher url_danfe (cPdf) em "Vendas".notas_fiscais_omie
+ * - Preencher url_danfe (cPdf) em vendas.notas_fiscais_omie
  * - Resolver id_nf_omie quando ausente (via ConsultarNF)
  * - Opcionalmente preencher url_xml se a Omie devolver link HTTP explícito
  *
@@ -114,10 +114,10 @@ function pickHttpUrl(...candidates) {
 
 async function ensureColumns(client) {
   await client.query(`
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
-    ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
   `);
 }
 
@@ -161,7 +161,7 @@ async function listarPendentes(client, { onlyMissingDanfe, limite, ano, mes, fas
 
   const { rows } = await client.query(`
     SELECT id, identidade, numero_nota, chave_nfe, id_nf_omie, url_danfe, url_xml, operacao
-    FROM "Vendas".notas_fiscais_omie
+    FROM vendas.notas_fiscais_omie
     ${where}
     ORDER BY updated_at DESC
     ${limitSql}
@@ -281,7 +281,7 @@ async function main() {
         }
 
         const result = await client.query(`
-          UPDATE "Vendas".notas_fiscais_omie
+          UPDATE vendas.notas_fiscais_omie
           SET
             id_nf_omie = COALESCE(id_nf_omie, $2),
             url_danfe = COALESCE(url_danfe, $3),
@@ -314,7 +314,7 @@ async function main() {
         COUNT(*) FILTER (WHERE tipo_documento='NFe' AND id_nf_omie IS NULL)::int AS sem_id_nf_omie,
         COUNT(*) FILTER (WHERE tipo_documento='NFe' AND COALESCE(url_xml, '') = '')::int AS sem_url_xml,
         COUNT(*) FILTER (WHERE tipo_documento='NFe' AND operacao IS NULL)::int AS sem_operacao
-      FROM "Vendas".notas_fiscais_omie
+      FROM vendas.notas_fiscais_omie
     `);
 
     console.log('\n=== Resumo final ===');

@@ -3,7 +3,7 @@
  * CRON — Snapshot diário de estoque (20:00 horário Brasília)
  * ============================================================
  * Copia o estado atual de logistica.estoque_atual para
- * public.omie_estoque_posicao com data_posicao = hoje.
+ * omie.omie_estoque_posicao com data_posicao = hoje.
  *
  * Não faz nenhuma chamada à API Omie — usa apenas dados
  * locais já mantidos pelo webhook.
@@ -33,7 +33,7 @@ async function executarSnapshotEstoque() {
 
   try {
     const result = await dbQuery(`
-      INSERT INTO public.omie_estoque_posicao (
+      INSERT INTO omie.omie_estoque_posicao (
         data_posicao,
         ingested_at,
         local_codigo,

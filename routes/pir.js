@@ -12,7 +12,7 @@ let ensureProdutosOmiePirColumnPromise = null;
 async function ensureProdutosOmiePirColumn() {
   if (!ensureProdutosOmiePirColumnPromise) {
     ensureProdutosOmiePirColumnPromise = dbQuery(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir BOOLEAN NOT NULL DEFAULT FALSE
     `).catch((err) => {
       ensureProdutosOmiePirColumnPromise = null;
@@ -33,7 +33,7 @@ router.get('/produto/:codigo/verificacao', async (req, res) => {
 
     const result = await dbQuery(
       `SELECT codigo, COALESCE(pir, FALSE) AS pir
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
        ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
        LIMIT 1`,
@@ -72,7 +72,7 @@ router.put('/produto/:codigo/verificacao', async (req, res) => {
       await client.query('BEGIN');
       await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
       result = await client.query(
-        `UPDATE public.produtos_omie
+        `UPDATE produto.produtos_omie
          SET pir = $2
          WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
          RETURNING codigo, pir`,
@@ -121,7 +121,7 @@ router.get('/resumo/codigos', async (_req, res) => {
        FROM pir_unico pu
        LEFT JOIN LATERAL (
          SELECT descricao, pir
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
           WHERE (pu.id_omie <> '' AND TRIM(codigo_produto::text) = pu.id_omie)
              OR TRIM(codigo) = pu.codigo
           ORDER BY CASE
@@ -147,7 +147,7 @@ router.get('/resumo/codigos', async (_req, res) => {
   }
 });
 
-// Listar produtos da public.produtos_omie por filtros de negócio para verificação PIR
+// Listar produtos da produto.produtos_omie por filtros de negócio para verificação PIR
 router.get('/resumo/produtos-omie', async (_req, res) => {
   try {
     await ensureProdutosOmiePirColumn();
@@ -165,7 +165,7 @@ router.get('/resumo/produtos-omie', async (_req, res) => {
       `SELECT po.codigo,
               COALESCE(po.descricao, '') AS descricao,
               COALESCE(po.pir, FALSE) AS pir
-       FROM public.produtos_omie po
+       FROM produto.produtos_omie po
        WHERE COALESCE(po.inativo, 'N') = 'N'
          AND COALESCE(po.bloqueado, 'N') = 'N'
          AND po.codigo_familia::text = ANY($1::text[])

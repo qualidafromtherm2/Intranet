@@ -290,7 +290,7 @@ router.post('/executar', express.json(), async (req, res) => {
     const skus = [...new Set(itensParsed.map(it => it.sku))];
     const { rows: prodRows } = await dbQuery(
       `SELECT codigo, codigo_produto, descricao
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo = ANY($1::text[])`,
       [skus]
     );
@@ -321,7 +321,7 @@ router.post('/executar', express.json(), async (req, res) => {
     for (const it of itensComCusto) {
       // SAI — saída do material (remove estoque ao custo atual)
       const { rows: saiRows } = await dbQuery(
-        `INSERT INTO mensagens.ajustes_estoque
+        `INSERT INTO logistica.ajustes_estoque
            (tipo_operacao, codigo_produto, codigo, descricao, qtd,
             local_estoque, local_nome, data_movimentacao,
             cmc, motivo, obs, solicitante, status, criado_em)
@@ -338,7 +338,7 @@ router.post('/executar', express.json(), async (req, res) => {
 
       // ENT — entrada com custo rateado pela área
       const { rows: entRows } = await dbQuery(
-        `INSERT INTO mensagens.ajustes_estoque
+        `INSERT INTO logistica.ajustes_estoque
            (tipo_operacao, codigo_produto, codigo, descricao, qtd,
             local_estoque, local_nome, data_movimentacao,
             cmc, motivo, obs, solicitante, status, criado_em)
@@ -365,7 +365,7 @@ router.post('/executar', express.json(), async (req, res) => {
           obs: `[Transf.MP SAI] ${obsBase}`.slice(0, 200),
         });
         await dbQuery(
-          `UPDATE mensagens.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
+          `UPDATE logistica.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
           [idSai, solicitante || 'Sistema']
         );
 
@@ -376,7 +376,7 @@ router.post('/executar', express.json(), async (req, res) => {
           obs: `[Transf.MP ENT] ${obsBase}`.slice(0, 200),
         });
         await dbQuery(
-          `UPDATE mensagens.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
+          `UPDATE logistica.ajustes_estoque SET status='Executado', aprovado_por=$2, aprovado_em=NOW() WHERE id=$1`,
           [idEnt, solicitante || 'Sistema']
         );
 

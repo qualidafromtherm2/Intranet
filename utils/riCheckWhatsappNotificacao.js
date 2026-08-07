@@ -194,7 +194,7 @@ async function notificarRegistroTempoWhatsappPorId(registroId) {
   const { rows } = await dbQuery(
     `SELECT id, numero_op, posto_origem, tipo_registro,
             inicio, fim, usuario_fim
-       FROM "Tempo_Producao"."Registro_tempo"
+       FROM producao."Registro_tempo"
       WHERE id = $1 AND tipo_registro = 'posto'`,
     [id]
   );

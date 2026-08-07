@@ -10,10 +10,10 @@ test('desativarDuplicatasMesmoCodigo inativa irmãos ativos do mesmo SKU', async
   const client = {
     query: async (sql, params) => {
       if (/BEGIN|COMMIT|ROLLBACK|set_config/i.test(sql)) return { rows: [], rowCount: 0 };
-      if (sql.includes('FROM public.produtos_omie') && sql.includes('WHERE codigo_produto = $1')) {
+      if (sql.includes('FROM produto.produtos_omie') && sql.includes('WHERE codigo_produto = $1')) {
         return { rows: [{ codigo: '01.MP.N.30100', integracao: '01.MP.N.30100', inativo: 'N' }] };
       }
-      if (sql.includes('UPDATE public.produtos_omie') && sql.includes('codigo_produto <> $1')) {
+      if (sql.includes('UPDATE produto.produtos_omie') && sql.includes('codigo_produto <> $1')) {
         updates.push(params);
         return {
           rows: [{ codigo_produto: '10748663973', codigo: '01.MP.N.30100', descricao: 'ANTIGO' }],
@@ -56,7 +56,7 @@ test('limparDuplicatasAtivasLocais mantém o maior ID e inativa o resto', async 
           }]
         };
       }
-      if (sql.includes('UPDATE public.produtos_omie') && sql.includes('ANY($1')) {
+      if (sql.includes('UPDATE produto.produtos_omie') && sql.includes('ANY($1')) {
         updateParams = params;
         return {
           rows: [{ codigo_produto: '10748663973', codigo: '01.MP.N.30100', descricao: 'ANTIGO' }],

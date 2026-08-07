@@ -54,7 +54,7 @@ async function marcarProdutosOmieInativos(client, ids, source = 'omie_sync') {
 
   return comSourceOmie(client, source, async () => {
     const { rowCount } = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET inativo = 'S',
               updated_at = NOW()
         WHERE codigo_produto = ANY($1::bigint[])
@@ -92,7 +92,7 @@ async function desativarDuplicatasMesmoCodigo(client, opts, source = 'omie_sync'
         `SELECT TRIM(codigo) AS codigo,
                 TRIM(COALESCE(codigo_produto_integracao, '')) AS integracao,
                 COALESCE(NULLIF(UPPER(TRIM(inativo)), ''), 'N') AS inativo
-           FROM public.produtos_omie
+           FROM produto.produtos_omie
           WHERE codigo_produto = $1
           LIMIT 1`,
         [codigoProduto]
@@ -108,7 +108,7 @@ async function desativarDuplicatasMesmoCodigo(client, opts, source = 'omie_sync'
     if (!cod && !integ) return { marcados: 0, ids: [], detalhes: [] };
 
     const { rows } = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET inativo = 'S',
               updated_at = NOW()
         WHERE codigo_produto <> $1::bigint
@@ -125,7 +125,7 @@ async function desativarDuplicatasMesmoCodigo(client, opts, source = 'omie_sync'
     if (rows.length) {
       const { rows: descRows } = await client.query(
         `SELECT LEFT(COALESCE(descricao, ''), 120) AS descricao
-           FROM public.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
+           FROM produto.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
         [codigoProduto]
       );
       etq = await migrarEtqAoInativarDuplicatas(client, {
@@ -157,7 +157,7 @@ async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
     const { rows: grupos } = await client.query(
       `SELECT TRIM(codigo) AS codigo,
               array_agg(codigo_produto ORDER BY codigo_produto DESC) AS ids
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE TRIM(COALESCE(codigo, '')) <> ''
           AND COALESCE(UPPER(TRIM(inativo)), 'N') NOT IN ('S', 'SIM')
         GROUP BY TRIM(codigo)
@@ -173,7 +173,7 @@ async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
       const inativar = ids.slice(1);
       if (!inativar.length) continue;
       const { rows } = await client.query(
-        `UPDATE public.produtos_omie
+        `UPDATE produto.produtos_omie
             SET inativo = 'S',
                 updated_at = NOW()
           WHERE codigo_produto = ANY($1::bigint[])
@@ -188,7 +188,7 @@ async function limparDuplicatasAtivasLocais(client, source = 'omie_sync') {
       if (rows.length) {
         const { rows: descRows } = await client.query(
           `SELECT LEFT(COALESCE(descricao, ''), 120) AS descricao
-             FROM public.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
+             FROM produto.produtos_omie WHERE codigo_produto = $1::bigint LIMIT 1`,
           [manter]
         );
         const etq = await migrarEtqAoInativarDuplicatas(client, {
@@ -237,7 +237,7 @@ async function reconciliarProdutosOmieAusentes(client, idsVistosNaOmie, source =
 
   return comSourceOmie(client, source, async () => {
     const { rows } = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET inativo = 'S',
               updated_at = NOW()
         WHERE COALESCE(UPPER(TRIM(inativo)), 'N') <> 'S'

@@ -8,9 +8,12 @@ const TZ = 'America/Sao_Paulo';
 
 async function garantirSchemaTempoProducao() {
   if (!schemaCriado) {
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Tempo_Producao"`);
+  const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('./organizarSchemasMigracao');
+  const { pool } = require('../src/db');
+  if (pool) await organizarSchemasMigracao(pool);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS "Tempo_Producao"."Turno_padrao" (
+    CREATE TABLE IF NOT EXISTS producao."Turno_padrao" (
       id                  BIGSERIAL PRIMARY KEY,
       usuario             TEXT NOT NULL,
       nome                TEXT NOT NULL DEFAULT 'Padrão',
@@ -25,7 +28,7 @@ async function garantirSchemaTempoProducao() {
       updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE IF NOT EXISTS "Tempo_Producao"."Turno_dia" (
+    CREATE TABLE IF NOT EXISTS producao."Turno_dia" (
       id                  BIGSERIAL PRIMARY KEY,
       usuario             TEXT NOT NULL,
       nome_turno          TEXT NOT NULL DEFAULT 'Padrão',
@@ -41,9 +44,9 @@ async function garantirSchemaTempoProducao() {
       created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_turno_dia_data
-      ON "Tempo_Producao"."Turno_dia" (data_referencia);
+      ON producao."Turno_dia" (data_referencia);
 
-    CREATE TABLE IF NOT EXISTS "Tempo_Producao"."Registro_tempo" (
+    CREATE TABLE IF NOT EXISTS producao."Registro_tempo" (
       id                      BIGSERIAL PRIMARY KEY,
       kanban_programacao_id   BIGINT,
       op_producao_id          BIGINT,
@@ -59,35 +62,36 @@ async function garantirSchemaTempoProducao() {
       created_at              TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_reg_tempo_op
-      ON "Tempo_Producao"."Registro_tempo" (op_producao_id, fim);
+      ON producao."Registro_tempo" (op_producao_id, fim);
     CREATE INDEX IF NOT EXISTS idx_reg_tempo_numero_op
-      ON "Tempo_Producao"."Registro_tempo" (numero_op, fim);
+      ON producao."Registro_tempo" (numero_op, fim);
     CREATE INDEX IF NOT EXISTS idx_reg_tempo_kanban
-      ON "Tempo_Producao"."Registro_tempo" (kanban_programacao_id, fim);
+      ON producao."Registro_tempo" (kanban_programacao_id, fim);
     CREATE INDEX IF NOT EXISTS idx_reg_tempo_aberto
-      ON "Tempo_Producao"."Registro_tempo" (fim) WHERE fim IS NULL;
+      ON producao."Registro_tempo" (fim) WHERE fim IS NULL;
   `);
+    if (pool) await ensureSchemasCompatViews(pool);
     schemaCriado = true;
   }
 
   if (!schemaMigrado) {
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_padrao" ADD COLUMN IF NOT EXISTS nome TEXT`);
-  await dbQuery(`UPDATE "Tempo_Producao"."Turno_padrao" SET nome = 'Padrão' WHERE nome IS NULL OR TRIM(nome) = ''`);
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_padrao" ALTER COLUMN nome SET DEFAULT 'Padrão'`);
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_dia" ADD COLUMN IF NOT EXISTS nome_turno TEXT`);
-  await dbQuery(`UPDATE "Tempo_Producao"."Turno_dia" SET nome_turno = 'Padrão' WHERE nome_turno IS NULL OR TRIM(nome_turno) = ''`);
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_dia" ALTER COLUMN nome_turno SET DEFAULT 'Padrão'`);
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_padrao" DROP CONSTRAINT IF EXISTS "Turno_padrao_usuario_key"`);
-  await dbQuery(`ALTER TABLE "Tempo_Producao"."Turno_padrao" DROP CONSTRAINT IF EXISTS turno_padrao_usuario_key`);
+  await dbQuery(`ALTER TABLE producao."Turno_padrao" ADD COLUMN IF NOT EXISTS nome TEXT`);
+  await dbQuery(`UPDATE producao."Turno_padrao" SET nome = 'Padrão' WHERE nome IS NULL OR TRIM(nome) = ''`);
+  await dbQuery(`ALTER TABLE producao."Turno_padrao" ALTER COLUMN nome SET DEFAULT 'Padrão'`);
+  await dbQuery(`ALTER TABLE producao."Turno_dia" ADD COLUMN IF NOT EXISTS nome_turno TEXT`);
+  await dbQuery(`UPDATE producao."Turno_dia" SET nome_turno = 'Padrão' WHERE nome_turno IS NULL OR TRIM(nome_turno) = ''`);
+  await dbQuery(`ALTER TABLE producao."Turno_dia" ALTER COLUMN nome_turno SET DEFAULT 'Padrão'`);
+  await dbQuery(`ALTER TABLE producao."Turno_padrao" DROP CONSTRAINT IF EXISTS "Turno_padrao_usuario_key"`);
+  await dbQuery(`ALTER TABLE producao."Turno_padrao" DROP CONSTRAINT IF EXISTS turno_padrao_usuario_key`);
   await dbQuery(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_turno_padrao_usuario_nome
-      ON "Tempo_Producao"."Turno_padrao" (usuario, LOWER(TRIM(nome)));
+      ON producao."Turno_padrao" (usuario, LOWER(TRIM(nome)));
   `);
   await dbQuery(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_turno_dia_data_usuario_nome
-      ON "Tempo_Producao"."Turno_dia" (data_referencia, usuario, LOWER(TRIM(nome_turno)));
+      ON producao."Turno_dia" (data_referencia, usuario, LOWER(TRIM(nome_turno)));
   `);
-  await dbQuery(`DROP INDEX IF EXISTS "Tempo_Producao".idx_turno_dia_data_nome`);
+  await dbQuery(`DROP INDEX IF EXISTS producao.idx_turno_dia_data_nome`);
     schemaMigrado = true;
   }
 }
@@ -266,7 +270,7 @@ async function buscarTurnosNoPeriodo(inicio, fim) {
             refeicao_fim::text AS refeicao_fim,
             fim_turno::text AS fim_turno,
             observacao, trabalho_fim_semana, created_at::text AS created_at
-       FROM "Tempo_Producao"."Turno_dia"
+       FROM producao."Turno_dia"
       WHERE data_referencia >= $1::date AND data_referencia <= $2::date
       ORDER BY data_referencia, inicio_turno`,
     [dkIni, dkFim]
@@ -309,7 +313,7 @@ async function encerrarRegistrosAbertos({
   }
   params.push(usuario || null);
   const { rows } = await dbQuery(
-    `UPDATE "Tempo_Producao"."Registro_tempo"
+    `UPDATE producao."Registro_tempo"
         SET fim = NOW(), usuario_fim = COALESCE($${params.length}, usuario_fim)
       WHERE ${where}
       RETURNING id, tipo_registro, posto_origem, numero_op,
@@ -351,7 +355,7 @@ async function iniciarRegistroTempo({
   });
 
   const { rows } = await dbQuery(
-    `INSERT INTO "Tempo_Producao"."Registro_tempo"
+    `INSERT INTO producao."Registro_tempo"
        (kanban_programacao_id, op_producao_id, numero_op, posto_origem,
         tipo_registro, operacao, ri_check_id, usuario_inicio)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -422,7 +426,7 @@ async function buscarRegistroPostoAberto({ opProducaoId = 0, numeroOp = '', kanb
     `SELECT id, kanban_programacao_id, op_producao_id, numero_op, posto_origem,
             tipo_registro, operacao, ri_check_id,
             inicio::text AS inicio, fim::text AS fim
-       FROM "Tempo_Producao"."Registro_tempo"
+       FROM producao."Registro_tempo"
       WHERE fim IS NULL AND tipo_registro = 'posto'
         AND (
           ($1::bigint > 0 AND op_producao_id = $1)
@@ -440,7 +444,7 @@ async function buscarRegistrosPostoOp({ opProducaoId = 0, numeroOp = '', kanbanP
   await garantirSchemaTempoProducao();
   const { rows } = await dbQuery(
     `SELECT id, posto_origem, inicio::text AS inicio, fim::text AS fim
-       FROM "Tempo_Producao"."Registro_tempo"
+       FROM producao."Registro_tempo"
       WHERE tipo_registro = 'posto'
         AND (
           ($1::bigint > 0 AND op_producao_id = $1)
@@ -552,7 +556,7 @@ async function listarTurnosPadrao(usuario) {
   await garantirSchemaTempoProducao();
   const { rows } = await dbQuery(
     `SELECT ${TURNO_SELECT_PADRAO}
-       FROM "Tempo_Producao"."Turno_padrao"
+       FROM producao."Turno_padrao"
       WHERE usuario = $1
       ORDER BY nome`,
     [usuario]
@@ -565,7 +569,7 @@ async function buscarTurnoPadrao(usuario, nome) {
   const nomeNorm = normalizarNomeTurno(nome);
   const { rows } = await dbQuery(
     `SELECT ${TURNO_SELECT_PADRAO}
-       FROM "Tempo_Producao"."Turno_padrao"
+       FROM producao."Turno_padrao"
       WHERE usuario = $1 AND LOWER(TRIM(nome)) = LOWER(TRIM($2))`,
     [usuario, nomeNorm]
   );
@@ -580,7 +584,7 @@ async function salvarTurnoPadrao(usuario, body) {
   const existente = await buscarTurnoPadrao(usuario, nome);
   if (existente?.id) {
     const { rows } = await dbQuery(
-      `UPDATE "Tempo_Producao"."Turno_padrao"
+      `UPDATE producao."Turno_padrao"
           SET inicio_turno = $3, cafe_inicio = $4, cafe_fim = $5,
               refeicao_inicio = $6, refeicao_fim = $7, fim_turno = $8,
               observacao = $9, trabalho_fim_semana = $10, updated_at = NOW()
@@ -592,7 +596,7 @@ async function salvarTurnoPadrao(usuario, body) {
     return rows[0];
   }
   const { rows } = await dbQuery(
-    `INSERT INTO "Tempo_Producao"."Turno_padrao"
+    `INSERT INTO producao."Turno_padrao"
        (usuario, nome, inicio_turno, cafe_inicio, cafe_fim, refeicao_inicio, refeicao_fim,
         fim_turno, observacao, trabalho_fim_semana, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
@@ -610,7 +614,7 @@ async function buscarTurnoDia(dataRef, nomeTurno, usuario) {
   const usr = String(usuario || '').trim();
   const { rows } = await dbQuery(
     `SELECT ${TURNO_SELECT_DIA}
-       FROM "Tempo_Producao"."Turno_dia"
+       FROM producao."Turno_dia"
       WHERE data_referencia = $1::date
         AND LOWER(TRIM(nome_turno)) = LOWER(TRIM($2))
         AND ($3::text = '' OR usuario = $3)`,
@@ -628,7 +632,7 @@ async function registrarTurnoDia(usuario, body) {
   const existente = await buscarTurnoDia(dataRef, nomeTurno, usuario);
   if (existente?.id) {
     const { rows } = await dbQuery(
-      `UPDATE "Tempo_Producao"."Turno_dia"
+      `UPDATE producao."Turno_dia"
           SET usuario = $2, inicio_turno = $3, cafe_inicio = $4, cafe_fim = $5,
               refeicao_inicio = $6, refeicao_fim = $7, fim_turno = $8,
               observacao = $9, trabalho_fim_semana = $10
@@ -640,7 +644,7 @@ async function registrarTurnoDia(usuario, body) {
     return rows[0];
   }
   const { rows } = await dbQuery(
-    `INSERT INTO "Tempo_Producao"."Turno_dia"
+    `INSERT INTO producao."Turno_dia"
        (usuario, nome_turno, data_referencia, inicio_turno, cafe_inicio, cafe_fim,
         refeicao_inicio, refeicao_fim, fim_turno, observacao, trabalho_fim_semana)
      VALUES ($1, $2, $3::date, $4, $5, $6, $7, $8, $9, $10, $11)
@@ -656,7 +660,7 @@ async function listarTurnosDia(dataRef) {
   const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
   const { rows } = await dbQuery(
     `SELECT ${TURNO_SELECT_DIA}
-       FROM "Tempo_Producao"."Turno_dia"
+       FROM producao."Turno_dia"
       WHERE data_referencia = $1::date
       ORDER BY inicio_turno, id`,
     [dk]
@@ -669,7 +673,7 @@ async function registrarTurnosDiaAutomatico(dataRef) {
   const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
   const { rows: padroes } = await dbQuery(
     `SELECT ${TURNO_SELECT_PADRAO}
-       FROM "Tempo_Producao"."Turno_padrao"
+       FROM producao."Turno_padrao"
       ORDER BY usuario, nome`
   );
   let total = 0;

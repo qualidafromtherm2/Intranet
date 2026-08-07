@@ -161,7 +161,7 @@ async function lookupEquipamentoPorSerie(pool, serieRaw) {
   const { rows: preRows } = await pool.query(
     `
     SELECT *
-      FROM public.historico_pre2024
+      FROM vendas.historico_pre2024
      WHERE TRIM(pedido) = $1
         OR TRIM(COALESCE(numero_op_informacoes, '')) = $1
         OR TRIM(COALESCE(nfe, '')) = $1
@@ -236,7 +236,7 @@ async function lookupNf(pool, { nf, pedido } = {}) {
       `
       SELECT numero_nota, chave_nfe, numero_pedido, valor_total, razao_emitente,
              data_emissao, cnpj_emitente, url_danfe, id_nf_omie
-        FROM "Vendas".notas_fiscais_omie
+        FROM vendas.notas_fiscais_omie
        WHERE ($1::text <> '' AND (
                TRIM(COALESCE(numero_nota, '')) = $1
             OR LTRIM(TRIM(COALESCE(numero_nota, '')), '0') = LTRIM($1, '0')
@@ -266,7 +266,7 @@ async function lookupNf(pool, { nf, pedido } = {}) {
       `
       SELECT pedido, nfe, modelo, nome_fantasia_revende, razao_social_faturamento,
              valor, data_entrega, uf, representante
-        FROM public.historico_pre2024
+        FROM vendas.historico_pre2024
        WHERE ($1::text <> '' AND (
                TRIM(COALESCE(nfe, '')) = $1
             OR LTRIM(TRIM(COALESCE(nfe, '')), '0') = LTRIM($1, '0')
@@ -400,8 +400,8 @@ async function buscarTrechosManualPorModelo(pool, modelo, sintoma) {
   const { rows } = await pool.query(
     `
     SELECT m.nome_arquivo, c.pagina_inicial, c.pagina_final, left(c.texto, 900) AS trecho
-      FROM "Chatbot".manuais_instrucao_chunks c
-      JOIN "Chatbot".manuais_instrucao m ON m.id = c.manual_id
+      FROM chatbot.manuais_instrucao_chunks c
+      JOIN chatbot.manuais_instrucao m ON m.id = c.manual_id
      WHERE COALESCE(m.status_indexacao, 'pendente') = 'indexado'
        AND lower(COALESCE(m.nome_arquivo, '')) LIKE $1
        AND (
@@ -606,7 +606,7 @@ async function executarAcaoTecnica(pool, actionObj) {
 }
 
 const TECH_QUALIDADE_TABELAS_PRIORITARIAS = [
-  'public.historico_pre2024',
+  'vendas.historico_pre2024',
   'sac.at_serie_cache',
   'sac.at',
   'sac.at_busca_selecionada',

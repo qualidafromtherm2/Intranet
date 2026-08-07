@@ -84,9 +84,9 @@ function inferTipoAnexo(file) {
 
 async function ensureSchema() {
   if (schemaReady) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Suporte_tecnico"`);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS suporte`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS "Suporte_tecnico"."Chamado" (
+    CREATE TABLE IF NOT EXISTS suporte."Chamado" (
       id                BIGSERIAL PRIMARY KEY,
       descricao         TEXT NOT NULL,
       criticidade       TEXT NOT NULL DEFAULT 'normal',
@@ -105,18 +105,18 @@ async function ensureSchema() {
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_por
-      ON "Suporte_tecnico"."Chamado" (criado_por)
+      ON suporte."Chamado" (criado_por)
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_suporte_chamado_status
-      ON "Suporte_tecnico"."Chamado" (status)
+      ON suporte."Chamado" (status)
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_suporte_chamado_criado_em
-      ON "Suporte_tecnico"."Chamado" (criado_em DESC)
+      ON suporte."Chamado" (criado_em DESC)
   `);
   await dbQuery(`
-    ALTER TABLE "Suporte_tecnico"."Chamado"
+    ALTER TABLE suporte."Chamado"
       ADD COLUMN IF NOT EXISTS motivo_reprovacao TEXT,
       ADD COLUMN IF NOT EXISTS anexos_reprovacao JSONB NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS reprovado_em TIMESTAMPTZ,
@@ -130,7 +130,7 @@ async function ensureSchema() {
   `);
   // Corrige status legado com espaço ("em andamento" → "em_andamento")
   await dbQuery(`
-    UPDATE "Suporte_tecnico"."Chamado"
+    UPDATE suporte."Chamado"
        SET status = REPLACE(TRIM(status), ' ', '_'),
            atualizado_em = NOW()
      WHERE status LIKE '% %'
@@ -208,7 +208,7 @@ router.get('/chamados/contagem', requireAuth, async (req, res) => {
 
     const { rows } = await dbQuery(
       `SELECT COUNT(*)::int AS total
-         FROM "Suporte_tecnico"."Chamado"
+         FROM suporte."Chamado"
         WHERE ${where.join(' AND ')}`,
       params
     );
@@ -247,7 +247,7 @@ router.get('/chamados', requireAuth, async (req, res) => {
 
     const sql = `
       SELECT ${CHAMADO_COLS}
-        FROM "Suporte_tecnico"."Chamado"
+        FROM suporte."Chamado"
        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
        ORDER BY
          CASE LOWER(REPLACE(TRIM(status), ' ', '_'))
@@ -281,7 +281,7 @@ router.get('/chamados/:id', requireAuth, async (req, res) => {
 
     const { rows } = await dbQuery(
       `SELECT ${CHAMADO_COLS}
-         FROM "Suporte_tecnico"."Chamado"
+         FROM suporte."Chamado"
         WHERE id = $1`,
       [id]
     );
@@ -342,7 +342,7 @@ router.post(
       }
 
       const { rows } = await dbQuery(
-        `INSERT INTO "Suporte_tecnico"."Chamado"
+        `INSERT INTO suporte."Chamado"
            (descricao, criticidade, status, anexos, criado_por, criado_por_nome)
          VALUES ($1, $2, 'aberto', $3::jsonb, $4, $5)
          RETURNING ${CHAMADO_COLS}`,
@@ -376,7 +376,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     }
 
     const { rows: existingRows } = await dbQuery(
-      `SELECT id, status, criado_por, comentarios FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+      `SELECT id, status, criado_por, comentarios FROM suporte."Chamado" WHERE id = $1`,
       [id]
     );
     const existing = existingRows[0];
@@ -398,7 +398,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
       }
 
       const { rows } = await dbQuery(
-        `UPDATE "Suporte_tecnico"."Chamado"
+        `UPDATE suporte."Chamado"
             SET status = 'fechado',
                 fechado_por = $1,
                 fechado_por_nome = $2,
@@ -511,7 +511,7 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
 
     params.push(id);
     const { rows } = await dbQuery(
-      `UPDATE "Suporte_tecnico"."Chamado"
+      `UPDATE suporte."Chamado"
           SET ${sets.join(', ')}
         WHERE id = $${params.length}
         RETURNING ${CHAMADO_COLS}`,
@@ -548,7 +548,7 @@ router.post(
 
       const { rows: existingRows } = await dbQuery(
         `SELECT id, status, criado_por, descricao, anexos, comentarios
-           FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+           FROM suporte."Chamado" WHERE id = $1`,
         [id]
       );
       const existing = existingRows[0];
@@ -648,7 +648,7 @@ router.post(
           : String(existing.descricao || '');
 
       const { rows } = await dbQuery(
-        `UPDATE "Suporte_tecnico"."Chamado"
+        `UPDATE suporte."Chamado"
             SET status = 'aberto',
                 descricao = $1,
                 anexos = $2::jsonb,
@@ -698,7 +698,7 @@ router.post(
 
       const { rows: existingRows } = await dbQuery(
         `SELECT id, status, criado_por, anexos_reprovacao
-           FROM "Suporte_tecnico"."Chamado" WHERE id = $1`,
+           FROM suporte."Chamado" WHERE id = $1`,
         [id]
       );
       const existing = existingRows[0];
@@ -742,7 +742,7 @@ router.post(
       const anexosReprovacao = [...anexosAnteriores, ...anexosNovos];
 
       const { rows } = await dbQuery(
-        `UPDATE "Suporte_tecnico"."Chamado"
+        `UPDATE suporte."Chamado"
             SET status = 'aberto',
                 motivo_reprovacao = $1,
                 anexos_reprovacao = $2::jsonb,

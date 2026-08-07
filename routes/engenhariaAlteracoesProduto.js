@@ -77,7 +77,7 @@ async function resolverCodigosBusca(pool, raw) {
   try {
     const { rows } = await pool.query(
       `SELECT codigo_produto::text AS codigo_produto, codigo::text AS codigo
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo_produto::text = $1 OR codigo = $1
         LIMIT 1`,
       [entrada]
@@ -102,7 +102,7 @@ async function resolverCodigoOmiePrincipal(pool, raw) {
   try {
     const { rows } = await pool.query(
       `SELECT codigo_produto::text AS codigo_produto
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo_produto::text = $1 OR codigo = $1
         ORDER BY CASE WHEN codigo_produto::text = $1 THEN 0 ELSE 1 END
         LIMIT 1`,
@@ -163,9 +163,9 @@ module.exports = (pool) => {
                 a.foto_antes, a.foto_depois, a.video, a.arquivo, a.criado_por,
                 COALESCE(p.codigo, p2.codigo) AS codigo_interno
            FROM engenharia.alteracoes_produto a
-           LEFT JOIN public.produtos_omie p
+           LEFT JOIN produto.produtos_omie p
              ON p.codigo_produto::text = a.codigo_omie
-           LEFT JOIN public.produtos_omie p2
+           LEFT JOIN produto.produtos_omie p2
              ON p2.codigo = a.codigo_omie
           ORDER BY a.data DESC, a.id DESC`
       );

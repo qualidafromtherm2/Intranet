@@ -284,8 +284,8 @@ async function fetchRelatorio(modo, tipo, refDate = new Date(), periodoOverride 
         COALESCE(env.total_envio, 0)::float AS valor_envio,
         COALESCE(cp.total_pecas, 0)::float AS valor_pecas
       FROM base b
-      LEFT JOIN (SELECT id_at, SUM(COALESCE(valor_envio, 0))::float AS total_envio FROM envios.solicitacoes WHERE id_at IS NOT NULL GROUP BY id_at) env ON env.id_at = b.id
-      LEFT JOIN (SELECT id_at, SUM(COALESCE(valor_total, 0))::float AS total_pecas FROM envios.custo_pecas WHERE id_at IS NOT NULL GROUP BY id_at) cp ON cp.id_at = b.id
+      LEFT JOIN (SELECT id_at, SUM(COALESCE(valor_envio, 0))::float AS total_envio FROM sac.envios_solicitacoes WHERE id_at IS NOT NULL GROUP BY id_at) env ON env.id_at = b.id
+      LEFT JOIN (SELECT id_at, SUM(COALESCE(valor_total, 0))::float AS total_pecas FROM sac.envios_custo_pecas WHERE id_at IS NOT NULL GROUP BY id_at) cp ON cp.id_at = b.id
       WHERE COALESCE(b.valor_total_mao_obra, 0) > 0 OR COALESCE(env.total_envio, 0) > 0 OR COALESCE(cp.total_pecas, 0) > 0
       ORDER BY b.data ASC`, params),
     pool.query(`
@@ -294,7 +294,7 @@ async function fetchRelatorio(modo, tipo, refDate = new Date(), periodoOverride 
         SUM(COALESCE(cp.quantidade, 0))::float AS quantidade,
         SUM(COALESCE(cp.valor_total, 0))::float AS valor_total,
         COUNT(DISTINCT cp.id_at)::int AS qtd_os
-      FROM envios.custo_pecas cp
+      FROM sac.envios_custo_pecas cp
       INNER JOIN sac.at a ON a.id = cp.id_at
       WHERE a.data >= $1::date AND a.data < $2::date${tipoSql}
         AND COALESCE(cp.valor_total, 0) > 0

@@ -52,9 +52,12 @@ let schemaAjustesOk = false;
 
 async function ensureAjustesSchema() {
   if (schemaAjustesOk) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS mensagens`);
+  const { pool } = require('../src/db');
+  const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('../utils/organizarSchemasMigracao');
+  if (pool) await organizarSchemasMigracao(pool);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS logistica`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS mensagens.ajustes_estoque (
+    CREATE TABLE IF NOT EXISTS logistica.ajustes_estoque (
       id                 BIGSERIAL PRIMARY KEY,
       tipo_operacao      TEXT NOT NULL CHECK (tipo_operacao IN ('ENT','SAI')),
       codigo_produto     BIGINT,
@@ -77,6 +80,7 @@ async function ensureAjustesSchema() {
       criado_em          TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  if (pool) await ensureSchemasCompatViews(pool);
   schemaAjustesOk = true;
 }
 
@@ -158,7 +162,7 @@ async function buscarCodigoProduto(codigo) {
   // Se for numérico, tenta direto por codigo_produto
   if (/^\d+$/.test(raw)) {
     const { rows } = await dbQuery(
-      `SELECT codigo_produto FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+      `SELECT codigo_produto FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
       [Number(raw)]
     );
     if (rows.length) return Number(rows[0].codigo_produto);
@@ -166,7 +170,7 @@ async function buscarCodigoProduto(codigo) {
 
   // Busca por ID Omie (codigo_produto) ou código textual (SKU)
   const { rows } = await dbQuery(
-    `SELECT codigo_produto FROM public.produtos_omie
+    `SELECT codigo_produto FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1)
          OR TRIM(codigo) = TRIM($1)
       ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
@@ -174,7 +178,7 @@ async function buscarCodigoProduto(codigo) {
     [raw]
   );
   if (!rows.length) {
-    const err = new Error(`Produto "${raw}" não encontrado em public.produtos_omie.`);
+    const err = new Error(`Produto "${raw}" não encontrado em produto.produtos_omie.`);
     err.status = 404;
     throw err;
   }
@@ -369,7 +373,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
     // Data mais recente disponível para este armazém na tabela de posição
     const { rows: dateRows } = await dbQuery(
       `SELECT MAX(data_posicao) AS ultima_data
-         FROM public.omie_estoque_posicao
+         FROM omie.omie_estoque_posicao
         WHERE local_codigo = $1`,
       [local_estoque]
     );
@@ -383,7 +387,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
     // Busca saldo e cmc de cada produto na posição mais recente do armazém alvo
     const { rows: estoqueRows } = await dbQuery(
       `SELECT codigo, COALESCE(saldo, 0) AS saldo, COALESCE(cmc, 0) AS cmc, descricao
-         FROM public.omie_estoque_posicao
+         FROM omie.omie_estoque_posicao
         WHERE local_codigo = $1
           AND data_posicao = $2
           AND codigo = ANY($3::text[])`,
@@ -405,7 +409,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
     if (codigosEnt.length && local_estoque !== COD_RECEBIMENTO) {
       const { rows: drRows } = await dbQuery(
         `SELECT MAX(data_posicao) AS ultima_data
-           FROM public.omie_estoque_posicao
+           FROM omie.omie_estoque_posicao
           WHERE local_codigo = $1`,
         [COD_RECEBIMENTO]
       );
@@ -413,7 +417,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
       if (ultimaDataReceb) {
         const { rows: recebRows } = await dbQuery(
           `SELECT codigo, COALESCE(saldo, 0) AS saldo
-             FROM public.omie_estoque_posicao
+             FROM omie.omie_estoque_posicao
             WHERE local_codigo = $1
               AND data_posicao = $2
               AND codigo = ANY($3::text[])`,
@@ -426,7 +430,7 @@ router.post('/reconciliar', express.json(), async (req, res) => {
     // tipoitem de cada produto (para regra PA/Revenda → #MAQ)
     const { rows: tipoRows } = await dbQuery(
       `SELECT codigo, COALESCE(tipoitem, '') AS tipoitem
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo = ANY($1::text[])`,
       [codigos]
     );
@@ -624,7 +628,7 @@ router.get('/', async (_req, res) => {
                 solicitante, status, aprovado_por, aprovado_em,
                 reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
                 0 AS ordem_status
-           FROM mensagens.ajustes_estoque
+           FROM logistica.ajustes_estoque
           WHERE lower(coalesce(status, '')) NOT IN ('executado', 'reprovado')
        ),
        historico AS (
@@ -633,7 +637,7 @@ router.get('/', async (_req, res) => {
                 solicitante, status, aprovado_por, aprovado_em,
                 reprovado_por, reprovado_em, motivo_reprovacao, criado_em,
                 1 AS ordem_status
-           FROM mensagens.ajustes_estoque
+           FROM logistica.ajustes_estoque
           WHERE lower(coalesce(status, '')) IN ('executado', 'reprovado')
           ORDER BY id DESC
           LIMIT 250
@@ -773,7 +777,7 @@ router.post('/', express.json(), exigirSupervisorMovimentacao, async (req, res) 
     }).join(', ');
 
     const insertSql = `
-      INSERT INTO mensagens.ajustes_estoque
+      INSERT INTO logistica.ajustes_estoque
         (tipo_operacao, codigo_produto, codigo, descricao, qtd,
          local_estoque, local_nome, data_movimentacao, cmc, motivo, obs, solicitante, status)
       VALUES ${valuesSql}
@@ -811,7 +815,7 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
       `SELECT id, tipo_operacao, codigo_produto, codigo, descricao, qtd,
               local_estoque, local_nome, data_movimentacao, cmc, motivo, obs,
               solicitante, status, aprovado_por
-         FROM mensagens.ajustes_estoque
+         FROM logistica.ajustes_estoque
         WHERE id = $1
         LIMIT 1`,
       [id]
@@ -832,7 +836,7 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
     const respostaOmie = await incluirAjusteOmie(registro, aprovadoPor);
 
     const { rows } = await dbQuery(
-      `UPDATE mensagens.ajustes_estoque
+      `UPDATE logistica.ajustes_estoque
           SET status = $1,
               aprovado_por = $2,
               aprovado_em = NOW()
@@ -908,7 +912,7 @@ router.patch('/:id/reprovar', express.json(), async (req, res) => {
     }
 
     const { rows: encontrados } = await dbQuery(
-      `SELECT id, status FROM mensagens.ajustes_estoque WHERE id = $1 LIMIT 1`,
+      `SELECT id, status FROM logistica.ajustes_estoque WHERE id = $1 LIMIT 1`,
       [id]
     );
 
@@ -922,7 +926,7 @@ router.patch('/:id/reprovar', express.json(), async (req, res) => {
     }
 
     const { rows } = await dbQuery(
-      `UPDATE mensagens.ajustes_estoque
+      `UPDATE logistica.ajustes_estoque
           SET status = $1,
               reprovado_por = $2,
               reprovado_em = NOW(),

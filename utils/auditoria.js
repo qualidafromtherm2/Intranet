@@ -1,5 +1,5 @@
 // utils/auditoria.js
-// Helper para registrar modificações de produto no histórico (auditoria_produto.historico_modificacoes)
+// Helper para registrar modificações de produto no histórico (auditoria.historico_modificacoes)
 const { dbQuery, isDbEnabled } = require('../src/db');
 
 /**
@@ -31,15 +31,15 @@ async function registrarModificacao({ codigo_omie, codigo_texto, codigo_produto,
       DO $$ BEGIN
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns
-          WHERE table_schema = 'auditoria_produto' AND table_name = 'historico_modificacoes' AND column_name = 'codigo_texto'
+          WHERE table_schema = 'auditoria' AND table_name = 'historico_modificacoes' AND column_name = 'codigo_texto'
         ) THEN
-          ALTER TABLE auditoria_produto.historico_modificacoes ADD COLUMN codigo_texto text;
+          ALTER TABLE auditoria.historico_modificacoes ADD COLUMN codigo_texto text;
         END IF;
         IF NOT EXISTS (
           SELECT 1 FROM information_schema.columns
-          WHERE table_schema = 'auditoria_produto' AND table_name = 'historico_modificacoes' AND column_name = 'codigo_produto'
+          WHERE table_schema = 'auditoria' AND table_name = 'historico_modificacoes' AND column_name = 'codigo_produto'
         ) THEN
-          ALTER TABLE auditoria_produto.historico_modificacoes ADD COLUMN codigo_produto bigint;
+          ALTER TABLE auditoria.historico_modificacoes ADD COLUMN codigo_produto bigint;
         END IF;
       END $$;
     `);
@@ -52,7 +52,7 @@ async function registrarModificacao({ codigo_omie, codigo_texto, codigo_produto,
         : (codigo_produto != null ? String(codigo_produto) : null);
 
     await dbQuery(
-      `INSERT INTO auditoria_produto.historico_modificacoes
+      `INSERT INTO auditoria.historico_modificacoes
        (codigo_omie, codigo_texto, codigo_produto, tipo_acao, usuario, detalhes, origem)
        VALUES ($1, $2, $3, $4, $5, $6, $7)`,
       [

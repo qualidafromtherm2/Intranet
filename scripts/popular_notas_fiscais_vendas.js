@@ -4,9 +4,9 @@
  * Carga inicial das tabelas de notas fiscais de vendas.
  *
  * Objetivos:
- * 1) Remover registros de teste em "Vendas".notas_fiscais_omie(_eventos)
- * 2) Popular "Vendas".notas_fiscais_omie com base em logistica.recebimentos_nfe_omie
- * 3) Registrar evento técnico de sincronização inicial em "Vendas".notas_fiscais_omie_eventos
+ * 1) Remover registros de teste em vendas.notas_fiscais_omie(_eventos)
+ * 2) Popular vendas.notas_fiscais_omie com base em logistica.recebimentos_nfe_omie
+ * 3) Registrar evento técnico de sincronização inicial em vendas.notas_fiscais_omie_eventos
  *
  * Modo opcional de replay por endpoint (3 req/s):
  *   node scripts/popular_notas_fiscais_vendas.js --replay-endpoint
@@ -25,9 +25,9 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function garantirTabelas(client) {
   await client.query(`
-    CREATE SCHEMA IF NOT EXISTS "Vendas";
+    CREATE SCHEMA IF NOT EXISTS vendas;
 
-    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie (
+    CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie (
       id BIGSERIAL PRIMARY KEY,
       identidade TEXT NOT NULL UNIQUE,
       tipo_documento VARCHAR(10) NOT NULL,
@@ -48,7 +48,7 @@ async function garantirTabelas(client) {
       updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
     );
 
-    CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie_eventos (
+    CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie_eventos (
       id BIGSERIAL PRIMARY KEY,
       identidade TEXT,
       tipo_documento VARCHAR(10),
@@ -66,21 +66,21 @@ async function garantirTabelas(client) {
     );
 
     CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_fiscais_omie_eventos_message_topic
-      ON "Vendas".notas_fiscais_omie_eventos(message_id, topic)
+      ON vendas.notas_fiscais_omie_eventos(message_id, topic)
       WHERE message_id IS NOT NULL;
   `);
 }
 
 async function limparDadosTeste(client) {
   const delEventos = await client.query(`
-    DELETE FROM "Vendas".notas_fiscais_omie_eventos
+    DELETE FROM vendas.notas_fiscais_omie_eventos
     WHERE COALESCE(message_id, '') ILIKE 'teste-%'
        OR COALESCE(numero_pedido, '') ILIKE 'PV-TESTE-%'
        OR COALESCE(author, '') ILIKE '%teste%'
   `);
 
   const delNotas = await client.query(`
-    DELETE FROM "Vendas".notas_fiscais_omie
+    DELETE FROM vendas.notas_fiscais_omie
     WHERE COALESCE(message_id_ultimo, '') ILIKE 'teste-%'
        OR COALESCE(numero_pedido, '') ILIKE 'PV-TESTE-%'
        OR COALESCE(razao_emitente, '') ILIKE '%Fornecedor Teste%'
@@ -144,7 +144,7 @@ async function backfillDireto(client) {
     const messageId = `backfill-${row.n_id_receb}`;
 
     await client.query(`
-      INSERT INTO "Vendas".notas_fiscais_omie (
+      INSERT INTO vendas.notas_fiscais_omie (
         identidade, tipo_documento, topic_ultimo, status_ultimo,
         numero_nota, chave_nfe, numero_pedido, valor_total,
         cnpj_emitente, razao_emitente, data_emissao,
@@ -161,12 +161,12 @@ async function backfillDireto(client) {
       DO UPDATE SET
         topic_ultimo = EXCLUDED.topic_ultimo,
         status_ultimo = EXCLUDED.status_ultimo,
-        numero_nota = COALESCE(EXCLUDED.numero_nota, "Vendas".notas_fiscais_omie.numero_nota),
-        chave_nfe = COALESCE(EXCLUDED.chave_nfe, "Vendas".notas_fiscais_omie.chave_nfe),
-        valor_total = COALESCE(EXCLUDED.valor_total, "Vendas".notas_fiscais_omie.valor_total),
-        cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, "Vendas".notas_fiscais_omie.cnpj_emitente),
-        razao_emitente = COALESCE(EXCLUDED.razao_emitente, "Vendas".notas_fiscais_omie.razao_emitente),
-        data_emissao = COALESCE(EXCLUDED.data_emissao, "Vendas".notas_fiscais_omie.data_emissao),
+        numero_nota = COALESCE(EXCLUDED.numero_nota, vendas.notas_fiscais_omie.numero_nota),
+        chave_nfe = COALESCE(EXCLUDED.chave_nfe, vendas.notas_fiscais_omie.chave_nfe),
+        valor_total = COALESCE(EXCLUDED.valor_total, vendas.notas_fiscais_omie.valor_total),
+        cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, vendas.notas_fiscais_omie.cnpj_emitente),
+        razao_emitente = COALESCE(EXCLUDED.razao_emitente, vendas.notas_fiscais_omie.razao_emitente),
+        data_emissao = COALESCE(EXCLUDED.data_emissao, vendas.notas_fiscais_omie.data_emissao),
         message_id_ultimo = EXCLUDED.message_id_ultimo,
         author_ultimo = EXCLUDED.author_ultimo,
         payload_ultimo = EXCLUDED.payload_ultimo,
@@ -193,7 +193,7 @@ async function backfillDireto(client) {
     upserts++;
 
     await client.query(`
-      INSERT INTO "Vendas".notas_fiscais_omie_eventos (
+      INSERT INTO vendas.notas_fiscais_omie_eventos (
         identidade, tipo_documento, topic, status,
         numero_nota, chave_nfe, numero_pedido,
         message_id, author, payload,
@@ -299,8 +299,8 @@ async function main() {
 
     const resumo = await client.query(`
       SELECT
-        (SELECT COUNT(*) FROM "Vendas".notas_fiscais_omie) AS total_notas,
-        (SELECT COUNT(*) FROM "Vendas".notas_fiscais_omie_eventos) AS total_eventos
+        (SELECT COUNT(*) FROM vendas.notas_fiscais_omie) AS total_notas,
+        (SELECT COUNT(*) FROM vendas.notas_fiscais_omie_eventos) AS total_eventos
     `);
     console.log('Resumo final:', resumo.rows[0]);
   } catch (err) {

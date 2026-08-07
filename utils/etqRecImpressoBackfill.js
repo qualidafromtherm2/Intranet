@@ -14,7 +14,7 @@ async function backfillEtqRecImpresso(conn) {
              NULLIF(TRIM(r.descricao_produto), '')
            )
       FROM etiqueta."ETQ_recebimento" r
-      JOIN public.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
+      JOIN produto.produtos_omie p ON TRIM(p.codigo) = TRIM(r.codigo_produto)
      WHERE r.id = i.origem_id
        AND (
          NULLIF(TRIM(i.codigo_produto), '') IS NULL
@@ -30,7 +30,7 @@ async function backfillEtqRecImpresso(conn) {
              NULLIF(TRIM(i.descricao_produto), ''),
              NULLIF(TRIM(p.descricao), '')
            )
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
      WHERE (i.codigo_produto IS NULL OR TRIM(i.codigo_produto) = '')
        AND i.conteudo_zpl IS NOT NULL
        AND TRIM(i.conteudo_zpl) <> ''
@@ -75,7 +75,7 @@ async function backfillEtqRecImpresso(conn) {
     UPDATE etiqueta."ETQ_rec_impresso" i
        SET codigo_produto = p.codigo_produto::text,
            descricao_produto = COALESCE(NULLIF(TRIM(i.descricao_produto), ''), NULLIF(TRIM(p.descricao), ''))
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
      WHERE TRIM(i.codigo_produto) = TRIM(p.codigo)
        AND p.codigo_produto IS NOT NULL
        AND TRIM(i.codigo_produto) <> TRIM(p.codigo_produto::text)

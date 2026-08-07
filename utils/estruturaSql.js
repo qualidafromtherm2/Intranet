@@ -647,7 +647,7 @@ async function buscarProdutoOmieValidado(codigo, codigoProduto) {
 
   const { rows } = await dbQuery(
     `SELECT codigo_produto, codigo, descricao
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE codigo_produto = $1 AND codigo = $2
       LIMIT 1`,
     [codProd, cod]
@@ -823,7 +823,7 @@ async function resolverProdutoOmiePorCodigo(codigo) {
   if (!cod) return null;
   const { rows } = await dbQuery(
     `SELECT codigo_produto, codigo, descricao
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE UPPER(BTRIM(codigo)) = UPPER(BTRIM($1))
       ORDER BY codigo_produto DESC
       LIMIT 1`,

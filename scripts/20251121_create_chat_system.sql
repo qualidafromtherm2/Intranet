@@ -5,7 +5,7 @@
 -- ============================================================================
 
 -- Tabela principal de mensagens
-CREATE TABLE IF NOT EXISTS public.chat_messages (
+CREATE TABLE IF NOT EXISTS chatbot.chat_messages (
     id BIGSERIAL PRIMARY KEY,
     from_user_id BIGINT NOT NULL,
     to_user_id BIGINT NOT NULL,
@@ -25,18 +25,18 @@ CREATE TABLE IF NOT EXISTS public.chat_messages (
 );
 
 -- Comentários descritivos
-COMMENT ON TABLE public.chat_messages IS 'Armazena todas as mensagens trocadas entre usuários do sistema';
-COMMENT ON COLUMN public.chat_messages.from_user_id IS 'ID do usuário que enviou a mensagem';
-COMMENT ON COLUMN public.chat_messages.to_user_id IS 'ID do usuário que recebeu a mensagem';
-COMMENT ON COLUMN public.chat_messages.message_text IS 'Conteúdo da mensagem';
-COMMENT ON COLUMN public.chat_messages.is_read IS 'Indica se a mensagem foi lida pelo destinatário';
+COMMENT ON TABLE chatbot.chat_messages IS 'Armazena todas as mensagens trocadas entre usuários do sistema';
+COMMENT ON COLUMN chatbot.chat_messages.from_user_id IS 'ID do usuário que enviou a mensagem';
+COMMENT ON COLUMN chatbot.chat_messages.to_user_id IS 'ID do usuário que recebeu a mensagem';
+COMMENT ON COLUMN chatbot.chat_messages.message_text IS 'Conteúdo da mensagem';
+COMMENT ON COLUMN chatbot.chat_messages.is_read IS 'Indica se a mensagem foi lida pelo destinatário';
 
 -- Índices para otimizar consultas
-CREATE INDEX IF NOT EXISTS idx_chat_from_user ON public.chat_messages(from_user_id);
-CREATE INDEX IF NOT EXISTS idx_chat_to_user ON public.chat_messages(to_user_id);
-CREATE INDEX IF NOT EXISTS idx_chat_created_at ON public.chat_messages(created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_chat_unread ON public.chat_messages(to_user_id, is_read) WHERE is_read = FALSE;
-CREATE INDEX IF NOT EXISTS idx_chat_conversation ON public.chat_messages(from_user_id, to_user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_chat_from_user ON chatbot.chat_messages(from_user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_to_user ON chatbot.chat_messages(to_user_id);
+CREATE INDEX IF NOT EXISTS idx_chat_created_at ON chatbot.chat_messages(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_chat_unread ON chatbot.chat_messages(to_user_id, is_read) WHERE is_read = FALSE;
+CREATE INDEX IF NOT EXISTS idx_chat_conversation ON chatbot.chat_messages(from_user_id, to_user_id, created_at);
 
 -- ============================================================================
 -- FUNÇÃO: Listar usuários ativos disponíveis para chat
@@ -63,7 +63,7 @@ BEGIN
         -- Conta mensagens não lidas do usuário para o usuário atual
         COALESCE(
             (SELECT COUNT(*) 
-             FROM public.chat_messages m 
+             FROM chatbot.chat_messages m 
              WHERE m.from_user_id = u.id 
                AND m.to_user_id = p_current_user_id 
                AND m.is_read = FALSE),
@@ -109,7 +109,7 @@ BEGIN
         m.is_read,
         m.created_at
     FROM 
-        public.chat_messages m
+        chatbot.chat_messages m
     WHERE 
         (m.from_user_id = p_user1_id AND m.to_user_id = p_user2_id)
         OR 
@@ -167,7 +167,7 @@ BEGIN
     END IF;
     
     -- Insere a mensagem
-    INSERT INTO public.chat_messages (from_user_id, to_user_id, message_text)
+    INSERT INTO chatbot.chat_messages (from_user_id, to_user_id, message_text)
     VALUES (p_from_user_id, p_to_user_id, TRIM(p_message_text))
     RETURNING id INTO v_message_id;
     
@@ -191,7 +191,7 @@ DECLARE
     v_updated_count INTEGER;
 BEGIN
     -- Marca como lidas todas as mensagens não lidas do remetente para o usuário
-    UPDATE public.chat_messages
+    UPDATE chatbot.chat_messages
     SET 
         is_read = TRUE,
         updated_at = CURRENT_TIMESTAMP
@@ -222,7 +222,7 @@ DECLARE
 BEGIN
     SELECT COUNT(*)
     INTO v_count
-    FROM public.chat_messages
+    FROM chatbot.chat_messages
     WHERE to_user_id = p_user_id
       AND is_read = FALSE;
     
@@ -268,7 +268,7 @@ BEGIN
                     END
                 ORDER BY m.created_at DESC
             ) as rn
-        FROM public.chat_messages m
+        FROM chatbot.chat_messages m
         WHERE m.from_user_id = p_user_id OR m.to_user_id = p_user_id
     )
     SELECT 
@@ -278,7 +278,7 @@ BEGIN
         lm.created_at,
         COALESCE(
             (SELECT COUNT(*) 
-             FROM public.chat_messages m2 
+             FROM chatbot.chat_messages m2 
              WHERE m2.from_user_id = lm.other_user_id 
                AND m2.to_user_id = p_user_id 
                AND m2.is_read = FALSE),
@@ -309,9 +309,9 @@ BEGIN
 END;
 $$;
 
-DROP TRIGGER IF EXISTS trigger_update_chat_timestamp ON public.chat_messages;
+DROP TRIGGER IF EXISTS trigger_update_chat_timestamp ON chatbot.chat_messages;
 CREATE TRIGGER trigger_update_chat_timestamp
-    BEFORE UPDATE ON public.chat_messages
+    BEFORE UPDATE ON chatbot.chat_messages
     FOR EACH ROW
     EXECUTE FUNCTION public.update_chat_updated_at();
 

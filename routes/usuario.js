@@ -1,7 +1,7 @@
 /**
  * routes/usuario.js — Preferências de usuário (impressora padrão, etc.)
  *
- * Tabela: public.usuario_preferencias (login, chave, valor, atualizado_em)
+ * Tabela: usuario.usuario_preferencias (login, chave, valor, atualizado_em)
  *
  * GET  /api/usuario/preferencias/:chave  → { valor } ou { valor: null }
  * POST /api/usuario/preferencias         → { chave, valor } upsert → { ok: true }
@@ -15,7 +15,7 @@ const { dbQuery } = require('../src/db.js');
 (async () => {
   try {
     await dbQuery(`
-      CREATE TABLE IF NOT EXISTS public.usuario_preferencias (
+      CREATE TABLE IF NOT EXISTS usuario.usuario_preferencias (
         login        TEXT        NOT NULL,
         chave        TEXT        NOT NULL,
         valor        TEXT,
@@ -43,7 +43,7 @@ router.get('/preferencias/:chave', requireAuth, async (req, res) => {
   if (!chave) return res.status(400).json({ ok: false, error: 'chave obrigatória' });
   try {
     const { rows } = await dbQuery(
-      `SELECT valor FROM public.usuario_preferencias WHERE login = $1 AND chave = $2 LIMIT 1`,
+      `SELECT valor FROM usuario.usuario_preferencias WHERE login = $1 AND chave = $2 LIMIT 1`,
       [req.loginUsuario, chave]
     );
     return res.json({ valor: rows.length ? rows[0].valor : null });
@@ -59,7 +59,7 @@ router.post('/preferencias', requireAuth, async (req, res) => {
   if (!chave) return res.status(400).json({ ok: false, error: 'chave obrigatória' });
   try {
     await dbQuery(
-      `INSERT INTO public.usuario_preferencias (login, chave, valor, atualizado_em)
+      `INSERT INTO usuario.usuario_preferencias (login, chave, valor, atualizado_em)
        VALUES ($1, $2, $3, NOW())
        ON CONFLICT (login, chave) DO UPDATE
          SET valor = EXCLUDED.valor, atualizado_em = NOW()`,

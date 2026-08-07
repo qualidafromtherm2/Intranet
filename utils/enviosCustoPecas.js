@@ -1,5 +1,5 @@
 /**
- * Custo de peças enviadas (CMC) amarrado a envios.solicitacoes + OS (id_at).
+ * Custo de peças enviadas (CMC) amarrado a sac.envios_solicitacoes + OS (id_at).
  * Fonte do valor unitário: logistica.estoque_atual.cmc
  */
 'use strict';
@@ -34,11 +34,14 @@ function parseConteudoItens(conteudoRaw) {
 }
 
 async function ensureCustoPecasTable(db) {
+  const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('./organizarSchemasMigracao');
+  await organizarSchemasMigracao(db);
   await db.query(`
+    CREATE SCHEMA IF NOT EXISTS sac;
     CREATE SCHEMA IF NOT EXISTS envios;
-    CREATE TABLE IF NOT EXISTS envios.custo_pecas (
+    CREATE TABLE IF NOT EXISTS sac.envios_custo_pecas (
       id BIGSERIAL PRIMARY KEY,
-      id_envio BIGINT NOT NULL REFERENCES envios.solicitacoes(id) ON DELETE CASCADE,
+      id_envio BIGINT NOT NULL REFERENCES sac.envios_solicitacoes(id) ON DELETE CASCADE,
       id_at BIGINT,
       codigo_produto TEXT,
       descricao TEXT,
@@ -48,14 +51,15 @@ async function ensureCustoPecasTable(db) {
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE INDEX IF NOT EXISTS idx_envios_custo_pecas_id_envio
-      ON envios.custo_pecas (id_envio);
+      ON sac.envios_custo_pecas (id_envio);
     CREATE INDEX IF NOT EXISTS idx_envios_custo_pecas_id_at
-      ON envios.custo_pecas (id_at)
+      ON sac.envios_custo_pecas (id_at)
       WHERE id_at IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_envios_custo_pecas_codigo
-      ON envios.custo_pecas (codigo_produto)
+      ON sac.envios_custo_pecas (codigo_produto)
       WHERE codigo_produto IS NOT NULL;
   `);
+  await ensureSchemasCompatViews(db);
 }
 
 async function buscarCmcMap(db, codigos) {
@@ -77,7 +81,7 @@ async function buscarCmcMap(db, codigos) {
 }
 
 /**
- * Regenera linhas de envios.custo_pecas para um envio (a partir de conteudo + CMC atual).
+ * Regenera linhas de sac.envios_custo_pecas para um envio (a partir de conteudo + CMC atual).
  */
 async function syncCustoPecasEnvio(db, envioId) {
   const id = parseInt(envioId, 10);
@@ -86,14 +90,14 @@ async function syncCustoPecasEnvio(db, envioId) {
   await ensureCustoPecasTable(db);
 
   const { rows } = await db.query(
-    `SELECT id, id_at, conteudo FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+    `SELECT id, id_at, conteudo FROM sac.envios_solicitacoes WHERE id = $1 LIMIT 1`,
     [id]
   );
   if (!rows.length) return { ok: false, inserted: 0 };
 
   const envio = rows[0];
   const itens = parseConteudoItens(envio.conteudo);
-  await db.query(`DELETE FROM envios.custo_pecas WHERE id_envio = $1`, [id]);
+  await db.query(`DELETE FROM sac.envios_custo_pecas WHERE id_envio = $1`, [id]);
 
   if (!itens.length) return { ok: true, inserted: 0 };
 
@@ -119,7 +123,7 @@ async function syncCustoPecasEnvio(db, envioId) {
   }
 
   await db.query(
-    `INSERT INTO envios.custo_pecas
+    `INSERT INTO sac.envios_custo_pecas
        (id_envio, id_at, codigo_produto, descricao, quantidade, cmc_unitario, valor_total)
      VALUES ${values.join(',')}`,
     params
@@ -135,14 +139,14 @@ async function backfillCustoPecas(db, { onlyMissing = true, limit = 5000 } = {})
   const { rows: envios } = await db.query(
     onlyMissing
       ? `SELECT e.id, e.id_at, e.conteudo
-           FROM envios.solicitacoes e
+           FROM sac.envios_solicitacoes e
           WHERE e.conteudo IS NOT NULL
             AND TRIM(e.conteudo) <> ''
-            AND NOT EXISTS (SELECT 1 FROM envios.custo_pecas c WHERE c.id_envio = e.id)
+            AND NOT EXISTS (SELECT 1 FROM sac.envios_custo_pecas c WHERE c.id_envio = e.id)
           ORDER BY e.id DESC
           LIMIT $1`
       : `SELECT e.id, e.id_at, e.conteudo
-           FROM envios.solicitacoes e
+           FROM sac.envios_solicitacoes e
           WHERE e.conteudo IS NOT NULL
             AND TRIM(e.conteudo) <> ''
           ORDER BY e.id DESC
@@ -156,7 +160,7 @@ async function backfillCustoPecas(db, { onlyMissing = true, limit = 5000 } = {})
   }
 
   if (!onlyMissing) {
-    await db.query(`DELETE FROM envios.custo_pecas WHERE id_envio = ANY($1::bigint[])`, [
+    await db.query(`DELETE FROM sac.envios_custo_pecas WHERE id_envio = ANY($1::bigint[])`, [
       envios.map((e) => e.id),
     ]);
   }
@@ -200,7 +204,7 @@ async function backfillCustoPecas(db, { onlyMissing = true, limit = 5000 } = {})
       );
     }
     await db.query(
-      `INSERT INTO envios.custo_pecas
+      `INSERT INTO sac.envios_custo_pecas
          (id_envio, id_at, codigo_produto, descricao, quantidade, cmc_unitario, valor_total)
        VALUES ${values.join(',')}`,
       params
@@ -209,9 +213,9 @@ async function backfillCustoPecas(db, { onlyMissing = true, limit = 5000 } = {})
   }
 
   await db.query(`
-    UPDATE envios.custo_pecas c
+    UPDATE sac.envios_custo_pecas c
        SET id_at = e.id_at
-      FROM envios.solicitacoes e
+      FROM sac.envios_solicitacoes e
      WHERE c.id_envio = e.id
        AND c.id_at IS DISTINCT FROM e.id_at
   `);

@@ -7,7 +7,7 @@
  *
  * Conteúdo:
  *  1. Agenda do dia (rh.reservas_ambientes + rh.reservas_participantes)
- *  2. Mensagens não lidas no SGF (public.chat_messages)
+ *  2. Mensagens não lidas no SGF (chatbot.chat_messages)
  *
  * Se houver mensagens não lidas, envia botão interativo
  * "Marcar como lidas". O clique é tratado no webhook do WhatsApp
@@ -216,7 +216,7 @@ async function executarNotificacaoDiaria() {
       // ── 2. Mensagens não lidas ──────────────────────────────────────────
       const { rows: mensagens } = await dbQuery(
         `SELECT cm.id, cm.message_text, cm.from_user_id, cm.created_at
-         FROM public.chat_messages cm
+         FROM chatbot.chat_messages cm
          WHERE cm.to_user_id = $1
            AND cm.is_read = false
          ORDER BY cm.created_at DESC

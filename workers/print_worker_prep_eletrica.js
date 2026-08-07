@@ -92,7 +92,7 @@ async function tick() {
     const sel = await client.query(
       `
   SELECT id, numero_op, codigo_produto, conteudo_zpl
-  FROM "OrdemProducao".tab_op
+  FROM producao.tab_op
       WHERE impressa = FALSE
         AND local_impressao = $1
       ORDER BY id ASC
@@ -121,7 +121,7 @@ async function tick() {
 
         // Marca como impressa
         await client.query(
-          `UPDATE "OrdemProducao".tab_op
+          `UPDATE producao.tab_op
              SET impressa = TRUE,
                  data_impressao = NOW()
            WHERE id = $1`,

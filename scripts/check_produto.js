@@ -15,7 +15,7 @@ async function checkProduto() {
         bloqueado,
         updated_at,
         created_at
-      FROM public.produtos_omie 
+      FROM produto.produtos_omie 
       WHERE codigo_produto = 10437359849 
          OR codigo = '09.MC.N.10622'
       LIMIT 1

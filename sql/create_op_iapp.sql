@@ -10,12 +10,12 @@
 -- Leitura via GET  /api/producao/ordens (sem sync automático)
 -- =============================================================
 
-CREATE SCHEMA IF NOT EXISTS "IAPP_API";
+CREATE SCHEMA IF NOT EXISTS producao;
 
 -- -------------------------------------------------------------
 -- 1. PRODUTOS
 -- -------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_produto (
+CREATE TABLE IF NOT EXISTS producao.op_iapp_produto (
   produto_id            INTEGER       NOT NULL PRIMARY KEY,  -- produto.id
   identificacao         TEXT,                                -- produto.identificacao (código)
   descricao             TEXT,                                -- produto.descricao
@@ -64,22 +64,22 @@ CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_produto (
   sincronizado_em  TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_iapp_produto_ident  ON "IAPP_API".op_iapp_produto (identificacao);
-CREATE INDEX IF NOT EXISTS idx_iapp_produto_tipo   ON "IAPP_API".op_iapp_produto (tipo);
-CREATE INDEX IF NOT EXISTS idx_iapp_produto_status ON "IAPP_API".op_iapp_produto (status);
+CREATE INDEX IF NOT EXISTS idx_iapp_produto_ident  ON producao.op_iapp_produto (identificacao);
+CREATE INDEX IF NOT EXISTS idx_iapp_produto_tipo   ON producao.op_iapp_produto (tipo);
+CREATE INDEX IF NOT EXISTS idx_iapp_produto_status ON producao.op_iapp_produto (status);
 
 
 -- -------------------------------------------------------------
 -- 2. ORDENS DE PRODUÇÃO (item pai)
 -- Chave: id da OP no IAPP.
 -- -------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp (
+CREATE TABLE IF NOT EXISTS producao.op_iapp (
   iapp_id               INTEGER       NOT NULL PRIMARY KEY,  -- OP.id
   identificacao         TEXT,                                -- ex: "0002394"
   status                TEXT,                                -- "A PRODUZIR", "PRODUZINDO", "ENCERRADO" …
 
   -- Referências
-  produto_id            INTEGER  REFERENCES "IAPP_API".op_iapp_produto (produto_id) ON DELETE SET NULL,
+  produto_id            INTEGER  REFERENCES producao.op_iapp_produto (produto_id) ON DELETE SET NULL,
   ficha_tecnica         INTEGER,                             -- id da ficha técnica no IAPP
   linha_producao        INTEGER,                             -- id da linha de produção no IAPP
 
@@ -107,19 +107,19 @@ CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp (
   sincronizado_em  TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_iapp_op_status          ON "IAPP_API".op_iapp (status);
-CREATE INDEX IF NOT EXISTS idx_iapp_op_produto_id      ON "IAPP_API".op_iapp (produto_id);
-CREATE INDEX IF NOT EXISTS idx_iapp_op_data_abertura   ON "IAPP_API".op_iapp (data_abertura DESC);
-CREATE INDEX IF NOT EXISTS idx_iapp_op_ult_atualizacao ON "IAPP_API".op_iapp (data_ultima_atualizacao DESC);
+CREATE INDEX IF NOT EXISTS idx_iapp_op_status          ON producao.op_iapp (status);
+CREATE INDEX IF NOT EXISTS idx_iapp_op_produto_id      ON producao.op_iapp (produto_id);
+CREATE INDEX IF NOT EXISTS idx_iapp_op_data_abertura   ON producao.op_iapp (data_abertura DESC);
+CREATE INDEX IF NOT EXISTS idx_iapp_op_ult_atualizacao ON producao.op_iapp (data_ultima_atualizacao DESC);
 
 
 -- -------------------------------------------------------------
 -- 3. ORDENS DE SERVIÇO (itens filhos da OP)
 -- Chave: id da OS no IAPP.
 -- -------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os (
+CREATE TABLE IF NOT EXISTS producao.op_iapp_os (
   os_id                 INTEGER       NOT NULL PRIMARY KEY,  -- OS.id
-  op_iapp_id            INTEGER       NOT NULL REFERENCES "IAPP_API".op_iapp (iapp_id) ON DELETE CASCADE,
+  op_iapp_id            INTEGER       NOT NULL REFERENCES producao.op_iapp (iapp_id) ON DELETE CASCADE,
 
   identificacao         TEXT,   -- ex: "0002394.01"
   status                TEXT,   -- "ABERTA", "EM ANDAMENTO", "ENCERRADA" …
@@ -151,15 +151,15 @@ CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os (
   data_status_producao  TIMESTAMP
 );
 
-CREATE INDEX IF NOT EXISTS idx_iapp_os_op_id  ON "IAPP_API".op_iapp_os (op_iapp_id);
-CREATE INDEX IF NOT EXISTS idx_iapp_os_status ON "IAPP_API".op_iapp_os (status);
+CREATE INDEX IF NOT EXISTS idx_iapp_os_op_id  ON producao.op_iapp_os (op_iapp_id);
+CREATE INDEX IF NOT EXISTS idx_iapp_os_status ON producao.op_iapp_os (status);
 
 -- -------------------------------------------------------------
 -- 4. PARADAS DE PRODUÇÃO (por OS)
 -- -------------------------------------------------------------
-CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os_parada (
+CREATE TABLE IF NOT EXISTS producao.op_iapp_os_parada (
   parada_id     SERIAL PRIMARY KEY,
-  os_id         INTEGER NOT NULL REFERENCES "IAPP_API".op_iapp_os (os_id) ON DELETE CASCADE,
+  os_id         INTEGER NOT NULL REFERENCES producao.op_iapp_os (os_id) ON DELETE CASCADE,
   op_iapp_id    INTEGER NOT NULL,
   data_parada   TIMESTAMP NOT NULL DEFAULT NOW(),
   operador      TEXT,
@@ -168,5 +168,5 @@ CREATE TABLE IF NOT EXISTS "IAPP_API".op_iapp_os_parada (
 );
 
 CREATE INDEX IF NOT EXISTS idx_iapp_os_parada_os
-  ON "IAPP_API".op_iapp_os_parada (os_id, data_parada DESC);
+  ON producao.op_iapp_os_parada (os_id, data_parada DESC);
 

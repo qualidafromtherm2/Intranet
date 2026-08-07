@@ -1,8 +1,8 @@
 BEGIN;
 
-CREATE SCHEMA IF NOT EXISTS "Vendas";
+CREATE SCHEMA IF NOT EXISTS vendas;
 
-CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie (
+CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie (
   id BIGSERIAL PRIMARY KEY,
   identidade TEXT NOT NULL UNIQUE,
   tipo_documento VARCHAR(10) NOT NULL,
@@ -35,26 +35,26 @@ CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie (
   updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_numero ON "Vendas".notas_fiscais_omie(numero_nota);
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_chave ON "Vendas".notas_fiscais_omie(chave_nfe);
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_pedido ON "Vendas".notas_fiscais_omie(numero_pedido);
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_topic ON "Vendas".notas_fiscais_omie(topic_ultimo);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_numero ON vendas.notas_fiscais_omie(numero_nota);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_chave ON vendas.notas_fiscais_omie(chave_nfe);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_pedido ON vendas.notas_fiscais_omie(numero_pedido);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_topic ON vendas.notas_fiscais_omie(topic_ultimo);
 
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
-ALTER TABLE "Vendas".notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS acao_ultimo VARCHAR(40);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_nf_omie BIGINT;
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS serie VARCHAR(10);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_xml TEXT;
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS ambiente VARCHAR(10);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS operacao VARCHAR(30);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS hora_emissao VARCHAR(20);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS id_pedido_omie BIGINT;
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS url_danfe TEXT;
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_ie VARCHAR(40);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
+ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
 
-CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie_eventos (
+CREATE TABLE IF NOT EXISTS vendas.notas_fiscais_omie_eventos (
   id BIGSERIAL PRIMARY KEY,
   identidade TEXT,
   tipo_documento VARCHAR(10),
@@ -71,11 +71,11 @@ CREATE TABLE IF NOT EXISTS "Vendas".notas_fiscais_omie_eventos (
   erro TEXT
 );
 
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_topic ON "Vendas".notas_fiscais_omie_eventos(topic);
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_numero ON "Vendas".notas_fiscais_omie_eventos(numero_nota);
-CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_chave ON "Vendas".notas_fiscais_omie_eventos(chave_nfe);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_topic ON vendas.notas_fiscais_omie_eventos(topic);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_numero ON vendas.notas_fiscais_omie_eventos(numero_nota);
+CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_eventos_chave ON vendas.notas_fiscais_omie_eventos(chave_nfe);
 CREATE UNIQUE INDEX IF NOT EXISTS uq_notas_fiscais_omie_eventos_message_topic
-  ON "Vendas".notas_fiscais_omie_eventos(message_id, topic)
+  ON vendas.notas_fiscais_omie_eventos(message_id, topic)
   WHERE message_id IS NOT NULL;
 
 COMMIT;

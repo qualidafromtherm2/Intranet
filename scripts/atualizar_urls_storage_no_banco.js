@@ -27,8 +27,8 @@ const NEW_PREFIX = String(R2_PUBLIC_BASE_URL || process.env.STORAGE_PUBLIC_BASE_
 const LIKE = `%${SUPABASE_HOST}%`;
 
 const UPDATES = [
-  { label: 'fotos produto', table: 'public.produtos_omie_imagens', column: 'url_imagem' },
-  { label: 'anexos produto', table: 'public.produtos_omie_anexos', column: 'url_anexo' },
+  { label: 'fotos produto', table: 'produto.produtos_omie_imagens', column: 'url_imagem' },
+  { label: 'anexos produto', table: 'produto.produtos_omie_anexos', column: 'url_anexo' },
   { label: 'foto perfil', table: 'public.auth_user', column: 'foto_perfil_url' },
   { label: 'anexos AT', table: 'sac.at_anexos', column: 'url_publica' },
   { label: 'NFe fechamento', table: 'sac.fechamento', column: 'nfe_url' },

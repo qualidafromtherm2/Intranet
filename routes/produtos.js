@@ -40,7 +40,7 @@ async function ensureProdutosOmieWebhookOnlyGuard() {
       BEGIN
         v_source := lower(trim(coalesce(current_setting('app.produtos_omie_write_source', true), '')));
         IF v_source NOT IN ('omie_webhook', 'omie_cron', 'omie_manual', 'omie_sync') THEN
-          RAISE EXCEPTION 'Escrita em public.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
+          RAISE EXCEPTION 'Escrita em produto.produtos_omie permitida apenas via Omie (webhook/cron/sync). source=%', v_source
             USING ERRCODE = '42501';
         END IF;
 
@@ -52,17 +52,17 @@ async function ensureProdutosOmieWebhookOnlyGuard() {
       END;
       $$;
 
-      DROP TRIGGER IF EXISTS trg_guard_produtos_omie_webhook_only ON public.produtos_omie;
+      DROP TRIGGER IF EXISTS trg_guard_produtos_omie_webhook_only ON produto.produtos_omie;
 
       CREATE TRIGGER trg_guard_produtos_omie_webhook_only
-      BEFORE INSERT OR UPDATE OR DELETE ON public.produtos_omie
+      BEFORE INSERT OR UPDATE OR DELETE ON produto.produtos_omie
       FOR EACH ROW
       EXECUTE FUNCTION public.trg_guard_produtos_omie_webhook_only();
     `);
 
-    console.log('[produtos] Proteção ativa: public.produtos_omie aceita escrita via webhook/cron/sync Omie');
+    console.log('[produtos] Proteção ativa: produto.produtos_omie aceita escrita via webhook/cron/sync Omie');
   } catch (err) {
-    console.error('[produtos] Falha ao instalar proteção da public.produtos_omie:', String(err));
+    console.error('[produtos] Falha ao instalar proteção da produto.produtos_omie:', String(err));
   }
 }
 
@@ -162,7 +162,7 @@ async function consultarProdutoOmie({ codigo_produto, codigo }) {
 
 // GET /api/produtos/detalhe?codigo=FTI55DPTBR
 // Retorna os campos para preencher a guia "Dados do produto" direto do Postgres.
-// Fontes: public.produtos_omie + public.produtos_omie_imagens
+// Fontes: produto.produtos_omie + produto.produtos_omie_imagens
 router.get('/detalhe', async (req, res) => {
   try {
     await ensureProdutosOmieCustomizadoColumn();
@@ -201,7 +201,7 @@ router.get('/detalhe', async (req, res) => {
         p.dalt, p.halt, p.dinc, p.hinc, p.ualt, p.uinc,
         p.codigo_familia,
         p.codint_familia
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
       WHERE ${sqlWhereProdutosOmieIdentidade('p', '$1')}
       ORDER BY ${sqlOrderPreferCodigoProduto('p', '$1')}
       LIMIT 1;
@@ -215,7 +215,7 @@ router.get('/detalhe', async (req, res) => {
     // 2) Busca imagens ativas (se houverem)
     const imgSql = `
       SELECT url_imagem, pos
-      FROM public.produtos_omie_imagens
+      FROM produto.produtos_omie_imagens
       WHERE codigo_produto = $1
         AND COALESCE(ativo, TRUE) = TRUE
         AND url_imagem IS NOT NULL
@@ -334,7 +334,7 @@ async function atualizarVisivelPrincipalProdutoOmie(codigo, valor) {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
     const result = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET visivel_principal = $2
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         RETURNING codigo, codigo_produto, visivel_principal`,
@@ -424,7 +424,7 @@ router.get('/lista', async (req, res) => {
         SELECT
           p.codigo_produto,
           SUM(COALESCE(i.saldo, 0)) AS saldo_enderecado
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
         JOIN (
           SELECT
             TRIM(codigo_produto) AS produto_ref,
@@ -458,7 +458,7 @@ router.get('/lista', async (req, res) => {
           COALESCE(endr.saldo_enderecado, 0) - COALESCE(er.saldo_almox, 0)
             AS diferenca_saldo_endereco_local
         FROM vw_lista_produtos v
-        LEFT JOIN public.produtos_omie p ON p.codigo_produto = v.codigo_produto
+        LEFT JOIN produto.produtos_omie p ON p.codigo_produto = v.codigo_produto
         LEFT JOIN estoque_resumo er ON er.codigo = v.codigo
         LEFT JOIN enderecos_resumo endr ON endr.codigo_produto = v.codigo_produto
         WHERE
@@ -1144,10 +1144,10 @@ async function ensureVwListaProdutos() {
         p.dinc,
         p.hinc,
         img.url_imagem AS primeira_imagem
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
       LEFT JOIN LATERAL (
         SELECT i.url_imagem
-          FROM public.produtos_omie_imagens i
+          FROM produto.produtos_omie_imagens i
          WHERE i.codigo_produto = p.codigo_produto
            AND COALESCE(i.ativo, TRUE) = TRUE
            AND i.url_imagem IS NOT NULL
@@ -1170,7 +1170,7 @@ ensureVwListaProdutos().catch((err) => {
 async function ensureProdutosOmieMultiploColumn() {
   if (!ensureProdutosOmieMultiploColumnPromise) {
     ensureProdutosOmieMultiploColumnPromise = dbQuery(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS multiplo NUMERIC
     `).catch((err) => {
       ensureProdutosOmieMultiploColumnPromise = null;
@@ -1183,7 +1183,7 @@ async function ensureProdutosOmieMultiploColumn() {
 async function ensureProdutosOmieCustomizadoColumn() {
   if (!ensureProdutosOmieCustomizadoColumnPromise) {
     ensureProdutosOmieCustomizadoColumnPromise = dbQuery(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS produto_customizado BOOLEAN NOT NULL DEFAULT FALSE
     `).catch((err) => {
       ensureProdutosOmieCustomizadoColumnPromise = null;
@@ -1197,7 +1197,7 @@ let ensureProdutosOmiePirVaiDiretoColumnPromise = null;
 async function ensureProdutosOmiePirVaiDiretoColumn() {
   if (!ensureProdutosOmiePirVaiDiretoColumnPromise) {
     ensureProdutosOmiePirVaiDiretoColumnPromise = dbQuery(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch((err) => {
       ensureProdutosOmiePirVaiDiretoColumnPromise = null;
@@ -1210,7 +1210,7 @@ async function ensureProdutosOmiePirVaiDiretoColumn() {
 async function ensureProdutosOmieItemLimitadoColumn() {
   if (!ensureProdutosOmieItemLimitadoColumnPromise) {
     ensureProdutosOmieItemLimitadoColumnPromise = dbQuery(`
-      ALTER TABLE public.produtos_omie
+      ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS item_limitado BOOLEAN NOT NULL DEFAULT FALSE
     `).catch((err) => {
       ensureProdutosOmieItemLimitadoColumnPromise = null;
@@ -1237,7 +1237,7 @@ async function atualizarMultiploProdutoOmie(codigo, multiplo) {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
     const result = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET multiplo = $2
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         RETURNING codigo, multiplo`,
@@ -1260,7 +1260,7 @@ router.get('/:codigo/multiplo', async (req, res) => {
     if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
 
     const { rows } = await dbQuery(
-      `SELECT codigo, multiplo FROM public.produtos_omie
+      `SELECT codigo, multiplo FROM produto.produtos_omie
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
         LIMIT 1`,
@@ -1318,7 +1318,7 @@ async function atualizarProdutoCustomizadoOmie(codigo, valor) {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
     const result = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET produto_customizado = $2
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         RETURNING codigo, codigo_produto, produto_customizado`,
@@ -1342,7 +1342,7 @@ router.get('/:codigo/produto-customizado', async (req, res) => {
 
     const { rows } = await dbQuery(
       `SELECT codigo, COALESCE(produto_customizado, FALSE) AS produto_customizado
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
         LIMIT 1`,
@@ -1395,7 +1395,7 @@ async function atualizarPirVaiDiretoIdentificacaoOmie(codigo, valor) {
     await client.query('BEGIN');
     await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
     const result = await client.query(
-      `UPDATE public.produtos_omie
+      `UPDATE produto.produtos_omie
           SET pir_vai_direto_identificacao = $2
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         RETURNING codigo, codigo_produto, pir_vai_direto_identificacao`,
@@ -1438,7 +1438,7 @@ router.get('/:codigo/pir-vai-direto-identificacao', async (req, res) => {
 
     const { rows } = await dbQuery(
       `SELECT codigo, COALESCE(pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
         LIMIT 1`,
@@ -1505,7 +1505,7 @@ router.put('/:codigo/item-limitado', express.json(), async (req, res) => {
       await client.query('BEGIN');
       await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
       result = await client.query(
-        `UPDATE public.produtos_omie
+        `UPDATE produto.produtos_omie
             SET item_limitado = $2
           WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
           RETURNING codigo, item_limitado`,
@@ -1534,7 +1534,7 @@ router.get('/:codigo/visivel-principal', async (req, res) => {
 
     const { rows } = await dbQuery(
       `SELECT codigo, COALESCE(visivel_principal, FALSE) AS visivel_principal
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
         ORDER BY ${sqlOrderPreferCodigoProduto('', '$1')}
         LIMIT 1`,

@@ -11,7 +11,7 @@ async function buscarProdutoAtivoPorId(dbQuery, codigoProduto) {
 
   const { rows } = await dbQuery(
     `SELECT p.codigo_produto
-       FROM public.produtos_omie p
+       FROM produto.produtos_omie p
       WHERE p.codigo_produto = $1
         AND ${produtoAtivoSql('p')}
       LIMIT 1`,
@@ -27,7 +27,7 @@ async function buscarProdutoAtivoPorCodigo(dbQuery, codigo) {
 
   const { rows } = await dbQuery(
     `SELECT p.codigo_produto
-       FROM public.produtos_omie p
+       FROM produto.produtos_omie p
       WHERE (TRIM(p.codigo) = $1 OR TRIM(p.codigo_produto_integracao) = $1)
         AND ${produtoAtivoSql('p')}
       ORDER BY p.updated_at DESC NULLS LAST, p.codigo_produto DESC
@@ -66,7 +66,7 @@ async function resolverCodigoProdutoPreferindoAtivo(dbQuery, codigoOuId, opts = 
     const { rows } = await dbQuery(
       `SELECT TRIM(codigo) AS codigo,
               TRIM(COALESCE(codigo_produto_integracao, '')) AS integracao
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo_produto = $1
         LIMIT 1`,
       [Number(raw)]
@@ -83,7 +83,7 @@ async function resolverCodigoProdutoPreferindoAtivo(dbQuery, codigoOuId, opts = 
   // Fallback legado (etiquetas / histórico): qualquer match, ativos primeiro.
   const { rows } = await dbQuery(
     `SELECT codigo_produto::text AS id_omie
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1)
          OR TRIM(codigo) = TRIM($1)
          OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
@@ -118,7 +118,7 @@ async function resolverCodigoTextoPreferindoAtivo(dbQuery, codigoOuId) {
 
   const { rows } = await dbQuery(
     `SELECT codigo
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1)
          OR TRIM(codigo) = TRIM($1)
          OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)

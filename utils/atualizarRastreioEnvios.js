@@ -1,5 +1,5 @@
 /**
- * Atualização em lote de rastreio — envios.solicitacoes
+ * Atualização em lote de rastreio — sac.envios_solicitacoes
  * Consulta VIPP (fila Valida / Processamento Vipp) e Correios (código ECT).
  */
 'use strict';
@@ -52,7 +52,7 @@ async function persistStatus(codigo, { status, quando }) {
   const isDelivered = /entregue ao destinat[áa]rio/i.test(statusVal) || /\bentregue\b/i.test(statusVal);
 
   await dbQuery(
-    `UPDATE envios.solicitacoes
+    `UPDATE sac.envios_solicitacoes
         SET rastreio_status = CASE
                                 WHEN $4 THEN 'Finalizado'
                                 ELSE $2
@@ -140,7 +140,7 @@ async function atualizarStatusVipp(envioId, idVipp) {
 
   if (statusParaSalvar) {
     await dbQuery(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET rastreio_status = $1,
               rastreio_quando = NOW(),
               identificacao   = COALESCE(NULLIF(identificacao, ''), $2)

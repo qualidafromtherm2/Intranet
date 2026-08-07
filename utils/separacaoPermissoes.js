@@ -73,7 +73,7 @@ async function assertAcessoSeparacao(client, solicIds, req) {
   if (!regra?.restringir_destinos) return { ok: true, regra };
   const { rows } = await client.query(`
     SELECT DISTINCT COALESCE(NULLIF(TRIM(nome_local), ''), 'Sem destino') AS destino
-      FROM solicitacao_produto.itens_solicitados
+      FROM logistica.itens_solicitados
      WHERE id = ANY($1::bigint[])
        AND CONCAT(TRIM(COALESCE(cod_local, '')), '|', TRIM(COALESCE(nome_local, ''))) <> ALL($2::text[])
   `, [ids, regra.destinos_chaves]);

@@ -8,7 +8,7 @@ const { registrarModificacao } = require('../utils/auditoria');
 router.get('/operacoes', async (req, res) => {
   try {
     const result = await dbQuery(
-      'SELECT DISTINCT operacao FROM public.omie_operacao ORDER BY operacao'
+      'SELECT DISTINCT operacao FROM omie.omie_operacao ORDER BY operacao'
     );
     
     res.json(result.rows.map(row => row.operacao));

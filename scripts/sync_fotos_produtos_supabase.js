@@ -10,7 +10,7 @@
 //   3. Faz upload no bucket Supabase (default: produtos) na pasta
 //        Fotos_produto/<codigo_produto>/<arquivo>
 //   4. Coleta as URLs públicas geradas
-//   5. Limpa public.produtos_omie_imagens e insere apenas os novos registros
+//   5. Limpa produto.produtos_omie_imagens e insere apenas os novos registros
 //
 // USO:
 //   node scripts/sync_fotos_produtos_supabase.js
@@ -205,7 +205,7 @@ async function gravarRegistros(novosRegistros) {
   // Filtra apenas codigo_produto que existe em produtos_omie (evita violar FK)
   const codigos = [...new Set(novosRegistros.map((r) => r.codigo_produto))];
   const { rows: existentes } = await dbQuery(
-    'SELECT codigo_produto FROM public.produtos_omie WHERE codigo_produto = ANY($1::bigint[])',
+    'SELECT codigo_produto FROM produto.produtos_omie WHERE codigo_produto = ANY($1::bigint[])',
     [codigos]
   );
   const setExistentes = new Set(existentes.map((r) => Number(r.codigo_produto)));
@@ -218,10 +218,10 @@ async function gravarRegistros(novosRegistros) {
   const client = await dbGetClient();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM public.produtos_omie_imagens');
+    await client.query('DELETE FROM produto.produtos_omie_imagens');
     for (const reg of filtrados) {
       await client.query(
-        `INSERT INTO public.produtos_omie_imagens
+        `INSERT INTO produto.produtos_omie_imagens
             (codigo_produto, pos, url_imagem, path_key, ativo)
          VALUES ($1, $2, $3, $4, true)`,
         [reg.codigo_produto, reg.pos, reg.url_imagem, reg.path_key]

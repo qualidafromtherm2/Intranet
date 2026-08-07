@@ -21,7 +21,7 @@ async function resolveCodigoProduto(codigoParam) {
 
   const sql = `
     SELECT codigo_produto
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
      WHERE codigo = $1
      LIMIT 1
   `;
@@ -95,14 +95,14 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
 
     // Desativa o slot atual e insere um novo registro ativo (histórico preservado)
     await dbQuery(
-      `UPDATE public.produtos_omie_imagens
+      `UPDATE produto.produtos_omie_imagens
           SET ativo = false
         WHERE codigo_produto = $1 AND pos = $2`,
       [codigoNum, pos]
     );
 
     await dbQuery(
-      `INSERT INTO public.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key, nome_foto, descricao_foto, ativo, visivel_producao, visivel_assistencia_tecnica)
+      `INSERT INTO produto.produtos_omie_imagens (codigo_produto, pos, url_imagem, path_key, nome_foto, descricao_foto, ativo, visivel_producao, visivel_assistencia_tecnica)
        VALUES ($1, $2, $3, $4, $5, $6, true, true, true)`,
       [codigoNum, pos, publicUrl, pathKey, nomeFoto, descricaoFoto]
     );
@@ -116,7 +116,7 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
       let codigoTexto = null;
       try {
-        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        const r = await dbQuery(`SELECT codigo FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
         codigoTexto = r.rows?.[0]?.codigo || null;
       } catch {}
       await registrarModificacao({
@@ -162,7 +162,7 @@ router.delete('/:codigo/fotos/:pos?', async (req, res) => {
 
     // Inativa a imagem (não remove storage nem linha para manter histórico)
     const r = await dbQuery(
-      `UPDATE public.produtos_omie_imagens
+      `UPDATE produto.produtos_omie_imagens
           SET ativo = false
         WHERE codigo_produto = $1 AND pos = $2
         RETURNING path_key`,
@@ -175,7 +175,7 @@ router.delete('/:codigo/fotos/:pos?', async (req, res) => {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
       let codigoTexto = null;
       try {
-        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        const r = await dbQuery(`SELECT codigo FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
         codigoTexto = r.rows?.[0]?.codigo || null;
       } catch {}
       await registrarModificacao({
@@ -208,7 +208,7 @@ router.get('/:codigo/fotos', async (req, res) => {
     const q = await dbQuery(
       `SELECT id, pos, url_imagem, path_key, nome_foto, descricao_foto, ativo,
               visivel_producao, visivel_assistencia_tecnica
-         FROM public.produtos_omie_imagens
+         FROM produto.produtos_omie_imagens
         WHERE codigo_produto = $1
           ${includeAll ? '' : 'AND ativo IS TRUE'}
         ORDER BY pos, id`,
@@ -234,14 +234,14 @@ router.patch('/:codigo/fotos/:pos/ativar', async (req, res) => {
       await client.query('BEGIN');
 
       await client.query(
-        `update public.produtos_omie_imagens
+        `update produto.produtos_omie_imagens
             set ativo = false
           where codigo_produto = $1 and pos = $2`,
         [codigoNum, pos]
       );
 
       const { rowCount } = await client.query(
-        `update public.produtos_omie_imagens
+        `update produto.produtos_omie_imagens
             set ativo = true
           where codigo_produto = $1 and pos = $2 ${Number.isFinite(id) ? 'and id = $3' : ''}`,
         Number.isFinite(id) ? [codigoNum, pos, id] : [codigoNum, pos]
@@ -274,7 +274,7 @@ router.patch('/:codigo/fotos/:pos/inativar', async (req, res) => {
     const id = Number(req.body?.id);
     const params = Number.isFinite(id) ? [codigoNum, pos, id] : [codigoNum, pos];
     const { rowCount } = await dbQuery(
-      `update public.produtos_omie_imagens
+      `update produto.produtos_omie_imagens
           set ativo = false
         where codigo_produto = $1 and pos = $2 ${Number.isFinite(id) ? 'and id = $3' : ''}`,
       params
@@ -313,7 +313,7 @@ router.patch('/:codigo/fotos/:id/visibilidade', async (req, res) => {
     if (vp !== null) { sets.push(`visivel_producao = $${params.length + 1}`); params.push(vp); }
     if (vat !== null) { sets.push(`visivel_assistencia_tecnica = $${params.length + 1}`); params.push(vat); }
 
-    const sql = `UPDATE public.produtos_omie_imagens
+    const sql = `UPDATE produto.produtos_omie_imagens
                    SET ${sets.join(', ')}
                  WHERE codigo_produto = $1 AND id = $2
                  RETURNING id`;

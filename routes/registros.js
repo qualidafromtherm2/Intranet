@@ -36,7 +36,7 @@ router.get('/', async (req, res) => {
 
         const sql = `
             SELECT *
-              FROM auditoria_produto.historico_modificacoes
+              FROM auditoria.historico_modificacoes
              ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
              ORDER BY data_hora DESC
              LIMIT ${lim}
@@ -56,7 +56,7 @@ router.post('/', async (req, res) => {
     }
     try {
         await dbQuery(`
-            INSERT INTO auditoria_produto.historico_modificacoes (codigo_omie, codigo_texto, codigo_produto, tipo_acao, usuario, detalhes, origem)
+            INSERT INTO auditoria.historico_modificacoes (codigo_omie, codigo_texto, codigo_produto, tipo_acao, usuario, detalhes, origem)
             VALUES ($1, $2, $3, $4, $5, $6, $7)
         `, [codigo_omie || codigo_texto || String(codigo_produto || ''), codigo_texto || null, codigo_produto || null, tipo_acao, usuario, detalhes || '', origem || '']);
         res.json({ success: true });

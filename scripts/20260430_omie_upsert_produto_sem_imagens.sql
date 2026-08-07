@@ -1,7 +1,7 @@
 -- Remove a parte de processamento de imagens da função omie_upsert_produto.
 -- A partir de 30/04/2026 as imagens dos produtos são gerenciadas exclusivamente
 -- pelo Supabase Storage (bucket "produtos", pasta "Fotos_produto/<codigo_produto>").
--- A tabela public.produtos_omie_imagens passa a refletir apenas o que está no Supabase
+-- A tabela produto.produtos_omie_imagens passa a refletir apenas o que está no Supabase
 -- e não deve mais ser sobrescrita por dados vindos da Omie.
 
 CREATE OR REPLACE FUNCTION public.omie_upsert_produto(item jsonb)

@@ -3,7 +3,7 @@
  * CRON RENDER — Atualização diária de rastreio (07:00 horário Brasília)
  *
  * Consulta VIPP e Correios para envios com rastreio_status
- * "Valida" ou "Processamento Vipp" e grava em envios.solicitacoes.
+ * "Valida" ou "Processamento Vipp" e grava em sac.envios_solicitacoes.
  *
  * Schedule Render: 0 10 * * *  (07:00 BRT = 10:00 UTC)
  */

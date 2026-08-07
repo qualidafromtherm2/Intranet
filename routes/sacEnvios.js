@@ -828,7 +828,7 @@ async function consultarMensagensNaoLidas(userId) {
     const { rows } = await pool.query(
       `SELECT cm.id, au.username AS remetente, LEFT(cm.message_text, 100) AS msg,
               cm.created_at
-       FROM public.chat_messages cm
+       FROM chatbot.chat_messages cm
        JOIN public.auth_user au ON au.id = cm.from_user_id
        WHERE cm.to_user_id = $1
          AND cm.is_read = false
@@ -1565,7 +1565,7 @@ async function consultarProdutoDB(termoBusca) {
               ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
               valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
               obs_internas, tipo_compra
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE UPPER(codigo) = UPPER($1)
        LIMIT 1`,
       [termo]
@@ -1579,7 +1579,7 @@ async function consultarProdutoDB(termoBusca) {
     // 2. Busca parcial por código ou descrição — pega até 50 para contar total
     const { rows: parcial } = await pool.query(
       `SELECT codigo_produto, codigo, descricao
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
        WHERE codigo ILIKE $1 OR descricao ILIKE $1
        ORDER BY CASE WHEN codigo ILIKE $1 THEN 0 ELSE 1 END, descricao ASC
        LIMIT 50`,
@@ -1596,7 +1596,7 @@ async function consultarProdutoDB(termoBusca) {
                 ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
                 valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
                 obs_internas, tipo_compra
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
          WHERE codigo_produto = $1
          LIMIT 1`,
         [parcial[0].codigo_produto]
@@ -1627,7 +1627,7 @@ async function montarDetalheProduto(produto) {
       `SELECT e.local_codigo, e.saldo, e.fisico, e.reservado, e.pendente,
               COALESCE(l.nome, e.local_nome, e.local_codigo) AS local_nome
        FROM logistica.estoque_atual e
-       LEFT JOIN public.omie_locais_estoque l ON l.local_codigo = e.local_codigo
+       LEFT JOIN omie.omie_locais_estoque l ON l.local_codigo = e.local_codigo
        WHERE e.omie_prod_id = $1 AND e.saldo > 0
        ORDER BY l.nome ASC`,
       [produto.codigo_produto]
@@ -1635,7 +1635,7 @@ async function montarDetalheProduto(produto) {
 
     // Buscar imagem
     const { rows: imgRows } = await pool.query(
-      `SELECT url_imagem FROM public.produtos_omie_imagens
+      `SELECT url_imagem FROM produto.produtos_omie_imagens
        WHERE codigo_produto = $1 AND ativo = true AND url_imagem IS NOT NULL AND url_imagem != ''
        ORDER BY pos ASC LIMIT 1`,
       [String(produto.codigo_produto)]
@@ -1915,7 +1915,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
   async function enviarListaTodosManuais() {
     const { rows: manuais } = await pool.query(`
       SELECT id, nome_arquivo, nome_arquivo_normalizado, paginas
-      FROM "Chatbot".manuais_instrucao
+      FROM chatbot.manuais_instrucao
       ORDER BY nome_arquivo ASC
     `);
     if (manuais.length === 0) {
@@ -1961,7 +1961,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     // Estratégia 1: busca direta pelo nome normalizado do manual (match exato)
     const queryNome = `
       SELECT id, nome_arquivo, caminho_manual, paginas
-      FROM "Chatbot".manuais_instrucao
+      FROM chatbot.manuais_instrucao
       WHERE regexp_replace(lower(nome_arquivo), '[^a-z0-9]', '', 'g') ILIKE $1
          OR regexp_replace(lower(nome_arquivo_normalizado), '[^a-z0-9]', '', 'g') ILIKE $1
       ORDER BY length(nome_arquivo) ASC LIMIT 8
@@ -1977,10 +1977,10 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       if (rows.length > 0) return rows;
     }
 
-    // Estratégia 3: busca via public.produtos_omie por código/descrição
+    // Estratégia 3: busca via produto.produtos_omie por código/descrição
     // → encontra o codigo_produto → encontra manuais que têm aquele produto no JSONB
     const { rows: produtos } = await pool.query(`
-      SELECT DISTINCT codigo_produto FROM public.produtos_omie
+      SELECT DISTINCT codigo_produto FROM produto.produtos_omie
       WHERE codigo ILIKE $1 OR descricao ILIKE $1
       LIMIT 30
     `, [`%${modeloDigitado}%`]);
@@ -1988,7 +1988,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
       const cpIds = produtos.map(p => String(p.codigo_produto));
       const { rows: byProduto } = await pool.query(`
         SELECT id, nome_arquivo, caminho_manual, paginas
-        FROM "Chatbot".manuais_instrucao
+        FROM chatbot.manuais_instrucao
         WHERE EXISTS (
           SELECT 1 FROM jsonb_array_elements_text(produtos) AS cp
           WHERE cp = ANY($1::text[])
@@ -2004,7 +2004,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
   /** Parseia o sumário de um manual a partir dos chunks de texto */
   async function parsearSumarioManual(manualId) {
     const { rows } = await pool.query(`
-      SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+      SELECT texto FROM chatbot.manuais_instrucao_chunks
       WHERE manual_id = $1 ORDER BY chunk_ordem
     `, [manualId]);
     const fullText = rows.map(r => r.texto).join('\n');
@@ -2046,7 +2046,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     let rows;
     if (paginaInicio < paginaFim) {
       const res = await pool.query(`
-        SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+        SELECT texto FROM chatbot.manuais_instrucao_chunks
         WHERE manual_id = $1 AND pagina_inicial >= $2 AND pagina_inicial <= $3
         ORDER BY chunk_ordem LIMIT 12
       `, [manualId, paginaInicio, paginaFim]);
@@ -2054,7 +2054,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     } else {
       // Mesma página: só os 2 primeiros chunks para não misturar seções
       const res = await pool.query(`
-        SELECT texto FROM "Chatbot".manuais_instrucao_chunks
+        SELECT texto FROM chatbot.manuais_instrucao_chunks
         WHERE manual_id = $1 AND pagina_inicial = $2
         ORDER BY chunk_ordem LIMIT 2
       `, [manualId, paginaInicio]);
@@ -2086,7 +2086,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
 
     const { rows } = await pool.query(`
       SELECT texto, pagina_inicial, chunk_ordem
-      FROM "Chatbot".manuais_instrucao_chunks
+      FROM chatbot.manuais_instrucao_chunks
       WHERE manual_id = $1
       ORDER BY chunk_ordem
       LIMIT 800
@@ -2190,7 +2190,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { sendPayload, outMsgId };
   }
 
-  /** Consulta pedido de venda por numero_pedido em "Vendas".pedidos_venda + itens */
+  /** Consulta pedido de venda por numero_pedido em vendas.pedidos_venda + itens */
   async function consultarVendaPorNumeroPedido(numeroPedido) {
     const numero = String(numeroPedido || '').trim();
     if (!numero) return { ok: false, error: 'Número do pedido não informado.' };
@@ -2205,7 +2205,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         codigo_cliente,
         numero_pedido_cliente,
         updated_at
-      FROM "Vendas".pedidos_venda
+      FROM vendas.pedidos_venda
       WHERE numero_pedido = $1
       ORDER BY updated_at DESC NULLS LAST
       LIMIT 1
@@ -2219,7 +2219,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     const { rows: itemRows } = await pool.query(`
       SELECT
         seq, codigo, descricao, unidade, quantidade, valor_unitario, valor_total
-      FROM "Vendas".pedidos_venda_itens
+      FROM vendas.pedidos_venda_itens
       WHERE codigo_pedido = $1
       ORDER BY seq ASC
     `, [pedido.codigo_pedido]);
@@ -2227,7 +2227,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     return { ok: true, pedido, itens: itemRows };
   }
 
-  /** Consulta NFe/NFSe já recebida por webhook no schema "Vendas" */
+  /** Consulta NFe/NFSe já recebida por webhook no schema vendas */
   async function consultarNfeVendaPorNumero(numeroNfe) {
     const numeroNorm = String(numeroNfe || '').replace(/\D/g, '').replace(/^0+/, '') || '0';
     const { rows } = await pool.query(`
@@ -2244,7 +2244,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         razao_emitente,
         data_emissao,
         updated_at
-      FROM "Vendas".notas_fiscais_omie
+      FROM vendas.notas_fiscais_omie
       WHERE regexp_replace(COALESCE(numero_nota, ''), '[^0-9]', '', 'g') <> ''
         AND LTRIM(regexp_replace(COALESCE(numero_nota, ''), '[^0-9]', '', 'g'), '0') = $1
       ORDER BY updated_at DESC NULLS LAST
@@ -2275,7 +2275,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         razao_emitente,
         data_emissao,
         updated_at
-      FROM "Vendas".notas_fiscais_omie
+      FROM vendas.notas_fiscais_omie
       WHERE COALESCE(numero_pedido, '') = ANY($1::text[])
         AND COALESCE(chave_nfe, '') <> ''
       ORDER BY updated_at DESC NULLS LAST
@@ -2605,7 +2605,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
                     ncm, ean, descricao_familia, estoque_minimo, quantidade_estoque,
                     valor_unitario, peso_bruto, peso_liq, altura, largura, profundidade,
                     obs_internas, tipo_compra
-             FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+             FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
             [prodSelecionado.codigo_produto]
           );
           if (full.length) {
@@ -2668,7 +2668,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         if (interactiveId?.startsWith('msel_')) {
           const manualId = parseInt(interactiveId.slice(5), 10);
           const { rows: manualRows } = await pool.query(
-            `SELECT id, nome_arquivo, caminho_manual, paginas FROM "Chatbot".manuais_instrucao WHERE id = $1`,
+            `SELECT id, nome_arquivo, caminho_manual, paginas FROM chatbot.manuais_instrucao WHERE id = $1`,
             [manualId]
           );
           const manual = manualRows[0];
@@ -3132,7 +3132,7 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
         if (interactiveId?.startsWith('msel_')) {
           const manualId = parseInt(interactiveId.slice(5), 10);
           const { rows: manualRows } = await pool.query(
-            `SELECT id, nome_arquivo, caminho_manual, paginas FROM "Chatbot".manuais_instrucao WHERE id = $1`,
+            `SELECT id, nome_arquivo, caminho_manual, paginas FROM chatbot.manuais_instrucao WHERE id = $1`,
             [manualId]
           );
           const manual = manualRows[0];
@@ -3244,7 +3244,7 @@ async function getStoredStatus(codigo) {
   try {
     const r = await pool.query(
       `SELECT identificacao, rastreio_status, rastreio_quando, finalizado_em
-         FROM envios.solicitacoes
+         FROM sac.envios_solicitacoes
         WHERE upper(regexp_replace(COALESCE(identificacao, ''), '\\s+', '', 'g')) = $1
            OR upper(identificacao) = $1
         LIMIT 1`,
@@ -3651,9 +3651,13 @@ async function ensureSchema() {
     try { await backfillEnviosSolicitacoesIdAt(); } catch (_) {}
     return;
   }
-  _ensureSchemaPromise = pool.query(`
+  _ensureSchemaPromise = (async () => {
+    const { organizarSchemasMigracao, ensureSchemasCompatViews } = require('../utils/organizarSchemasMigracao');
+    await organizarSchemasMigracao(pool);
+    await pool.query(`
+    CREATE SCHEMA IF NOT EXISTS sac;
     CREATE SCHEMA IF NOT EXISTS envios;
-    CREATE TABLE IF NOT EXISTS envios.solicitacoes (
+    CREATE TABLE IF NOT EXISTS sac.envios_solicitacoes (
       id SERIAL PRIMARY KEY,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       usuario TEXT NOT NULL,
@@ -3666,61 +3670,61 @@ async function ensureSchema() {
       finalizado_em TIMESTAMPTZ
     );
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS anexos TEXT[] NOT NULL DEFAULT '{}'::text[];
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS conferido BOOLEAN NOT NULL DEFAULT false;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS etiqueta_url TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS declaracao_url TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS identificacao TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS numero_sep TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS conteudo TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS chave_dce TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS rastreio_status TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS rastreio_quando TIMESTAMPTZ;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS id_vipp TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS finalizado_em TIMESTAMPTZ;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS metodo_envio TEXT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS id_at BIGINT;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2);
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS sla_limite_em TIMESTAMPTZ;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS enviado_em TIMESTAMPTZ;
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ADD COLUMN IF NOT EXISTS enviado_por TEXT;
 
-    UPDATE envios.solicitacoes
+    UPDATE sac.envios_solicitacoes
        SET sla_limite_em = created_at + CASE EXTRACT(ISODOW FROM created_at)
          WHEN 5 THEN INTERVAL '3 days'
          WHEN 6 THEN INTERVAL '2 days'
@@ -3728,37 +3732,37 @@ async function ensureSchema() {
        END
      WHERE sla_limite_em IS NULL;
 
-    UPDATE envios.solicitacoes
+    UPDATE sac.envios_solicitacoes
        SET enviado_em = COALESCE(rastreio_quando, finalizado_em)
      WHERE enviado_em IS NULL
        AND COALESCE(NULLIF(TRIM(rastreio_status), ''), 'Pendente') IN ('Enviado', 'Entregue', 'Finalizado');
 
     CREATE INDEX IF NOT EXISTS idx_envios_solicitacoes_id_at
-      ON envios.solicitacoes (id_at)
+      ON sac.envios_solicitacoes (id_at)
       WHERE id_at IS NOT NULL;
 
     DO $$
     BEGIN
       IF EXISTS (
         SELECT 1 FROM information_schema.columns
-         WHERE table_schema = 'envios'
-           AND table_name = 'solicitacoes'
+         WHERE table_schema = 'sac'
+           AND table_name = 'envios_solicitacoes'
            AND column_name = 'status'
       ) THEN
         EXECUTE $migrate$
-          UPDATE envios.solicitacoes
+          UPDATE sac.envios_solicitacoes
              SET rastreio_status = COALESCE(NULLIF(TRIM(rastreio_status), ''), status, 'Pendente')
            WHERE rastreio_status IS NULL OR TRIM(rastreio_status) = ''
         $migrate$;
-        EXECUTE 'ALTER TABLE envios.solicitacoes DROP COLUMN status';
+        EXECUTE 'ALTER TABLE sac.envios_solicitacoes DROP COLUMN status';
       END IF;
     END $$;
 
-    UPDATE envios.solicitacoes
+    UPDATE sac.envios_solicitacoes
        SET rastreio_status = 'Pendente'
      WHERE rastreio_status IS NULL OR TRIM(rastreio_status) = '';
 
-    ALTER TABLE envios.solicitacoes
+    ALTER TABLE sac.envios_solicitacoes
       ALTER COLUMN rastreio_status SET DEFAULT 'Pendente';
 
     CREATE SCHEMA IF NOT EXISTS sac;
@@ -4070,7 +4074,7 @@ async function ensureSchema() {
     );
     CREATE INDEX IF NOT EXISTS at_relatorio_gerencial_mes_idx
       ON sac.at_relatorio_gerencial (mes);
-  `).then(async () => {
+    `);
     try {
       const { ensureCustoPecasTable, backfillCustoPecas } = require('../utils/enviosCustoPecas');
       await ensureCustoPecasTable(pool);
@@ -4081,7 +4085,8 @@ async function ensureSchema() {
     try {
       await backfillEnviosSolicitacoesIdAt();
     } catch (_) { /* backfill não deve impedir o schema */ }
-  }).catch((err) => {
+    await ensureSchemasCompatViews(pool);
+  })().catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
   });
@@ -4131,7 +4136,7 @@ async function backfillEnviosSolicitacoesIdAt() {
   _enviosIdAtBackfillPromise = (async () => {
     const { rows: pending } = await pool.query(`
       SELECT id, observacao
-      FROM envios.solicitacoes
+      FROM sac.envios_solicitacoes
       WHERE id_at IS NULL
         AND observacao IS NOT NULL
         AND TRIM(observacao) <> ''
@@ -4176,7 +4181,7 @@ async function backfillEnviosSolicitacoesIdAt() {
         params.push(row.envioId, row.idAt);
       }
       const r = await pool.query(
-        `UPDATE envios.solicitacoes e
+        `UPDATE sac.envios_solicitacoes e
             SET id_at = v.id_at
            FROM (VALUES ${vals.join(',')}) AS v(id, id_at)
           WHERE e.id = v.id
@@ -4185,7 +4190,7 @@ async function backfillEnviosSolicitacoesIdAt() {
       );
       updated += r.rowCount || 0;
     }
-    console.log(`[SAC] backfill envios.solicitacoes.id_at: ${updated}/${pending.length} preenchidos`);
+    console.log(`[SAC] backfill sac.envios_solicitacoes.id_at: ${updated}/${pending.length} preenchidos`);
     return { updated, pending: pending.length };
   })().catch((err) => {
     _enviosIdAtBackfillPromise = null;
@@ -4591,7 +4596,7 @@ router.get('/at/atendimentos', async (_req, res) => {
       // 2) Vínculo OS → envio via coluna id_at
       pool.query(`
         SELECT id_at, rastreio_status
-        FROM envios.solicitacoes
+        FROM sac.envios_solicitacoes
         WHERE id_at IS NOT NULL
         ORDER BY id DESC
       `)
@@ -4821,7 +4826,7 @@ router.post('/solicitacoes/vipp', async (req, res) => {
 
   try {
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes
+      `INSERT INTO sac.envios_solicitacoes
          (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, id_vipp, conteudo, metodo_envio, id_at, sla_limite_em)
        VALUES ($1, $2, $3, 'Pendente', '{}', false, $4, $5, $6, $7,
          NOW() + CASE EXTRACT(ISODOW FROM NOW()) WHEN 5 THEN INTERVAL '3 days' WHEN 6 THEN INTERVAL '2 days' ELSE INTERVAL '1 day' END)
@@ -4940,7 +4945,7 @@ router.post('/solicitacoes', upload.array('anexos', 2), async (req, res) => {
     const declaracaoUrl = urls[1] || null;
 
     const result = await pool.query(
-      `INSERT INTO envios.solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce, id_at, sla_limite_em)
+      `INSERT INTO sac.envios_solicitacoes (usuario, observacao, numero_sep, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, conteudo, chave_dce, id_at, sla_limite_em)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
          NOW() + CASE EXTRACT(ISODOW FROM NOW()) WHEN 5 THEN INTERVAL '3 days' WHEN 6 THEN INTERVAL '2 days' ELSE INTERVAL '1 day' END)
        RETURNING id, created_at, rastreio_status, anexos, conferido, etiqueta_url, declaracao_url, identificacao, numero_sep, conteudo, chave_dce, id_at, sla_limite_em`,
@@ -5009,11 +5014,11 @@ router.get('/solicitacoes', async (req, res) => {
                   WHEN BOOL_OR(i.status = 'Devolvido') THEN 'Devolvido'
                   ELSE 'Concluído'
                 END
-                  FROM solicitacao_produto.itens_solicitados i
-                 WHERE i.n_solic = envios.solicitacoes.numero_sep
+                  FROM logistica.itens_solicitados i
+                 WHERE i.n_solic = sac.envios_solicitacoes.numero_sep
                    AND COALESCE(i.status, '') NOT IN ('Excluído', 'Excluido')
               ) AS sep_status
-         FROM envios.solicitacoes
+         FROM sac.envios_solicitacoes
         ${whereClause}
         ORDER BY id DESC
         LIMIT 200`,
@@ -5030,7 +5035,7 @@ router.get('/solicitacoes', async (req, res) => {
                    sla_limite_em,
                    COALESCE(enviado_em, rastreio_quando, finalizado_em) AS data_envio,
                    COALESCE(NULLIF(TRIM(rastreio_status), ''), 'Pendente') AS status
-              FROM envios.solicitacoes
+              FROM sac.envios_solicitacoes
              WHERE COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
           ), ativo AS (
             SELECT * FROM base WHERE status NOT IN ('Enviado', 'Entregue', 'Finalizado')
@@ -5068,7 +5073,7 @@ router.get('/solicitacoes', async (req, res) => {
           SELECT COALESCE(NULLIF(TRIM(enviado_por), ''), 'Não identificado') AS executor,
                  COUNT(*)::int AS enviados,
                  COUNT(*) FILTER (WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) <= sla_limite_em)::int AS dentro_sla
-            FROM envios.solicitacoes
+            FROM sac.envios_solicitacoes
            WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) >= NOW() - INTERVAL '7 days'
              AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
            GROUP BY 1
@@ -5352,7 +5357,7 @@ router.patch('/solicitacoes/:id/status', async (req, res) => {
 
   try {
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET rastreio_status = $1,
               rastreio_quando = CASE WHEN $1 = 'Enviado' THEN COALESCE(rastreio_quando, NOW()) ELSE rastreio_quando END,
               enviado_em = CASE WHEN $1 = 'Enviado' THEN COALESCE(enviado_em, NOW()) ELSE enviado_em END,
@@ -5392,7 +5397,7 @@ router.patch('/solicitacoes/:id/identificacao', async (req, res) => {
 
   try {
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET identificacao = $1
         WHERE id = $2
       RETURNING id, identificacao`,
@@ -5421,7 +5426,7 @@ router.patch('/solicitacoes/:id/observacao', async (req, res) => {
 
   try {
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET observacao = $1
         WHERE id = $2
       RETURNING id, observacao`,
@@ -5461,7 +5466,7 @@ router.patch('/solicitacoes/:id/status-livre', async (req, res) => {
 
   try {
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET rastreio_status = $1,
               rastreio_quando = CASE WHEN $1 = 'Enviado' THEN COALESCE(rastreio_quando, NOW()) ELSE rastreio_quando END,
               enviado_em = CASE WHEN $1 = 'Enviado' THEN COALESCE(enviado_em, NOW()) ELSE enviado_em END,
@@ -5500,7 +5505,7 @@ router.patch('/solicitacoes/:id/quantidade', async (req, res) => {
     JSON.parse(conteudoStr); // Valida o JSON
 
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET conteudo = $1
         WHERE id = $2
       RETURNING id, conteudo`,
@@ -5527,7 +5532,7 @@ router.delete('/solicitacoes/:id', async (req, res) => {
 
   try {
     const r = await pool.query(
-      `UPDATE envios.solicitacoes
+      `UPDATE sac.envios_solicitacoes
           SET rastreio_status = 'Excluído'
         WHERE id = $1
       RETURNING id, rastreio_status`,
@@ -5689,7 +5694,7 @@ function _candidatosPedidoVendas(pedido) {
   return [...out];
 }
 
-/** Busca Cliente/NF/Data em "Vendas" a partir do numero_pedido (coluna Pedido da busca). */
+/** Busca Cliente/NF/Data em vendas a partir do numero_pedido (coluna Pedido da busca). */
 async function buscarDadosVendaPorPedidos(pedidos) {
   const originais = [...new Set(
     (pedidos || []).map((p) => String(p || '').trim()).filter(Boolean)
@@ -5712,7 +5717,7 @@ async function buscarDadosVendaPorPedidos(pedidos) {
       SELECT DISTINCT ON (TRIM(p.numero_pedido))
         TRIM(p.numero_pedido) AS numero_pedido,
         p.codigo_pedido
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       WHERE TRIM(COALESCE(p.numero_pedido, '')) = ANY($1::text[])
       ORDER BY TRIM(p.numero_pedido), p.updated_at DESC NULLS LAST
     )
@@ -5723,7 +5728,7 @@ async function buscarDadosVendaPorPedidos(pedidos) {
       nf.chave_nfe,
       nf.data_emissao
     FROM pv
-    JOIN "Vendas".notas_fiscais_omie nf
+    JOIN vendas.notas_fiscais_omie nf
       ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(pv.codigo_pedido::text, ''))
     WHERE COALESCE(nf.chave_nfe, '') <> ''
     ORDER BY pv.numero_pedido, nf.updated_at DESC NULLS LAST
@@ -5792,8 +5797,8 @@ async function enriquecerAtSerieCacheComVendasLote() {
         nf.numero_nota,
         nf.chave_nfe,
         nf.data_emissao
-      FROM "Vendas".pedidos_venda p
-      JOIN "Vendas".notas_fiscais_omie nf
+      FROM vendas.pedidos_venda p
+      JOIN vendas.notas_fiscais_omie nf
         ON TRIM(COALESCE(nf.numero_pedido, '')) = TRIM(COALESCE(p.codigo_pedido::text, ''))
       WHERE COALESCE(nf.chave_nfe, '') <> ''
       ORDER BY TRIM(p.numero_pedido), nf.updated_at DESC NULLS LAST
@@ -5870,7 +5875,7 @@ function formatDateBrSerie(value) {
 }
 
 /**
- * Máquinas antigas (até ~2022) ficam em public.historico_pre2024, fora do cache/planilhas.
+ * Máquinas antigas (até ~2022) ficam em vendas.historico_pre2024, fora do cache/planilhas.
  * Busca por pedido (série), OP, NF-e e ordem de coleta — mesmos campos usados no agente técnico.
  */
 async function buscarSerieHistoricoPre2024(termoNorm, limit = 10) {
@@ -5880,7 +5885,7 @@ async function buscarSerieHistoricoPre2024(termoNorm, limit = 10) {
     SELECT pedido, numero_op_informacoes, nfe, numero_ordem_coleta, modelo,
            nome_fantasia_revende, razao_social_faturamento,
            data_entrega, data_aprovacao_pedido, data_entrada_pedido, ano
-      FROM public.historico_pre2024
+      FROM vendas.historico_pre2024
      WHERE UPPER(TRIM(COALESCE(pedido, ''))) LIKE $1
         OR UPPER(TRIM(COALESCE(numero_op_informacoes, ''))) LIKE $1
         OR UPPER(TRIM(COALESCE(nfe, ''))) LIKE $1
@@ -6790,7 +6795,7 @@ router.get('/at/lista-pecas-iapp', async (req, res) => {
              FROM engenharia.iapp_fichas_operacao_materiais m
              LEFT JOIN LATERAL (
                SELECT p.codigo, p.descricao
-                 FROM public.produtos_omie p
+                 FROM produto.produtos_omie p
                 WHERE p.codigo_produto::text = m.produto_id::text
                    OR UPPER(BTRIM(p.codigo)) = UPPER(BTRIM(COALESCE(
                         m.raw_payload #>> '{produto,identificacao}',
@@ -8422,14 +8427,14 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
         LEFT JOIN LATERAL (
           SELECT po0.codigo_familia::text AS codigo_familia
-          FROM public.produtos_omie po0
+          FROM produto.produtos_omie po0
           WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
               = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
           LIMIT 1
         ) po ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
             AND h0.data_integracao IS NOT NULL
             AND TRIM(h0.data_integracao) <> ''
@@ -8438,7 +8443,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         ) h ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
             AND (
               TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
@@ -8520,14 +8525,14 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
         LEFT JOIN LATERAL (
           SELECT po0.codigo_familia::text AS codigo_familia
-          FROM public.produtos_omie po0
+          FROM produto.produtos_omie po0
           WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
               = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
           LIMIT 1
         ) po ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
             AND h0.data_integracao IS NOT NULL
             AND TRIM(h0.data_integracao) <> ''
@@ -8536,7 +8541,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         ) h ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
             AND (
               TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
@@ -8638,7 +8643,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           SELECT id_at,
                  SUM(COALESCE(valor_envio, 0))::float AS total_envio,
                  COUNT(*)::int AS qtd_envios
-            FROM envios.solicitacoes
+            FROM sac.envios_solicitacoes
            WHERE id_at IS NOT NULL
            GROUP BY id_at
         ) env ON env.id_at = b.id
@@ -8646,7 +8651,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           SELECT id_at,
                  SUM(COALESCE(valor_total, 0))::float AS total_pecas,
                  COUNT(*)::int AS qtd_itens
-            FROM envios.custo_pecas
+            FROM sac.envios_custo_pecas
            WHERE id_at IS NOT NULL
            GROUP BY id_at
         ) cp ON cp.id_at = b.id
@@ -8662,7 +8667,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           SUM(COALESCE(cp.quantidade, 0))::float AS quantidade,
           SUM(COALESCE(cp.valor_total, 0))::float AS valor_total,
           COUNT(DISTINCT cp.id_at)::int AS qtd_os
-        FROM envios.custo_pecas cp
+        FROM sac.envios_custo_pecas cp
         INNER JOIN sac.at a ON a.id = cp.id_at
         WHERE a.data >= $1::date
           AND a.data < $2::date${tipoSql}
@@ -8733,7 +8738,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         SELECT
           ${sqlFamiliaModeloAt('h.modelo')} AS modelo,
           COUNT(*)::int AS quantidade
-        FROM public.historico_pedido_originalis h
+        FROM vendas.historico_pedido_originalis h
         WHERE TRIM(COALESCE(h.data_integracao, '')) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
           AND LEFT(TRIM(h.data_integracao), 10)::date >= $1::date
           AND LEFT(TRIM(h.data_integracao), 10)::date < $2::date
@@ -8744,13 +8749,13 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
         WITH ${VENDAS_NF_POR_PEDIDO_CTE},
         pedidos_cfop_ignorado AS (
           SELECT DISTINCT codigo_pedido
-          FROM "Vendas".pedidos_venda_itens
+          FROM vendas.pedidos_venda_itens
           WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
         ),
         base_vendas AS (
           SELECT DISTINCT ON (p.codigo_pedido)
             p.codigo_pedido
-          FROM "Vendas".pedidos_venda p
+          FROM vendas.pedidos_venda p
           LEFT JOIN nf_por_pedido nf
             ON ${vendasNfJoinPedidoSql('nf', 'p')}
           WHERE p.codigo_pedido NOT IN (SELECT codigo_pedido FROM pedidos_cfop_ignorado)
@@ -8764,7 +8769,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
           ${sqlFamiliaModeloAt('i.codigo')} AS modelo,
           COALESCE(SUM(COALESCE(i.quantidade, 0)), 0)::float AS quantidade
         FROM base_vendas b
-        JOIN "Vendas".pedidos_venda_itens i ON i.codigo_pedido = b.codigo_pedido
+        JOIN vendas.pedidos_venda_itens i ON i.codigo_pedido = b.codigo_pedido
         WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
         GROUP BY 1
         ORDER BY quantidade DESC, modelo
@@ -8963,7 +8968,7 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
             LEFT(TRIM(h.data_integracao), 7) AS mes,
             ${sqlFamiliaModeloAt('h.modelo')} AS modelo,
             COUNT(*)::int AS quantidade
-          FROM public.historico_pedido_originalis h
+          FROM vendas.historico_pedido_originalis h
           WHERE TRIM(COALESCE(h.data_integracao, '')) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
             AND LEFT(TRIM(h.data_integracao), 10) >= $1
             AND LEFT(TRIM(h.data_integracao), 10) < $2
@@ -9037,9 +9042,9 @@ router.get('/at/relatorio-gerencial', async (req, res) => {
                 ELSE to_char((a.data AT TIME ZONE 'America/Sao_Paulo'), 'YYYY-MM')
               END AS mes
             FROM engenharia.alteracoes_produto a
-            LEFT JOIN public.produtos_omie p
+            LEFT JOIN produto.produtos_omie p
               ON p.codigo_produto::text = a.codigo_omie
-            LEFT JOIN public.produtos_omie p2
+            LEFT JOIN produto.produtos_omie p2
               ON p2.codigo = a.codigo_omie
             WHERE a.codigo_omie IS NOT NULL
               AND TRIM(a.codigo_omie) <> ''
@@ -9266,14 +9271,14 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
         INNER JOIN sac.at_busca_selecionada s ON s.id_at = a.id
         LEFT JOIN LATERAL (
           SELECT po0.codigo_familia::text AS codigo_familia
-          FROM public.produtos_omie po0
+          FROM produto.produtos_omie po0
           WHERE UPPER(REPLACE(TRIM(po0.codigo), '-', ''))
               = UPPER(REPLACE(TRIM(COALESCE(s.modelo, a.modelo, '')), '-', ''))
           LIMIT 1
         ) po ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(h0.pedido) = TRIM(regexp_replace(TRIM(COALESCE(s.pedido, '')), '^.* /\\s*', ''))
             AND h0.data_integracao IS NOT NULL
             AND TRIM(h0.data_integracao) <> ''
@@ -9282,7 +9287,7 @@ router.get('/at/relatorio-gerencial/lote-detalhe', async (req, res) => {
         ) h ON TRUE
         LEFT JOIN LATERAL (
           SELECT h0.data_integracao
-          FROM public.historico_pedido_originalis h0
+          FROM vendas.historico_pedido_originalis h0
           WHERE TRIM(COALESCE(s.ordem_producao, '')) <> ''
             AND (
               TRIM(h0.ordem_de_producao) = TRIM(s.ordem_producao)
@@ -9500,7 +9505,7 @@ router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
       WITH ${VENDAS_NF_POR_PEDIDO_CTE},
       pedidos_cfop_ignorado AS (
         SELECT DISTINCT codigo_pedido
-        FROM "Vendas".pedidos_venda_itens
+        FROM vendas.pedidos_venda_itens
         WHERE REGEXP_REPLACE(TRIM(COALESCE(cfop, '')), '\\D', '', 'g') = '6905'
       )
       SELECT
@@ -9515,7 +9520,7 @@ router.get('/vendas/graficos/valor-estado-mes', async (_req, res) => {
           WHEN '80' THEN 'Concluído'
           ELSE 'Etapa ' || COALESCE(NULLIF(TRIM(p.etapa::text), ''), 'N/D')
         END                                                                 AS etapa_descricao
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       JOIN nf_por_pedido nf
         ON ${vendasNfJoinPedidoSql('nf', 'p')}
       LEFT JOIN omie.fornecedores f
@@ -9564,13 +9569,13 @@ router.get('/vendas/graficos/mapa-brasil', async (req, res) => {
           END AS etapa_descricao,
           COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
           p.updated_at AS created_at
-        FROM "Vendas".pedidos_venda p
+        FROM vendas.pedidos_venda p
         LEFT JOIN omie.fornecedores f
           ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
         WHERE p.updated_at IS NOT NULL
           AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
             SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
-            FROM "Vendas".pedidos_venda_itens i
+            FROM vendas.pedidos_venda_itens i
             WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
           )
       ),
@@ -9665,13 +9670,13 @@ router.get('/vendas/graficos/mapa-brasil', async (req, res) => {
             END AS etapa_descricao,
             COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total,
             p.updated_at AS created_at
-          FROM "Vendas".pedidos_venda p
+          FROM vendas.pedidos_venda p
           LEFT JOIN omie.fornecedores f
             ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
           WHERE p.updated_at IS NOT NULL
             AND TRIM(COALESCE(p.codigo_pedido::text, '')) NOT IN (
               SELECT DISTINCT TRIM(COALESCE(i.codigo_pedido::text, ''))
-              FROM "Vendas".pedidos_venda_itens i
+              FROM vendas.pedidos_venda_itens i
               WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = '6905'
             )
         ),
@@ -9747,8 +9752,8 @@ router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
           i.codigo_pedido,
           COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
           i.quantidade
-        FROM "Vendas".pedidos_venda_itens i
-        LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+        FROM vendas.pedidos_venda_itens i
+        LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
         WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
       )
       SELECT
@@ -9756,7 +9761,7 @@ router.get('/vendas/graficos/quantidade-familia-mes', async (_req, res) => {
         TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
         SUM(iv.quantidade)::numeric(14,2)                            AS quantidade_total
       FROM itens_validos iv
-      JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
+      JOIN vendas.pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
       JOIN nf_por_pedido nf
         ON ${vendasNfJoinPedidoSql('nf', 'p')}
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
@@ -9786,11 +9791,11 @@ router.get('/vendas/graficos/quantidade-familia-mes/detalhe', async (req, res) =
         i.descricao AS descricao_item,
         i.cfop,
         i.quantidade
-      FROM "Vendas".pedidos_venda_itens i
-      JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
+      FROM vendas.pedidos_venda_itens i
+      JOIN vendas.pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
       JOIN nf_por_pedido nf
         ON ${vendasNfJoinPedidoSql('nf', 'p')}
-      LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $1
         AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2
         AND TRIM(COALESCE(p.etapa::text, '')) = '70'
@@ -9817,8 +9822,8 @@ router.get('/vendas/graficos/valor-familia-mes', async (_req, res) => {
           i.codigo_pedido,
           COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
           i.valor_total AS valor_total_item
-        FROM "Vendas".pedidos_venda_itens i
-        LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+        FROM vendas.pedidos_venda_itens i
+        LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
         WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> '6905'
       )
       SELECT
@@ -9826,7 +9831,7 @@ router.get('/vendas/graficos/valor-familia-mes', async (_req, res) => {
         TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') AS mes,
         SUM(iv.valor_total_item)::numeric(14,2)                      AS valor_total
       FROM itens_validos iv
-      JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
+      JOIN vendas.pedidos_venda p ON p.codigo_pedido = iv.codigo_pedido
       JOIN nf_por_pedido nf
         ON ${vendasNfJoinPedidoSql('nf', 'p')}
       WHERE TRIM(COALESCE(p.etapa::text, '')) = '70'
@@ -9856,11 +9861,11 @@ router.get('/vendas/graficos/valor-familia-mes/detalhe', async (req, res) => {
         i.descricao   AS descricao_item,
         i.cfop,
         i.valor_total AS valor_total_item
-      FROM "Vendas".pedidos_venda_itens i
-      JOIN "Vendas".pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
+      FROM vendas.pedidos_venda_itens i
+      JOIN vendas.pedidos_venda p ON p.codigo_pedido = i.codigo_pedido
       JOIN nf_por_pedido nf
         ON ${vendasNfJoinPedidoSql('nf', 'p')}
-      LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $1
         AND TO_CHAR(DATE_TRUNC('month', nf.data_emissao_dt), 'YYYY-MM') = $2
         AND TRIM(COALESCE(p.etapa::text, '')) = '70'
@@ -9900,7 +9905,7 @@ router.get('/vendas/controle/pedidos', async (_req, res) => {
         p.data_previsao,
         COALESCE(p.numero_pedido_cliente, '') AS origem_pedido,
         COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total_pedido
-      FROM "Vendas".pedidos_venda p
+      FROM vendas.pedidos_venda p
       LEFT JOIN omie.fornecedores f
         ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
       ORDER BY p.numero_pedido DESC NULLS LAST
@@ -9924,8 +9929,8 @@ router.get('/vendas/controle/pedido-itens/:codigoPedido', async (req, res) => {
         COALESCE(po.descricao, i.descricao, '-') AS descricao,
         i.quantidade,
         COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-      FROM "Vendas".pedidos_venda_itens i
-      LEFT JOIN public.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      FROM vendas.pedidos_venda_itens i
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
       WHERE i.codigo_pedido = $1
       ORDER BY i.descricao NULLS LAST
     `, [codigoPedido]);
@@ -10539,7 +10544,7 @@ router.get('/at/pecas-enviadas/:id', async (req, res) => {
     const { rows } = await pool.query(
       `SELECT id, identificacao, observacao, conteudo, etiqueta_url, declaracao_url, anexos,
               rastreio_status, created_at, usuario, metodo_envio, id_vipp, id_at, valor_envio
-       FROM envios.solicitacoes
+       FROM sac.envios_solicitacoes
        WHERE id_at = $1
        ORDER BY id DESC`,
       [id]
@@ -11288,14 +11293,14 @@ async function _atEnsureSepSchema(db) {
   if (_atSepSchemaOk) return;
   await client.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS comentario TEXT`);
   await client.query(`ALTER TABLE logistica.carrinho ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
-  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`);
-  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
-  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
-  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
-  await client.query(`ALTER TABLE solicitacao_produto.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
-  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`);
-  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
-  await client.query(`ALTER TABLE solicitacao_produto.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
+  await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS criado_em TIMESTAMPTZ DEFAULT now()`);
+  await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS observacao TEXT`);
+  await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS motivo TEXT`);
+  await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS cod_local TEXT`);
+  await client.query(`ALTER TABLE logistica.itens_solicitados ADD COLUMN IF NOT EXISTS nome_local TEXT`);
+  await client.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS justificativa_nao_separacao TEXT`);
+  await client.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS urgente BOOLEAN DEFAULT FALSE`);
+  await client.query(`ALTER TABLE logistica.solicitacoes_separacao ADD COLUMN IF NOT EXISTS n_solic TEXT`);
   _atSepSchemaOk = true;
 }
 
@@ -12168,7 +12173,7 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
               const uid = Number(inbound.buttonReplyId.replace('sgf_marcar_lidas_', ''));
               if (uid > 0) {
                 await pool.query(
-                  'UPDATE public.chat_messages SET is_read = true, updated_at = NOW() WHERE to_user_id = $1 AND is_read = false',
+                  'UPDATE chatbot.chat_messages SET is_read = true, updated_at = NOW() WHERE to_user_id = $1 AND is_read = false',
                   [uid]
                 );
                 await enviarMensagemWhatsappTexto({
@@ -12502,10 +12507,10 @@ router.get('/at/tecnico/separacao/produtos', async (req, res) => {
           po.descricao,
           COALESCE(po.unidade, 'UN') AS unidade,
           img.url_imagem
-         FROM public.produtos_omie po
+         FROM produto.produtos_omie po
          LEFT JOIN LATERAL (
            SELECT i.url_imagem
-             FROM public.produtos_omie_imagens i
+             FROM produto.produtos_omie_imagens i
             WHERE i.codigo_produto = po.codigo_produto
               AND i.ativo = true
               AND i.url_imagem IS NOT NULL
@@ -12544,7 +12549,7 @@ router.post('/at/tecnico/separacao', express.json(), async (req, res) => {
   try {
     await _atEnsureSepSchema();
     const omieRes = await pool.query(
-      `SELECT codigo_produto FROM public.produtos_omie
+      `SELECT codigo_produto FROM produto.produtos_omie
         WHERE TRIM(codigo_produto::text) = TRIM($1)
            OR TRIM(codigo) = TRIM($1)
         ORDER BY CASE WHEN TRIM(codigo_produto::text) = TRIM($1) THEN 0 ELSE 1 END
@@ -12559,7 +12564,7 @@ router.post('/at/tecnico/separacao', express.json(), async (req, res) => {
           AND c.codigo_produto = $2
           AND COALESCE(c.unidade, 'UN') = COALESCE($3, 'UN')
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )
         ORDER BY c.criado_em ASC
         LIMIT 1`,
@@ -12603,10 +12608,10 @@ router.get('/at/tecnico/separacao/carrinho', async (req, res) => {
               c.comentario, COALESCE(c.urgente, false) AS urgente, c.criado_em,
               img.url_imagem
          FROM logistica.carrinho c
-         LEFT JOIN public.produtos_omie po ON po.codigo = c.codigo_produto
+         LEFT JOIN produto.produtos_omie po ON po.codigo = c.codigo_produto
          LEFT JOIN LATERAL (
            SELECT i.url_imagem
-             FROM public.produtos_omie_imagens i
+             FROM produto.produtos_omie_imagens i
             WHERE i.codigo_produto = po.codigo_produto
               AND i.ativo = true
               AND i.url_imagem IS NOT NULL
@@ -12616,13 +12621,13 @@ router.get('/at/tecnico/separacao/carrinho', async (req, res) => {
          ) img ON true
         WHERE c.id_user = $1
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )
         ORDER BY c.criado_em ASC`,
       [id_user]
     );
     const { rows: localRows } = await pool.query(
-      `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+      `SELECT nome FROM omie.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
       [AT_SEP_LOCAL_ESTOQUE]
     );
     res.json({
@@ -12653,7 +12658,7 @@ router.patch('/at/tecnico/separacao/carrinho/:id/quantidade', express.json(), as
       `UPDATE logistica.carrinho SET quantidade = $1
         WHERE id = $2 AND id_user = $3
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
           )`,
       [qty, itemId, id_user]
     );
@@ -12676,7 +12681,7 @@ router.patch('/at/tecnico/separacao/carrinho/:id/comentario', express.json(), as
       `UPDATE logistica.carrinho SET comentario = $1
         WHERE id = $2 AND id_user = $3
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
           )`,
       [comentario, itemId, id_user]
     );
@@ -12713,7 +12718,7 @@ router.delete('/at/tecnico/separacao/carrinho', async (req, res) => {
       `DELETE FROM logistica.carrinho c
         WHERE c.id_user = $1
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = c.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = c.id
           )`,
       [id_user]
     );
@@ -12738,7 +12743,7 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
     await client.query('BEGIN');
 
     const { rows: localRows } = await client.query(
-      `SELECT nome FROM public.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
+      `SELECT nome FROM omie.omie_locais_estoque WHERE local_codigo = $1 LIMIT 1`,
       [AT_SEP_LOCAL_ESTOQUE]
     );
     const codLocalGravar = AT_SEP_LOCAL_ESTOQUE;
@@ -12750,7 +12755,7 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
          FROM logistica.carrinho
         WHERE id_user = $1
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
           )
         ORDER BY criado_em ASC`,
       [id_user]
@@ -12765,22 +12770,22 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
           SET data_prevista = $1, horario = $2, retirada_por = $3, nome_user = $4
         WHERE id_user = $5
           AND NOT EXISTS (
-            SELECT 1 FROM solicitacao_produto.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
+            SELECT 1 FROM logistica.itens_solicitados i WHERE i.id_carr = logistica.carrinho.id
           )`,
       [data_prevista || null, horario || null, solicitadoPara, nome_user, id_user]
     );
 
-    // Próximo SEP: max(itens_solicitados, envios.solicitacoes) — evita reuso após limpeza parcial
+    // Próximo SEP: max(itens_solicitados, sac.envios_solicitacoes) — evita reuso após limpeza parcial
     const { rows: [seq] } = await client.query(`
       SELECT GREATEST(
         COALESCE((
           SELECT MAX(SUBSTRING(n_solic FROM 5)::integer)
-            FROM solicitacao_produto.itens_solicitados
+            FROM logistica.itens_solicitados
            WHERE n_solic ~ '^SEP-[0-9]+$'
         ), 999),
         COALESCE((
           SELECT MAX(SUBSTRING(numero_sep FROM 5)::integer)
-            FROM envios.solicitacoes
+            FROM sac.envios_solicitacoes
            WHERE numero_sep ~ '^SEP-[0-9]+$'
         ), 999)
       ) + 1 AS next_num
@@ -12789,7 +12794,7 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
 
     for (const item of itens) {
       await client.query(
-        `INSERT INTO solicitacao_produto.solicitacoes_separacao
+        `INSERT INTO logistica.solicitacoes_separacao
            (id_user, nome_user, solicitado_para, codigo_produto, descricao, unidade, quantidade,
             data_prevista, horario, observacao, n_solic, urgente)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
@@ -12798,7 +12803,7 @@ router.post('/at/tecnico/separacao/enviar', express.json(), async (req, res) => 
          nSolic, item.urgente || false]
       );
       await client.query(
-        `INSERT INTO solicitacao_produto.itens_solicitados
+        `INSERT INTO logistica.itens_solicitados
            (id_carr, n_solic, status, observacao, motivo, cod_local, nome_local, urgente)
          VALUES ($1, $2, 'pendente', $3, 'AT', $4, $5, $6)`,
         [item.id, nSolic, observacao || null, codLocalGravar, nomeLocalGravar, item.urgente || false]
@@ -12842,7 +12847,7 @@ router.get('/at/tecnico/separacao/acompanhamento', async (req, res) => {
             WHEN bool_or(i.status = 'Aguardando retirada') THEN 'Aguardando retirada'
             ELSE 'Concluído'
           END AS status_sep
-         FROM solicitacao_produto.itens_solicitados i
+         FROM logistica.itens_solicitados i
          JOIN logistica.carrinho c ON c.id = i.id_carr
         WHERE i.n_solic IS NOT NULL
           AND c.id_user = $1
@@ -12864,7 +12869,7 @@ router.get('/at/tecnico/separacao/acompanhamento', async (req, res) => {
             c.quantidade,
             i.status,
             COALESCE(i.urgente, false) AS urgente
-           FROM solicitacao_produto.itens_solicitados i
+           FROM logistica.itens_solicitados i
            JOIN logistica.carrinho c ON c.id = i.id_carr
           WHERE i.n_solic = ANY($1::text[])
             AND c.id_user = $2

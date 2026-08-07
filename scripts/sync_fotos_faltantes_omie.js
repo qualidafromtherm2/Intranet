@@ -2,7 +2,7 @@
 /* eslint-disable no-console */
 
 // ============================================================================
-// Sincroniza fotos da Omie → Cloudflare R2 → public.produtos_omie_imagens
+// Sincroniza fotos da Omie → Cloudflare R2 → produto.produtos_omie_imagens
 // ----------------------------------------------------------------------------
 // Fluxo:
 //   1. Carrega posições de foto já gravadas no banco (por codigo_produto)
@@ -105,7 +105,7 @@ function logErro(contexto, codigoProduto, msg) {
 async function carregarEstadoLocal() {
   const { rows: produtos } = await dbQuery(`
     SELECT codigo_produto::text AS id, COALESCE(codigo, '') AS codigo
-    FROM public.produtos_omie
+    FROM produto.produtos_omie
   `);
 
   const map = new Map();
@@ -115,7 +115,7 @@ async function carregarEstadoLocal() {
 
   const { rows: imgs } = await dbQuery(`
     SELECT codigo_produto::text AS id, pos
-    FROM public.produtos_omie_imagens
+    FROM produto.produtos_omie_imagens
     WHERE ativo IS DISTINCT FROM false
       AND url_imagem IS NOT NULL
       AND TRIM(url_imagem) <> ''
@@ -250,7 +250,7 @@ async function inserirImagem(reg) {
   }
 
   await dbQuery(
-    `INSERT INTO public.produtos_omie_imagens
+    `INSERT INTO produto.produtos_omie_imagens
        (codigo_produto, pos, url_imagem, path_key, ativo, visivel_producao, visivel_assistencia_tecnica)
      VALUES ($1::bigint, $2, $3, $4, true, true, true)
      ON CONFLICT (codigo_produto, pos) WHERE (ativo IS TRUE)

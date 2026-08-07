@@ -136,7 +136,7 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
   const operIdExpr = useOper ? `op_single."${operCols.id}"::text` : 'NULL::text';
   const profileOperIdExpr = 'up.operacao_id::text';
   const operJoin = useOper
-    ? ` LEFT JOIN public.omie_operacao op_single ON ${operIdExpr} = ${profileOperIdExpr}`
+    ? ` LEFT JOIN omie.omie_operacao op_single ON ${operIdExpr} = ${profileOperIdExpr}`
     : '';
   const operSelect = useOper
     ? `, ${operLabelExpr} AS operacao, up.operacao_id`
@@ -157,7 +157,7 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
          '[]'::json
        )
        FROM public.auth_user_operacao uo
-       LEFT JOIN public.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text
+       LEFT JOIN omie.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text
        WHERE uo.user_id = u.id
        ) AS operacoes`
     : `,
@@ -177,7 +177,7 @@ router.get('/', requireLogin, manageOnly, async (_req, res) => {
       '[]'::json
     )
     FROM public.auth_user_produto_permissao upp
-    LEFT JOIN public.produto_permissao pp ON pp.codigo = upp.permissao_codigo
+    LEFT JOIN produto.produto_permissao pp ON pp.codigo = upp.permissao_codigo
     WHERE upp.user_id = u.id
     ) AS produto_permissoes`;
 
@@ -218,7 +218,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
   const operIdExpr = useOper ? `op_single."${operCols.id}"::text` : 'NULL::text';
   const profileOperIdExpr = 'up.operacao_id::text';
   const operJoin = useOper
-    ? ` LEFT JOIN public.omie_operacao op_single ON ${operIdExpr} = ${profileOperIdExpr}`
+    ? ` LEFT JOIN omie.omie_operacao op_single ON ${operIdExpr} = ${profileOperIdExpr}`
     : '';
   const operSelect = useOper
     ? `, ${operLabelExpr} AS operacao, up.operacao_id`
@@ -227,7 +227,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
   const useOperList = hasOperLink && operCols;
   const operListJoin = useOperList
     ? ` LEFT JOIN public.auth_user_operacao uo ON uo.user_id = u.id
-        LEFT JOIN public.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text`
+        LEFT JOIN omie.omie_operacao op_list ON op_list."${operCols.id}"::text = uo.operacao_id::text`
     : '';
   const operListLabelExpr = useOperList ? `op_list."${operCols.label}"` : 'NULL::text';
   const operListSelect = useOperList
@@ -266,7 +266,7 @@ router.get('/:id', requireLogin, selfOrManage, async (req, res) => {
   const { rows: permRows } = await pool.query(
     `SELECT pp.codigo, pp.nome
      FROM public.auth_user_produto_permissao upp
-     JOIN public.produto_permissao pp ON pp.codigo = upp.permissao_codigo
+     JOIN produto.produto_permissao pp ON pp.codigo = upp.permissao_codigo
      WHERE upp.user_id = $1
      ORDER BY pp.nome`,
     [uid]

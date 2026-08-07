@@ -29,12 +29,12 @@ async function proximoSepBase(client) {
     SELECT GREATEST(
       COALESCE((
         SELECT MAX(SUBSTRING(n_solic FROM 5)::integer)
-          FROM solicitacao_produto.itens_solicitados
+          FROM logistica.itens_solicitados
          WHERE n_solic ~ '^SEP-[0-9]+$'
       ), 999),
       COALESCE((
         SELECT MAX(SUBSTRING(numero_sep FROM 5)::integer)
-          FROM envios.solicitacoes
+          FROM sac.envios_solicitacoes
          WHERE numero_sep ~ '^SEP-[0-9]+$'
       ), 999)
     ) + 1 AS next_num
@@ -51,9 +51,9 @@ async function buscarConflitos(client) {
       MIN(COALESCE(ss.criado_em, i.criado_em, now())) AS primeiro_em,
       COUNT(DISTINCT i.id) AS qtd_itens,
       COUNT(DISTINCT ss.id) AS qtd_ss
-    FROM solicitacao_produto.itens_solicitados i
+    FROM logistica.itens_solicitados i
     JOIN logistica.carrinho c ON c.id = i.id_carr
-    LEFT JOIN solicitacao_produto.solicitacoes_separacao ss
+    LEFT JOIN logistica.solicitacoes_separacao ss
       ON ss.n_solic = i.n_solic
      AND ss.codigo_produto = c.codigo_produto
      AND ss.id_user = c.id_user
@@ -100,7 +100,7 @@ async function aplicarRemapeamentos(client, remapeamentos) {
     map.para = novoSep;
 
     const { rowCount: ssCount } = await client.query(
-      `UPDATE solicitacao_produto.solicitacoes_separacao
+      `UPDATE logistica.solicitacoes_separacao
           SET n_solic = $1
         WHERE n_solic = $2
           AND nome_user = $3
@@ -110,7 +110,7 @@ async function aplicarRemapeamentos(client, remapeamentos) {
     );
 
     const { rowCount: itCount } = await client.query(
-      `UPDATE solicitacao_produto.itens_solicitados i
+      `UPDATE logistica.itens_solicitados i
           SET n_solic = $1
          FROM logistica.carrinho c
         WHERE i.id_carr = c.id
@@ -122,12 +122,12 @@ async function aplicarRemapeamentos(client, remapeamentos) {
     );
 
     const { rowCount: envCount } = await client.query(
-      `UPDATE envios.solicitacoes e
+      `UPDATE sac.envios_solicitacoes e
           SET numero_sep = $1
         WHERE e.numero_sep = $2
           AND e.usuario = $3
           AND NOT EXISTS (
-            SELECT 1 FROM envios.solicitacoes e2 WHERE e2.numero_sep = $1
+            SELECT 1 FROM sac.envios_solicitacoes e2 WHERE e2.numero_sep = $1
           )`,
       [novoSep, map.de, map.nome_user]
     );

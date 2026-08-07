@@ -266,7 +266,7 @@ router.get('/status', async (req, res) => {
       pool.query(`
         WITH base AS (
           SELECT p.*
-          FROM public.produtos_omie p
+          FROM produto.produtos_omie p
           WHERE LPAD(REGEXP_REPLACE(COALESCE(p.tipoitem, ''), '\\D', '', 'g'), 2, '0') IN ('00', '04')
             AND COALESCE(p.inativo, 'N') <> 'S'
         )
@@ -781,10 +781,10 @@ router.get('/produtos', async (req, res) => {
           AND GREATEST(COALESCE(p.peso_bruto, 0), COALESCE(p.peso_liq, 0)) > 0
           AND GREATEST(p.altura, p.largura, p.profundidade) <= 500
         ) AS apto_simulacao
-      FROM public.produtos_omie p
+      FROM produto.produtos_omie p
       LEFT JOIN LATERAL (
         SELECT i.url_imagem
-        FROM public.produtos_omie_imagens i
+        FROM produto.produtos_omie_imagens i
         WHERE i.codigo_produto = p.codigo_produto
           AND COALESCE(i.ativo, TRUE) = TRUE
         ORDER BY COALESCE(i.pos, 999999), i.id
@@ -819,7 +819,7 @@ router.get('/produtos-pendentes', async (req, res) => {
                  CASE WHEN GREATEST(COALESCE(p.peso_bruto, 0), COALESCE(p.peso_liq, 0)) <= 0 THEN 'Peso ausente' END,
                  CASE WHEN GREATEST(COALESCE(p.altura, 0), COALESCE(p.largura, 0), COALESCE(p.profundidade, 0)) > 500 THEN 'Dimensao acima de 500 cm; conferir unidade' END
                ], NULL) AS pendencias
-        FROM public.produtos_omie p
+        FROM produto.produtos_omie p
         WHERE LPAD(REGEXP_REPLACE(COALESCE(p.tipoitem, ''), '\\D', '', 'g'), 2, '0') IN ('00', '04')
           AND COALESCE(p.inativo, 'N') <> 'S'
       )
@@ -953,10 +953,10 @@ router.get('/cotacoes/:id', async (req, res) => {
                AND GREATEST(p.altura, p.largura, p.profundidade) <= 500
              ) AS apto_simulacao
       FROM frete.cotacao_item ci
-      LEFT JOIN public.produtos_omie p ON p.codigo = ci.codigo
+      LEFT JOIN produto.produtos_omie p ON p.codigo = ci.codigo
       LEFT JOIN LATERAL (
         SELECT pi.url_imagem
-        FROM public.produtos_omie_imagens pi
+        FROM produto.produtos_omie_imagens pi
         WHERE pi.codigo_produto = p.codigo_produto AND COALESCE(pi.ativo, TRUE) = TRUE
         ORDER BY COALESCE(pi.pos, 999999), pi.id
         LIMIT 1
@@ -1012,7 +1012,7 @@ router.post('/simular', async (req, res) => {
     const { rows: produtos } = await pool.query(`
       SELECT codigo_produto, codigo, descricao, tipoitem, unidade, altura, largura, profundidade,
              peso_bruto, peso_liq
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
       WHERE codigo = ANY($1::text[])
         AND LPAD(REGEXP_REPLACE(COALESCE(tipoitem, ''), '\\D', '', 'g'), 2, '0') IN ('00', '04')
         AND COALESCE(inativo, 'N') <> 'S'

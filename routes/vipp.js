@@ -436,7 +436,7 @@ router.get('/status', async (req, res) => {
     if (envio_id && etiquetaPostagem) {
       try {
         await dbQuery(
-          `UPDATE envios.solicitacoes
+          `UPDATE sac.envios_solicitacoes
               SET identificacao = COALESCE(NULLIF(identificacao, ''), $1)
             WHERE id = $2`,
           [etiquetaPostagem, Number(envio_id)]
@@ -574,7 +574,7 @@ router.post('/gerar-etiqueta', async (req, res) => {
   if (!idConhecimento && envio_id) {
     try {
       const { rows } = await dbQuery(
-        `SELECT id_vipp, numero_sep FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+        `SELECT id_vipp, numero_sep FROM sac.envios_solicitacoes WHERE id = $1 LIMIT 1`,
         [Number(envio_id)]
       );
       if (rows[0]?.id_vipp) idConhecimento = rows[0].id_vipp;
@@ -592,28 +592,28 @@ router.post('/gerar-etiqueta', async (req, res) => {
     const ectCode = await gerarECT(idConhecimento);
     console.log(`[VIPP] ECT alocado: ${ectCode} → IdConhecimento=${idConhecimento}`);
 
-    // 2. Registra código de rastreio + status na tabela envios.solicitacoes
-    await dbQuery(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
+    // 2. Registra código de rastreio + status na tabela sac.envios_solicitacoes
+    await dbQuery(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
     if (n_solic || envio_id) {
       try {
         if (envio_id) {
           await dbQuery(
-            `UPDATE envios.solicitacoes
+            `UPDATE sac.envios_solicitacoes
                 SET identificacao = $1
               WHERE id = $2`,
             [ectCode, Number(envio_id)]
           );
         } else if (n_solic) {
           await dbQuery(
-            `UPDATE envios.solicitacoes
+            `UPDATE sac.envios_solicitacoes
                 SET identificacao = $1
               WHERE numero_sep = $2`,
             [ectCode, n_solic]
           );
         }
-        console.log(`[VIPP] identificacao=${ectCode} registrado em envios.solicitacoes → SEP=${n_solic || '-'} envio=${envio_id || '-'}`);
+        console.log(`[VIPP] identificacao=${ectCode} registrado em sac.envios_solicitacoes → SEP=${n_solic || '-'} envio=${envio_id || '-'}`);
       } catch (e) {
-        console.warn('[VIPP] Falha ao atualizar envios.solicitacoes:', e.message);
+        console.warn('[VIPP] Falha ao atualizar sac.envios_solicitacoes:', e.message);
       }
     }
 
@@ -640,7 +640,7 @@ router.post('/gerar-etiqueta', async (req, res) => {
 // etiqueta_url, o frontend abre o PDF diretamente sem chamar este endpoint.
 //
 // Body JSON: { envio_id, destino_agente?, impressora? }
-// envio_id       → id de envios.solicitacoes
+// envio_id       → id de sac.envios_solicitacoes
 // destino_agente → pcName do agente (opcional)
 // impressora     → nome da impressora (opcional)
 //
@@ -652,7 +652,7 @@ router.post('/imprimir-envio', async (req, res) => {
   try {
     // 1. Busca código ECT e etiqueta_url do registro de envio
     const { rows } = await dbQuery(
-      `SELECT identificacao, etiqueta_url FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+      `SELECT identificacao, etiqueta_url FROM sac.envios_solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(envio_id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
@@ -679,7 +679,7 @@ router.post('/imprimir-envio', async (req, res) => {
       zpl = await _gerarZplEtiquetaEnvio(cachedUrl);
       // Upgrade: substitui ZVP por ZPL no cache para reprints futuros
       dbQuery(
-        `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2`,
+        `UPDATE sac.envios_solicitacoes SET etiqueta_url = $1 WHERE id = $2`,
         [zpl, Number(envio_id)]
       ).catch(e => console.warn('[VIPP] falha ao atualizar ZPL em etiqueta_url:', e.message));
     } else {
@@ -710,7 +710,7 @@ router.post('/imprimir-envio', async (req, res) => {
       // Persiste ZPL em etiqueta_url (cache para reimpressões futuras)
       try {
         await dbQuery(
-          `UPDATE envios.solicitacoes SET etiqueta_url = $1 WHERE id = $2 AND (etiqueta_url IS NULL OR etiqueta_url = '')`,
+          `UPDATE sac.envios_solicitacoes SET etiqueta_url = $1 WHERE id = $2 AND (etiqueta_url IS NULL OR etiqueta_url = '')`,
           [zpl, Number(envio_id)]
         );
       } catch (e) {
@@ -742,7 +742,7 @@ router.post('/imprimir-envio', async (req, res) => {
 // Retorna a declaração de conteúdo de um envio como HTML (pronto para impressão).
 //
 // Query params:
-//   id  — id de envios.solicitacoes
+//   id  — id de sac.envios_solicitacoes
 //
 // Lógica:
 //   1. Se o registro tem declaracao_url → redireciona para o PDF salvo
@@ -757,7 +757,7 @@ router.get('/declaracao', async (req, res) => {
   try {
     const { rows } = await dbQuery(
       `SELECT id, declaracao_url, identificacao, id_vipp, conteudo, observacao, usuario
-         FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+         FROM sac.envios_solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
@@ -1054,10 +1054,10 @@ async function _persistirValorEnvio({ envioId, nSolic, idVipp, ect, onlyIfEmpty 
   const codigo = String(ect || '').trim().replace(/\s+/g, '');
   if (!codigo) return null;
   try {
-    await dbQuery(`ALTER TABLE envios.solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
+    await dbQuery(`ALTER TABLE sac.envios_solicitacoes ADD COLUMN IF NOT EXISTS valor_envio NUMERIC(12,2)`);
 
     if (onlyIfEmpty) {
-      let checkSql = `SELECT id FROM envios.solicitacoes WHERE valor_envio IS NULL`;
+      let checkSql = `SELECT id FROM sac.envios_solicitacoes WHERE valor_envio IS NULL`;
       const checkParams = [];
       if (envioId) {
         checkParams.push(Number(envioId));
@@ -1101,7 +1101,7 @@ async function _persistirValorEnvio({ envioId, nSolic, idVipp, ect, onlyIfEmpty 
       where = `REPLACE(COALESCE(identificacao, ''), ' ', '') = $${params.length}`;
     }
     await dbQuery(
-      `UPDATE envios.solicitacoes SET ${sets.join(', ')} WHERE ${where}`,
+      `UPDATE sac.envios_solicitacoes SET ${sets.join(', ')} WHERE ${where}`,
       params
     );
     console.log(`[VIPP] valor_envio=${valor} gravado (ect=${codigo}, envio=${envioId || '-'}, sep=${nSolic || '-'})`);
@@ -1126,7 +1126,7 @@ router.post('/imprimir-declaracao', async (req, res) => {
     // 1. Busca dados do envio
     const { rows } = await dbQuery(
       `SELECT id, identificacao, id_vipp, conteudo, observacao, declaracao_url
-         FROM envios.solicitacoes WHERE id = $1 LIMIT 1`,
+         FROM sac.envios_solicitacoes WHERE id = $1 LIMIT 1`,
       [Number(envio_id)]
     );
     if (!rows.length) return res.status(404).json({ ok: false, error: 'Envio não encontrado' });
@@ -1163,7 +1163,7 @@ router.post('/imprimir-declaracao', async (req, res) => {
     // 5. Persiste ZPL em declaracao_url para reimpressão futura
     try {
       await dbQuery(
-        `UPDATE envios.solicitacoes SET declaracao_url = $1 WHERE id = $2 AND (declaracao_url IS NULL OR declaracao_url = '')`,
+        `UPDATE sac.envios_solicitacoes SET declaracao_url = $1 WHERE id = $2 AND (declaracao_url IS NULL OR declaracao_url = '')`,
         [zpl, Number(envio_id)]
       );
     } catch (e) {
@@ -1558,7 +1558,7 @@ router.get('/sep-check', async (req, res) => {
   if (!n_solic) return res.json({ ok: true, idVipp: null });
   try {
     const { rows } = await dbQuery(
-      `SELECT id_vipp FROM envios.solicitacoes WHERE numero_sep = $1 AND id_vipp IS NOT NULL LIMIT 1`,
+      `SELECT id_vipp FROM sac.envios_solicitacoes WHERE numero_sep = $1 AND id_vipp IS NOT NULL LIMIT 1`,
       [n_solic]
     );
     return res.json({ ok: true, idVipp: rows[0]?.id_vipp || null });

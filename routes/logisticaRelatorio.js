@@ -144,13 +144,13 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
           COUNT(*) FILTER (WHERE COALESCE(TRIM(status), '') NOT IN ('Concluído', 'Concluido'))::int AS abertos,
           COUNT(*) FILTER (WHERE COALESCE(TRIM(status), '') IN ('Concluído', 'Concluido'))::int AS concluidos,
           COUNT(*) FILTER (WHERE COALESCE(urgente, false))::int AS urgentes
-        FROM solicitacao_produto.itens_solicitados
+        FROM logistica.itens_solicitados
         WHERE COALESCE(criado_em, NOW())::date >= $1::date
           AND COALESCE(criado_em, NOW())::date < $2::date
       `, rangeParams),
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(status), ''), 'Sem status') AS status, COUNT(*)::int AS total
-        FROM solicitacao_produto.itens_solicitados
+        FROM logistica.itens_solicitados
         WHERE COALESCE(criado_em, NOW())::date >= $1::date
           AND COALESCE(criado_em, NOW())::date < $2::date
         GROUP BY 1 ORDER BY total DESC, status LIMIT 12
@@ -158,7 +158,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(status), ''), 'Sem status') AS status, COUNT(*)::int AS total,
                COALESCE(SUM(qtd), 0)::float AS qtd_total
-        FROM mensagens.transferencias
+        FROM logistica.transferencias
         WHERE COALESCE(data_movimentacao, CURRENT_DATE) >= $1::date
           AND COALESCE(data_movimentacao, CURRENT_DATE) < $2::date
         GROUP BY 1 ORDER BY total DESC
@@ -168,7 +168,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
                COALESCE(NULLIF(TRIM(destino), ''), '?') AS destino,
                COUNT(*)::int AS total,
                COALESCE(SUM(qtd), 0)::float AS qtd_total
-        FROM mensagens.transferencias
+        FROM logistica.transferencias
         WHERE COALESCE(data_movimentacao, CURRENT_DATE) >= $1::date
           AND COALESCE(data_movimentacao, CURRENT_DATE) < $2::date
           AND TRIM(COALESCE(status, '')) = 'Transferido'
@@ -177,7 +177,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(status), ''), 'Sem status') AS status, COUNT(*)::int AS total,
                COALESCE(SUM(qtd), 0)::float AS qtd_total
-        FROM mensagens.ajustes_estoque
+        FROM logistica.ajustes_estoque
         WHERE COALESCE(data_movimentacao, criado_em::date) >= $1::date
           AND COALESCE(data_movimentacao, criado_em::date) < $2::date
         GROUP BY 1 ORDER BY total DESC
@@ -185,7 +185,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(tipo_operacao), ''), '?') AS tipo, COUNT(*)::int AS total,
                COALESCE(SUM(qtd), 0)::float AS qtd_total
-        FROM mensagens.ajustes_estoque
+        FROM logistica.ajustes_estoque
         WHERE COALESCE(data_movimentacao, criado_em::date) >= $1::date
           AND COALESCE(data_movimentacao, criado_em::date) < $2::date
         GROUP BY 1 ORDER BY total DESC
@@ -202,7 +202,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       `, rangeParams),
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(rastreio_status), ''), 'Pendente') AS status, COUNT(*)::int AS total
-        FROM envios.solicitacoes
+        FROM sac.envios_solicitacoes
         WHERE COALESCE(created_at, NOW())::date >= $1::date
           AND COALESCE(created_at, NOW())::date < $2::date
           AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
@@ -210,7 +210,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       `, rangeParams),
       safeQuery(`
         SELECT COALESCE(NULLIF(TRIM(metodo_envio), ''), 'Não informado') AS metodo, COUNT(*)::int AS total
-        FROM envios.solicitacoes
+        FROM sac.envios_solicitacoes
         WHERE COALESCE(created_at, NOW())::date >= $1::date
           AND COALESCE(created_at, NOW())::date < $2::date
           AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')
@@ -236,17 +236,17 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       safeQuery(`
         WITH evol_base AS (
           SELECT COALESCE(criado_em, NOW())::date AS data_ref
-          FROM solicitacao_produto.itens_solicitados
+          FROM logistica.itens_solicitados
           WHERE COALESCE(criado_em, NOW())::date >= $1::date
             AND COALESCE(criado_em, NOW())::date < $2::date
           UNION ALL
           SELECT COALESCE(data_movimentacao, CURRENT_DATE) AS data_ref
-          FROM mensagens.transferencias
+          FROM logistica.transferencias
           WHERE COALESCE(data_movimentacao, CURRENT_DATE) >= $1::date
             AND COALESCE(data_movimentacao, CURRENT_DATE) < $2::date
           UNION ALL
           SELECT COALESCE(created_at, NOW())::date AS data_ref
-          FROM envios.solicitacoes
+          FROM sac.envios_solicitacoes
           WHERE COALESCE(created_at, NOW())::date >= $1::date
             AND COALESCE(created_at, NOW())::date < $2::date
         )
@@ -256,7 +256,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
         SELECT COALESCE(NULLIF(TRIM(codigo_produto), ''), '(sem código)') AS produto,
                COUNT(*)::int AS total,
                COALESCE(SUM(quantidade_solicitada), 0)::float AS qtd_solicitada
-        FROM solicitacao_produto.itens_solicitados
+        FROM logistica.itens_solicitados
         WHERE COALESCE(criado_em, NOW())::date >= $1::date
           AND COALESCE(criado_em, NOW())::date < $2::date
         GROUP BY 1 ORDER BY total DESC, qtd_solicitada DESC LIMIT 15
@@ -265,8 +265,8 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
         WITH sep_fim AS (
           SELECT i.n_solic,
                  MAX(m.movimentado_em) AS separado_em
-            FROM solicitacao_produto.itens_solicitados i
-            JOIN solicitacao_produto.movimentacoes_kanban_itens m
+            FROM logistica.itens_solicitados i
+            JOIN logistica.movimentacoes_kanban_itens m
               ON m.solic_id = i.id
            WHERE m.status_destino IN ('Concluído', 'Concluido')
              AND NULLIF(TRIM(i.n_solic), '') IS NOT NULL
@@ -280,7 +280,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
                  sf.separado_em,
                  COALESCE(e.rastreio_quando, e.finalizado_em) AS enviado_em,
                  COALESCE(NULLIF(TRIM(e.rastreio_status), ''), 'Pendente') AS status
-            FROM envios.solicitacoes e
+            FROM sac.envios_solicitacoes e
             LEFT JOIN sep_fim sf ON sf.n_solic = e.numero_sep
            WHERE COALESCE(e.created_at, NOW())::date >= $1::date
              AND COALESCE(e.created_at, NOW())::date < $2::date
@@ -318,7 +318,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
           SELECT e.id,
                  COALESCE(e.rastreio_quando, e.finalizado_em) AS enviado_em,
                  e.created_at AS criado_em
-            FROM envios.solicitacoes e
+            FROM sac.envios_solicitacoes e
            WHERE COALESCE(e.created_at, NOW())::date >= $1::date
              AND COALESCE(e.created_at, NOW())::date < $2::date
              AND COALESCE(e.rastreio_status, '') NOT IN ('Excluído', 'Excluido')
@@ -350,8 +350,8 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       safeQuery(`
         WITH sep_fim AS (
           SELECT i.n_solic, MAX(m.movimentado_em) AS separado_em
-            FROM solicitacao_produto.itens_solicitados i
-            JOIN solicitacao_produto.movimentacoes_kanban_itens m ON m.solic_id = i.id
+            FROM logistica.itens_solicitados i
+            JOIN logistica.movimentacoes_kanban_itens m ON m.solic_id = i.id
            WHERE m.status_destino IN ('Concluído', 'Concluido')
              AND NULLIF(TRIM(i.n_solic), '') IS NOT NULL
            GROUP BY i.n_solic
@@ -376,7 +376,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
                          AND COALESCE(NULLIF(TRIM(e.rastreio_status), ''), 'Pendente') NOT IN ('Enviado', 'Entregue', 'Finalizado')
                     THEN ROUND((EXTRACT(EPOCH FROM (NOW() - e.created_at)) / 3600.0)::numeric, 1)
                END AS h_ciclo_ou_aberto
-          FROM envios.solicitacoes e
+          FROM sac.envios_solicitacoes e
           LEFT JOIN sep_fim sf ON sf.n_solic = e.numero_sep
          WHERE COALESCE(e.created_at, NOW())::date >= $1::date
            AND COALESCE(e.created_at, NOW())::date < $2::date
@@ -390,7 +390,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
                COUNT(*) FILTER (
                  WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em) <= sla_limite_em
                )::int AS dentro_sla
-          FROM envios.solicitacoes
+          FROM sac.envios_solicitacoes
          WHERE COALESCE(enviado_em, rastreio_quando, finalizado_em)::date >= $1::date
            AND COALESCE(enviado_em, rastreio_quando, finalizado_em)::date < $2::date
            AND COALESCE(rastreio_status, '') NOT IN ('Excluído', 'Excluido')

@@ -1,5 +1,5 @@
 /**
- * Sincroniza public.historico_pedido_originalis a partir da planilha
+ * Sincroniza vendas.historico_pedido_originalis a partir da planilha
  * [NOVUS ORIGINALIS] FT-M02-POPV — PEDIDOS (Google Sheets).
  *
  * Uso:
@@ -182,7 +182,7 @@ async function main() {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('TRUNCATE TABLE public.historico_pedido_originalis');
+    await client.query('TRUNCATE TABLE vendas.historico_pedido_originalis');
 
     let inserted = 0;
     for (let i = 0; i < mapped.length; i += BATCH_SIZE) {
@@ -199,7 +199,7 @@ async function main() {
         values.push(`(${placeholders.join(',')})`);
       }
       await client.query(
-        `INSERT INTO public.historico_pedido_originalis (${COLS.join(',')}) VALUES ${values.join(',')}`,
+        `INSERT INTO vendas.historico_pedido_originalis (${COLS.join(',')}) VALUES ${values.join(',')}`,
         params
       );
       inserted += batch.length;
@@ -213,11 +213,11 @@ async function main() {
       SELECT COUNT(*)::int AS total,
         COUNT(*) FILTER (WHERE NULLIF(TRIM(data_integracao), '') IS NOT NULL)::int AS com_di,
         MAX(data_integracao) AS max_di
-      FROM public.historico_pedido_originalis
+      FROM vendas.historico_pedido_originalis
     `);
     const check = await pool.query(`
       SELECT pedido, data_integracao, situacao
-      FROM public.historico_pedido_originalis
+      FROM vendas.historico_pedido_originalis
       WHERE TRIM(pedido) = '19933'
       LIMIT 1
     `);

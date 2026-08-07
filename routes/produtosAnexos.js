@@ -31,7 +31,7 @@ async function resolveCodigoProduto(codigoParam) {
 
   const sql = `
     SELECT codigo_produto
-      FROM public.produtos_omie
+      FROM produto.produtos_omie
      WHERE codigo = $1
      LIMIT 1
   `;
@@ -66,7 +66,7 @@ router.get('/:codigo/anexos', async (req, res) => {
     const { rows } = await dbQuery(
       `SELECT id, codigo_produto, nome_anexo, descricao_anexo, url_anexo, tamanho_bytes,
               content_type, visivel_producao, visivel_assistencia_tecnica, ativo, criado_em
-         FROM public.produtos_omie_anexos
+         FROM produto.produtos_omie_anexos
         WHERE codigo_produto = $1
           AND ($2::boolean OR ativo = TRUE)
         ORDER BY ativo DESC, criado_em DESC`,
@@ -112,7 +112,7 @@ router.post('/:codigo/anexos', upload.single('arquivo'), async (req, res) => {
     const publicUrl = data.publicUrl;
 
     const insert = await dbQuery(
-      `INSERT INTO public.produtos_omie_anexos
+      `INSERT INTO produto.produtos_omie_anexos
         (codigo_produto, nome_anexo, descricao_anexo, url_anexo, path_key,
          tamanho_bytes, content_type, visivel_producao, visivel_assistencia_tecnica, ativo)
        VALUES ($1, $2, $3, $4, $5, $6, $7, TRUE, TRUE, TRUE)
@@ -134,7 +134,7 @@ router.post('/:codigo/anexos', upload.single('arquivo'), async (req, res) => {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
       let codigoTexto = null;
       try {
-        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        const r = await dbQuery(`SELECT codigo FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
         codigoTexto = r.rows?.[0]?.codigo || null;
       } catch {}
       await registrarModificacao({
@@ -166,7 +166,7 @@ router.delete('/:codigo/anexos/:id', async (req, res) => {
     }
 
     const softDelete = await dbQuery(
-      `UPDATE public.produtos_omie_anexos
+      `UPDATE produto.produtos_omie_anexos
           SET ativo = FALSE
         WHERE codigo_produto = $1
           AND id = $2
@@ -186,7 +186,7 @@ router.delete('/:codigo/anexos/:id', async (req, res) => {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
       let codigoTexto = null;
       try {
-        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        const r = await dbQuery(`SELECT codigo FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
         codigoTexto = r.rows?.[0]?.codigo || null;
       } catch {}
       await registrarModificacao({
@@ -236,7 +236,7 @@ router.patch('/:codigo/anexos/:id/visibilidade', async (req, res) => {
       values.push(visibility.visivel_assistencia_tecnica);
     }
 
-    const sql = `UPDATE public.produtos_omie_anexos
+    const sql = `UPDATE produto.produtos_omie_anexos
                     SET ${fields.join(', ')}
                   WHERE codigo_produto = $1
                     AND id = $2
@@ -253,7 +253,7 @@ router.patch('/:codigo/anexos/:id/visibilidade', async (req, res) => {
       const usuarioAudit = (req.session?.user?.fullName || req.session?.user?.username || String(req.headers['x-user'] || '').trim() || 'sistema');
       let codigoTexto = null;
       try {
-        const r = await dbQuery(`SELECT codigo FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
+        const r = await dbQuery(`SELECT codigo FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`, [codigoNum]);
         codigoTexto = r.rows?.[0]?.codigo || null;
       } catch {}
       await registrarModificacao({

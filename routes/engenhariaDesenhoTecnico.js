@@ -53,7 +53,7 @@ async function resolverCodigosBusca(pool, raw) {
   try {
     const { rows } = await pool.query(
       `SELECT codigo_produto::text AS codigo_produto, codigo::text AS codigo
-         FROM public.produtos_omie
+         FROM produto.produtos_omie
         WHERE codigo_produto::text = $1 OR codigo = $1
         LIMIT 1`,
       [entrada]
@@ -116,7 +116,7 @@ module.exports = (pool) => {
         `SELECT d.id, d.nome_arquivo, d.versao, d.codigo_omie, d.anexo, d.data::text AS data, d.status,
                 p.codigo AS codigo_interno
            FROM engenharia.desenho_tecnico d
-           LEFT JOIN public.produtos_omie p
+           LEFT JOIN produto.produtos_omie p
              ON p.codigo_produto::text = d.codigo_omie
           ORDER BY d.data DESC, d.id DESC`
       );

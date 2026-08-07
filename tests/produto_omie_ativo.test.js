@@ -56,7 +56,7 @@ test('preferindo ativo: ID fantasma resolve para o ativo pelo mesmo SKU', async 
     if (sql.includes('p.codigo_produto = $1') && sql.includes('inativo')) {
       return { rows: [] }; // ID fantasma não está ativo
     }
-    if (sql.includes('FROM public.produtos_omie') && sql.includes('WHERE codigo_produto = $1') && sql.includes('integracao')) {
+    if (sql.includes('FROM produto.produtos_omie') && sql.includes('WHERE codigo_produto = $1') && sql.includes('integracao')) {
       assert.deepEqual(params, [10748663973]);
       return { rows: [{ codigo: '01.MP.N.30100', integracao: '01.MP.N.30100' }] };
     }

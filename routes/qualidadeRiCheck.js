@@ -55,7 +55,7 @@ function sanitizePathPart(str) {
 async function garantirSchemaRi() {
   if (schemaOk) return;
   await dbQuery(`CREATE SCHEMA IF NOT EXISTS qualidade`);
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
 
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS qualidade."RI_Check" (
@@ -106,11 +106,11 @@ async function garantirSchemaRi() {
       ON qualidade."RI_Verificacoes" (codigo_produto)
   `);
 
-  // codigo_produto = public.produtos_omie.codigo_produto (id Omie numérico)
+  // codigo_produto = produto.produtos_omie.codigo_produto (id Omie numérico)
   await dbQuery(`
     UPDATE qualidade."RI_Check" c
        SET codigo_produto = po.codigo_produto::text
-      FROM public.produtos_omie po
+      FROM produto.produtos_omie po
      WHERE c.codigo_produto IS NOT NULL
        AND TRIM(c.codigo_produto) <> ''
        AND c.codigo_produto !~ '^[0-9]+$'
@@ -119,7 +119,7 @@ async function garantirSchemaRi() {
   await dbQuery(`
     UPDATE qualidade."RI_Verificacoes" v
        SET codigo_produto = po.codigo_produto::text
-      FROM public.produtos_omie po
+      FROM produto.produtos_omie po
      WHERE v.codigo_produto IS NOT NULL
        AND TRIM(v.codigo_produto) <> ''
        AND v.codigo_produto !~ '^[0-9]+$'
@@ -130,7 +130,7 @@ async function garantirSchemaRi() {
        )
   `).catch(() => {});
 
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
 
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS qualidade."RI_NIQ" (
@@ -196,7 +196,7 @@ async function garantirSchemaRi() {
   if (!migRows.length) {
     await garantirSchemaKanbanProgramacao();
     await dbQuery(`
-      UPDATE "Producao"."Kanban_programacao" kp
+      UPDATE producao."Kanban_programacao" kp
          SET ri = TRUE
         WHERE COALESCE(kp.ri, FALSE) = FALSE
           AND COALESCE(NULLIF(TRIM(kp.status), ''), '') <> ''
@@ -229,9 +229,9 @@ let kanbanProgSchemaOk = false;
 
 async function garantirSchemaKanbanProgramacao() {
   if (kanbanProgSchemaOk) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS "Producao"`);
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
   await dbQuery(`
-    CREATE TABLE IF NOT EXISTS "Producao"."Kanban_programacao" (
+    CREATE TABLE IF NOT EXISTS producao."Kanban_programacao" (
       id              BIGSERIAL PRIMARY KEY,
       codigo_produto  BIGINT,
       codigo          TEXT NOT NULL,
@@ -242,28 +242,28 @@ async function garantirSchemaKanbanProgramacao() {
       created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS numero_op TEXT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_iapp_id BIGINT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_producao_id BIGINT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS observacao TEXT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS postos TEXT`);
-  await dbQuery(`ALTER TABLE "Producao"."Kanban_programacao" ADD COLUMN IF NOT EXISTS ri BOOLEAN NOT NULL DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS numero_op TEXT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_iapp_id BIGINT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS op_producao_id BIGINT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS status TEXT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS observacao TEXT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS postos TEXT`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS ri BOOLEAN NOT NULL DEFAULT FALSE`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_iapp
-      ON "Producao"."Kanban_programacao" (op_iapp_id)
+      ON producao."Kanban_programacao" (op_iapp_id)
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_op_producao
-      ON "Producao"."Kanban_programacao" (op_producao_id)
+      ON producao."Kanban_programacao" (op_producao_id)
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_numero_op
-      ON "Producao"."Kanban_programacao" (numero_op)
+      ON producao."Kanban_programacao" (numero_op)
   `);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_kanban_prog_ri
-      ON "Producao"."Kanban_programacao" (ri)
+      ON producao."Kanban_programacao" (ri)
       WHERE ri = TRUE
   `);
   kanbanProgSchemaOk = true;
@@ -272,7 +272,7 @@ async function garantirSchemaKanbanProgramacao() {
 async function buscarKanbanProgId(opRefId, numeroOpHint = '') {
   const numeroOp = String(numeroOpHint || '').trim();
   const { rows } = await dbQuery(
-    `SELECT id FROM "Producao"."Kanban_programacao"
+    `SELECT id FROM producao."Kanban_programacao"
       WHERE op_producao_id = $1
          OR op_iapp_id = $1
          OR ($2 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
@@ -293,7 +293,7 @@ function resolverOpRefId(checkOrId) {
 async function resolverNumeroOpKanban(opRefId, check) {
   if (check?.id_kanban_programacao) {
     const { rows } = await dbQuery(
-      `SELECT numero_op FROM "Producao"."Kanban_programacao" WHERE id = $1 LIMIT 1`,
+      `SELECT numero_op FROM producao."Kanban_programacao" WHERE id = $1 LIMIT 1`,
       [check.id_kanban_programacao]
     );
     const n = String(rows[0]?.numero_op || '').trim();
@@ -301,7 +301,7 @@ async function resolverNumeroOpKanban(opRefId, check) {
   }
 
   const { rows: kpRows } = await dbQuery(
-    `SELECT numero_op FROM "Producao"."Kanban_programacao"
+    `SELECT numero_op FROM producao."Kanban_programacao"
       WHERE op_producao_id = $1 OR op_iapp_id = $1
       ORDER BY id DESC NULLS LAST
       LIMIT 1`,
@@ -334,7 +334,7 @@ async function resolverCodigoProdutoOmieId(codigoOuId) {
   if (/^\d{8,}$/.test(raw)) return Number(raw);
   const { rows } = await dbQuery(
     `SELECT codigo_produto
-       FROM public.produtos_omie
+       FROM produto.produtos_omie
       WHERE TRIM(codigo_produto::text) = TRIM($1)
          OR TRIM(codigo) = TRIM($1)
          OR TRIM(COALESCE(codigo_produto_integracao, '')) = TRIM($1)
@@ -357,7 +357,7 @@ async function resolverCamposProdutoOmie({ codigoTexto, codigoProdutoHint, opIap
   if (!idOmie && kanbanProgId) {
     const { rows } = await dbQuery(
       `SELECT codigo_produto, codigo, descricao
-         FROM "Producao"."Kanban_programacao"
+         FROM producao."Kanban_programacao"
         WHERE id = $1 LIMIT 1`,
       [kanbanProgId]
     );
@@ -378,7 +378,7 @@ async function resolverCamposProdutoOmie({ codigoTexto, codigoProdutoHint, opIap
   if (!idOmie && codigo) idOmie = await resolverCodigoProdutoOmieId(codigo);
   if (!codigo && idOmie) {
     const { rows } = await dbQuery(
-      `SELECT codigo, descricao FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+      `SELECT codigo, descricao FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
       [idOmie]
     );
     if (rows[0]) {
@@ -404,8 +404,8 @@ async function buscarDadosOpKanban(opRefId) {
             op.codigo AS codigo_produto_texto,
             COALESCE(po.descricao, '') AS descricao_produto,
             op.codigo_produto AS codigo_produto_id
-       FROM "Producao"."OP_producao" op
-       LEFT JOIN public.produtos_omie po ON po.codigo_produto = op.codigo_produto
+       FROM producao."OP_producao" op
+       LEFT JOIN produto.produtos_omie po ON po.codigo_produto = op.codigo_produto
       WHERE op.id = $1
       LIMIT 1`,
     [opRefId]
@@ -417,9 +417,9 @@ async function buscarDadosOpKanban(opRefId) {
             p.identificacao AS codigo_produto_texto,
             p.descricao AS descricao_produto,
             po.codigo_produto AS codigo_produto_id
-       FROM "IAPP_API".op_iapp o
-       LEFT JOIN "IAPP_API".op_iapp_produto p ON p.produto_id = o.produto_id
-       LEFT JOIN public.produtos_omie po
+       FROM producao.op_iapp o
+       LEFT JOIN producao.op_iapp_produto p ON p.produto_id = o.produto_id
+       LEFT JOIN produto.produtos_omie po
          ON UPPER(TRIM(po.codigo)) = UPPER(TRIM(p.identificacao))
       WHERE o.iapp_id = $1
       LIMIT 1`,
@@ -603,8 +603,8 @@ async function listarKanbanProgIdsPorOp(opRefId, check) {
   const params = [opRefId, numeroOp, kanbanProgId || null, codigo];
   const { rows } = await dbQuery(
     `SELECT DISTINCT kp.id
-       FROM "Producao"."Kanban_programacao" kp
-       LEFT JOIN "Producao"."OP_producao" op ON op.id = $1
+       FROM producao."Kanban_programacao" kp
+       LEFT JOIN producao."OP_producao" op ON op.id = $1
       WHERE kp.op_producao_id = $1
          OR kp.op_iapp_id = $1
          OR ($2 <> '' AND UPPER(TRIM(COALESCE(kp.numero_op, ''))) = UPPER(TRIM($2)))
@@ -629,14 +629,14 @@ async function atualizarStatusKanbanOp(opRefId, statusKanban, check, checkStatus
   const statusFinal = String(statusKanban || '').trim();
   const kanbanIds = await listarKanbanProgIdsPorOp(opRefId, check);
   const { rows: opProdRows } = await dbQuery(
-    `SELECT id FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
+    `SELECT id FROM producao."OP_producao" WHERE id = $1 LIMIT 1`,
     [opRefId]
   );
   const opProducaoId = opProdRows[0]?.id || null;
 
   if (kanbanIds.length) {
     const upd = await dbQuery(
-      `UPDATE "Producao"."Kanban_programacao"
+      `UPDATE producao."Kanban_programacao"
           SET status = $1,
               op_producao_id = COALESCE(op_producao_id, $3)
         WHERE id = ANY($2::bigint[])`,
@@ -658,7 +658,7 @@ async function atualizarStatusKanbanOp(opRefId, statusKanban, check, checkStatus
   const codigoCol = campos.codigoTexto || check?.codigo || numeroOpGravar;
 
   await dbQuery(
-    `INSERT INTO "Producao"."Kanban_programacao"
+    `INSERT INTO producao."Kanban_programacao"
        (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, op_producao_id, status)
      VALUES ($1, $2, $3, 0, 1, $4, $5, $6, $7)`,
     [
@@ -680,7 +680,7 @@ async function buscarStatusKanbanOp(opRefId, numeroOpHint = '', check = null) {
 
   const { rows } = await dbQuery(
     `SELECT status
-       FROM "Producao"."Kanban_programacao"
+       FROM producao."Kanban_programacao"
       WHERE id = ANY($1::bigint[])
       ORDER BY id DESC`,
     [kanbanIds]
@@ -795,7 +795,7 @@ router.post('/status-por-ops', requireAuth, express.json(), async (req, res) => 
     const { rows } = await dbQuery(
       `SELECT COALESCE(NULLIF(op_producao_id, 0), op_iapp_id) AS op_id,
               BOOL_OR(COALESCE(ri, FALSE)) AS ri
-         FROM "Producao"."Kanban_programacao"
+         FROM producao."Kanban_programacao"
         WHERE op_producao_id = ANY($1::bigint[])
            OR op_iapp_id = ANY($1::bigint[])
         GROUP BY COALESCE(NULLIF(op_producao_id, 0), op_iapp_id)`,
@@ -829,7 +829,7 @@ router.get('/pendentes', requireAuth, async (_req, res) => {
     const [kpResult, riResult] = await Promise.all([
       dbQuery(
         `SELECT id, op_producao_id, op_iapp_id, numero_op, status, codigo, observacao, postos, COALESCE(ri, FALSE) AS ri
-           FROM "Producao"."Kanban_programacao"
+           FROM producao."Kanban_programacao"
           WHERE COALESCE(ri, FALSE) = TRUE
             AND COALESCE(NULLIF(TRIM(status), ''), '') <> ''
             AND LOWER(TRIM(status)) NOT IN ('programado', 'pedidos')`
@@ -875,8 +875,8 @@ router.get('/pendentes', requireAuth, async (_req, res) => {
               op.codigo AS prod_codigo,
               COALESCE(po.descricao, '') AS prod_descricao,
               '04 - Produto Acabado' AS prod_tipo
-         FROM "Producao"."OP_producao" op
-         LEFT JOIN public.produtos_omie po ON po.codigo_produto = op.codigo_produto
+         FROM producao."OP_producao" op
+         LEFT JOIN produto.produtos_omie po ON po.codigo_produto = op.codigo_produto
         WHERE op.id = ANY($1::bigint[])`,
       [opIds]
     );
@@ -996,7 +996,7 @@ router.post('/preparar', requireAuth, express.json(), async (req, res) => {
     const codigoProdutoBody = Number(req.body?.codigo_produto) || null;
 
     const { rows: opProdRows } = await dbQuery(
-      `SELECT id, n_op, codigo_produto, codigo FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
+      `SELECT id, n_op, codigo_produto, codigo FROM producao."OP_producao" WHERE id = $1 LIMIT 1`,
       [opRefId]
     );
     const opRow = opProdRows[0] || null;
@@ -1011,7 +1011,7 @@ router.post('/preparar', requireAuth, express.json(), async (req, res) => {
       };
       if (!camposProd.descricao && camposProd.idOmie) {
         const { rows: poRows } = await dbQuery(
-          `SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+          `SELECT descricao FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
           [camposProd.idOmie]
         );
         if (poRows[0]?.descricao) camposProd.descricao = poRows[0].descricao;
@@ -1032,14 +1032,14 @@ router.post('/preparar', requireAuth, express.json(), async (req, res) => {
     let riAtivo = false;
     if (kanbanProgId) {
       const { rows: riRows } = await dbQuery(
-        `SELECT COALESCE(ri, FALSE) AS ri FROM "Producao"."Kanban_programacao" WHERE id = $1`,
+        `SELECT COALESCE(ri, FALSE) AS ri FROM producao."Kanban_programacao" WHERE id = $1`,
         [kanbanProgId]
       );
       riAtivo = !!riRows[0]?.ri;
     } else {
       const { rows: riRows } = await dbQuery(
         `SELECT BOOL_OR(COALESCE(ri, FALSE)) AS ri
-           FROM "Producao"."Kanban_programacao"
+           FROM producao."Kanban_programacao"
           WHERE op_producao_id = $1 OR op_iapp_id = $1`,
         [opRefId]
       );
@@ -1102,7 +1102,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
 
     const [opProdResult, kanbanProgIdFromBody] = await Promise.all([
       dbQuery(
-        `SELECT id, n_op, codigo_produto, codigo FROM "Producao"."OP_producao" WHERE id = $1 LIMIT 1`,
+        `SELECT id, n_op, codigo_produto, codigo FROM producao."OP_producao" WHERE id = $1 LIMIT 1`,
         [opRefId]
       ),
       Number(req.body?.id_kanban_programacao) || null,
@@ -1126,7 +1126,7 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
       };
       if (!camposProd.descricao && camposProd.idOmie) {
         const { rows: poRows } = await dbQuery(
-          `SELECT descricao FROM public.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
+          `SELECT descricao FROM produto.produtos_omie WHERE codigo_produto = $1 LIMIT 1`,
           [camposProd.idOmie]
         );
         if (poRows[0]?.descricao) camposProd.descricao = poRows[0].descricao;
@@ -1657,7 +1657,7 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
     const kanbanProgId = Number(check.id_kanban_programacao) || null;
     const avancarParaEmbalagem = isKanbanInspecaoFinal(statusRi);
     await dbQuery(
-      `UPDATE "Producao"."Kanban_programacao"
+      `UPDATE producao."Kanban_programacao"
           SET ri = FALSE,
               status = CASE WHEN $4::boolean THEN 'Embalagem' ELSE status END
         WHERE ($1::bigint IS NOT NULL AND id = $1)
