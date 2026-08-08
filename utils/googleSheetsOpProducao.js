@@ -2,38 +2,35 @@
  * Registra OPs geradas na planilha Google Sheets (aba PRODUÇÃO 2 - F/ ESCOPO)
  * via webhook do Google Apps Script.
  *
+ * Mapeamento na planilha:
+ *   E = MODELO
+ *   G = CONTROLADOR ← numero_op do sistema
+ *   F = ORDEM DE PRODUÇÃO (não preencher)
+ *   D = PEDIDO (deixar em branco — fórmula antiga gerava #NAME?)
+ *
  * Env: GOOGLE_SHEETS_OP_WEBHOOK_URL
+ *
+ * Após alterar scripts/google_apps_script/registrar_op_producao_escopo.gs,
+ * é obrigatório republicar a implantação do Apps Script (nova versão).
  */
 
 const ACAO = 'registrar_ops_producao_escopo';
 
-function montarFormulaPedido(rowNum) {
-  const r = Number(rowNum);
-  if (!Number.isFinite(r) || r < 1) {
-    throw new Error('Número de linha inválido para fórmula PEDIDO');
-  }
-  // Sintaxe US (IFERROR/VLOOKUP) — Google converte para SEERRO/PROCV na planilha pt-BR
-  return `=IFERROR(VLOOKUP(F${r},PEDIDOS!C:I,7,FALSE),IFERROR(VLOOKUP(F${r}*1,PEDIDOS!C:I,7,FALSE),IFERROR(VLOOKUP("*"&F${r}&"*",PEDIDOS!C:I,7,FALSE),"ESTOQUE")))`;
-}
-
 /**
- * @param {{ modelo: string, numeroOp: string|number, rowNum?: number }} params
+ * @param {{ modelo: string, numeroOp: string|number }} params
  */
-function montarLinhaPlanilhaOp({ modelo, numeroOp, rowNum }) {
+function montarLinhaPlanilhaOp({ modelo, numeroOp }) {
   const modeloTxt = String(modelo || '').trim();
   const numeroOpTxt = String(numeroOp || '').trim();
   if (!modeloTxt || !numeroOpTxt) {
     throw new Error('modelo e numeroOp são obrigatórios para a planilha');
   }
-  const linha = {
+  return {
     modelo: modeloTxt,
     numero_op: numeroOpTxt,
     etapa: 5,
+    // PEDIDO fica em branco no Apps Script (sem formula_pedido)
   };
-  if (rowNum != null) {
-    linha.formula_pedido = montarFormulaPedido(rowNum);
-  }
-  return linha;
 }
 
 async function postWebhookOpProducao(payload) {
@@ -121,7 +118,6 @@ async function registrarOpsGeradasNaPlanilha({ modelo, ops }) {
 
 module.exports = {
   ACAO,
-  montarFormulaPedido,
   montarLinhaPlanilhaOp,
   registrarOpsGeradasNaPlanilha,
 };

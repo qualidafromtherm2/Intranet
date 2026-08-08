@@ -376,6 +376,17 @@
       <i class="fa-solid fa-flask" style="margin-right:8px;"></i>
       testes
     </a>
+    <a href="#"
+       id="menu-producao-relatorio"
+       class="menu-link"
+       data-nav-key="side:producao:relatorio"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Relatório Produção"
+       data-nav-selector="#menu-producao-relatorio">
+      <i class="fa-solid fa-file-lines" style="margin-right:8px;"></i>
+      Relatório Produção
+    </a>
   </div>
 </div>
 
@@ -13109,6 +13120,50 @@
           </div>
         </div>
 
+        <!-- Painel Produção: Relatório Gerencial (tempo por posto / RI) -->
+        <div id="producaoRelatorioPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-file-lines" style="color:#14b8a6;"></i>
+                  Relatório Gerencial — Produção
+                </div>
+                <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-left:auto;">
+                  <div style="display:flex;align-items:center;gap:8px;">
+                    <label for="prodRelGerModo" style="font-size:12px;font-weight:600;color:#94a3b8;white-space:nowrap;">Período</label>
+                    <select id="prodRelGerModo"
+                      style="padding:6px 10px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:13px;min-width:210px;">
+                      <option value="mes">Mês atual</option>
+                      <option value="3m">3 últimos meses (sem o atual)</option>
+                      <option value="6m">6 últimos meses (sem o atual)</option>
+                      <option value="anual">Anual (12 meses, sem o atual)</option>
+                    </select>
+                  </div>
+                  <button id="prodRelGerAtualizarBtn" type="button" title="Atualizar"
+                    style="padding:6px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;">
+                    <i class="fa-solid fa-rotate"></i>
+                  </button>
+                  <button id="prodRelGerPdfBtn" type="button" title="Exportar PDF"
+                    style="padding:6px 14px;border-radius:8px;border:1px solid #14b8a6;background:rgba(20,184,166,.15);color:#5eead4;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;">
+                    <i class="fa-solid fa-file-pdf"></i> Exportar PDF
+                  </button>
+                </div>
+              </div>
+
+              <div id="prodRelGerStatus" style="display:none;margin-top:14px;font-size:13px;color:#94a3b8;">Carregando...</div>
+              <div id="prodRelGerErro" style="display:none;margin-top:14px;font-size:13px;color:#f87171;"></div>
+
+              <div id="prodRelGerConteudo" style="display:none;margin-top:16px;">
+                <div class="at-rel-ger-layout">
+                  <nav class="at-rel-ger-nav" id="prodRelGerNav" aria-label="Seções do relatório de produção"></nav>
+                  <div class="at-rel-ger-main" id="prodRelGerPages"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Modal Configuração — RI Registro de inspeção -->
         <div id="riRegistroConfigModal" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.55);align-items:center;justify-content:center;padding:20px;">
           <div style="width:100%;max-width:480px;background:#1e293b;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 20px 50px rgba(0,0,0,.45);overflow:hidden;">
@@ -13508,6 +13563,7 @@
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260805c" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
+  <script src="/public/js/producao-relatorio-gerencial.js?v=20260807a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script type="module" src="menu_produto.js?v=20260807-chamado-aprovacao-solucao"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
@@ -15154,6 +15210,7 @@ function attachDropZone(ul) {
 #sacAtRelatorioPane .content-section,
 #vendasRelatorioPane .content-section,
 #logisticaRelatorioPane .content-section { overflow: visible; }
+#producaoRelatorioPane .content-section { overflow: visible; }
 
 /* CFOP config: evita checkbox gigante (regras globais de input esticam o nativo) */
 #vendRelGerCfopLista .vend-rel-cfop-chk,
@@ -20870,7 +20927,8 @@ function attachDropZone(ul) {
     colaboradores: ['btn-colaboradores'],
     relatorio_at: ['menu-sac-at-relatorio'],
     relatorio_vendas: ['menu-vendas-relatorio'],
-    relatorio_logistica: ['menu-log-relatorio']
+    relatorio_logistica: ['menu-log-relatorio'],
+    relatorio_producao: ['menu-producao-relatorio']
   };
   const PURCHASE_MODE = {
     OMIE: 'omie',
@@ -21458,6 +21516,7 @@ function attachDropZone(ul) {
     if (t.includes('relatorio') && t.includes('at')) return 'relatorio_at';
     if (t.includes('relatorio') && t.includes('venda')) return 'relatorio_vendas';
     if (t.includes('relatorio') && (t.includes('logistica') || t.includes('logística'))) return 'relatorio_logistica';
+    if (t.includes('relatorio') && (t.includes('producao') || t.includes('produção'))) return 'relatorio_producao';
     if ((t.includes('grafico') && t.includes('at')) || (t.includes('graf') && t.includes('at'))) return 'relatorio_at';
     if (t.includes('sincron')) return 'sincronizacao';
     if (t.includes('colaborador')) return 'colaboradores';

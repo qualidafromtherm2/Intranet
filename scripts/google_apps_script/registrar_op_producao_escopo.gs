@@ -1,15 +1,24 @@
 /**
  * Google Apps Script — registrar OPs na aba "PRODUÇÃO 2 - F/ ESCOPO"
  *
- * Grava C, E, G, H. A coluna D (PEDIDO) NÃO é montada como texto.
- * O número da OP vai na coluna G (CONTROLADOR).
- * Em seguida faz autoFill da fórmula da linha de cima (igual arrastar no Sheets).
+ * Colunas gravadas:
+ *   C = PREVISÃO DE INICIO (hoje)
+ *   E = MODELO
+ *   G = CONTROLADOR ← número da OP do sistema (NÃO vai em F / ORDEM DE PRODUÇÃO)
+ *   H = Nº DA ETAPA (5)
  *
- * Implantar: Gerenciar implantações → EDITAR (lápis) → Nova versão → Implantar
+ * Coluna D (PEDIDO): fica em branco (fórmula TO_TEXT/VLOOKUP gerava #NAME?).
+ * Coluna F (ORDEM DE PRODUÇÃO): fica em branco.
+ *
+ * IMPORTANTE — após alterar este arquivo, republicar o webhook:
+ *   Apps Script → Implantar → Gerenciar implantações → EDITAR (lápis)
+ *   → Nova versão → Implantar
+ * Sem republicar, o Google continua com a versão antiga (OP na coluna F).
  */
 
 var SPREADSHEET_ID = '1Kzg7LngaUig6t2CLabS1fhZ-iD5idrmv1ZesIUVOy1M';
 var ABA_ESCOPO = 'PRODUÇÃO 2 - F/ ESCOPO';
+var SCRIPT_VERSION = '20260807a-controlador-g-pedido-vazio';
 
 function doPost(e) {
   try {
@@ -39,7 +48,7 @@ function doPost(e) {
       ok: true,
       inseridas: resultado.inseridas,
       linhas: resultado.linhas,
-      script_version: '20260703i-autofill',
+      script_version: SCRIPT_VERSION,
     });
   } catch (err) {
     return jsonOut({ ok: false, error: String(err && err.message ? err.message : err) });
@@ -58,34 +67,35 @@ function registrarLinhasOpEscopo(sheet, linhas) {
     var etapa = Number(item.etapa);
     if (!modelo || !numeroOp) continue;
 
-    var rowNum = proximaLinhaVaziaColunaF(sheet);
+    var rowNum = proximaLinhaLivre(sheet);
 
-    // Só as colunas de dados — NÃO grava fórmula em D como texto
+    // C — previsão de início
     sheet.getRange(rowNum, 3).setValue(hoje);
     sheet.getRange(rowNum, 3).setNumberFormat('dd/MM/yyyy');
+
+    // D — PEDIDO: deixar em branco (evita #NAME? de TO_TEXT / fórmula quebrada)
+    sheet.getRange(rowNum, 4).clearContent();
+
+    // E — modelo
     sheet.getRange(rowNum, 5).setValue(modelo);
-    // G (coluna 7) = CONTROLADOR — número da OP (antes ia na F / ORDEM DE PRODUÇÃO)
+
+    // F — ORDEM DE PRODUÇÃO: não preencher (número do sistema vai no CONTROLADOR)
+    sheet.getRange(rowNum, 6).clearContent();
+
+    // G — CONTROLADOR = número da OP gerada no intranet
     sheet.getRange(rowNum, 7).setValue(numeroOp);
+
+    // H — etapa
     sheet.getRange(rowNum, 8).setValue(Number.isFinite(etapa) && etapa > 0 ? etapa : 5);
 
-    // D = arrasta fórmula da linha modelo (igual você faz na tela)
-    var templateRow = buscarLinhaModeloFormula(sheet, rowNum);
-    sheet.getRange(templateRow, 4).autoFill(
-      sheet.getRange(templateRow, 4, rowNum, 4),
-      SpreadsheetApp.AutoFillSeries.DEFAULT_SERIES
-    );
-
     SpreadsheetApp.flush();
-    var formulaGravada = sheet.getRange(rowNum, 4).getFormula();
-    var displayPedido = sheet.getRange(rowNum, 4).getDisplayValue();
 
     detalhes.push({
       numero_op: numeroOp,
       linha: rowNum,
-      pedido: displayPedido,
-      template_row: templateRow,
-      formula: formulaGravada,
-      formula_ok: displayPedido !== '#NAME?',
+      coluna_controlador: 'G',
+      pedido: '',
+      script_version: SCRIPT_VERSION,
     });
     count++;
   }
@@ -93,12 +103,15 @@ function registrarLinhasOpEscopo(sheet, linhas) {
   return { inseridas: count, linhas: detalhes };
 }
 
-function proximaLinhaVaziaColunaF(sheet) {
+/**
+ * Próxima linha livre: considera usada se F (histórico) OU G (CONTROLADOR) tiver valor.
+ */
+function proximaLinhaLivre(sheet) {
   var last = sheet.getLastRow();
   if (last < 1) return 1;
 
-  // Considera a linha "usada" se F (histórico) OU G (novo — CONTROLADOR) tiver dado.
-  var valores = sheet.getRange(1, 6, last, 6).getValues();
+  // Colunas F e G (índices 6 e 7)
+  var valores = sheet.getRange(1, 6, last, 7).getValues();
   var ultimaComDado = 0;
   for (var i = 0; i < valores.length; i++) {
     var colF = String(valores[i][0] || '').trim();
@@ -110,29 +123,6 @@ function proximaLinhaVaziaColunaF(sheet) {
   return ultimaComDado + 1;
 }
 
-/**
- * Linha com fórmula PEDIDO que mostra valor válido (não #NAME?).
- * Preferimos linhas que já estão "ok" na tela — autoFill replica o arrastar.
- */
-function buscarLinhaModeloFormula(sheet, antesDeRow) {
-  var limite = Math.max(2, antesDeRow - 300);
-
-  for (var r = antesDeRow - 1; r >= limite; r--) {
-    var formula = sheet.getRange(r, 4).getFormula();
-    if (!formula) continue;
-
-    var fUp = String(formula).toUpperCase();
-    if (fUp.indexOf('PROCV') < 0 && fUp.indexOf('VLOOKUP') < 0) continue;
-
-    var display = String(sheet.getRange(r, 4).getDisplayValue() || '').trim();
-    if (!display || display === '#NAME?' || display === '#N/A') continue;
-
-    return r;
-  }
-
-  throw new Error('Nenhuma linha modelo de PEDIDO encontrada para autoFill');
-}
-
 function jsonOut(obj) {
   return ContentService
     .createTextOutput(JSON.stringify(obj))
@@ -140,24 +130,13 @@ function jsonOut(obj) {
 }
 
 /** Teste manual no editor Apps Script */
-function testarFormulaPedido() {
+function testarInsercaoControlador() {
   var ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   var sheet = ss.getSheetByName(ABA_ESCOPO);
-  var rowNum = proximaLinhaVaziaColunaF(sheet);
-
-  sheet.getRange(rowNum, 3).setValue(new Date());
-  sheet.getRange(rowNum, 5).setValue('MODELO-TESTE-SGF');
-  sheet.getRange(rowNum, 7).setValue('TESTE-AUTOFILL');
-  sheet.getRange(rowNum, 8).setValue(5);
-
-  var tpl = buscarLinhaModeloFormula(sheet, rowNum);
-  sheet.getRange(tpl, 4).autoFill(
-    sheet.getRange(tpl, 4, rowNum, 4),
-    SpreadsheetApp.AutoFillSeries.DEFAULT_SERIES
-  );
-  SpreadsheetApp.flush();
-
-  Logger.log('Template: ' + tpl);
-  Logger.log('Formula: ' + sheet.getRange(rowNum, 4).getFormula());
-  Logger.log('Display: ' + sheet.getRange(rowNum, 4).getDisplayValue());
+  var resultado = registrarLinhasOpEscopo(sheet, [{
+    modelo: 'MODELO-TESTE-SGF',
+    numero_op: 'TESTE-' + Utilities.formatDate(new Date(), 'America/Sao_Paulo', 'yyyyMMddHHmmss'),
+    etapa: 5,
+  }]);
+  Logger.log(JSON.stringify(resultado));
 }
