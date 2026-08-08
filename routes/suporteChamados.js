@@ -189,21 +189,27 @@ async function uploadAnexo(file, chamadoTempId) {
   };
 }
 
-// GET /api/suporte/chamados/contagem — abertos (aberto + em_andamento)
+// GET /api/suporte/chamados/contagem
+// Admin: fila "Aberto" (aberto + em_andamento)
+// Usuário: pendências dele (necessário revisão + aguardando aprovação)
 router.get('/chamados/contagem', requireAuth, async (req, res) => {
   try {
     await ensureSchema();
     const admin = isAdmin(req);
     const usuario = getUsuario(req);
     const params = [];
-    const where = [
-      `LOWER(REPLACE(TRIM(status), ' ', '_')) IN ('aberto', 'em_andamento')`,
-    ];
+    const where = [];
 
-    // Não-admin: só os próprios; admin: fila completa
-    if (!admin) {
+    if (admin) {
+      where.push(
+        `LOWER(REPLACE(TRIM(status), ' ', '_')) IN ('aberto', 'em_andamento')`
+      );
+    } else {
       params.push(usuario);
       where.push(`criado_por = $${params.length}`);
+      where.push(
+        `LOWER(REPLACE(TRIM(status), ' ', '_')) IN ('necessario_revisao', 'aguardando_aprovacao')`
+      );
     }
 
     const { rows } = await dbQuery(
@@ -213,7 +219,9 @@ router.get('/chamados/contagem', requireAuth, async (req, res) => {
       params
     );
 
-    res.json({ ok: true, admin, abertos: rows[0]?.total || 0 });
+    const contador = rows[0]?.total || 0;
+    // `abertos` mantido por compatibilidade com o front antigo (= valor do badge)
+    res.json({ ok: true, admin, contador, abertos: contador });
   } catch (err) {
     console.error('[suporte/chamados] contagem:', err);
     res.status(500).json({ error: err.message || 'Falha ao contar chamados' });

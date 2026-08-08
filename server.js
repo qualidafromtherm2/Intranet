@@ -13,7 +13,7 @@ const {
 const SERVICE_PROFILE = String(process.env.SERVICE_PROFILE || 'full').trim().toLowerCase();
 const IS_CHAT_SERVICE = SERVICE_PROFILE === 'chat';
 if (IS_CHAT_SERVICE) {
-  console.log('[boot] SERVICE_PROFILE=chat — modo leve (sem SheetsAuto/crons/schemas pesados)');
+  console.log('[boot] SERVICE_PROFILE=chat — modo leve (sem crons/schemas pesados)');
 }
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
@@ -34,7 +34,8 @@ const {
   fecharSolicitacoesDePedidosFechados,
   sincronizarSolicitacaoPorPedido,
   refrescarPedidoFechadoDaOmie,
-  aplicarPendenciaOmieLote
+  aplicarPendenciaOmieLote,
+  fecharAposRecebimentoNfeLocal
 } = require('./utils/syncPedidosCompraOmie');
 const {
   MSG_FORMATO: ETQ_ENDERECO_MSG_FORMATO,
@@ -8771,6 +8772,67 @@ app.get('/api/compras/categoria-por-produto/:codigo_produto', async (req, res) =
   } catch (err) {
     console.error('[Compras] Erro ao buscar categoria por produto:', err);
     res.status(500).json({ ok: false, error: 'Erro ao buscar categoria' });
+  }
+});
+
+// ======== CONFIGURAÇÃO: e-mail ao criar requisição (setor Compras) ========
+const COMPRAS_CFG_EMAIL_REQUISICAO = 'email_requisicao_ativo';
+
+async function ensureComprasConfigSistema() {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS compras.config_sistema (
+      chave TEXT PRIMARY KEY,
+      valor TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(
+    `INSERT INTO compras.config_sistema (chave, valor, updated_at)
+     VALUES ($1, 'true', NOW())
+     ON CONFLICT (chave) DO NOTHING`,
+    [COMPRAS_CFG_EMAIL_REQUISICAO]
+  );
+}
+
+async function obterEmailRequisicaoComprasAtivo() {
+  await ensureComprasConfigSistema();
+  const { rows } = await pool.query(
+    `SELECT valor FROM compras.config_sistema WHERE chave = $1 LIMIT 1`,
+    [COMPRAS_CFG_EMAIL_REQUISICAO]
+  );
+  const raw = String(rows[0]?.valor ?? 'true').trim().toLowerCase();
+  return !['false', '0', 'off', 'nao', 'não', 'desativado'].includes(raw);
+}
+
+// GET /api/compras/config-email-requisicao
+app.get('/api/compras/config-email-requisicao', async (req, res) => {
+  try {
+    const ativo = await obterEmailRequisicaoComprasAtivo();
+    return res.json({ ok: true, ativo });
+  } catch (err) {
+    console.error('[Compras] Erro ao ler config e-mail requisição:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao ler configuração' });
+  }
+});
+
+// PUT /api/compras/config-email-requisicao  body: { ativo: true|false }
+app.put('/api/compras/config-email-requisicao', express.json(), async (req, res) => {
+  try {
+    const ativo = req.body?.ativo === true || String(req.body?.ativo || '').toLowerCase() === 'true';
+    await ensureComprasConfigSistema();
+    const { rows } = await pool.query(
+      `INSERT INTO compras.config_sistema (chave, valor, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (chave)
+       DO UPDATE SET valor = EXCLUDED.valor, updated_at = NOW()
+       RETURNING chave, valor, updated_at`,
+      [COMPRAS_CFG_EMAIL_REQUISICAO, ativo ? 'true' : 'false']
+    );
+    console.log(`[Compras] E-mail requisição ${ativo ? 'ATIVADO' : 'DESATIVADO'}`);
+    return res.json({ ok: true, ativo, config: rows[0] });
+  } catch (err) {
+    console.error('[Compras] Erro ao salvar config e-mail requisição:', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao salvar configuração' });
   }
 });
 
@@ -35018,6 +35080,19 @@ app.post('/api/compras/sem-cadastro/:id/criar-requisicao-omie', express.json(), 
     }
     if (!numeroRequisicaoOmie) numeroRequisicaoOmie = String(codReqCompraOmie || '');
 
+    try {
+      const { notificarRequisicaoComprasCriada } = require('./utils/comprasRequisicaoEmail');
+      await notificarRequisicaoComprasCriada({
+        origem: 'compras_sem_cadastro',
+        itemIds: idsGrupo,
+        numeroPedido: novoNumeroPedido,
+        ncodped: codReqCompraOmie,
+        numeroRequisicaoOmie,
+      });
+    } catch (errEmail) {
+      console.error('[ComprasReqEmail] Falha após sem-cadastro criar-requisicao-omie:', errEmail?.message || errEmail);
+    }
+
     return res.json({
       ok: true,
       codReqCompra: codReqCompraOmie,
@@ -35458,6 +35533,18 @@ async function processarRequisicaoDiretaNaOmie(client, itemsGroup, solicitante) 
     `, [codIntReqCompra, codReqCompra, itemGroup.idDb]);
 
     console.log(`[Compras-Solicitacao-Omie] Item ${itemGroup.idDb} atualizado - numero_pedido: ${codIntReqCompra}, ncodped: ${codReqCompra}`);
+  }
+
+  try {
+    const { notificarRequisicaoComprasCriada } = require('./utils/comprasRequisicaoEmail');
+    await notificarRequisicaoComprasCriada({
+      origem: 'solicitacao_compras',
+      itemIds: itemsGroup.map((g) => g.idDb).filter((id) => Number.isInteger(Number(id))),
+      numeroPedido: codIntReqCompra,
+      ncodped: codReqCompra,
+    });
+  } catch (errEmail) {
+    console.error('[ComprasReqEmail] Falha após processarRequisicaoDiretaNaOmie:', errEmail?.message || errEmail);
   }
 
   return {
@@ -36173,6 +36260,18 @@ async function criarRequisicaoOmieParaItem(item, itemId) {
     WHERE id = $3
   `, [codIntReqCompra, codReqCompra, itemId]);
 
+  try {
+    const { notificarRequisicaoComprasCriada } = require('./utils/comprasRequisicaoEmail');
+    await notificarRequisicaoComprasCriada({
+      origem: 'solicitacao_compras',
+      itemIds: [itemId],
+      numeroPedido: codIntReqCompra,
+      ncodped: codReqCompra,
+    });
+  } catch (errEmail) {
+    console.error('[ComprasReqEmail] Falha após criarRequisicaoOmieParaItem:', errEmail?.message || errEmail);
+  }
+
   return { codReqCompra, codIntReqCompra, omieResult };
 }
 
@@ -36348,6 +36447,19 @@ async function criarRequisicaoOmieParaItens(itens) {
       updated_at = NOW()
     WHERE id = ANY($3)
   `, [codIntReqCompra, codReqCompra, itens.map(i => i.id)]);
+
+  try {
+    const { notificarRequisicaoComprasCriada } = require('./utils/comprasRequisicaoEmail');
+    await notificarRequisicaoComprasCriada({
+      origem: 'solicitacao_compras',
+      itemIds: itens.map((i) => i.id),
+      numeroPedido: codIntReqCompra,
+      ncodped: codReqCompra,
+      numeroRequisicaoOmie,
+    });
+  } catch (errEmail) {
+    console.error('[ComprasReqEmail] Falha após criarRequisicaoOmieParaItens:', errEmail?.message || errEmail);
+  }
 
   return { codReqCompra, codIntReqCompra, omieResult, grupo_requisicao: primeiroItem?.grupo_requisicao || null, numeroRequisicaoOmie };
 }
@@ -37636,6 +37748,8 @@ app.get('/api/compras/compras-realizadas', async (req, res) => {
         AND po.pendente_omie IS TRUE
         AND COALESCE(po."Pedido recebido", FALSE) = FALSE
         AND BTRIM(COALESCE(po.c_etapa, '')) IN ('10', '15')
+        -- Já associados/recebidos na NF não ficam em Compra realizada
+        AND COALESCE(BTRIM(po."Etapa_NF"), '') NOT IN ('50', '60', '80')
         AND po.d_inc_data >= '2026-01-01'${whereDataCR}
       ORDER BY
         CASE WHEN po.c_numero ~ '^\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
@@ -38176,16 +38290,18 @@ Retorne SOMENTE um array JSON válido (sem texto adicional), ordenado do MAIS ao
  * GET /api/compras/pedidos-etapa-nf
  * Retorna recebimentos da tabela logistica.recebimentos_nfe_omie:
  * - Faturada pelo fornecedor: c_recebido <> S, c_cancelada <> S, c_bloqueado <> S
- * - Recebido: c_recebido = S, c_etapa IN (50,60), c_cancelada <> S, c_bloqueado <> S
- * - Concluído: c_recebido = S, c_etapa = 80, c_cancelada <> S, c_bloqueado <> S
+ * - Recebido parcialmente: c_recebido = S, c_etapa = 50
+ * - Recebido: c_recebido = S, c_etapa = 60
+ * - Concluído: c_recebido = S, c_etapa = 80
+ * Também inclui pedidos Omie com Etapa_NF = 50 (kanban Recebido parcialmente).
  * Igual ao filtro da Omie: exclui CT-e (modelo 57) — só NF-e (modelo 55).
  * Faturada não tem trava de data (Omie usa "Todos os períodos").
- * Filtro de calendário: Faturada usa d_emissao_nfe; Recebido/Concluído usam d_rec
+ * Filtro de calendário: Faturada usa d_emissao_nfe; Recebido/Parcial/Concluído usam d_rec
  */
 app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
   try {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
-    console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Recebido/Concluído)...');
+    console.log('[Compras/PedidosEtapaNF] Listando recebimentos NF-e (Faturada/Parcial/Recebido/Concluído)...');
     await ensureRecebimentosNfeDadosAdicionaisColumn(pool);
 
     const { dataInicio: diNF, dataFim: dfNF } = req.query;
@@ -38264,20 +38380,33 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       ${orderBase}
     `;
 
-    // 2) Recebido: não cancelada, não bloqueada, recebida, etapa 50 ou 60
+    // 2) Recebido parcialmente (NF-e etapa 50)
+    const queryRecebidoParcial = `
+      SELECT ${selectBase}
+      FROM logistica.recebimentos_nfe_omie r
+      WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
+        AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
+        AND COALESCE(BTRIM(r.c_etapa), '') = '50'
+        AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
+        AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
+      ${orderBase}
+    `;
+
+    // 3) Recebido total (NF-e etapa 60)
     const queryRecebido = `
       SELECT ${selectBase}
       FROM logistica.recebimentos_nfe_omie r
       WHERE UPPER(BTRIM(COALESCE(r.c_cancelada, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_bloqueado, 'N'))) NOT IN ('S', 'SIM')
         AND UPPER(BTRIM(COALESCE(r.c_recebido, 'N'))) IN ('S', 'SIM')
-        AND COALESCE(BTRIM(r.c_etapa), '') IN ('50', '60')
+        AND COALESCE(BTRIM(r.c_etapa), '') = '60'
         AND BTRIM(COALESCE(r.c_modelo_nfe, '55')) <> '57'
         AND r.d_emissao_nfe >= '2026-01-01'${whereDataRecebConc}
       ${orderBase}
     `;
 
-    // 3) Concluído: não cancelada, não bloqueada, recebida, etapa 80
+    // 4) Concluído: não cancelada, não bloqueada, recebida, etapa 80
     const queryConcluido = `
       SELECT ${selectBase}
       FROM logistica.recebimentos_nfe_omie r
@@ -38290,14 +38419,81 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       ${orderBase}
     `;
 
-    const [resFaturada, resRecebido, resConcluido] = await Promise.all([
+    // 5) Pedidos Omie com Etapa_NF=50 (saiu de Compra realizada, aguarda restante)
+    const paramsPedParcial = [];
+    let whereDataPedParcial = '';
+    if (diNF) {
+      paramsPedParcial.push(diNF);
+      whereDataPedParcial += ` AND po.d_inc_data::date >= $${paramsPedParcial.length}::date`;
+    }
+    if (dfNF) {
+      paramsPedParcial.push(dfNF);
+      whereDataPedParcial += ` AND po.d_inc_data::date <= $${paramsPedParcial.length}::date`;
+    }
+    const queryPedidosOmieParcial = `
+      SELECT
+        po.n_cod_ped,
+        po.c_numero,
+        po.c_cod_int_ped,
+        po.c_obs,
+        po.c_etapa,
+        po."Etapa_NF" AS etapa_nf,
+        po.n_cod_for,
+        po.d_inc_data,
+        po.d_dt_previsao,
+        po.n_valor,
+        po."NFe vinculada",
+        cc.nome_fantasia AS fornecedor_nome,
+        pop.c_produto,
+        pop.c_descricao,
+        pop.c_unidade,
+        pop.n_qtde,
+        pop.n_qtde_rec,
+        pop.n_val_tot,
+        pop.c_link_nfe_pdf,
+        pop.c_dados_adicionais_nfe,
+        po.updated_at,
+        origem.solicitante,
+        origem.grupo_requisicao
+      FROM compras.pedidos_omie po
+      LEFT JOIN omie.fornecedores cc ON cc.codigo_cliente_omie = po.n_cod_for
+      LEFT JOIN compras.pedidos_omie_produtos pop ON pop.n_cod_ped = po.n_cod_ped
+      LEFT JOIN LATERAL (
+        SELECT src.solicitante, src.grupo_requisicao
+        FROM (
+          SELECT sc.solicitante, sc.grupo_requisicao, sc.created_at
+          FROM compras.solicitacao_compras sc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(sc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+          UNION ALL
+          SELECT csc.solicitante, csc.grupo_requisicao, csc.created_at
+          FROM compras.compras_sem_cadastro csc
+          WHERE TRIM(COALESCE(po.c_cod_int_ped, '')) <> ''
+            AND TRIM(COALESCE(csc.numero_pedido, '')) = TRIM(COALESCE(po.c_cod_int_ped, ''))
+        ) src
+        ORDER BY src.created_at DESC NULLS LAST
+        LIMIT 1
+      ) origem ON TRUE
+      WHERE COALESCE(po.inativo, FALSE) = FALSE
+        AND COALESCE(po."Pedido recebido", FALSE) = FALSE
+        AND BTRIM(COALESCE(po."Etapa_NF", '')) = '50'
+        AND po.d_inc_data >= '2026-01-01'${whereDataPedParcial}
+      ORDER BY
+        CASE WHEN po.c_numero ~ '^\\d+$' THEN po.c_numero::INT ELSE NULL END DESC,
+        po.c_numero DESC
+    `;
+
+    const [resFaturada, resRecebidoParcial, resRecebido, resConcluido, resPedOmieParcial] = await Promise.all([
       pool.query(queryFaturada, paramsFaturada),
+      pool.query(queryRecebidoParcial, paramsRecebConc),
       pool.query(queryRecebido, paramsRecebConc),
-      pool.query(queryConcluido, paramsRecebConc)
+      pool.query(queryConcluido, paramsRecebConc),
+      pool.query(queryPedidosOmieParcial, paramsPedParcial)
     ]);
 
     const mapearStatus = {
       faturada: 'faturada pelo fornecedor',
+      parcial: 'recebido parcialmente',
       recebido: 'recebido',
       concluido: 'concluído'
     };
@@ -38349,11 +38545,68 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
     for (const row of resFaturada.rows) {
       pedidos.push(montarRegistro(row, mapearStatus.faturada));
     }
+    for (const row of resRecebidoParcial.rows) {
+      pedidos.push(montarRegistro(row, mapearStatus.parcial));
+    }
     for (const row of resRecebido.rows) {
       pedidos.push(montarRegistro(row, mapearStatus.recebido));
     }
     for (const row of resConcluido.rows) {
       pedidos.push(montarRegistro(row, mapearStatus.concluido));
+    }
+
+    // Agrupa itens dos pedidos Omie parciais (mesmo formato de Compra realizada)
+    const pedidosOmieParcialPorNumero = new Map();
+    for (const row of resPedOmieParcial.rows) {
+      const numero = String(row.c_numero || '').trim() || `ped_${row.n_cod_ped}`;
+      if (!pedidosOmieParcialPorNumero.has(numero)) {
+        pedidosOmieParcialPorNumero.set(numero, {
+          numero,
+          c_numero: String(row.c_numero || '').trim(),
+          n_cod_ped: row.n_cod_ped,
+          n_id_receb: null,
+          c_cod_int_ped: row.c_cod_int_ped || null,
+          c_etapa: row.c_etapa || '',
+          etapa_nf: '50',
+          status_nf: mapearStatus.parcial,
+          n_cod_for: row.n_cod_for,
+          d_inc_data: row.d_inc_data || null,
+          d_dt_previsao: row.d_dt_previsao || null,
+          d_rec: null,
+          solicitante: row.solicitante || null,
+          grupo_requisicao: row.grupo_requisicao || null,
+          fornecedor_nome: row.fornecedor_nome || 'Sem fornecedor',
+          c_chave_nfe: null,
+          c_dados_adicionais: null,
+          n_valor: row.n_valor ?? null,
+          n_valor_nfe: null,
+          nfe_vinculada: row['NFe vinculada'] || null,
+          c_obs: row.c_obs || null,
+          cfops_entrada: [],
+          compras: null,
+          origem_recebimento_nfe: false,
+          origem_pedido_omie_parcial: true,
+          created_at: null,
+          updated_at: row.updated_at || null,
+          itens: []
+        });
+      }
+      const ped = pedidosOmieParcialPorNumero.get(numero);
+      if (row.c_produto || row.c_descricao) {
+        ped.itens.push({
+          produto_codigo: row.c_produto || '-',
+          produto_descricao: row.c_descricao || '-',
+          c_unidade: row.c_unidade || '-',
+          n_qtde: row.n_qtde,
+          n_qtde_rec: row.n_qtde_rec,
+          n_val_tot: row.n_val_tot,
+          c_link_nfe_pdf: row.c_link_nfe_pdf || null,
+          c_dados_adicionais_nfe: row.c_dados_adicionais_nfe || null
+        });
+      }
+    }
+    for (const ped of pedidosOmieParcialPorNumero.values()) {
+      pedidos.push(ped);
     }
 
     const parseNumero = valor => {
@@ -38370,7 +38623,9 @@ app.get('/api/compras/pedidos-etapa-nf', async (req, res) => {
       return String(b.numero).localeCompare(String(a.numero));
     });
 
-    console.log(`[Compras/PedidosEtapaNF] Retornando ${pedidos.length} recebimentos agrupados (Faturada: ${resFaturada.rows.length}, Recebido: ${resRecebido.rows.length}, Concluído: ${resConcluido.rows.length})`);
+    console.log(
+      `[Compras/PedidosEtapaNF] Retornando ${pedidos.length} (Faturada: ${resFaturada.rows.length}, Parcial NF: ${resRecebidoParcial.rows.length}, Pedidos Omie parcial: ${pedidosOmieParcialPorNumero.size}, Recebido: ${resRecebido.rows.length}, Concluído: ${resConcluido.rows.length})`
+    );
     res.json({ ok: true, pedidos });
   } catch (err) {
     console.error('[Compras/PedidosEtapaNF] Erro ao listar recebimentos NF-e:', err);
@@ -41322,6 +41577,119 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       }
     }
 
+    // Fecha Compra realizada / solicitações mesmo se o webhook CompraProduto atrasar.
+    const pedidosParaFecharPosNfe = (
+      pedidosAssociadosIds.length > 0 ? pedidosAssociadosIds : [plano.n_cod_ped]
+    )
+      .map((id) => Number(id))
+      .filter((id) => Number.isFinite(id) && id > 0);
+
+    for (const codPedFechar of pedidosParaFecharPosNfe) {
+      try {
+        const { rows: resumoPos } = await pool.query(
+          `WITH pedido AS (
+             SELECT p.n_cod_ped,
+                    COALESCE(
+                      NULLIF(p.n_valor, 0),
+                      (
+                        SELECT COALESCE(SUM(COALESCE(pp.n_val_tot, 0)), 0)
+                          FROM compras.pedidos_omie_produtos pp
+                         WHERE pp.n_cod_ped = p.n_cod_ped
+                      ),
+                      0
+                    )::numeric AS valor_total,
+                    NULLIF(BTRIM(p."Etapa_NF"), '') AS etapa_nf,
+                    p.c_numero
+               FROM compras.pedidos_omie p
+              WHERE p.n_cod_ped = $1
+              LIMIT 1
+           ),
+           recebido AS (
+             SELECT COALESCE(SUM(COALESCE(i.v_total_item, 0)), 0)::numeric AS valor_recebido
+               FROM logistica.recebimentos_nfe_itens i
+               JOIN logistica.recebimentos_nfe_omie r
+                 ON r.n_id_receb = i.n_id_receb
+              WHERE i.n_id_pedido = $1
+                AND COALESCE(r.c_cancelada, 'N') <> 'S'
+           )
+           SELECT COALESCE(p.valor_total, 0) AS valor_total,
+                  COALESCE(rc.valor_recebido, 0) AS valor_recebido,
+                  p.etapa_nf,
+                  p.c_numero
+             FROM pedido p
+             CROSS JOIN recebido rc`,
+          [codPedFechar]
+        );
+
+        let etapaPos = String(resumoPos[0]?.etapa_nf || etapaPedidoNf || '').trim();
+        if (resumoPos.length > 0) {
+          const vt = Number(resumoPos[0].valor_total || 0);
+          const vr = Number(resumoPos[0].valor_recebido || 0);
+          if (vt > 0 && (vr + 0.01) >= vt) etapaPos = '60';
+          else if (!etapaPos) etapaPos = '50';
+          if (etapaPos === '50' || etapaPos === '60') {
+            await pool.query(
+              `UPDATE compras.pedidos_omie
+                  SET "Etapa_NF" = $2,
+                      updated_at = NOW()
+                WHERE n_cod_ped = $1`,
+              [codPedFechar, etapaPos]
+            );
+          }
+        }
+        if (Number(codPedFechar) === Number(plano.n_cod_ped) && etapaPos) {
+          etapaPedidoNf = etapaPos;
+        }
+
+        // Só força refresh/fechamento Omie no recebimento total (60).
+        // No parcial (50), refrescarPedidoFechadoDaOmie poderia marcar recebido demais cedo.
+        if (etapaPos === '60') {
+          try {
+            await refrescarPedidoFechadoDaOmie({
+              pool,
+              nCodPed: codPedFechar,
+              cNumero: resumoPos[0]?.c_numero || null,
+              delayMs: 150,
+              log: (...a) => console.log(...a),
+              omieConsultarPedCompra: async (nCod) => {
+                const resp = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    call: 'ConsultarPedCompra',
+                    app_key: OMIE_APP_KEY,
+                    app_secret: OMIE_APP_SECRET,
+                    param: [{ nCodPed: Number(nCod) }]
+                  })
+                });
+                const data = await resp.json().catch(() => ({}));
+                if (!resp.ok || data?.faultstring) {
+                  throw new Error(data?.faultstring || `HTTP ${resp.status}`);
+                }
+                return data;
+              }
+            });
+          } catch (errRefresh) {
+            console.warn(
+              `[Compras/NFeAssociarPedido] Refresh Omie pedido ${codPedFechar}:`,
+              errRefresh?.message || errRefresh
+            );
+          }
+        }
+
+        await fecharAposRecebimentoNfeLocal(pool, codPedFechar, {
+          etapaNf: etapaPos || '50',
+          origem: 'nfe-associar-pedido',
+          log: (...a) => console.log(...a)
+        });
+      } catch (errFecharPos) {
+        console.warn(
+          `[Compras/NFeAssociarPedido] Falha ao fechar pós-NF pedido ${codPedFechar}:`,
+          errFecharPos?.message || errFecharPos
+        );
+      }
+    }
+
     if (alertaItemAssociacao && !vinculoConfirmado) {
       throw new Error(alertaItemAssociacao);
     }
@@ -43170,538 +43538,23 @@ app.delete('/api/compras/itens/:id', async (req, res) => {
   }
 })();
 
-// ===================== AUTO-SYNC COMPRAS -> GOOGLE SHEETS =====================
-const GOOGLE_SHEETS_AUTOSYNC_ENABLED = process.env.GOOGLE_SHEETS_AUTOSYNC_ENABLED !== '0';
-const GOOGLE_SHEETS_SYNC_MODE = String(process.env.GOOGLE_SHEETS_SYNC_MODE || 'db-trigger').toLowerCase();
-const GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS = Math.max(
-  15000,
-  Number(process.env.GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS || 60000)
-);
-const GOOGLE_SHEETS_SYNC_CHANNEL = 'compras_google_sheets_sync';
-const comprasGoogleSheetsSyncState = {
-  running: false,
-  lastFingerprint: null,
-  timer: null,
-  eventDebounceTimer: null,
-  listenerClient: null,
-  lastSyncAt: null,
-  lastSyncReason: null,
-  lastSyncStatus: 'idle',
-  lastSyncRows: 0,
-  lastSyncError: null,
-};
-
-let historicoComprasHasValorPedidoColumn = null;
-let historicoComprasHasDtPrevisaoColumn = null;
-
-async function verificarColunaValorPedidoHistoricoCompras(force = false) {
-  if (!force && historicoComprasHasValorPedidoColumn !== null) {
-    return historicoComprasHasValorPedidoColumn;
-  }
-
-  const { rows } = await pool.query(`
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'compras'
-        AND table_name = 'historico_compras'
-        AND column_name = 'valor_pedido'
-    ) AS exists_col
-  `);
-
-  historicoComprasHasValorPedidoColumn = !!rows[0]?.exists_col;
-  return historicoComprasHasValorPedidoColumn;
-}
-
-async function verificarColunaDtPrevisaoHistoricoCompras(force = false) {
-  if (!force && historicoComprasHasDtPrevisaoColumn !== null) {
-    return historicoComprasHasDtPrevisaoColumn;
-  }
-
-  const { rows } = await pool.query(`
-    SELECT EXISTS (
-      SELECT 1
-      FROM information_schema.columns
-      WHERE table_schema = 'compras'
-        AND table_name = 'historico_compras'
-        AND column_name = 'd_dt_previsao'
-    ) AS exists_col
-  `);
-
-  historicoComprasHasDtPrevisaoColumn = !!rows[0]?.exists_col;
-  return historicoComprasHasDtPrevisaoColumn;
-}
-
-function formatarDataHoraPtBr(valor) {
-  if (!valor) return '-';
-  const data = new Date(valor);
-  if (Number.isNaN(data.getTime())) return '-';
-  return data.toLocaleString('pt-BR');
-}
-
-function formatarDataPtBr(valor) {
-  if (!valor) return '-';
-  const data = new Date(valor);
-  if (Number.isNaN(data.getTime())) return '-';
-  return data.toLocaleDateString('pt-BR');
-}
-
-function normalizarRetornoCotacao(valor, tableSource) {
-  const texto = String(valor || '').trim().toLowerCase();
-  if (!texto) return 'Não';
-  if (String(tableSource) === 'compras_sem_cadastro') {
-    const semRetorno = '🛒 apenas realizar compra sem retorno de valores ou caracteristica';
-    return texto === semRetorno ? 'Não' : 'Sim';
-  }
-  return ['s', 'sim', 'yes', 'true', '1'].includes(texto) ? 'Sim' : 'Não';
-}
-
-async function obterFingerprintComprasParaSheets() {
-  const { rows } = await pool.query(`
-    SELECT
-      (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.solicitacao_compras) AS max_sol,
-      (SELECT COUNT(*) FROM compras.solicitacao_compras) AS qtd_sol,
-      (SELECT COALESCE(MAX(updated_at), MAX(created_at), to_timestamp(0)) FROM compras.compras_sem_cadastro) AS max_sem,
-      (SELECT COUNT(*) FROM compras.compras_sem_cadastro) AS qtd_sem,
-      (SELECT COALESCE(MAX(created_at), to_timestamp(0)) FROM compras.historico_compras) AS max_hist,
-      (SELECT COUNT(*) FROM compras.historico_compras) AS qtd_hist
-  `);
-
-  const row = rows[0] || {};
-  const maxSol = row.max_sol ? new Date(row.max_sol).toISOString() : '0';
-  const maxSem = row.max_sem ? new Date(row.max_sem).toISOString() : '0';
-  const maxHist = row.max_hist ? new Date(row.max_hist).toISOString() : '0';
-  return `${maxSol}|${row.qtd_sol || 0}|${maxSem}|${row.qtd_sem || 0}|${maxHist}|${row.qtd_hist || 0}`;
-}
-
-async function montarLinhasComprasParaSheets() {
-  const { rows: solicitacoesBase } = await pool.query(`
-    SELECT
-      id,
-      numero_pedido,
-      produto_codigo,
-      produto_descricao,
-      quantidade,
-      prazo_solicitado,
-      previsao_chegada,
-      status,
-      observacao,
-      observacao_retificacao,
-      solicitante,
-      resp_inspecao_recebimento,
-      departamento,
-      centro_custo,
-      objetivo_compra,
-      fornecedor_nome,
-      fornecedor_id,
-      familia_produto,
-      grupo_requisicao,
-      retorno_cotacao,
-      categoria_compra_codigo,
-      categoria_compra_nome,
-      codigo_omie,
-      codigo_produto_omie,
-      anexos,
-      cnumero,
-      ncodped,
-      created_at,
-      updated_at,
-      'solicitacao_compras' AS table_source
-    FROM compras.solicitacao_compras
-  `);
-
-  const { rows: solicitacoesSemCadastro } = await pool.query(`
-    SELECT
-      id,
-      numero_pedido,
-      produto_codigo,
-      produto_descricao,
-      quantidade,
-      NULL::date AS prazo_solicitado,
-      NULL::date AS previsao_chegada,
-      status,
-      objetivo_compra AS observacao,
-      NULL::text AS observacao_retificacao,
-      solicitante,
-      resp_inspecao_recebimento,
-      departamento,
-      centro_custo,
-      objetivo_compra,
-      NULL::text AS fornecedor_nome,
-      NULL::text AS fornecedor_id,
-      NULL::text AS familia_produto,
-      grupo_requisicao,
-      retorno_cotacao,
-      categoria_compra_codigo,
-      categoria_compra_nome,
-      NULL::text AS codigo_omie,
-      NULL::text AS codigo_produto_omie,
-      anexos,
-      numero_pedido AS cnumero,
-      ncodped,
-      created_at,
-      updated_at,
-      'compras_sem_cadastro' AS table_source
-    FROM compras.compras_sem_cadastro
-  `);
-
-  const todas = [...solicitacoesBase, ...solicitacoesSemCadastro]
-    .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
-
-  return todas.map(item => ({
-    'Origem': item.table_source || '-',
-    'ID': item.id || '-',
-    'Nº Pedido': item.numero_pedido || '-',
-    'Código Produto': item.produto_codigo || '-',
-    'Descrição Produto': item.produto_descricao || '-',
-    'Quantidade': item.quantidade || 0,
-    'Prazo Solicitado': formatarDataPtBr(item.prazo_solicitado),
-    'Previsão Chegada': formatarDataPtBr(item.previsao_chegada),
-    'Status': item.status || '-',
-    'Observação': item.observacao || '-',
-    'Observação Retificação': item.observacao_retificacao || '-',
-    'Solicitante': item.solicitante || '-',
-    'Resp. Inspeção/Recebimento': item.resp_inspecao_recebimento || '-',
-    'Departamento': item.departamento || '-',
-    'Centro de Custo': item.centro_custo || '-',
-    'Objetivo da Compra': item.objetivo_compra || '-',
-    'Fornecedor Nome': item.fornecedor_nome || '-',
-    'Fornecedor ID': item.fornecedor_id || '-',
-    'Família Produto': item.familia_produto || '-',
-    'Grupo Requisição': item.grupo_requisicao || '-',
-    'Retorno Cotação': normalizarRetornoCotacao(item.retorno_cotacao, item.table_source),
-    'Categoria Compra Código': item.categoria_compra_codigo || '-',
-    'Categoria Compra Nome': item.categoria_compra_nome || '-',
-    'Código Omie': item.codigo_omie || '-',
-    'Código Produto Omie': item.codigo_produto_omie || '-',
-    'Anexos': item.anexos ? JSON.stringify(item.anexos) : '-',
-    'cNumero': item.cnumero || '-',
-    'nCodPed': item.ncodped || '-',
-    'Criado em': formatarDataHoraPtBr(item.created_at),
-    'Atualizado em': formatarDataHoraPtBr(item.updated_at || item.created_at)
-  }));
-}
-
-async function montarLinhasHistoricoComprasParaSheets() {
-  const { rows } = await pool.query(`
-    SELECT
-      id,
-      grupo_requisicao,
-      status,
-      tabela_origem,
-      valor_pedido,
-      d_dt_previsao,
-      d_rec,
-      created_at
-    FROM compras.historico_compras
-    ORDER BY created_at DESC, id DESC
-  `);
-
-  return rows.map((item) => ({
-    'ID': item.id || '-',
-    'Grupo Requisição': item.grupo_requisicao || '-',
-    'Status': item.status || '-',
-    'Tabela Origem': item.tabela_origem || '-',
-    'Valor Pedido': item.valor_pedido == null ? '-' : Number(item.valor_pedido),
-    'd_dt_previsao': formatarDataPtBr(item.d_dt_previsao),
-    'd_rec': formatarDataPtBr(item.d_rec),
-    'Criado em': formatarDataHoraPtBr(item.created_at)
-  }));
-}
-
-async function enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas = []) {
-  const webhookUrl = process.env.GOOGLE_SHEETS_WEBHOOK_URL;
-  if (!webhookUrl) {
-    throw new Error('GOOGLE_SHEETS_WEBHOOK_URL não configurada');
-  }
-
-  const fetchFn = global.safeFetch || globalThis.fetch;
-  if (!fetchFn) {
-    throw new Error('Fetch indisponível no servidor');
-  }
-
-  const payloadBody = JSON.stringify({
-    linhas,
-    historicoLinhas,
-    abas: {
-      KANBAN: linhas,
-      historico: historicoLinhas
-    }
-  });
-
-  const executarPost = async (url, followRedirect = false) => {
-    const resposta = await fetchFn(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: payloadBody,
-      redirect: followRedirect ? 'follow' : 'manual'
-    });
-    return resposta;
-  };
-
-  const resposta = await executarPost(webhookUrl, false);
-
-  if ([301, 302, 303, 307, 308].includes(Number(resposta.status || 0))) {
-    return;
-  }
-
-  const contentType = String(resposta.headers.get('content-type') || '').toLowerCase();
-  const texto = await resposta.text();
-
-  if (!resposta.ok) {
-    throw new Error(`Webhook Google Sheets retornou HTTP ${resposta.status}: ${texto.slice(0, 300)}`);
-  }
-
-  if (contentType.includes('text/html')) {
-    throw new Error(`Webhook Google Sheets retornou HTML: ${texto.slice(0, 300)}`);
-  }
-
-  if (texto) {
-    let payload = null;
-    try {
-      payload = JSON.parse(texto);
-    } catch (_) {
-      // resposta não-JSON é aceita desde que não seja HTML e não seja erro HTTP
-    }
-
-    if (payload && payload.ok === false) {
-      throw new Error(`Apps Script retornou erro: ${JSON.stringify(payload)}`);
-    }
-  }
-}
-
-async function sincronizarComprasGoogleSheets({ force = false, motivo = 'auto' } = {}) {
-  if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) return;
-  if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) return;
-  if (comprasGoogleSheetsSyncState.running) return;
-
-  comprasGoogleSheetsSyncState.running = true;
+// Remove triggers antigos do sync Compras -> Google Sheets (recurso descontinuado)
+async function limparTriggersGoogleSheetsCompras() {
+  if (!pool) return;
   try {
-    const fingerprint = await obterFingerprintComprasParaSheets();
-    if (!force && comprasGoogleSheetsSyncState.lastFingerprint === fingerprint) {
-      return;
-    }
-
-    const linhas = await montarLinhasComprasParaSheets();
-    const historicoLinhas = await montarLinhasHistoricoComprasParaSheets();
-    if (!linhas.length && !historicoLinhas.length) {
-      comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
-      comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
-      comprasGoogleSheetsSyncState.lastSyncReason = motivo;
-      comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
-      comprasGoogleSheetsSyncState.lastSyncRows = 0;
-      comprasGoogleSheetsSyncState.lastSyncError = null;
-      return;
-    }
-
-    await enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas);
-    comprasGoogleSheetsSyncState.lastFingerprint = fingerprint;
-    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
-    comprasGoogleSheetsSyncState.lastSyncReason = motivo;
-    comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
-    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length + historicoLinhas.length;
-    comprasGoogleSheetsSyncState.lastSyncError = null;
-    console.log(`[SheetsAuto] Sincronização concluída (${motivo}) com ${linhas.length} linha(s) em KANBAN e ${historicoLinhas.length} linha(s) em historico.`);
+    await pool.query(`
+      DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_solicitacao
+        ON compras.solicitacao_compras;
+      DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_sem_cadastro
+        ON compras.compras_sem_cadastro;
+      DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_historico
+        ON compras.historico_compras;
+      DROP FUNCTION IF EXISTS compras.fn_notify_google_sheets_sync();
+    `);
   } catch (err) {
-    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
-    comprasGoogleSheetsSyncState.lastSyncReason = motivo;
-    comprasGoogleSheetsSyncState.lastSyncStatus = 'error';
-    comprasGoogleSheetsSyncState.lastSyncError = String(err?.message || err || 'Erro desconhecido');
-    console.error('[SheetsAuto] Erro ao sincronizar automaticamente:', err?.message || err);
-  } finally {
-    comprasGoogleSheetsSyncState.running = false;
+    console.warn('[boot] limpeza triggers Google Sheets compras:', err?.message || err);
   }
 }
-
-function agendarSyncPorEvento(motivo = 'evento-db') {
-  if (comprasGoogleSheetsSyncState.eventDebounceTimer) {
-    clearTimeout(comprasGoogleSheetsSyncState.eventDebounceTimer);
-  }
-  comprasGoogleSheetsSyncState.eventDebounceTimer = setTimeout(() => {
-    sincronizarComprasGoogleSheets({ force: true, motivo });
-  }, 1200);
-}
-
-async function garantirTriggersNotificacaoGoogleSheets() {
-  await pool.query(`
-    CREATE OR REPLACE FUNCTION compras.fn_notify_google_sheets_sync()
-    RETURNS TRIGGER
-    LANGUAGE plpgsql
-    AS $fn$
-    BEGIN
-      PERFORM pg_notify('${GOOGLE_SHEETS_SYNC_CHANNEL}', TG_TABLE_NAME || ':' || TG_OP);
-      RETURN NULL;
-    END;
-    $fn$;
-  `);
-
-  await pool.query(`
-    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_solicitacao
-    ON compras.solicitacao_compras;
-
-    CREATE TRIGGER trg_notify_google_sheets_sync_solicitacao
-    AFTER INSERT OR UPDATE OR DELETE
-    ON compras.solicitacao_compras
-    FOR EACH STATEMENT
-    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
-  `);
-
-  await pool.query(`
-    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_sem_cadastro
-    ON compras.compras_sem_cadastro;
-
-    CREATE TRIGGER trg_notify_google_sheets_sync_sem_cadastro
-    AFTER INSERT OR UPDATE OR DELETE
-    ON compras.compras_sem_cadastro
-    FOR EACH STATEMENT
-    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
-  `);
-
-  await pool.query(`
-    DROP TRIGGER IF EXISTS trg_notify_google_sheets_sync_historico
-    ON compras.historico_compras;
-
-    CREATE TRIGGER trg_notify_google_sheets_sync_historico
-    AFTER INSERT OR UPDATE OR DELETE
-    ON compras.historico_compras
-    FOR EACH STATEMENT
-    EXECUTE FUNCTION compras.fn_notify_google_sheets_sync();
-  `);
-}
-
-async function iniciarAutoSyncPorEventosPostgres() {
-  if (comprasGoogleSheetsSyncState.listenerClient) return;
-
-  await garantirTriggersNotificacaoGoogleSheets();
-
-  const client = await pool.connect();
-  comprasGoogleSheetsSyncState.listenerClient = client;
-
-  client.on('notification', (msg) => {
-    if (msg.channel !== GOOGLE_SHEETS_SYNC_CHANNEL) return;
-    agendarSyncPorEvento(`evento-db:${msg.payload || 'mudanca'}`);
-  });
-
-  client.on('error', (err) => {
-    console.error('[SheetsAuto] Erro no listener LISTEN/NOTIFY:', err?.message || err);
-    try { client.release(); } catch (_) {}
-    if (comprasGoogleSheetsSyncState.listenerClient === client) {
-      comprasGoogleSheetsSyncState.listenerClient = null;
-    }
-    setTimeout(() => {
-      iniciarAutoSyncPorEventosPostgres().catch((e) => {
-        console.error('[SheetsAuto] Falha ao reconectar listener:', e?.message || e);
-      });
-    }, 5000);
-  });
-
-  await client.query(`LISTEN ${GOOGLE_SHEETS_SYNC_CHANNEL}`);
-  console.log(`[SheetsAuto] Listener DB ativo no canal ${GOOGLE_SHEETS_SYNC_CHANNEL}.`);
-
-  setTimeout(() => {
-    sincronizarComprasGoogleSheets({ force: true, motivo: 'startup' });
-  }, 10000);
-}
-
-function iniciarAutoSyncComprasGoogleSheets() {
-  if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) {
-    console.log('[SheetsAuto] Auto-sync desabilitado por GOOGLE_SHEETS_AUTOSYNC_ENABLED=0');
-    return;
-  }
-
-  if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) {
-    console.log('[SheetsAuto] Auto-sync não iniciado (GOOGLE_SHEETS_WEBHOOK_URL ausente)');
-    return;
-  }
-
-  if (GOOGLE_SHEETS_SYNC_MODE === 'polling') {
-    if (comprasGoogleSheetsSyncState.timer) {
-      clearInterval(comprasGoogleSheetsSyncState.timer);
-    }
-
-    setTimeout(() => {
-      sincronizarComprasGoogleSheets({ force: true, motivo: 'startup' });
-    }, 12000);
-
-    comprasGoogleSheetsSyncState.timer = setInterval(() => {
-      sincronizarComprasGoogleSheets({ force: false, motivo: 'intervalo' });
-    }, GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS);
-
-    console.log(`[SheetsAuto] Auto-sync iniciado em polling (intervalo ${GOOGLE_SHEETS_AUTOSYNC_INTERVAL_MS}ms).`);
-    return;
-  }
-
-  iniciarAutoSyncPorEventosPostgres().catch((err) => {
-    console.error('[SheetsAuto] Falha ao iniciar listener do banco:', err?.message || err);
-  });
-}
-
-app.get('/api/compras/google-sheets/status', async (_req, res) => {
-  const planilhaUrl = process.env.GOOGLE_SHEETS_PLANILHA_URL
-    || 'https://docs.google.com/spreadsheets/d/1xJT96JbXxqb2SPdCwsNAI55E8EGuEofDOiXbn5iFCDE/edit?usp=sharing';
-
-  res.json({
-    ok: true,
-    enabled: GOOGLE_SHEETS_AUTOSYNC_ENABLED,
-    mode: GOOGLE_SHEETS_SYNC_MODE,
-    listenerActive: !!comprasGoogleSheetsSyncState.listenerClient,
-    running: comprasGoogleSheetsSyncState.running,
-    webhookConfigured: !!process.env.GOOGLE_SHEETS_WEBHOOK_URL,
-    planilhaUrl,
-    channel: GOOGLE_SHEETS_SYNC_CHANNEL,
-    lastSync: {
-      at: comprasGoogleSheetsSyncState.lastSyncAt,
-      reason: comprasGoogleSheetsSyncState.lastSyncReason,
-      status: comprasGoogleSheetsSyncState.lastSyncStatus,
-      rows: comprasGoogleSheetsSyncState.lastSyncRows,
-      error: comprasGoogleSheetsSyncState.lastSyncError,
-    }
-  });
-});
-
-app.post('/api/compras/google-sheets/sync-now', async (req, res) => {
-  try {
-    if (!GOOGLE_SHEETS_AUTOSYNC_ENABLED) {
-      return res.status(400).json({ ok: false, error: 'Auto-sync Google Sheets está desabilitado' });
-    }
-
-    if (!process.env.GOOGLE_SHEETS_WEBHOOK_URL) {
-      return res.status(400).json({ ok: false, error: 'GOOGLE_SHEETS_WEBHOOK_URL não configurada' });
-    }
-
-    const motivo = String(req.body?.motivo || 'manual').trim() || 'manual';
-    const linhas = await montarLinhasComprasParaSheets();
-    const historicoLinhas = await montarLinhasHistoricoComprasParaSheets();
-
-    await enviarLinhasComprasParaGoogleSheets(linhas, historicoLinhas);
-
-    comprasGoogleSheetsSyncState.lastFingerprint = await obterFingerprintComprasParaSheets();
-    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
-    comprasGoogleSheetsSyncState.lastSyncReason = `manual:${motivo}`;
-    comprasGoogleSheetsSyncState.lastSyncStatus = 'success';
-    comprasGoogleSheetsSyncState.lastSyncRows = linhas.length + historicoLinhas.length;
-    comprasGoogleSheetsSyncState.lastSyncError = null;
-
-    return res.json({
-      ok: true,
-      mensagem: 'Sincronização manual concluída',
-      contagem: {
-        kanban: linhas.length,
-        historico: historicoLinhas.length
-      },
-      headers: {
-        kanban: Object.keys(linhas[0] || {}),
-        historico: Object.keys(historicoLinhas[0] || {})
-      }
-    });
-  } catch (err) {
-    comprasGoogleSheetsSyncState.lastSyncAt = new Date().toISOString();
-    comprasGoogleSheetsSyncState.lastSyncReason = 'manual';
-    comprasGoogleSheetsSyncState.lastSyncStatus = 'error';
-    comprasGoogleSheetsSyncState.lastSyncError = String(err?.message || err || 'Erro desconhecido');
-    return res.status(500).json({ ok: false, error: String(err?.message || err || 'Erro ao sincronizar') });
-  }
-});
 
 const OMIE_WEBHOOK_AUTOSYNC_ENABLED = (() => {
   const raw = String(process.env.OMIE_WEBHOOK_AUTOSYNC_ENABLED || '0').trim().toLowerCase();
@@ -44270,6 +44123,7 @@ async function startServer() {
       await ensureSessionTableReady();
       const { organizarSchemasMigracao } = require('./utils/organizarSchemasMigracao');
       await organizarSchemasMigracao(pool);
+      await limparTriggersGoogleSheetsCompras();
     } catch (err) {
       console.error('[db] falha ao preparar pool/session na subida:', err?.message || err);
     }
@@ -44283,7 +44137,6 @@ async function startServer() {
       return;
     }
     setTimeout(() => {
-      iniciarAutoSyncComprasGoogleSheets();
       iniciarAutoSyncWebhooksOmie();
       iniciarCronAgendamento();
       const { iniciarCronNotificacaoDiaria } = require('./cron/notificacao_diaria_whatsapp');

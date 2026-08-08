@@ -214,6 +214,7 @@ async function sincronizarSolicitacaoPorPedido(pool, nCodPed, opts = {}) {
                'recebido', 'concluído', 'concluido', 'cancelado',
                'reprovado', 'excluido', 'excluído', 'carrinho'
              )
+         -- "recebido parcialmente" NÃO está na lista: pode avançar para "recebido"
       `,
       [
         status,
@@ -238,7 +239,7 @@ async function sincronizarSolicitacaoPorPedido(pool, nCodPed, opts = {}) {
   const descricaoEtapa =
     etapaResult.rows.length > 0 ? etapaResult.rows[0].descricao_padrao : `Etapa ${etapa}`;
 
-  // Não reabre solicitação já finalizada
+  // Não reabre solicitação já finalizada / parcial aguardando resto
   const result = await pool.query(
     `
     UPDATE compras.solicitacao_compras
@@ -247,7 +248,7 @@ async function sincronizarSolicitacaoPorPedido(pool, nCodPed, opts = {}) {
            updated_at = NOW()
      WHERE ncodped::text = TRIM($3::text)
        AND LOWER(TRIM(COALESCE(status, ''))) NOT IN (
-             'recebido', 'concluído', 'concluido', 'cancelado',
+             'recebido', 'recebido parcialmente', 'concluído', 'concluido', 'cancelado',
              'reprovado', 'excluido', 'excluído', 'carrinho'
            )
     `,
@@ -421,6 +422,65 @@ async function aplicarPendenciaOmieLote(pool, abertosIds, log = console.log) {
   };
 }
 
+/**
+ * Após associação/conclusão de NF-e na intranet (Etapa_NF 50/60):
+ * - etapa 50: sai de Compra realizada → "recebido parcialmente" (fica até receber o resto)
+ * - etapa 60: marca pedido recebido e fecha solicitações (sai do parcial)
+ *
+ * Não depende do webhook CompraProduto.* ter atualizado n_qtde_rec.
+ */
+async function fecharAposRecebimentoNfeLocal(pool, nCodPed, opts = {}) {
+  const log = opts.log || console.log;
+  const etapaNf = String(opts.etapaNf || '').trim();
+  if (!nCodPed || (etapaNf !== '50' && etapaNf !== '60')) {
+    return { updated: false, etapaNf, solicitacoes: 0 };
+  }
+
+  if (etapaNf === '60') {
+    await pool.query(
+      `
+      UPDATE compras.pedidos_omie
+         SET pendente_omie = FALSE,
+             "Pedido recebido" = TRUE,
+             "Pedido recebido em" = COALESCE("Pedido recebido em", NOW()),
+             "Pedido recebido webhook" = COALESCE(
+               NULLIF(BTRIM("Pedido recebido webhook"), ''),
+               $2
+             ),
+             "Etapa_NF" = '60',
+             updated_at = NOW()
+       WHERE n_cod_ped = $1
+      `,
+      [nCodPed, opts.origem || 'nfe-associar-pedido']
+    );
+  } else {
+    // Parcial: permanece pendente na Omie até o restante; só grava Etapa_NF=50
+    await pool.query(
+      `
+      UPDATE compras.pedidos_omie
+         SET "Etapa_NF" = '50',
+             "Pedido recebido" = FALSE,
+             updated_at = NOW()
+       WHERE n_cod_ped = $1
+         AND COALESCE("Pedido recebido", FALSE) = FALSE
+      `,
+      [nCodPed]
+    );
+  }
+
+  const statusSolic = etapaNf === '60' ? 'recebido' : 'recebido parcialmente';
+  const sync = await sincronizarSolicitacaoPorPedido(pool, nCodPed, {
+    log,
+    statusFinalForcado: statusSolic
+  });
+
+  log(
+    `[syncPedidosCompra] Pós-NF pedido ${nCodPed}: Etapa_NF=${etapaNf}, status="${statusSolic}", sol=${sync.updated || 0}`
+  );
+
+  return { updated: true, etapaNf, solicitacoes: sync.updated || 0, statusSolic };
+}
+
 module.exports = {
   STATUS_FINAIS,
   atualizarFlagsRecebimentoPedido,
@@ -428,5 +488,6 @@ module.exports = {
   sincronizarSolicitacaoPorPedido,
   substituirItensPedido,
   refrescarPedidoFechadoDaOmie,
-  aplicarPendenciaOmieLote
+  aplicarPendenciaOmieLote,
+  fecharAposRecebimentoNfeLocal
 };

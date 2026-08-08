@@ -1113,7 +1113,7 @@
               </div>
 
               <!-- Kanban de Compras -->
-              <div id="kanbanMinhasSolicitacoes" class="kanban-container" style="display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:8px;flex-wrap:nowrap;max-width:100%;margin-top:4px;">
+              <div id="kanbanMinhasSolicitacoes" class="kanban-container" style="display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;padding-bottom:16px;flex-wrap:nowrap;width:100%;max-width:100%;margin-top:4px;-webkit-overflow-scrolling:touch;">
                 <!-- As colunas serão renderizadas via JavaScript -->
               </div>
 
@@ -1313,10 +1313,6 @@
                   <i class="fa-solid fa-magnifying-glass-chart"></i>
                   <span class="compras-acao-text">Varrer Faturadas (Omie)</span>
                 </button>
-                <button id="comprasExportarExcelMinhasBtn" class="content-button compras-acao-btn" type="button" title="Tabela google sheet">
-                  <i class="fa-solid fa-table"></i>
-                  <span class="compras-acao-text">Tabela google sheet</span>
-                </button>
                 <button id="comprasConfigBtn" class="content-button compras-acao-btn" type="button" title="Configuração de Compras">
                   <i class="fa-solid fa-cog"></i>
                   <span class="compras-acao-text">Configuração de Compras</span>
@@ -1325,42 +1321,6 @@
                   <i class="fa-solid fa-clock-rotate-left"></i>
                   <span class="compras-acao-text">Histórico de Movimentações</span>
                 </button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Modal Tabela Google Sheet -->
-        <div id="modalGoogleSheetsStatus" class="modal-overlay" style="display:none;z-index:10025;">
-          <div class="modal-container" style="max-width:720px;">
-            <div class="modal-header">
-              <div style="font-weight:600;color:#e5e7eb;display:flex;align-items:center;gap:8px;">
-                <i class="fa-solid fa-table" style="color:#60a5fa;"></i>
-                Tabela Google Sheet
-              </div>
-              <button id="modalGoogleSheetsStatusFecharBtn" class="modal-close-btn" type="button">
-                <i class="fa-solid fa-xmark"></i>
-              </button>
-            </div>
-            <div class="modal-body" style="display:flex;flex-direction:column;gap:14px;">
-              <a id="googleSheetsAbrirPlanilhaBtn" href="https://docs.google.com/spreadsheets/d/1xJT96JbXxqb2SPdCwsNAI55E8EGuEofDOiXbn5iFCDE/edit?usp=sharing" target="_blank" rel="noopener noreferrer" class="content-button" style="display:inline-flex;align-items:center;justify-content:center;gap:8px;background:#2563eb;color:#fff;width:fit-content;">
-                <i class="fa-solid fa-up-right-from-square"></i>
-                Abrir planilha
-              </a>
-
-              <div style="border:1px solid var(--card-border-color);border-radius:10px;padding:12px;background:rgba(255,255,255,0.03);">
-                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-                  <div style="font-weight:600;color:#e5e7eb;">Status da última sincronização</div>
-                  <button id="googleSheetsAtualizarStatusBtn" type="button" class="content-button" style="padding:8px 12px;font-size:12px;">
-                    <i class="fa-solid fa-rotate-right"></i>
-                    Atualizar status
-                  </button>
-                </div>
-
-                <div id="googleSheetsSyncResumo" style="margin-top:10px;font-size:13px;color:#cbd5e1;line-height:1.5;">
-                  Carregando status...
-                </div>
-                <div id="googleSheetsSyncDetalhes" style="margin-top:8px;font-size:12px;color:#94a3b8;line-height:1.6;"></div>
               </div>
             </div>
           </div>
@@ -1976,6 +1936,33 @@
               <button class="modal-close" id="modalConfigResponsavelFechar">&times;</button>
             </div>
             <div class="modal-body" style="padding:24px;">
+
+              <!-- Seção 0: E-mail de requisição -->
+              <div style="background:#ecfdf5;padding:16px;border-radius:8px;margin-bottom:24px;border:1px solid #a7f3d0;">
+                <h4 style="margin:0 0 12px 0;font-size:15px;color:#1f2937;display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-envelope" style="color:#059669;"></i>
+                  E-mail de requisição (setor Compras)
+                </h4>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;background:#fff;padding:14px 16px;border-radius:8px;border:1px solid #d1fae5;">
+                  <div style="flex:1;min-width:220px;">
+                    <div style="font-weight:600;font-size:13px;color:#1f2937;">Enviar e-mail ao criar requisição na Omie</div>
+                    <div id="configEmailRequisicaoHint" style="font-size:12px;color:#6b7280;margin-top:4px;">
+                      Quando ativado, avisa o setor Compras (com anexos) ao cair em Requisições.
+                    </div>
+                  </div>
+                  <label for="configEmailRequisicaoAtivo" style="display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none;">
+                    <span id="configEmailRequisicaoLabel" style="font-size:13px;font-weight:600;color:#059669;">Ativado</span>
+                    <span style="position:relative;display:inline-block;width:48px;height:28px;">
+                      <input type="checkbox" id="configEmailRequisicaoAtivo" checked
+                        style="opacity:0;width:0;height:0;position:absolute;">
+                      <span id="configEmailRequisicaoTrack"
+                        style="position:absolute;inset:0;background:#059669;border-radius:999px;transition:background .2s;"></span>
+                      <span id="configEmailRequisicaoThumb"
+                        style="position:absolute;top:3px;left:23px;width:22px;height:22px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s;"></span>
+                    </span>
+                  </label>
+                </div>
+              </div>
 
               <!-- Seção 1: Responsável por Categoria -->
               <div style="background:#f3f4f6;padding:16px;border-radius:8px;margin-bottom:24px;">

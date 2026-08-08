@@ -17863,14 +17863,70 @@ body.mobile-modal-open {
   display: none !important;
 }
 
+/* Pai do board: permite a barra horizontal aparecer */
+#comprasFormPane .content-wrapper,
+#comprasFormPane .content-section,
+#minhasComprasWrapper {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: visible;
+}
+
 #kanbanMinhasSolicitacoes.kanban-container {
   gap: 18px !important;
   background: transparent;
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  overflow-x: auto !important;
+  overflow-y: hidden !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding-bottom: 16px !important;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #e2e8f0;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar {
+  height: 12px;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-track {
+  background: #e2e8f0;
+  border-radius: 6px;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 6px;
+}
+
+#kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+:root:not(.light-mode) #kanbanMinhasSolicitacoes.kanban-container {
+  scrollbar-color: #94a3b8 #1e293b;
+}
+
+:root:not(.light-mode) #kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-track {
+  background: #1e293b;
+}
+
+:root:not(.light-mode) #kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+
+:root:not(.light-mode) #kanbanMinhasSolicitacoes.kanban-container::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
 }
 
 #kanbanMinhasSolicitacoes .kanban-column-minhas {
+  flex: 0 0 336px !important;
   flex-basis: 336px !important;
   min-width: 336px !important;
+  max-width: 336px !important;
   padding: 0 2px 10px !important;
   background: transparent !important;
   border: 0 !important;
