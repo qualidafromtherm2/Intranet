@@ -7319,15 +7319,7 @@ router.get('/at/os-data/:id', async (req, res) => {
          ORDER BY CASE WHEN nome_fantasia ILIKE s.cliente THEN 0 ELSE 1 END
          LIMIT 1
        ) f ON true
-       WHERE a.id = COALESCE(
-         (SELECT a2.id FROM sac.at a2
-          JOIN sac.at_busca_selecionada s2 ON s2.id_at = a2.id
-          WHERE s2.ordem_producao = (
-            SELECT s3.ordem_producao FROM sac.at_busca_selecionada s3 WHERE s3.id_at = $1
-          )
-          ORDER BY a2.id DESC LIMIT 1),
-         $1
-       )
+       WHERE a.id = $1
        LIMIT 1`,
       [id]
     );

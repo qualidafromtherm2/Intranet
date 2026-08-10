@@ -1285,8 +1285,8 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
   }
 });
 
-// GET /api/qualidade/ri-check/template-verificacao — lista cadastros mestre de todos os produtos (para copiar)
-router.get('/template-verificacao', requireAuth, async (req, res) => {
+// GET /api/qualidade/ri-check/template-verificacao/produtos — máquinas com verificações (agrupado)
+router.get('/template-verificacao/produtos', requireAuth, async (req, res) => {
   try {
     await garantirSchemaRi();
     const q = String(req.query?.q || '').trim();
@@ -1297,12 +1297,86 @@ router.get('/template-verificacao', requireAuth, async (req, res) => {
       params.push(`%${q}%`);
       where = `WHERE (
         COALESCE(t.codigo, '') ILIKE $1
-        OR COALESCE(t.item_verificado, '') ILIKE $1
-        OR COALESCE(t.o_que_verificar, '') ILIKE $1
-        OR COALESCE(t.local_verificacao, '') ILIKE $1
         OR CAST(t.id_omie AS TEXT) ILIKE $1
+        OR COALESCE(t.item_verificado, '') ILIKE $1
       )`;
     }
+    params.push(limit);
+    const { rows } = await dbQuery(
+      `SELECT g.id_omie,
+              g.codigo,
+              g.qtd_verificacoes,
+              COALESCE(NULLIF(TRIM(po.descricao), ''), '') AS descricao,
+              NULLIF(TRIM(img.url_imagem), '') AS foto_url
+         FROM (
+           SELECT t.id_omie,
+                  COALESCE(NULLIF(TRIM(MAX(t.codigo)), ''), CAST(t.id_omie AS TEXT)) AS codigo,
+                  COUNT(*)::int AS qtd_verificacoes
+             FROM qualidade.ri t
+             ${where}
+            GROUP BY t.id_omie
+            ORDER BY COALESCE(NULLIF(TRIM(MAX(t.codigo)), ''), CAST(t.id_omie AS TEXT)) ASC
+            LIMIT $${params.length}
+         ) g
+         LEFT JOIN produto.produtos_omie po
+           ON po.codigo_produto = g.id_omie
+         LEFT JOIN LATERAL (
+           SELECT i.url_imagem
+             FROM produto.produtos_omie_imagens i
+            WHERE COALESCE(i.ativo, TRUE) = TRUE
+              AND NULLIF(TRIM(i.url_imagem), '') IS NOT NULL
+              AND (
+                i.codigo_produto = g.id_omie
+                OR (
+                  NULLIF(TRIM(g.codigo), '') IS NOT NULL
+                  AND i.url_imagem ILIKE '%' || TRIM(g.codigo) || '%'
+                )
+              )
+            ORDER BY
+              CASE WHEN i.codigo_produto = g.id_omie THEN 0 ELSE 1 END,
+              i.pos NULLS LAST,
+              i.id DESC
+            LIMIT 1
+         ) img ON TRUE
+        ORDER BY g.codigo ASC`,
+      params
+    );
+    return res.json({ ok: true, items: rows, total: rows.length });
+  } catch (err) {
+    console.error('[qualidade/ri-check/template-verificacao/produtos GET]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar produtos.' });
+  }
+});
+
+// GET /api/qualidade/ri-check/template-verificacao — lista cadastros mestre (para copiar)
+router.get('/template-verificacao', requireAuth, async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const q = String(req.query?.q || '').trim();
+    const idOmieFiltro = Number(req.query?.id_omie || req.query?.codigo_produto) || 0;
+    const codigoFiltro = String(req.query?.codigo || '').trim();
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 300, 1), 500);
+    const params = [];
+    const whereParts = [];
+    if (idOmieFiltro) {
+      params.push(idOmieFiltro);
+      whereParts.push(`t.id_omie = $${params.length}`);
+    }
+    if (codigoFiltro) {
+      params.push(codigoFiltro);
+      whereParts.push(`COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) = $${params.length}`);
+    }
+    if (q) {
+      params.push(`%${q}%`);
+      whereParts.push(`(
+        COALESCE(t.codigo, '') ILIKE $${params.length}
+        OR COALESCE(t.item_verificado, '') ILIKE $${params.length}
+        OR COALESCE(t.o_que_verificar, '') ILIKE $${params.length}
+        OR COALESCE(t.local_verificacao, '') ILIKE $${params.length}
+        OR CAST(t.id_omie AS TEXT) ILIKE $${params.length}
+      )`);
+    }
+    const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
     params.push(limit);
     const { rows } = await dbQuery(
       `SELECT t.id,

@@ -15510,6 +15510,76 @@ app.get('/api/etiquetas/rec-impresso/etiquetas-por-produto', async (req, res) =>
   }
 });
 
+// Histórico completo de identificações (ETQ impressas) de um produto — para reimpressão
+app.get('/api/etiquetas/rec-impresso/historico-por-produto', async (req, res) => {
+  try {
+    if (!req.session?.user?.id) {
+      return res.status(401).json({ ok: false, error: 'Não autenticado' });
+    }
+    await _ensureEtqDevolucaoColumns(pool);
+    const codigo = String(req.query.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'codigo é obrigatório.' });
+
+    const idOmie = await _resolveProdutoOmieCodigoProduto(pool, codigo);
+    const chaves = [...new Set([codigo, idOmie].filter(Boolean).map((v) => String(v).trim()))];
+    if (!chaves.length) return res.json({ ok: true, codigo, total: 0, etiquetas: [] });
+
+    const limit = Math.min(300, Math.max(1, Number(req.query.limit) || 150));
+    const { rows } = await pool.query(
+      `SELECT i.id,
+              NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo,
+              COALESCE(NULLIF(TRIM(i.codigo_produto), ''), r.codigo_produto) AS codigo_produto,
+              COALESCE(NULLIF(TRIM(i.descricao_produto), ''), r.descricao_produto) AS descricao_produto,
+              COALESCE(i.qtd, 0) AS qtd,
+              COALESCE(NULLIF(TRIM(i.unidade), ''), NULLIF(TRIM(r.unidade), ''), 'UN') AS unidade,
+              TRIM(COALESCE(r.lote, '')) AS lote,
+              TRIM(COALESCE(i.endereco, '')) AS endereco,
+              TRIM(COALESCE(i.complemento, '')) AS complemento,
+              r.numero_nfe,
+              r.numero_pedido,
+              r.fornecedor,
+              COALESCE(NULLIF(TRIM(i.data_emissao), ''), r.data_emissao) AS data_emissao,
+              i.impresso_em,
+              i.usuario_criacao,
+              COALESCE(NULLIF(TRIM(i.fonte), ''), 'recebimento') AS fonte
+         FROM etiqueta."ETQ_rec_impresso" i
+         LEFT JOIN etiqueta."ETQ_recebimento" r ON r.id = i.origem_id
+        WHERE TRIM(COALESCE(i.codigo_produto, '')) = ANY($1::text[])
+           OR TRIM(COALESCE(r.codigo_produto, '')) = ANY($1::text[])
+        ORDER BY i.impresso_em DESC NULLS LAST, i.id DESC
+        LIMIT $2`,
+      [chaves, limit]
+    );
+
+    res.json({
+      ok: true,
+      codigo,
+      total: rows.length,
+      etiquetas: rows.map((r) => ({
+        id: Number(r.id),
+        id_rotulo: r.id_rotulo || null,
+        codigo_produto: r.codigo_produto || codigo,
+        descricao_produto: r.descricao_produto || '',
+        qtd: Number(r.qtd) || 0,
+        unidade: r.unidade || 'UN',
+        lote: r.lote || '',
+        endereco: r.endereco || '',
+        complemento: r.complemento || '',
+        numero_nfe: r.numero_nfe || '',
+        numero_pedido: r.numero_pedido || '',
+        fornecedor: r.fornecedor || '',
+        data_emissao: r.data_emissao || '',
+        impresso_em: r.impresso_em || null,
+        usuario_criacao: r.usuario_criacao || '',
+        fonte: r.fonte || 'recebimento',
+      })),
+    });
+  } catch (err) {
+    console.error('[etiquetas/rec-impresso/historico-por-produto]', err);
+    res.status(500).json({ ok: false, error: err?.message || 'Falha ao buscar histórico de identificações.' });
+  }
+});
+
 // GET /api/etiquetas/rec-impresso/ids-fifo-batch?codigos=A,B
 // IDs com saldo > 0 por produto, ordenados do menor ID → maior (FIFO de coleta)
 app.get('/api/etiquetas/rec-impresso/ids-fifo-batch', async (req, res) => {
