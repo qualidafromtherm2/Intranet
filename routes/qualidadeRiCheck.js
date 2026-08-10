@@ -1242,7 +1242,9 @@ router.get('/template-verificacao', requireAuth, async (req, res) => {
               COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) AS codigo,
               t.item_verificado AS check_nome,
               t.o_que_verificar AS descricao_check,
-              COALESCE(NULLIF(TRIM(t.local_verificacao), ''), '') AS local
+              COALESCE(NULLIF(TRIM(t.local_verificacao), ''), '') AS local,
+              t.foto_url,
+              COALESCE(t.anexos, '[]'::jsonb) AS anexos
          FROM qualidade.ri t
          ${where}
         ORDER BY COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) ASC,
@@ -1251,7 +1253,25 @@ router.get('/template-verificacao', requireAuth, async (req, res) => {
         LIMIT $${params.length}`,
       params
     );
-    return res.json({ ok: true, items: rows, total: rows.length });
+    const items = rows.map((r) => {
+      let anexos = Array.isArray(r.anexos) ? r.anexos : [];
+      if (!Array.isArray(anexos)) anexos = [];
+      anexos = anexos.filter((a) => a && a.url);
+      if (!anexos.length && r.foto_url) {
+        anexos = [{ url: r.foto_url, tipo: 'foto', nome: 'Foto' }];
+      }
+      return {
+        id: r.id,
+        id_omie: r.id_omie,
+        codigo: r.codigo,
+        check_nome: r.check_nome,
+        descricao_check: r.descricao_check,
+        local: r.local,
+        foto_url: r.foto_url || null,
+        anexos,
+      };
+    });
+    return res.json({ ok: true, items, total: items.length });
   } catch (err) {
     console.error('[qualidade/ri-check/template-verificacao GET]', err);
     return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar verificações.' });
@@ -1276,9 +1296,27 @@ router.post('/template-verificacao', requireAuth, upload.fields([
     if (!descricaoCheck) return res.status(400).json({ ok: false, error: 'Informe a descrição do check.' });
     if (!local) return res.status(400).json({ ok: false, error: 'Informe o local (kanban).' });
 
+    let anexosCopiar = [];
+    try {
+      const raw = req.body?.anexos_copiar || req.body?.anexos_manter;
+      anexosCopiar = typeof raw === 'string' ? JSON.parse(raw || '[]') : (Array.isArray(raw) ? raw : []);
+    } catch (_) { anexosCopiar = []; }
+    if (!Array.isArray(anexosCopiar)) anexosCopiar = [];
+    anexosCopiar = anexosCopiar
+      .filter((a) => a && a.url)
+      .map((a) => ({
+        url: String(a.url),
+        tipo: String(a.tipo || '').trim() || 'documento',
+        nome: String(a.nome || '').trim() || String(a.url).split('/').pop() || 'Arquivo',
+      }));
+
     const codigoPasta = codigo || String(idOmie);
     const files = coletarArquivosUpload(req);
-    const { anexos, fotoUrl } = await uploadRiArquivosLista(codigoPasta, files);
+    const { anexos: anexosNovos, fotoUrl: fotoNova } = await uploadRiArquivosLista(codigoPasta, files);
+    const anexos = [...anexosCopiar, ...anexosNovos];
+    const fotoUrl = fotoNova
+      || anexos.find((a) => a.tipo === 'foto')?.url
+      || null;
 
     const ins = await dbQuery(
       `INSERT INTO qualidade.ri
