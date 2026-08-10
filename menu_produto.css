@@ -2023,7 +2023,18 @@ img {
   min-height: 100%;
   background: #171923 !important;
 }
-.produto-info-modal-body #produtoTabs > .main-header { display: none !important; }
+/* Mantém o hambúrguer (menu interno do produto) visível no modal Informações. */
+.produto-info-modal-body #produtoTabs > .main-header {
+  display: flex !important;
+  position: relative;
+  z-index: 6;
+  flex-wrap: wrap;
+  background: #111827;
+  border-bottom: 1px solid #334155;
+}
+.produto-info-modal-body #productNavGrid {
+  z-index: 30;
+}
 .produto-info-modal-body #dadosProduto > .content-wrapper {
   margin: 18px;
   background: #171923 !important;
@@ -21412,13 +21423,47 @@ html.light-mode #minhasComprasWrapper {
   border-bottom: 1px solid #dbe3ec !important;
 }
 
+#etqImpressoModal.etiquetas-page .etq-search-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+#etqImpressoModal.etiquetas-page .etq-btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 14px;
+  color: #08775a;
+  background: #fff;
+  border: 1px solid #08775a;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#etqImpressoModal.etiquetas-page .etq-btn-refresh:hover {
+  background: #ecfdf5;
+}
+
+#etqImpressoModal.etiquetas-page .etq-btn-refresh:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+
 #etqImpressoModal.etiquetas-page .etq-btn-scan {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
   min-height: 42px;
-  margin-left: auto;
+  margin-left: 0;
   padding: 8px 14px;
   color: #fff;
   background: #08775a;
@@ -22154,6 +22199,19 @@ html.light-mode #minhasComprasWrapper {
     display: grid !important;
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
+  }
+
+  #etqImpressoModal.etiquetas-page .etq-search-actions {
+    margin-left: 0;
+  }
+
+  #etqImpressoModal.etiquetas-page .etq-btn-refresh {
+    min-width: 42px;
+    padding: 8px 10px;
+  }
+
+  #etqImpressoModal.etiquetas-page .etq-btn-refresh span {
+    display: none;
   }
 
   #etqImpressoModal.etiquetas-page .etq-btn-scan {

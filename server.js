@@ -1373,8 +1373,10 @@ async function ensureRhReservasSchema() {
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS reservas_anexos_reserva_idx ON rh.reservas_anexos (reserva_id)`);
 
-    // Coluna de controle: reunião realizada
+    // Coluna de controle: reunião realizada (legado — preferir datas_realizadas por ocorrência)
     await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS realizada BOOLEAN NOT NULL DEFAULT FALSE`);
+    // Datas em que a ocorrência foi marcada como realizada (recorrentes: um dia não bloqueia os outros)
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS datas_realizadas DATE[] NOT NULL DEFAULT ARRAY[]::date[]`);
 
     // Tabela de presença: registra participantes confirmados ao marcar reunião como realizada
     await pool.query(`
@@ -1392,6 +1394,27 @@ async function ensureRhReservasSchema() {
     await pool.query(`CREATE INDEX IF NOT EXISTS reuniao_presenca_reserva_idx ON rh.reuniao_presenca (reserva_id)`);
     // Coluna ausentes para registros já existentes
     await pool.query(`ALTER TABLE rh.reuniao_presenca ADD COLUMN IF NOT EXISTS ausentes TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[]`);
+
+    // Migração: séries/reservas já marcadas "realizada" → datas_realizadas (presença ou data base)
+    await pool.query(`
+      UPDATE rh.reservas_ambientes r
+         SET datas_realizadas = CASE
+               WHEN EXISTS (
+                 SELECT 1 FROM rh.reuniao_presenca p WHERE p.reserva_id = r.id
+               )
+               THEN (
+                 SELECT ARRAY(
+                   SELECT DISTINCT p.data_reuniao
+                     FROM rh.reuniao_presenca p
+                    WHERE p.reserva_id = r.id
+                    ORDER BY 1
+                 )
+               )
+               ELSE ARRAY[r.data_reserva]::date[]
+             END
+       WHERE COALESCE(r.realizada, false) = true
+         AND cardinality(COALESCE(r.datas_realizadas, ARRAY[]::date[])) = 0
+    `);
 
     console.log('[RH] Schema de reservas pronto');
   } catch (err) {
@@ -4474,6 +4497,7 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.google_event_link,
               r.criado_por,
               r.realizada,
+              r.datas_realizadas,
               COALESCE(array_agg(p.username ORDER BY p.username)
                 FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
          FROM rh.reservas_ambientes r
@@ -4502,6 +4526,12 @@ app.get('/api/rh/reservas', async (req, res) => {
     const reservas = [];
 
     rows.forEach((r) => {
+      const datasRealizadas = Array.isArray(r.datas_realizadas)
+        ? r.datas_realizadas.map((d) => normalizarDataIsoRh(d)).filter(Boolean)
+        : [];
+      const datasRealizadasSet = new Set(datasRealizadas);
+      const realizadaLegado = !!r.realizada && datasRealizadasSet.size === 0;
+
       const baseReserva = {
         id: r.id,
         tipo: r.tipo_espaco,
@@ -4525,20 +4555,24 @@ app.get('/api/rh/reservas', async (req, res) => {
         googleEventLink: r.google_event_link || null,
         googleAgendado: !!r.google_event_id,
         criadoPor: r.criado_por,
-        realizada: !!r.realizada,
         podeEditar: userEhRh || (!!userLogado && String(r.criado_por || '').trim().toLowerCase() === userLogado),
         participantes: Array.isArray(r.participantes) ? r.participantes : []
       };
 
+      const ocorrenciaRealizada = (dataIso) =>
+        datasRealizadasSet.has(dataIso) || (realizadaLegado && !baseReserva.repetir);
+
       if (!baseReserva.repetir) {
-        reservas.push({ ...baseReserva, data: normalizarDataIsoRh(r.data_reserva) || r.data_reserva });
+        const dataIso = normalizarDataIsoRh(r.data_reserva) || r.data_reserva;
+        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
         return;
       }
 
       const diasSemanaSet = new Set(baseReserva.diasSemana);
       const datasExcecaoSet = new Set(normalizarDatasExcecaoRh(baseReserva.datasExcecao));
       if (!diasSemanaSet.size) {
-        reservas.push({ ...baseReserva, data: normalizarDataIsoRh(r.data_reserva) || r.data_reserva });
+        const dataIso = normalizarDataIsoRh(r.data_reserva) || r.data_reserva;
+        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
         return;
       }
 
@@ -4549,7 +4583,7 @@ app.get('/api/rh/reservas', async (req, res) => {
         const dataIso = formatarDataIsoLocalRh(dataAtual);
         if (!dataIso) continue;
         if (datasExcecaoSet.has(dataIso)) continue;
-        reservas.push({ ...baseReserva, data: dataIso });
+        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
       }
     });
 
@@ -5613,7 +5647,7 @@ app.delete('/api/rh/notas/:id', async (req, res) => {
 
 // ── Anexos de reserva (múltiplos por evento) ──────────────────────────────────
 
-// POST /api/rh/reservas/:id/realizada — alterna flag realizada e registra presença
+// POST /api/rh/reservas/:id/realizada — marca/desmarca realização da ocorrência (data) e registra presença
 app.post('/api/rh/reservas/:id/realizada', express.json(), async (req, res) => {
   const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
   if (!userLogado) return res.status(401).json({ error: 'Não autenticado' });
@@ -5629,18 +5663,46 @@ app.post('/api/rh/reservas/:id/realizada', express.json(), async (req, res) => {
   const client = await pool.connect();
   try {
     const { rows } = await client.query(
-      `SELECT realizada, to_char(hora_inicio, 'HH24:MI') AS hora_inicio, data_reserva
+      `SELECT realizada,
+              repetir,
+              to_char(hora_inicio, 'HH24:MI') AS hora_inicio,
+              to_char(data_reserva, 'YYYY-MM-DD') AS data_reserva,
+              COALESCE(datas_realizadas, ARRAY[]::date[]) AS datas_realizadas
          FROM rh.reservas_ambientes WHERE id = $1 LIMIT 1`,
       [reservaId]
     );
     if (!rows.length) return res.status(404).json({ error: 'Reserva não encontrada' });
 
-    const novoValor = !rows[0].realizada;
-    await client.query(`UPDATE rh.reservas_ambientes SET realizada = $1 WHERE id = $2`, [novoValor, reservaId]);
+    const dataReuniao = normalizarDataIsoRh(dataReuniaoRaw)
+      || normalizarDataIsoRh(rows[0].data_reserva)
+      || null;
+    if (!dataReuniao) return res.status(400).json({ error: 'Data da reunião inválida' });
+
+    const datasRealizadas = Array.isArray(rows[0].datas_realizadas)
+      ? rows[0].datas_realizadas.map((d) => normalizarDataIsoRh(d)).filter(Boolean)
+      : [];
+    const jaNestaData = datasRealizadas.includes(dataReuniao);
+    // Legado: boolean global sem datas_realizadas (só reserva única)
+    const legadoGlobal = !rows[0].repetir && !!rows[0].realizada && datasRealizadas.length === 0;
+    const estavaRealizada = jaNestaData || (legadoGlobal && dataReuniao === normalizarDataIsoRh(rows[0].data_reserva));
+    const novoValor = !estavaRealizada;
+
+    let novasDatas;
+    if (novoValor) {
+      novasDatas = Array.from(new Set([...datasRealizadas, dataReuniao])).sort();
+    } else {
+      novasDatas = datasRealizadas.filter((d) => d !== dataReuniao);
+    }
+
+    await client.query(
+      `UPDATE rh.reservas_ambientes
+          SET datas_realizadas = $1::date[],
+              realizada = (cardinality($1::date[]) > 0)
+        WHERE id = $2`,
+      [novasDatas, reservaId]
+    );
 
     if (novoValor) {
-      // Marcar como realizada: registrar presença
-      const dataReuniao = dataReuniaoRaw || (rows[0].data_reserva ? String(rows[0].data_reserva).slice(0, 10) : null);
       const horaInicio = rows[0].hora_inicio || null;
       await client.query(
         `INSERT INTO rh.reuniao_presenca (reserva_id, data_reuniao, hora_inicio, participantes, ausentes, registrado_por)
@@ -5648,20 +5710,16 @@ app.post('/api/rh/reservas/:id/realizada', express.json(), async (req, res) => {
         [reservaId, dataReuniao, horaInicio, participantes, ausentes, userLogado]
       );
     } else {
-      // Desmarcar como realizada: apaga o registro mais recente
+      // Desmarcar só a ocorrência da data aberta no calendário
       await client.query(
         `DELETE FROM rh.reuniao_presenca
-          WHERE id = (
-            SELECT id FROM rh.reuniao_presenca
-             WHERE reserva_id = $1
-             ORDER BY criado_em DESC
-             LIMIT 1
-          )`,
-        [reservaId]
+          WHERE reserva_id = $1
+            AND data_reuniao = $2::date`,
+        [reservaId, dataReuniao]
       );
     }
 
-    return res.json({ ok: true, realizada: novoValor });
+    return res.json({ ok: true, realizada: novoValor, data: dataReuniao, datasRealizadas: novasDatas });
   } catch (err) {
     console.error('[API] POST /api/rh/reservas/:id/realizada erro:', err);
     return res.status(500).json({ error: 'Falha ao atualizar status de realização' });
@@ -20691,9 +20749,86 @@ function normalizarLocalOmie(loc) {
   };
 }
 
-// Lista locais de estoque consultando a Omie (com cache e fallback para o Postgres)
+/** Grava no Postgres a lista vinda da Omie (mantém omie_locais_estoque atualizado). */
+async function persistirLocaisEstoqueDb(locaisNormalizados) {
+  if (!Array.isArray(locaisNormalizados) || !locaisNormalizados.length) return 0;
+  let gravados = 0;
+  for (const loc of locaisNormalizados) {
+    const codigo = String(loc.codigo_local_estoque || '').trim();
+    if (!codigo) continue;
+    await pool.query(
+      `INSERT INTO omie.omie_locais_estoque (local_codigo, nome, ativo, updated_at)
+       VALUES ($1, $2, $3, now())
+       ON CONFLICT (local_codigo)
+       DO UPDATE SET nome = EXCLUDED.nome, ativo = EXCLUDED.ativo, updated_at = now()`,
+      [codigo, loc.descricao || '', !loc.inativo]
+    );
+    gravados += 1;
+  }
+  return gravados;
+}
+
+async function buscarLocaisEstoqueOmieAtualizados({ force = false } = {}) {
+  const now = Date.now();
+  if (
+    !force &&
+    locaisEstoqueCache.data.length &&
+    (now - locaisEstoqueCache.at) < LOCAIS_CACHE_TTL_MS &&
+    locaisEstoqueCache.fonte === 'omie'
+  ) {
+    return { locais: locaisEstoqueCache.data, fonte: 'omie_cache' };
+  }
+
+  const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
+  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    const err = new Error('OMIE_APP_KEY/OMIE_APP_SECRET ausentes');
+    err.code = 'OMIE_CREDS_MISSING';
+    throw err;
+  }
+
+  const payload = {
+    call: 'ListarLocaisEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{ nPagina: 1, nRegPorPagina: 200 }]
+  };
+
+  const primeira = await callOmieDedup('https://app.omie.com.br/api/v1/estoque/local/', payload, { waitMs: 3500 });
+  let locaisRaw = Array.isArray(primeira?.locaisEncontrados) ? [...primeira.locaisEncontrados] : [];
+  const totalPaginas = Number(primeira?.nTotPaginas || 1);
+
+  for (let pagina = 2; pagina <= totalPaginas; pagina += 1) {
+    const extra = await callOmieDedup(
+      'https://app.omie.com.br/api/v1/estoque/local/',
+      { ...payload, param: [{ nPagina: pagina, nRegPorPagina: 200 }] },
+      { waitMs: 3500 }
+    );
+    if (Array.isArray(extra?.locaisEncontrados)) {
+      locaisRaw = locaisRaw.concat(extra.locaisEncontrados);
+    }
+  }
+
+  const normalizados = locaisRaw.map(normalizarLocalOmie);
+  locaisEstoqueCache.at = now;
+  locaisEstoqueCache.data = normalizados;
+  locaisEstoqueCache.fonte = 'omie';
+
+  try {
+    const gravados = await persistirLocaisEstoqueDb(normalizados);
+    console.log(`[armazem/locais] Omie → ${normalizados.length} locais (DB upsert: ${gravados}).`);
+  } catch (persistErr) {
+    console.error('[armazem/locais] falha ao persistir no DB:', persistErr?.message || persistErr);
+  }
+
+  return { locais: normalizados, fonte: 'omie' };
+}
+
+// Lista locais de estoque: padrão = Omie atualizada (+ upsert no DB). Fallback = Postgres.
+// ?fonte=db → só banco | ?force=1 → ignora cache de 10 min
 app.get('/api/armazem/locais', async (req, res) => {
   const preferSource = String(req.query?.fonte || req.query?.source || '').toLowerCase();
+  const force = ['1', 'true', 'sim', 'yes'].includes(String(req.query?.force || '').toLowerCase());
   const now = Date.now();
 
   const responder = (locais, fonte) => {
@@ -20714,52 +20849,14 @@ app.get('/api/armazem/locais', async (req, res) => {
     }
   };
 
-  // Padrão: sempre servir do banco (sem chamar Omie API).
-  // Para forçar refresh via Omie use ?fonte=omie explicitamente.
-  if (preferSource !== 'omie') {
+  // Só usa banco se pedido explicitamente.
+  if (preferSource === 'db' || preferSource === 'db_local') {
     return servirDoBanco();
-  }
-
-  const OMIE_APP_KEY = process.env.OMIE_APP_KEY;
-  const OMIE_APP_SECRET = process.env.OMIE_APP_SECRET;
-
-  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
-    return servirDoBanco();
-  }
-
-  if (locaisEstoqueCache.data.length && (now - locaisEstoqueCache.at) < LOCAIS_CACHE_TTL_MS && locaisEstoqueCache.fonte === 'omie') {
-    return responder(locaisEstoqueCache.data, 'omie_cache');
   }
 
   try {
-    const payload = {
-      call: 'ListarLocaisEstoque',
-      app_key: OMIE_APP_KEY,
-      app_secret: OMIE_APP_SECRET,
-      param: [{ nPagina: 1, nRegPorPagina: 200 }]
-    };
-
-    const primeira = await callOmieDedup('https://app.omie.com.br/api/v1/estoque/local/', payload, { waitMs: 3500 });
-    let locaisRaw = Array.isArray(primeira?.locaisEncontrados) ? [...primeira.locaisEncontrados] : [];
-    const totalPaginas = Number(primeira?.nTotPaginas || 1);
-
-    for (let pagina = 2; pagina <= totalPaginas; pagina += 1) {
-      const extra = await callOmieDedup(
-        'https://app.omie.com.br/api/v1/estoque/local/',
-        { ...payload, param: [{ nPagina: pagina, nRegPorPagina: 200 }] },
-        { waitMs: 3500 }
-      );
-      if (Array.isArray(extra?.locaisEncontrados)) {
-        locaisRaw = locaisRaw.concat(extra.locaisEncontrados);
-      }
-    }
-
-    const normalizados = locaisRaw.map(normalizarLocalOmie);
-    locaisEstoqueCache.at = now;
-    locaisEstoqueCache.data = normalizados;
-    locaisEstoqueCache.fonte = 'omie';
-
-    return responder(normalizados, 'omie');
+    const { locais, fonte } = await buscarLocaisEstoqueOmieAtualizados({ force });
+    return responder(locais, fonte);
   } catch (err) {
     console.error('[api/armazem/locais][omie] erro →', err?.faultstring || err?.message || err);
     return servirDoBanco();
@@ -22110,55 +22207,10 @@ app.post('/api/webhooks/omie/estoque', express.json({ limit:'2mb' }), async (req
 // Chamada automaticamente 1x/dia antes do primeiro sync de posição
 // ------------------------------------------------------------------
 async function syncLocaisEstoqueOmie() {
-  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) return;
-
-  const perPage = 50;
-  let pagina = 1;
-  let total = null;
-  const locais = [];
-
   try {
-    do {
-      const resp = await fetch('https://app.omie.com.br/api/v1/estoque/local/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          call: 'ListarLocaisEstoque',
-          app_key: OMIE_APP_KEY,
-          app_secret: OMIE_APP_SECRET,
-          param: [{ nPagina: pagina, nRegPorPagina: perPage }]
-        })
-      });
-      if (!resp.ok) throw new Error(`Omie HTTP ${resp.status} ${resp.statusText}`);
-      const data = await resp.json();
-      if (total === null) total = Number(data.nTotRegistros || 0);
-      // A Omie retorna o array na chave "locaisEncontrados"
-      const lista = Array.isArray(data.locaisEncontrados) ? data.locaisEncontrados : [];
-      locais.push(...lista);
-      pagina++;
-    } while (locais.length < total && total > 0 && pagina <= 50);
-
-    if (!locais.length) {
-      console.warn('[syncLocaisEstoqueOmie] Nenhum local retornado pela Omie.');
-      return;
-    }
-
-    for (const loc of locais) {
-      const codigo = loc.codigo_local_estoque;
-      const nome   = loc.descricao || '';
-      const ativo  = String(loc.inativo || '').toUpperCase() !== 'S';
-      if (!codigo) continue;
-      await pool.query(
-        `INSERT INTO omie_locais_estoque (local_codigo, nome, ativo, updated_at)
-         VALUES ($1, $2, $3, now())
-         ON CONFLICT (local_codigo)
-         DO UPDATE SET nome = EXCLUDED.nome, ativo = EXCLUDED.ativo, updated_at = now()`,
-        [String(codigo), nome, ativo]
-      );
-    }
-
+    const { locais, fonte } = await buscarLocaisEstoqueOmieAtualizados({ force: true });
     locaisSyncDate = new Date().toISOString().slice(0, 10);
-    console.log(`[syncLocaisEstoqueOmie] ${locais.length} locais sincronizados (${locaisSyncDate}).`);
+    console.log(`[syncLocaisEstoqueOmie] ${locais.length} locais sincronizados via ${fonte} (${locaisSyncDate}).`);
   } catch (err) {
     console.error('[syncLocaisEstoqueOmie] erro:', err?.message || err);
   }

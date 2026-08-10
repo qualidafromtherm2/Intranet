@@ -141,7 +141,7 @@ async function notificarNovaReserva(reserva) {
 
 /**
  * Lembrete matinal: reservas do dia (únicas + recorrentes que caem hoje),
- * ainda não realizadas, com participantes.
+ * ainda não realizadas na data de hoje (datas_realizadas), com participantes.
  * Espelha a regra de conflito/listagem em server.js (existeConflitoReservaRh).
  */
 async function enviarLembretesReservasDoDia(dataIso) {
@@ -179,7 +179,13 @@ async function enviarLembretesReservasDoDia(dataIso) {
             ) AS participantes
        FROM rh.reservas_ambientes r
        LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
-      WHERE COALESCE(r.realizada, false) = false
+      WHERE NOT ($1::date = ANY(COALESCE(r.datas_realizadas, ARRAY[]::date[])))
+        AND NOT (
+          -- Legado: reserva única marcada realizada antes de datas_realizadas
+          r.repetir = false
+          AND COALESCE(r.realizada, false) = true
+          AND cardinality(COALESCE(r.datas_realizadas, ARRAY[]::date[])) = 0
+        )
         AND (
           (
             r.repetir = false
