@@ -11806,7 +11806,13 @@
           <i class="fa-solid fa-chart-line" style="color:#38bdf8;"></i>
           Oscilação de Estoque por Armazém
         </div>
-        <div style="display:flex;gap:8px;align-items:center;margin-left:auto;">
+        <div style="display:flex;gap:8px;align-items:center;margin-left:auto;flex-wrap:wrap;">
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="osci-modo-aba-btn" data-osci-aba="nivel"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.22);color:#7dd3fc;font-size:12px;cursor:pointer;font-weight:600;">Nível</button>
+            <button type="button" class="osci-modo-aba-btn" data-osci-aba="fluxo"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;font-weight:600;">Fluxo</button>
+          </div>
           <div style="display:flex;gap:6px;">
             <button class="osci-periodo-btn" data-per="30"
               style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.22);color:#7dd3fc;font-size:12px;cursor:pointer;">30 dias</button>
@@ -11829,9 +11835,9 @@
       </div>
 
       <div style="background:rgba(255,255,255,.03);border:1px solid #1e293b;border-radius:12px;padding:16px;margin-top:16px;">
-        <div style="font-size:13px;font-weight:700;color:#38bdf8;display:flex;align-items:center;gap:6px;margin-bottom:12px;">
+        <div id="osciGrafTitulo" style="font-size:13px;font-weight:700;color:#38bdf8;display:flex;align-items:center;gap:6px;margin-bottom:12px;">
           <i class="fa-solid fa-warehouse"></i>
-          Estoque Físico Total por Armazém — dia a dia
+          Estoque físico total por armazém — dia a dia
         </div>
         <div id="osciGrafStatus" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;">Carregando...</div>
         <div style="position:relative;height:380px;"><canvas id="osciGrafCanvas"></canvas></div>
@@ -13021,6 +13027,10 @@
                   <button id="montaRiConfigBtn" type="button" title="Configuração RI"
                     style="display:none;align-items:center;gap:8px;padding:7px 14px;background:rgba(99,102,241,.12);color:#c7d2fe;border:1px solid rgba(99,102,241,.3);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-clipboard-check"></i> Config. RI
+                  </button>
+                  <button id="montaVerRiBtn" type="button" title="Mostrar só máquinas com RI para inspecionar"
+                    style="display:none;align-items:center;gap:8px;padding:7px 14px;background:rgba(245,158,11,.12);color:#fcd34d;border:1px solid rgba(245,158,11,.35);border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;">
+                    <i class="fa-solid fa-eye"></i> Ver RI
                   </button>
                   <button id="montaRecarregarBtn" type="button"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">

@@ -7636,6 +7636,48 @@ ul#comprasList li ,
   cursor: pointer;
 }
 
+/* Badge RI pendente no grupo (máquina) da Linha de produção */
+.kanban-prod-grupo-ri-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  color: #fbbf24;
+  background: rgba(245, 158, 11, 0.2);
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  padding: 2px 8px;
+  border-radius: 999px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.kanban-prod-grupo--ri-pendente {
+  border-color: rgba(245, 158, 11, 0.35) !important;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.12);
+}
+#montaVerRiBtn.is-active {
+  background: rgba(245, 158, 11, 0.28) !important;
+  color: #fde68a !important;
+  border-color: rgba(251, 191, 36, 0.65) !important;
+}
+
+/* Linha de produção: ao pesquisar, some o banner e sobra busca + kanban filtrado */
+#montaProducaoPane.monta-pesquisando > .content-wrapper > .content-wrapper-header {
+  display: none !important;
+}
+#montaProducaoPane.monta-pesquisando #montaPesquisaBar {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: 8px 0 10px;
+  margin-bottom: 8px;
+  background: var(--theme-bg-color, #0f172a);
+}
+#montaProducaoPane.monta-pesquisando #montaPesquisaBar > div {
+  max-width: 100% !important;
+}
+
 /* Celular / tablet — Linha de produção: colunas empilhadas; página rola (sem scroll preso na coluna) */
 @media (max-width: 768px) {
   #montaProducaoPane #montaKanban,

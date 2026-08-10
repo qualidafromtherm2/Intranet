@@ -11601,6 +11601,7 @@ app.use('/api/produtos', produtosFotosRouter);
 app.use('/api/produtos', produtosAnexosRouter);
 app.use('/api/transferencias', transferenciasRouter);
 app.use('/api/ajustes', ajustesRouter);
+app.use('/api/estoque', require('./routes/estoqueHistorico'));
 app.use('/api/monitoramento', monitoramentoRouter);
 app.use('/api/frete', freteRouter);
 app.use('/api/primeira-pc-ok', require('./routes/primeiraPcOk'));
