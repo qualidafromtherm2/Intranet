@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '3.2';
+const AGENT_VERSION = '3.3';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -971,7 +971,7 @@ async function refreshHistory() {
       const okIcon = p.ok ? '✓' : '✗';
       const okColor = p.ok ? 'var(--green)' : 'var(--red)';
       const titulo = (p.titulo || 'Etiqueta').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      const idAttr = String(p.id).replace(/"/g, '&quot;');
+      const idAttr = String(p.id).replace(/&/g,'&amp;').replace(/"/g, '&quot;').replace(/</g,'&lt;');
       const pc = (p.pcName || p.pc_name || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       const impr = (p.impressora || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
       return '<div class="hist-row" data-id="' + idAttr + '">' +
@@ -987,8 +987,8 @@ async function refreshHistory() {
         '<div class="hist-actions">' +
           '<label style="font-size:.72rem;color:var(--muted)">Qtd</label>' +
           '<input type="number" class="hist-qty" min="1" max="99" value="1" title="Quantidade de cópias">' +
-          '<button class="btn btn-green btn-sm" onclick="reprintHistory(\'' + idAttr.replace(/'/g, "\\'") + '\', this)">🔁 Reimprimir</button>' +
-          '<button class="btn btn-preview btn-sm" onclick="toggleHistPreview(\'' + idAttr.replace(/'/g, "\\'") + '\', this)">👁 Preview</button>' +
+          '<button type="button" class="btn btn-green btn-sm" onclick="reprintHistory(this.closest(&quot;.hist-row&quot;).dataset.id, this)">🔁 Reimprimir</button>' +
+          '<button type="button" class="btn btn-preview btn-sm" onclick="toggleHistPreview(this.closest(&quot;.hist-row&quot;).dataset.id, this)">👁 Preview</button>' +
         '</div>' +
         '<div class="hist-preview-box"></div>' +
       '</div>';

@@ -18325,7 +18325,7 @@ app.use('/agente-impressao', requireSessionForStatic, express.static(path.join(_
 }));
 
 // Retorna URL pública do instalador Windows + versão atual do agente
-const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '3.0';
+const _AGENTE_VERSAO_ATUAL = process.env.AGENTE_VERSAO || '3.3';
 const _agenteUrlFromVer = agenteExeUrl(_AGENTE_VERSAO_ATUAL);
 // Preferir URL da versão atual no R2. AGENTE_EXE_URL só vale se já apontar para essa versão
 // (evita ficar preso em URL antiga tipo v2.6 no env do Render).
