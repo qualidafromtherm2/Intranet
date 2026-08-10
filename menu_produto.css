@@ -25003,3 +25003,47 @@ html.light-mode #minhasComprasWrapper {
   background: #422006 !important;
   border-color: #f59e0b !important;
 }
+
+/* Oscilação — rolagem da página e da lista do degrau (app tem overflow:hidden) */
+#armazemContent.tab-pane {
+  overflow: hidden;
+}
+#armazemContent > .armazem-page {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+#conteudo-oscilacao-estoque > .content-wrapper {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  padding-bottom: 48px;
+}
+.osci-degrau-table-wrap,
+#osciDegrauTableWrap {
+  max-height: min(42vh, 420px);
+  overflow-y: auto !important;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid #1e293b;
+  border-radius: 10px;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #64748b #0f172a;
+}
+#osciDegrauTableWrap::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+#osciDegrauTableWrap::-webkit-scrollbar-track {
+  background: #0f172a;
+  border-radius: 8px;
+}
+#osciDegrauTableWrap::-webkit-scrollbar-thumb {
+  background: #64748b;
+  border-radius: 8px;
+}
+#osciDegrauTableWrap::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}

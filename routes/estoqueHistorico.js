@@ -5,8 +5,8 @@
  *
  * GET /api/estoque/datas-disponiveis
  * GET /api/estoque/posicao-por-data?data=YYYY-MM-DD&pagina=1&limite=200
- * GET /api/estoque/oscilacao-nivel?periodo=30|60|90|tudo
- * GET /api/estoque/oscilacao-fluxo?periodo=30|60|90|tudo
+ * GET /api/estoque/oscilacao-nivel?periodo=30|60|90|tudo|&data_de=&data_ate=
+ * GET /api/estoque/oscilacao-fluxo?periodo=30|60|90|tudo|&data_de=&data_ate=
  * GET /api/estoque/oscilacao-diaria  → alias de oscilacao-nivel (compat)
  */
 const express = require('express');
@@ -17,10 +17,50 @@ const TAG = '[estoqueHistorico]';
 
 function parsePeriodoDias(periodoRaw) {
   const p = String(periodoRaw || '30').trim().toLowerCase();
-  if (p === 'tudo' || p === 'all') return null;
+  if (p === 'tudo' || p === 'all' || p === 'custom') return null;
   const n = parseInt(p, 10);
   if ([30, 60, 90].includes(n)) return n;
   return 30;
+}
+
+function isIsoDate(s) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(s || '').trim());
+}
+
+/**
+ * Resolve intervalo: data_de/data_ate têm prioridade sobre periodo.
+ * data_ate nunca passa de hoje (nível reconstruído a partir do estoque atual).
+ */
+async function resolverIntervalo({ periodo, data_de, data_ate }) {
+  const hoje = toIsoDate(new Date());
+  let dataDe = String(data_de || '').trim();
+  let dataAte = String(data_ate || '').trim();
+
+  if (isIsoDate(dataDe) && isIsoDate(dataAte)) {
+    if (dataDe > dataAte) {
+      const tmp = dataDe;
+      dataDe = dataAte;
+      dataAte = tmp;
+    }
+    if (dataAte > hoje) dataAte = hoje;
+    if (dataDe > hoje) dataDe = hoje;
+    return { dataInicio: dataDe, dataFim: dataAte, dias: null, custom: true, hoje };
+  }
+
+  const dias = parsePeriodoDias(periodo);
+  let dataInicio;
+  if (dias == null) {
+    const { rows: minRows } = await dbQuery(`
+      SELECT LEAST(
+        (SELECT MIN(COALESCE(data_movimentacao, criado_em::date)) FROM logistica.ajustes_estoque WHERE lower(status)='executado'),
+        (SELECT MIN(data_movimentacao) FROM logistica.transferencias WHERE lower(status)='transferido')
+      )::text AS min_d
+    `);
+    dataInicio = minRows[0]?.min_d || addDaysIso(hoje, -90);
+  } else {
+    dataInicio = addDaysIso(hoje, -(dias - 1));
+  }
+  return { dataInicio, dataFim: hoje, dias, custom: false, hoje };
 }
 
 function toIsoDate(d) {
@@ -230,26 +270,15 @@ async function saldoAtualPorLocal() {
 /**
  * Nível: estoque físico total por armazém dia a dia (reconstruído do SQL).
  * saldo[d] = saldo[d+1] - delta[d+1]; hoje = estoque_atual.
+ * opts: { periodo, data_de, data_ate }
  */
-async function montarOscilacaoNivel(periodoRaw) {
-  const dias = parsePeriodoDias(periodoRaw);
-  const hoje = toIsoDate(new Date());
-  let dataInicio;
-  if (dias == null) {
-    const { rows: minRows } = await dbQuery(`
-      SELECT LEAST(
-        (SELECT MIN(COALESCE(data_movimentacao, criado_em::date)) FROM logistica.ajustes_estoque WHERE lower(status)='executado'),
-        (SELECT MIN(data_movimentacao) FROM logistica.transferencias WHERE lower(status)='transferido')
-      )::text AS min_d
-    `);
-    dataInicio = minRows[0]?.min_d || addDaysIso(hoje, -90);
-  } else {
-    dataInicio = addDaysIso(hoje, -(dias - 1));
-  }
+async function montarOscilacaoNivel(opts = {}) {
+  const { dataInicio, dataFim, dias, custom, hoje } = await resolverIntervalo(opts);
 
   const [nomes, saldosHoje, deltas] = await Promise.all([
     mapaNomesLocais(),
     saldoAtualPorLocal(),
+    // Precisa dos deltas até hoje para reconstruir corretamente quando dataFim < hoje
     carregarDeltasPorDia(dataInicio),
   ]);
 
@@ -283,22 +312,22 @@ async function montarOscilacaoNivel(periodoRaw) {
   const datas = listarDatasAsc(dataInicio, hoje);
   const rows = [];
 
-  // Grava hoje primeiro (saldo atual), depois anda para trás aplicando o inverso do delta do dia seguinte
   for (let i = datas.length - 1; i >= 0; i--) {
     const data = datas[i];
-    for (const loc of locais) {
-      const s = saldo.get(loc) || { fisico: 0, valor: 0 };
-      const nome = nomeArmazem(loc, nomes);
-      rows.push({
-        data,
-        armazem: nome,
-        local_codigo: loc,
-        total_fisico: s.fisico,
-        total_valor: s.valor,
-      });
+    if (data >= dataInicio && data <= dataFim) {
+      for (const loc of locais) {
+        const s = saldo.get(loc) || { fisico: 0, valor: 0 };
+        const nome = nomeArmazem(loc, nomes);
+        rows.push({
+          data,
+          armazem: nome,
+          local_codigo: loc,
+          total_fisico: s.fisico,
+          total_valor: s.valor,
+        });
+      }
     }
     if (i === 0) break;
-    // Para obter saldo do dia anterior: remove o efeito dos movimentos do dia atual
     const deltasDoDia = deltaMap.get(data);
     if (deltasDoDia) {
       for (const [loc, dlt] of deltasDoDia.entries()) {
@@ -313,7 +342,7 @@ async function montarOscilacaoNivel(periodoRaw) {
 
   rows.sort((a, b) => (a.data === b.data ? a.armazem.localeCompare(b.armazem) : a.data.localeCompare(b.data)));
 
-  const aviso = dias == null || dias > 90
+  const aviso = custom || dias == null || (dias != null && dias > 90)
     ? 'Reconstruído a partir do SQL (transferências e ajustes). Movimentos feitos só na Omie podem não aparecer.'
     : null;
 
@@ -321,29 +350,17 @@ async function montarOscilacaoNivel(periodoRaw) {
     ok: true,
     fonte: 'reconstruido_sql',
     aviso,
-    periodo: { de: dataInicio, ate: hoje, dias },
+    periodo: { de: dataInicio, ate: dataFim, dias, custom: !!custom },
     rows,
   };
 }
 
 /**
  * Fluxo: entradas / saídas / líquido por dia e armazém.
+ * opts: { periodo, data_de, data_ate }
  */
-async function montarOscilacaoFluxo(periodoRaw) {
-  const dias = parsePeriodoDias(periodoRaw);
-  const hoje = toIsoDate(new Date());
-  let dataInicio;
-  if (dias == null) {
-    const { rows: minRows } = await dbQuery(`
-      SELECT LEAST(
-        (SELECT MIN(COALESCE(data_movimentacao, criado_em::date)) FROM logistica.ajustes_estoque WHERE lower(status)='executado'),
-        (SELECT MIN(data_movimentacao) FROM logistica.transferencias WHERE lower(status)='transferido')
-      )::text AS min_d
-    `);
-    dataInicio = minRows[0]?.min_d || addDaysIso(hoje, -90);
-  } else {
-    dataInicio = addDaysIso(hoje, -(dias - 1));
-  }
+async function montarOscilacaoFluxo(opts = {}) {
+  const { dataInicio, dataFim, dias, custom } = await resolverIntervalo(opts);
 
   const nomes = await mapaNomesLocais();
   const { rows } = await dbQuery(
@@ -362,6 +379,7 @@ async function montarOscilacaoFluxo(periodoRaw) {
       WHERE lower(COALESCE(a.status, '')) = 'executado'
         AND UPPER(COALESCE(a.tipo_operacao, '')) IN ('ENT', 'SAI')
         AND COALESCE(a.data_movimentacao, a.criado_em::date) >= $1::date
+        AND COALESCE(a.data_movimentacao, a.criado_em::date) <= $2::date
         AND a.local_estoque IS NOT NULL
 
       UNION ALL
@@ -376,6 +394,7 @@ async function montarOscilacaoFluxo(periodoRaw) {
       FROM logistica.transferencias t
       WHERE lower(COALESCE(t.status, '')) = 'transferido'
         AND t.data_movimentacao >= $1::date
+        AND t.data_movimentacao <= $2::date
         AND t.origem IS NOT NULL
 
       UNION ALL
@@ -390,6 +409,7 @@ async function montarOscilacaoFluxo(periodoRaw) {
       FROM logistica.transferencias t
       WHERE lower(COALESCE(t.status, '')) = 'transferido'
         AND t.data_movimentacao >= $1::date
+        AND t.data_movimentacao <= $2::date
         AND t.destino IS NOT NULL
     )
     SELECT
@@ -407,7 +427,7 @@ async function montarOscilacaoFluxo(periodoRaw) {
     GROUP BY dia, local_codigo
     ORDER BY dia ASC, local_codigo ASC
     `,
-    [dataInicio]
+    [dataInicio, dataFim]
   );
 
   const normalized = rows.map(r => ({
@@ -424,14 +444,18 @@ async function montarOscilacaoFluxo(periodoRaw) {
   return {
     ok: true,
     fonte: 'sql_movimentacoes',
-    periodo: { de: dataInicio, ate: hoje, dias },
+    periodo: { de: dataInicio, ate: dataFim, dias, custom: !!custom },
     rows: normalized,
   };
 }
 
 router.get('/oscilacao-nivel', async (req, res) => {
   try {
-    const payload = await montarOscilacaoNivel(req.query.periodo);
+    const payload = await montarOscilacaoNivel({
+      periodo: req.query.periodo,
+      data_de: req.query.data_de,
+      data_ate: req.query.data_ate,
+    });
     return res.json(payload);
   } catch (err) {
     console.error(TAG, 'oscilacao-nivel:', err?.message || err);
@@ -441,7 +465,11 @@ router.get('/oscilacao-nivel', async (req, res) => {
 
 router.get('/oscilacao-fluxo', async (req, res) => {
   try {
-    const payload = await montarOscilacaoFluxo(req.query.periodo);
+    const payload = await montarOscilacaoFluxo({
+      periodo: req.query.periodo,
+      data_de: req.query.data_de,
+      data_ate: req.query.data_ate,
+    });
     return res.json(payload);
   } catch (err) {
     console.error(TAG, 'oscilacao-fluxo:', err?.message || err);
@@ -611,7 +639,11 @@ router.get('/oscilacao-detalhe', async (req, res) => {
 /** Compat: gráfico antigo apontava para oscilacao-diaria */
 router.get('/oscilacao-diaria', async (req, res) => {
   try {
-    const payload = await montarOscilacaoNivel(req.query.periodo);
+    const payload = await montarOscilacaoNivel({
+      periodo: req.query.periodo,
+      data_de: req.query.data_de,
+      data_ate: req.query.data_ate,
+    });
     return res.json(payload);
   } catch (err) {
     console.error(TAG, 'oscilacao-diaria:', err?.message || err);

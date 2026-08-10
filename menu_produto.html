@@ -11351,7 +11351,7 @@
   </div>
 </div>
 
-<div id="armazemContent" style="display:none;">
+<div id="armazemContent" class="tab-pane" style="display:none;">
 <!-- Painel de Estoque -->
 <div id="conteudo-estoque" class="armazem-page tab-pane" style="display:none;">
   <div class="content-wrapper">
@@ -11813,6 +11813,23 @@
             <button type="button" class="osci-modo-aba-btn" data-osci-aba="fluxo"
               style="padding:5px 12px;border-radius:8px;border:1px solid #374151;background:rgba(255,255,255,.04);color:#9ca3af;font-size:12px;cursor:pointer;font-weight:600;">Fluxo</button>
           </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;">
+              <i class="fa-solid fa-calendar-days" style="color:#38bdf8;"></i>
+              De
+              <input type="date" id="osciDataDe" class="osci-date-input"
+                style="padding:4px 8px;border-radius:8px;border:1px solid #374151;background:#0f172a;color:#e2e8f0;font-size:12px;">
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:#94a3b8;">
+              Até
+              <input type="date" id="osciDataAte" class="osci-date-input"
+                style="padding:4px 8px;border-radius:8px;border:1px solid #374151;background:#0f172a;color:#e2e8f0;font-size:12px;">
+            </label>
+            <button type="button" id="osciAplicarDatasBtn"
+              style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.18);color:#7dd3fc;font-size:12px;cursor:pointer;font-weight:600;">
+              Aplicar
+            </button>
+          </div>
           <div style="display:flex;gap:6px;">
             <button class="osci-periodo-btn" data-per="30"
               style="padding:5px 12px;border-radius:8px;border:1px solid #0ea5e9;background:rgba(14,165,233,.22);color:#7dd3fc;font-size:12px;cursor:pointer;">30 dias</button>
@@ -11851,9 +11868,9 @@
             </button>
           </div>
           <div id="osciDegrauResumo" style="font-size:12px;color:#94a3b8;margin-bottom:10px;"></div>
-          <div style="max-height:320px;overflow:auto;border:1px solid #1e293b;border-radius:10px;">
+          <div id="osciDegrauTableWrap" class="osci-degrau-table-wrap">
             <table style="width:100%;border-collapse:collapse;font-size:12px;">
-              <thead style="position:sticky;top:0;background:#0f172a;color:#94a3b8;">
+              <thead style="position:sticky;top:0;z-index:1;background:#0f172a;color:#94a3b8;">
                 <tr>
                   <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #1e293b;">Data</th>
                   <th style="text-align:left;padding:8px 10px;border-bottom:1px solid #1e293b;">Tipo</th>
