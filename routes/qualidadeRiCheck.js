@@ -14,7 +14,7 @@ const multer = require('multer');
 const mime = require('mime-types');
 const { v4: uuidv4 } = require('uuid');
 const { dbQuery } = require('../src/db');
-const { uploadPublicFile } = require('../utils/storage');
+const { uploadPublicFile, removePublicFiles } = require('../utils/storage');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -766,6 +766,74 @@ async function uploadRiArquivosLista(codigoPasta, files, opts = {}) {
   return { anexos, fotoUrl, videoUrl };
 }
 
+/** Extrai path relativo (RI/...) a partir da URL pública do bucket produtos. */
+function pathKeyFromRiPublicUrl(url) {
+  const raw = String(url || '').trim();
+  if (!raw) return null;
+  try {
+    const u = new URL(raw);
+    const parts = u.pathname.split('/').filter(Boolean).map((p) => {
+      try { return decodeURIComponent(p); } catch (_) { return p; }
+    });
+    const idx = parts.findIndex((p) => p === 'produtos');
+    if (idx >= 0 && parts[idx + 1] === 'RI') {
+      return parts.slice(idx + 1).join('/');
+    }
+    const idxRi = parts.findIndex((p) => p === 'RI');
+    if (idxRi >= 0) return parts.slice(idxRi).join('/');
+  } catch (_) { /* ignore */ }
+  const m = raw.match(/(?:^|\/)(RI\/[^?#]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
+function coletarUrlsAnexosRi(row) {
+  const urls = new Set();
+  if (row?.foto_url) urls.add(String(row.foto_url).trim());
+  let anexos = row?.anexos;
+  if (typeof anexos === 'string') {
+    try { anexos = JSON.parse(anexos || '[]'); } catch (_) { anexos = []; }
+  }
+  if (Array.isArray(anexos)) {
+    for (const a of anexos) {
+      if (a?.url) urls.add(String(a.url).trim());
+    }
+  }
+  return [...urls].filter(Boolean);
+}
+
+async function urlAindaReferenciadaNoRi(url, excluirId) {
+  const { rows } = await dbQuery(
+    `SELECT 1
+       FROM qualidade.ri t
+      WHERE t.id <> $2
+        AND (
+          COALESCE(t.foto_url, '') = $1
+          OR EXISTS (
+            SELECT 1
+              FROM jsonb_array_elements(COALESCE(t.anexos, '[]'::jsonb)) a
+             WHERE COALESCE(a->>'url', '') = $1
+          )
+        )
+      LIMIT 1`,
+    [url, excluirId]
+  );
+  if (rows.length) return true;
+  const { rows: rowsV } = await dbQuery(
+    `SELECT 1
+       FROM qualidade."RI_Verificacoes" v
+      WHERE COALESCE(v.foto, '') = $1
+         OR COALESCE(v.video, '') = $1
+         OR EXISTS (
+           SELECT 1
+             FROM jsonb_array_elements(COALESCE(v.anexos, '[]'::jsonb)) a
+            WHERE COALESCE(a->>'url', '') = $1
+         )
+      LIMIT 1`,
+    [url]
+  );
+  return rowsV.length > 0;
+}
+
 async function listarNiqPorOp(opIappId) {
   const { rows } = await dbQuery(
     `SELECT id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
@@ -1391,6 +1459,63 @@ router.put('/template-verificacao/:id', requireAuth, upload.fields([
   } catch (err) {
     console.error('[qualidade/ri-check/template-verificacao PUT]', err);
     return res.status(500).json({ ok: false, error: err.message || 'Falha ao editar verificação.' });
+  }
+});
+
+// DELETE /api/qualidade/ri-check/template-verificacao/:id — exclui cadastro mestre + arquivos órfãos
+router.delete('/template-verificacao/:id', requireAuth, async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const itemId = Number(req.params.id) || 0;
+    if (!itemId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    const { rows: atuais } = await dbQuery(
+      `SELECT * FROM qualidade.ri WHERE id = $1 LIMIT 1`,
+      [itemId]
+    );
+    if (!atuais.length) return res.status(404).json({ ok: false, error: 'Verificação não encontrada.' });
+    const atual = atuais[0];
+    const urls = coletarUrlsAnexosRi(atual);
+
+    const del = await dbQuery(
+      `DELETE FROM qualidade.ri WHERE id = $1 RETURNING id, codigo, id_omie, item_verificado`,
+      [itemId]
+    );
+    if (!del.rows.length) {
+      return res.status(404).json({ ok: false, error: 'Verificação não encontrada.' });
+    }
+
+    const removidosStorage = [];
+    const mantidosStorage = [];
+    for (const url of urls) {
+      try {
+        const aindaUsada = await urlAindaReferenciadaNoRi(url, itemId);
+        if (aindaUsada) {
+          mantidosStorage.push(url);
+          continue;
+        }
+        const pathKey = pathKeyFromRiPublicUrl(url);
+        if (!pathKey) {
+          mantidosStorage.push(url);
+          continue;
+        }
+        await removePublicFiles('produtos', [pathKey]);
+        removidosStorage.push(pathKey);
+      } catch (storageErr) {
+        console.warn('[qualidade/ri-check/template-verificacao DELETE] storage:', storageErr.message || storageErr);
+        mantidosStorage.push(url);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      item: del.rows[0],
+      arquivos_removidos: removidosStorage.length,
+      arquivos_mantidos_compartilhados: mantidosStorage.length,
+    });
+  } catch (err) {
+    console.error('[qualidade/ri-check/template-verificacao DELETE]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao excluir verificação.' });
   }
 });
 
