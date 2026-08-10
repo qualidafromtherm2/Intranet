@@ -1217,6 +1217,47 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
   }
 });
 
+// GET /api/qualidade/ri-check/template-verificacao — lista cadastros mestre de todos os produtos (para copiar)
+router.get('/template-verificacao', requireAuth, async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const q = String(req.query?.q || '').trim();
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 300, 1), 500);
+    const params = [];
+    let where = '';
+    if (q) {
+      params.push(`%${q}%`);
+      where = `WHERE (
+        COALESCE(t.codigo, '') ILIKE $1
+        OR COALESCE(t.item_verificado, '') ILIKE $1
+        OR COALESCE(t.o_que_verificar, '') ILIKE $1
+        OR COALESCE(t.local_verificacao, '') ILIKE $1
+        OR CAST(t.id_omie AS TEXT) ILIKE $1
+      )`;
+    }
+    params.push(limit);
+    const { rows } = await dbQuery(
+      `SELECT t.id,
+              t.id_omie,
+              COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) AS codigo,
+              t.item_verificado AS check_nome,
+              t.o_que_verificar AS descricao_check,
+              COALESCE(NULLIF(TRIM(t.local_verificacao), ''), '') AS local
+         FROM qualidade.ri t
+         ${where}
+        ORDER BY COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) ASC,
+                 t.item_verificado ASC NULLS LAST,
+                 t.id ASC
+        LIMIT $${params.length}`,
+      params
+    );
+    return res.json({ ok: true, items: rows, total: rows.length });
+  } catch (err) {
+    console.error('[qualidade/ri-check/template-verificacao GET]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar verificações.' });
+  }
+});
+
 // POST /api/qualidade/ri-check/template-verificacao — cadastro mestre (qualidade.ri) com vários arquivos
 router.post('/template-verificacao', requireAuth, upload.fields([
   { name: 'arquivos', maxCount: 20 },
