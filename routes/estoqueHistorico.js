@@ -292,6 +292,7 @@ async function montarOscilacaoNivel(periodoRaw) {
       rows.push({
         data,
         armazem: nome,
+        local_codigo: loc,
         total_fisico: s.fisico,
         total_valor: s.valor,
       });
@@ -412,6 +413,7 @@ async function montarOscilacaoFluxo(periodoRaw) {
   const normalized = rows.map(r => ({
     data: String(r.data).slice(0, 10),
     armazem: nomeArmazem(r.local_codigo, nomes),
+    local_codigo: String(r.local_codigo),
     entrada: Number(r.entrada) || 0,
     saida: Number(r.saida) || 0,
     transferencia: Number(r.transferencia) || 0,
@@ -444,6 +446,165 @@ router.get('/oscilacao-fluxo', async (req, res) => {
   } catch (err) {
     console.error(TAG, 'oscilacao-fluxo:', err?.message || err);
     return res.status(500).json({ ok: false, error: err?.message || 'Erro ao carregar fluxo' });
+  }
+});
+
+/**
+ * Movimentações que explicam o "degrau" entre duas datas no mesmo armazém.
+ * GET /api/estoque/oscilacao-detalhe?local_codigo=...&data_de=YYYY-MM-DD&data_ate=YYYY-MM-DD
+ * (aceita também armazem=nome)
+ */
+router.get('/oscilacao-detalhe', async (req, res) => {
+  try {
+    let localCodigo = String(req.query.local_codigo || '').trim();
+    const armazemNome = String(req.query.armazem || '').trim();
+    let dataDe = String(req.query.data_de || '').trim();
+    let dataAte = String(req.query.data_ate || '').trim();
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dataDe) || !/^\d{4}-\d{2}-\d{2}$/.test(dataAte)) {
+      return res.status(400).json({ ok: false, error: 'Informe data_de e data_ate (YYYY-MM-DD)' });
+    }
+    if (dataDe > dataAte) {
+      const tmp = dataDe;
+      dataDe = dataAte;
+      dataAte = tmp;
+    }
+
+    const nomes = await mapaNomesLocais();
+    if (!localCodigo && armazemNome) {
+      for (const [cod, nome] of nomes.entries()) {
+        if (String(nome).toLowerCase() === armazemNome.toLowerCase() || cod === armazemNome) {
+          localCodigo = cod;
+          break;
+        }
+      }
+      if (!localCodigo) localCodigo = armazemNome;
+    }
+    if (!localCodigo) {
+      return res.status(400).json({ ok: false, error: 'Informe local_codigo ou armazem' });
+    }
+
+    const { rows } = await dbQuery(
+      `
+      WITH mov AS (
+        SELECT
+          'ajuste'::text AS origem_reg,
+          a.id,
+          COALESCE(a.data_movimentacao, a.criado_em::date) AS data,
+          UPPER(COALESCE(a.tipo_operacao, '')) AS tipo,
+          COALESCE(a.qtd, 0) AS qtd,
+          a.codigo,
+          COALESCE(a.descricao, '') AS descricao,
+          a.local_estoque::text AS local_codigo,
+          NULL::text AS origem,
+          NULL::text AS destino,
+          COALESCE(a.cmc, 0) AS cmc,
+          COALESCE(a.motivo, '') AS motivo,
+          COALESCE(a.obs, '') AS obs,
+          COALESCE(a.solicitante, '') AS solicitante,
+          COALESCE(a.aprovado_por, '') AS aprovado_por,
+          a.status
+        FROM logistica.ajustes_estoque a
+        WHERE lower(COALESCE(a.status, '')) = 'executado'
+          AND UPPER(COALESCE(a.tipo_operacao, '')) IN ('ENT', 'SAI')
+          AND a.local_estoque::text = $1
+          AND COALESCE(a.data_movimentacao, a.criado_em::date) >= $2::date
+          AND COALESCE(a.data_movimentacao, a.criado_em::date) <= $3::date
+
+        UNION ALL
+
+        SELECT
+          'transferencia'::text,
+          t.id,
+          t.data_movimentacao AS data,
+          'TRF'::text AS tipo,
+          COALESCE(t.qtd, 0) AS qtd,
+          t.codigo,
+          COALESCE(t.descricao, '') AS descricao,
+          $1::text AS local_codigo,
+          t.origem::text,
+          t.destino::text,
+          COALESCE(t.cmc, 0) AS cmc,
+          ''::text AS motivo,
+          CASE
+            WHEN t.origem::text = $1 THEN 'Saída (transferência)'
+            ELSE 'Entrada (transferência)'
+          END AS obs,
+          COALESCE(t.solicitante, '') AS solicitante,
+          COALESCE(t.aprovado_pro, '') AS aprovado_por,
+          t.status
+        FROM logistica.transferencias t
+        WHERE lower(COALESCE(t.status, '')) = 'transferido'
+          AND t.data_movimentacao >= $2::date
+          AND t.data_movimentacao <= $3::date
+          AND (t.origem::text = $1 OR t.destino::text = $1)
+      )
+      SELECT
+        origem_reg,
+        id,
+        data::text AS data,
+        tipo,
+        ROUND(qtd::numeric, 4) AS qtd,
+        codigo,
+        descricao,
+        local_codigo,
+        origem,
+        destino,
+        ROUND(cmc::numeric, 4) AS cmc,
+        motivo,
+        obs,
+        solicitante,
+        aprovado_por,
+        status,
+        CASE
+          WHEN tipo = 'ENT' THEN ROUND(qtd::numeric, 4)
+          WHEN tipo = 'SAI' THEN ROUND((-qtd)::numeric, 4)
+          WHEN tipo = 'TRF' AND origem = $1 THEN ROUND((-qtd)::numeric, 4)
+          WHEN tipo = 'TRF' AND destino = $1 THEN ROUND(qtd::numeric, 4)
+          ELSE 0
+        END AS delta
+      FROM mov
+      WHERE data IS NOT NULL
+      ORDER BY data ASC, id ASC
+      `,
+      [localCodigo, dataDe, dataAte]
+    );
+
+    const registros = rows.map(r => ({
+      origem_reg: r.origem_reg,
+      id: r.id,
+      data: String(r.data).slice(0, 10),
+      tipo: r.tipo,
+      qtd: Number(r.qtd) || 0,
+      delta: Number(r.delta) || 0,
+      codigo: r.codigo,
+      descricao: r.descricao,
+      local_codigo: r.local_codigo,
+      origem: r.origem,
+      destino: r.destino,
+      cmc: Number(r.cmc) || 0,
+      motivo: r.motivo,
+      obs: r.obs,
+      solicitante: r.solicitante,
+      aprovado_por: r.aprovado_por,
+      status: r.status,
+    }));
+
+    const totalDelta = registros.reduce((s, r) => s + (Number(r.delta) || 0), 0);
+
+    return res.json({
+      ok: true,
+      local_codigo: localCodigo,
+      armazem: nomeArmazem(localCodigo, nomes),
+      data_de: dataDe,
+      data_ate: dataAte,
+      total_registros: registros.length,
+      total_delta: Math.round(totalDelta * 10000) / 10000,
+      registros,
+    });
+  } catch (err) {
+    console.error(TAG, 'oscilacao-detalhe:', err?.message || err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao carregar detalhe do intervalo' });
   }
 });
 
