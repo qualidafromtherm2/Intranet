@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260728-enderecos-produto"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260811-gemba"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
@@ -338,6 +338,17 @@
        data-nav-selector="#menu-monta-producao">
       <i class="fa-solid fa-screwdriver-wrench" style="margin-right:8px;"></i>
       Linha de produção
+    </a>
+    <a href="#"
+       id="menu-producao-gemba"
+       class="menu-link"
+       data-nav-key="side:producao:gemba"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Gemba"
+       data-nav-selector="#menu-producao-gemba">
+      <i class="fa-solid fa-binoculars" style="margin-right:8px;"></i>
+      Gemba
     </a>
     <a href="#"
        id="menu-preparacoes"
@@ -13208,6 +13219,103 @@
           </div>
         </div>
 
+        <!-- Painel Produção: Gemba — ocorrências do chão de fábrica -->
+        <div id="producaoGembaPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper gemba-page-heading">
+                <div>
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-binoculars" style="color:#0ea5e9;"></i>
+                    Gemba
+                  </div>
+                  <div class="gemba-page-subtitle">Registre e acompanhe ocorrências detectadas na fábrica.</div>
+                </div>
+                <div class="gemba-heading-actions">
+                  <button id="gembaRefreshBtn" class="content-button" type="button" title="Atualizar">
+                    <i class="fa-solid fa-rotate"></i>
+                    <span>Atualizar</span>
+                  </button>
+                  <button id="gembaAddBtn" class="content-button" type="button" title="Adicionar Gemba">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>Adicionar Gemba</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="gemba-toolbar">
+                <input id="gembaBusca" type="search" placeholder="Pesquisar título, descrição ou quem registrou..." autocomplete="off" />
+                <div id="gembaFiltrosStatus" class="gemba-filtros" role="tablist">
+                  <button type="button" class="gemba-filtro is-active" data-status="">Todas <span data-count="total">0</span></button>
+                  <button type="button" class="gemba-filtro" data-status="aberta">Abertas <span data-count="aberta">0</span></button>
+                  <button type="button" class="gemba-filtro" data-status="em_andamento">Em andamento <span data-count="em_andamento">0</span></button>
+                  <button type="button" class="gemba-filtro" data-status="resolvida">Resolvidas <span data-count="resolvida">0</span></button>
+                  <button type="button" class="gemba-filtro" data-status="cancelada">Canceladas <span data-count="cancelada">0</span></button>
+                </div>
+              </div>
+
+              <div id="gembaStatusMsg" class="gemba-status-msg" style="display:none;"></div>
+              <div id="gembaCardsContainer" class="gemba-cards"></div>
+            </div>
+          </div>
+
+          <div id="gembaFormModal" class="gemba-modal" role="dialog" aria-modal="true" aria-labelledby="gembaFormModalTitle" hidden>
+            <div class="gemba-modal-card">
+              <div class="gemba-modal-head">
+                <div>
+                  <i class="fa-solid fa-clipboard-list" style="color:#38bdf8;"></i>
+                  <strong id="gembaFormModalTitle">Nova ocorrência Gemba</strong>
+                </div>
+                <button id="gembaFormModalClose" type="button" title="Fechar"><i class="fa-solid fa-xmark"></i></button>
+              </div>
+              <form id="gembaForm" class="gemba-modal-body">
+                <input type="hidden" id="gembaFormId" value="" />
+                <label class="gemba-field">
+                  <span>Título</span>
+                  <input id="gembaFormTitulo" type="text" maxlength="180" required placeholder="Ex.: Vazamento no posto de solda" />
+                </label>
+                <label class="gemba-field">
+                  <span>Descrição</span>
+                  <textarea id="gembaFormDescricao" rows="5" placeholder="O que foi visto, onde e o impacto..."></textarea>
+                </label>
+                <div id="gembaFormStatusWrap" class="gemba-field" hidden>
+                  <span>Status</span>
+                  <select id="gembaFormStatus">
+                    <option value="aberta">Aberta</option>
+                    <option value="em_andamento">Em andamento</option>
+                    <option value="resolvida">Resolvida</option>
+                    <option value="cancelada">Cancelada</option>
+                  </select>
+                </div>
+                <label id="gembaFormComentarioWrap" class="gemba-field" hidden>
+                  <span>Comentário da atualização (opcional)</span>
+                  <input id="gembaFormComentario" type="text" maxlength="240" placeholder="Ex.: Encaminhado para manutenção" />
+                </label>
+                <div class="gemba-midia-grid">
+                  <label class="gemba-midia-box">
+                    <span><i class="fa-solid fa-image"></i> Foto</span>
+                    <input id="gembaFormFoto" type="file" accept="image/*" />
+                    <div id="gembaFotoPreview" class="gemba-preview">Nenhuma foto selecionada</div>
+                  </label>
+                  <label class="gemba-midia-box">
+                    <span><i class="fa-solid fa-video"></i> Vídeo</span>
+                    <input id="gembaFormVideo" type="file" accept="video/*" />
+                    <div id="gembaVideoPreview" class="gemba-preview">Nenhum vídeo selecionado</div>
+                  </label>
+                </div>
+                <div id="gembaFormHistorico" class="gemba-historico" hidden></div>
+                <div id="gembaFormErro" class="gemba-form-erro" hidden></div>
+                <div class="gemba-modal-actions">
+                  <button id="gembaFormCancelar" type="button" class="content-button">Cancelar</button>
+                  <button id="gembaFormSalvar" type="submit" class="content-button gemba-btn-salvar">
+                    <i class="fa-solid fa-floppy-disk"></i> Salvar
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Produção: Testes — relatório de bombas de calor -->
         <div id="producaoTestesPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -13668,7 +13776,8 @@
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260712a" defer></script>
   <script src="/public/js/producao-relatorio-gerencial.js?v=20260807a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
-  <script type="module" src="menu_produto.js?v=20260807-chamado-aprovacao-solucao"></script>
+  <script src="/public/js/producao-gemba.js?v=20260811a" defer></script>
+  <script type="module" src="menu_produto.js?v=20260811-gemba"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260730-filtro-expedicao"></script>

@@ -532,7 +532,7 @@ async function organizarSchemasMigracao(db) {
         sac: 'SAC/AT — OS, WhatsApp, material, envios VIPP',
         compras: 'Compras — kanban, cotações, pedidos Omie',
         vendas: 'Vendas — pedidos, NF-e, relatório gerencial',
-        producao: 'Produção — OP, kanban PCP, paradas, tempo, IAPP runtime',
+        producao: 'Produção — OP, kanban PCP, paradas, tempo, IAPP runtime, Gemba',
         engenharia: 'Engenharia — códigos de erro, fichas, estrutura BOM',
         qualidade: 'Qualidade — RI, PIR, 1ª peça, lista mestra',
         chatbot: 'Chatbot — manuais, FAQ, conversas, memória',
