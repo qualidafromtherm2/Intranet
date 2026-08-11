@@ -580,6 +580,18 @@
     </a>
 
     <a href="#"
+       id="menu-estoque-maquinas"
+       class="menu-link"
+       data-nav-key="side:log:estoque-maquinas"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="estoque de maquinas"
+       data-nav-selector="#menu-estoque-maquinas">
+      <i class="fa-solid fa-gears" style="margin-right:8px;"></i>
+      estoque de maquinas
+    </a>
+
+    <a href="#"
        id="menu-guardar-materiais"
        class="menu-link"
        data-nav-key="side:log:guardar-materiais"
@@ -7304,6 +7316,79 @@
           </div>
         </div>
 
+        <!-- Painel Logística: Estoque de máquinas -->
+        <div id="estoqueMaquinasPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-wrapper-header">
+              <div class="content-wrapper-context">
+                <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
+                  <i class="fa-solid fa-gears" style="color:#38bdf8;"></i>
+                  <span>Estoque de máquinas</span>
+                </h3>
+                <div class="content-text">Kanban de embalagem, estoque #MAQ e solicitações de envio.</div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+                <button id="maqEstoqueRecarregarBtn" type="button"
+                  style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#6366f1 0%,#4f46e5 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
+                  <i class="fa-solid fa-rotate-right"></i> Atualizar
+                </button>
+              </div>
+            </div>
+
+            <div id="maqEstoqueSpinner" style="display:none;text-align:center;padding:24px 0;color:#6366f1;">
+              <i class="fa-solid fa-spinner fa-spin" style="font-size:28px;"></i>
+              <div style="margin-top:10px;font-size:13px;color:var(--inactive-color);">Carregando...</div>
+            </div>
+            <div id="maqEstoqueStatus" style="display:none;padding:12px 14px;background:#450a0a;border:1px solid #dc2626;border-radius:10px;color:#fca5a5;font-size:13px;margin-bottom:12px;"></div>
+
+            <div style="margin-bottom:12px;max-width:480px;position:relative;">
+              <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
+              <input type="search" id="maqEstoquePesquisaInput" autocomplete="off"
+                placeholder="Pesquisar por modelo, OP, pedido ou cliente..."
+                style="width:100%;padding:8px 36px 8px 36px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;outline:none;">
+              <button type="button" id="maqEstoquePesquisaLimpar" title="Limpar pesquisa"
+                style="display:none;position:absolute;right:8px;top:50%;transform:translateY(-50%);width:22px;height:22px;align-items:center;justify-content:center;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);border-radius:50%;color:#94a3b8;font-size:14px;line-height:1;cursor:pointer;padding:0;">
+                <i class="fa-solid fa-xmark" style="font-size:11px;"></i>
+              </button>
+            </div>
+
+            <div id="maqEstoqueKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#064e3b;border-radius:10px 10px 0 0;border:1px solid #059669;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#34d399;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:.5px;">Aguardando embalagem</span>
+                  <span id="maqKanbanEmbalagemCount" style="margin-left:auto;font-size:11px;background:#065f46;color:#a7f3d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="maqKanbanEmbalagem" style="min-height:220px;background:rgba(52,211,153,.04);border:1px solid #059669;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em Atualizar para carregar.</div>
+                </div>
+              </div>
+
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#172554;border-radius:10px 10px 0 0;border:1px solid #1d4ed8;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#3b82f6;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#93c5fd;text-transform:uppercase;letter-spacing:.5px;">estoque de maquina</span>
+                  <span id="maqKanbanEstoqueCount" style="margin-left:auto;font-size:11px;background:#1e3a8a;color:#bfdbfe;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="maqKanbanEstoque" style="min-height:220px;background:rgba(59,130,246,.04);border:1px solid #1d4ed8;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em Atualizar para carregar.</div>
+                </div>
+              </div>
+
+              <div style="flex:0 0 340px;min-width:300px;">
+                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#422006;border-radius:10px 10px 0 0;border:1px solid #b45309;border-bottom:none;">
+                  <span style="width:10px;height:10px;border-radius:50%;background:#f59e0b;display:inline-block;flex-shrink:0;"></span>
+                  <span style="font-size:12px;font-weight:700;color:#fcd34d;text-transform:uppercase;letter-spacing:.5px;">solicitação de envio</span>
+                  <span id="maqKanbanEnvioCount" style="margin-left:auto;font-size:11px;background:#78350f;color:#fde68a;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
+                </div>
+                <div id="maqKanbanEnvio" style="min-height:220px;background:rgba(245,158,11,.04);border:1px solid #b45309;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
+                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em Atualizar para carregar.</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel 1ª Peça OK -->
         <div id="producaoPrimeiraPecaOkPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -13777,8 +13862,9 @@
   <script src="/public/js/producao-relatorio-gerencial.js?v=20260807a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script src="/public/js/producao-gemba.js?v=20260811a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260811-gemba"></script>
+  <script type="module" src="menu_produto.js?v=20260811-estoque-maq"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
+  <script defer src="/public/js/estoque-maquinas.js?v=20260811a"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260730-filtro-expedicao"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260805-solicitacao-lista"></script>
@@ -21129,6 +21215,7 @@ function attachDropZone(ul) {
     armazens: ['menu-armazens'],
     recebimento: ['menu-recebimento'],
     envio_mercadoria: ['menu-envio-mercadoria'],
+    estoque_maquinas: ['menu-estoque-maquinas'],
     os: ['menu-sac-at'],
     sac_envio: ['menu-sac-solicitacao-envio'],
     compras: ['cart-icon', 'menu-produto-recebido'],

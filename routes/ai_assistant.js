@@ -146,7 +146,7 @@ Você ajuda os colaboradores a navegar pelo sistema, tirar dúvidas sobre funcio
 - **Produto**: Cadastro e consulta de produtos — dados, estrutura, lista de peças, fotos, anexos, definições, últimas compras.
 - **Engenharia**: Gestão de engenharia e projetos (Check-Proj).
 - **Registros**: Histórico de alterações de produtos e dados do sistema.
-- **Logística**: Armazéns, Solicitação de transferência, Recebimento de materiais, Envio de mercadoria, Relatório Logística.
+- **Logística**: Armazéns, Solicitação de transferência, Recebimento de materiais, Envio de mercadoria, Estoque de máquinas, Relatório Logística.
 - **Qualidade (PIR)**: PIR de produtos — registro de inspeções e resultados de qualidade.
 - **SAC → AT (Assistência Técnica)**: Abertura de OS de assistência técnica ao cliente.
   Dados para abrir OS:
