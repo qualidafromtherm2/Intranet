@@ -20,6 +20,7 @@ const upload = multer({
 const uploadCampos = upload.fields([
   { name: 'foto', maxCount: 1 },
   { name: 'video', maxCount: 1 },
+  { name: 'foto_depois', maxCount: 1 },
 ]);
 
 let schemaReady = false;
@@ -40,10 +41,20 @@ async function ensureGembaSchema() {
       criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       resolvido_em TIMESTAMPTZ,
+      responsavel_acao TEXT,
+      plano_acao TEXT,
+      prazo DATE,
+      data_conclusao DATE,
+      foto_depois_url TEXT,
       CONSTRAINT gemba_ocorrencia_status_chk
         CHECK (status IN ('aberta', 'em_andamento', 'resolvida', 'cancelada'))
     )
   `);
+  await dbQuery(`ALTER TABLE producao.gemba_ocorrencia ADD COLUMN IF NOT EXISTS responsavel_acao TEXT`);
+  await dbQuery(`ALTER TABLE producao.gemba_ocorrencia ADD COLUMN IF NOT EXISTS plano_acao TEXT`);
+  await dbQuery(`ALTER TABLE producao.gemba_ocorrencia ADD COLUMN IF NOT EXISTS prazo DATE`);
+  await dbQuery(`ALTER TABLE producao.gemba_ocorrencia ADD COLUMN IF NOT EXISTS data_conclusao DATE`);
+  await dbQuery(`ALTER TABLE producao.gemba_ocorrencia ADD COLUMN IF NOT EXISTS foto_depois_url TEXT`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_gemba_ocorrencia_status
       ON producao.gemba_ocorrencia (status)
@@ -107,7 +118,9 @@ async function registrarHistorico(ocorrenciaId, statusAnterior, statusNovo, come
 
 const COLS = `
   id, titulo, descricao, status, foto_url, video_url,
-  criado_por, atualizado_por, criado_em, atualizado_em, resolvido_em
+  criado_por, atualizado_por, criado_em, atualizado_em, resolvido_em,
+  responsavel_acao, plano_acao, prazo::text AS prazo,
+  data_conclusao::text AS data_conclusao, foto_depois_url
 `;
 
 function handleMulter(req, res, next) {
@@ -204,23 +217,31 @@ router.post('/', handleMulter, async (req, res) => {
     const titulo = String(req.body?.titulo || '').trim();
     const descricao = String(req.body?.descricao || '').trim();
     if (!titulo) return res.status(400).json({ error: 'Informe o título da ocorrência.' });
+    const responsavelAcao = String(req.body?.responsavel_acao || '').trim();
+    const planoAcao = String(req.body?.plano_acao || '').trim();
+    const prazo = String(req.body?.prazo || '').trim() || null;
+    const dataConclusao = String(req.body?.data_conclusao || '').trim() || null;
 
     const autor = usuarioLogado(req);
     const inserted = await dbQuery(
-      `INSERT INTO producao.gemba_ocorrencia (titulo, descricao, status, criado_por, atualizado_por)
-       VALUES ($1, $2, 'aberta', $3, $3)
+      `INSERT INTO producao.gemba_ocorrencia
+         (titulo, descricao, status, criado_por, atualizado_por,
+          responsavel_acao, plano_acao, prazo, data_conclusao)
+       VALUES ($1, $2, 'aberta', $3, $3, $4, $5, $6, $7)
        RETURNING id`,
-      [titulo, descricao || null, autor]
+      [titulo, descricao || null, autor, responsavelAcao || null, planoAcao || null, prazo, dataConclusao]
     );
     const id = inserted.rows[0].id;
     const files = req.files || {};
 
     let fotoUrl = null;
     let videoUrl = null;
+    let fotoDepoisUrl = null;
     try {
-      [fotoUrl, videoUrl] = await Promise.all([
+      [fotoUrl, videoUrl, fotoDepoisUrl] = await Promise.all([
         uploadMidia(id, 'foto', files.foto?.[0]),
         uploadMidia(id, 'video', files.video?.[0]),
+        uploadMidia(id, 'depois', files.foto_depois?.[0]),
       ]);
     } catch (upErr) {
       await dbQuery(`DELETE FROM producao.gemba_ocorrencia WHERE id = $1`, [id]);
@@ -229,10 +250,10 @@ router.post('/', handleMulter, async (req, res) => {
 
     const { rows } = await dbQuery(
       `UPDATE producao.gemba_ocorrencia
-          SET foto_url = $2, video_url = $3, atualizado_em = NOW()
+          SET foto_url = $2, video_url = $3, foto_depois_url = $4, atualizado_em = NOW()
         WHERE id = $1
         RETURNING ${COLS}`,
-      [id, fotoUrl, videoUrl]
+      [id, fotoUrl, videoUrl, fotoDepoisUrl]
     );
     await registrarHistorico(id, null, 'aberta', 'Ocorrência registrada no Gemba', autor);
     res.json({ success: true, data: rows[0] });
@@ -266,15 +287,20 @@ router.put('/:id', handleMulter, async (req, res) => {
 
     const autor = usuarioLogado(req);
     const files = req.files || {};
-    const [fotoNova, videoNovo] = await Promise.all([
+    const [fotoNova, videoNovo, fotoDepoisNova] = await Promise.all([
       uploadMidia(id, 'foto', files.foto?.[0]),
       uploadMidia(id, 'video', files.video?.[0]),
+      uploadMidia(id, 'depois', files.foto_depois?.[0]),
     ]);
 
     const statusAnterior = atual.rows[0].status;
     const resolvidoEm = statusNovo === 'resolvida'
       ? (atual.rows[0].resolvido_em || new Date())
       : null;
+    const responsavelAcao = String(req.body?.responsavel_acao || '').trim();
+    const planoAcao = String(req.body?.plano_acao || '').trim();
+    const prazo = String(req.body?.prazo || '').trim() || null;
+    const dataConclusao = String(req.body?.data_conclusao || '').trim() || null;
 
     const { rows } = await dbQuery(
       `UPDATE producao.gemba_ocorrencia
@@ -283,12 +309,21 @@ router.put('/:id', handleMulter, async (req, res) => {
               status = $4,
               foto_url = COALESCE($5, foto_url),
               video_url = COALESCE($6, video_url),
-              atualizado_por = $7,
+              foto_depois_url = COALESCE($7, foto_depois_url),
+              atualizado_por = $8,
               atualizado_em = NOW(),
-              resolvido_em = $8
+              resolvido_em = $9,
+              responsavel_acao = $10,
+              plano_acao = $11,
+              prazo = $12,
+              data_conclusao = $13
         WHERE id = $1
         RETURNING ${COLS}`,
-      [id, titulo, descricao || null, statusNovo, fotoNova, videoNovo, autor, resolvidoEm]
+      [
+        id, titulo, descricao || null, statusNovo,
+        fotoNova, videoNovo, fotoDepoisNova, autor, resolvidoEm,
+        responsavelAcao || null, planoAcao || null, prazo, dataConclusao,
+      ]
     );
 
     const comentario = String(req.body?.comentario || '').trim();

@@ -1,7 +1,6 @@
 const express = require('express');
 const { pool } = require('../src/db');
 const omieCall = require('../utils/omieCall');
-const { vendasNfJoinPedidoSql } = require('../utils/vendasNfJoin');
 const {
   calcPeriodoComFiltros,
   parseFiltrosRelatorio,
@@ -196,49 +195,62 @@ function buildEtapaFilter(etapaRaw) {
     };
   }
   return {
-    sql: ` AND TRIM(COALESCE(p.etapa::text, '')) = '70'
-           AND nf.data_emissao_dt IS NOT NULL`,
+    sql: ` AND (
+             p.codigo_pedido IS NULL
+             OR TRIM(COALESCE(p.etapa::text, '')) = '70'
+           )`,
     label: 'Entregues',
   };
 }
 
-/** NF por pedido — filtro de status_ultimo só neste relatório (não altera utils/vendasNfJoin). */
-const VENDAS_NF_POR_PEDIDO_CTE = `
-  nf_por_pedido AS (
+const NF_DATA_EMISSAO_SQL = `CASE
+  WHEN TRIM(COALESCE(nf.data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+    THEN LEFT(TRIM(nf.data_emissao), 10)::date
+  WHEN TRIM(COALESCE(nf.data_emissao, '')) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
+    THEN to_date(regexp_replace(SUBSTRING(TRIM(nf.data_emissao) FROM 1 FOR 10), ' .*', ''), 'DD/MM/YYYY')
+  ELSE NULL
+END`;
+
+/** Faturamento = notas fiscais de saída no período (não depende do pedido ter sido sincronizado). */
+const VENDAS_CTES = `
+  nf_emitidas AS (
     SELECT
-      COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') AS pedido_key,
-      MAX(
-        CASE
-          WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
-            THEN LEFT(TRIM(data_emissao), 10)::date
-          WHEN TRIM(COALESCE(data_emissao, '')) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
-            THEN to_date(regexp_replace(SUBSTRING(TRIM(data_emissao) FROM 1 FOR 10), ' .*', ''), 'DD/MM/YYYY')
-          ELSE NULL
-        END
-      ) AS data_emissao_dt
-    FROM vendas.notas_fiscais_omie
-    WHERE COALESCE(NULLIF(TRIM(numero_pedido), ''), TRIM(id_pedido_omie::text), '') <> ''
+      nf.id,
+      nf.numero_nota,
+      nf.numero_pedido,
+      nf.id_pedido_omie,
+      nf.valor_total,
+      nf.cfop,
+      nf.status_ultimo,
+      nf.payload_ultimo,
+      ${NF_DATA_EMISSAO_SQL} AS data_emissao_dt
+    FROM vendas.notas_fiscais_omie nf
+    WHERE nf.ativa IS DISTINCT FROM FALSE
+      AND ${NF_DATA_EMISSAO_SQL} >= $1::date
+      AND ${NF_DATA_EMISSAO_SQL} < $2::date
+      AND COALESCE(nf.payload_ultimo->'ide'->>'tpNF', '1') <> '0'
       AND (
-        status_ultimo IN (
+        nf.status_ultimo IN (
           SELECT s.status FROM vendas.relatorio_gerencial_status s WHERE s.incluido IS TRUE
         )
         OR NOT EXISTS (SELECT 1 FROM vendas.relatorio_gerencial_status LIMIT 1)
       )
-    GROUP BY 1
-  )
-`;
-
-/** Pedidos com algum item cujo CFOP está desmarcado na config compartilhada. */
-const VENDAS_CTES = `
-  ${VENDAS_NF_POR_PEDIDO_CTE},
-  pedidos_cfop_ignorado AS (
-    SELECT DISTINCT i.codigo_pedido
-    FROM vendas.pedidos_venda_itens i
-    WHERE REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') <> ''
-      AND REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
-        SELECT c.cfop
-          FROM vendas.relatorio_gerencial_cfop c
-         WHERE c.incluido IS FALSE
+      AND (
+        TRIM(COALESCE(nf.cfop, '')) = ''
+        OR EXISTS (
+          SELECT 1
+            FROM unnest(string_to_array(nf.cfop, ',')) AS raw(cf)
+            JOIN vendas.relatorio_gerencial_cfop c
+              ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
+             AND c.incluido IS TRUE
+        )
+      )
+      AND NOT EXISTS (
+        SELECT 1
+          FROM unnest(string_to_array(COALESCE(nf.cfop, ''), ',')) AS raw(cf)
+          JOIN vendas.relatorio_gerencial_cfop c
+            ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
+           AND c.incluido IS FALSE
       )
   )
 `;
@@ -247,41 +259,46 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
   return `
     WITH ${VENDAS_CTES},
     base AS (
-      SELECT DISTINCT ON (p.codigo_pedido)
-        p.codigo_pedido,
-        p.numero_pedido,
+      SELECT
+        COALESCE(p.codigo_pedido, nf.id_pedido_omie, (-nf.id)) AS codigo_pedido,
+        COALESCE(NULLIF(TRIM(p.numero_pedido), ''), NULLIF(TRIM(nf.numero_nota), ''), TRIM(nf.id::text)) AS numero_pedido,
         TRIM(COALESCE(p.informacoes_adicionais->>'codVend', '')) AS codigo_vendedor,
-        TRIM(COALESCE(p.etapa::text, '')) AS etapa,
-        CASE TRIM(COALESCE(p.etapa::text, ''))
-          WHEN '00' THEN 'Aberto'
-          WHEN '10' THEN 'Em análise'
-          WHEN '20' THEN 'Aprovado'
-          WHEN '50' THEN 'Em processamento'
-          WHEN '60' THEN 'Em separação'
-          WHEN '70' THEN 'Faturado/Entregue'
-          WHEN '80' THEN 'Concluído'
+        CASE
+          WHEN p.codigo_pedido IS NULL THEN '70'
+          ELSE TRIM(COALESCE(p.etapa::text, ''))
+        END AS etapa,
+        CASE
+          WHEN p.codigo_pedido IS NULL THEN 'Faturado/Entregue'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '00' THEN 'Aberto'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '10' THEN 'Em análise'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '20' THEN 'Aprovado'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '50' THEN 'Em processamento'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '60' THEN 'Em separação'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '70' THEN 'Faturado/Entregue'
+          WHEN TRIM(COALESCE(p.etapa::text, '')) = '80' THEN 'Concluído'
           ELSE 'Outras'
         END AS etapa_descricao,
-        COALESCE(p.valor_total_pedido, 0)::numeric(14,2) AS valor_total_pedido,
+        COALESCE(nf.valor_total, 0)::numeric(14,2) AS valor_total_pedido,
         COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado,
         COALESCE(
           NULLIF(TRIM(f.nome_fantasia), ''),
           NULLIF(TRIM(f.razao_social), ''),
+          NULLIF(TRIM(nf.payload_ultimo->'nfDestInt'->>'cRazao'), ''),
           '(sem cliente)'
         ) AS cliente,
         nf.data_emissao_dt,
-        COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM vendas.pedidos_venda p
+        nf.data_emissao_dt AS data_ref
+      FROM nf_emitidas nf
+      LEFT JOIN vendas.pedidos_venda p
+        ON p.codigo_pedido = nf.id_pedido_omie
       LEFT JOIN omie.fornecedores f
-        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
-      LEFT JOIN nf_por_pedido nf
-        ON ${vendasNfJoinPedidoSql('nf', 'p')}
-      WHERE p.codigo_pedido NOT IN (SELECT codigo_pedido FROM pedidos_cfop_ignorado)
-        AND COALESCE(nf.data_emissao_dt, p.updated_at::date) >= $1::date
-        AND COALESCE(nf.data_emissao_dt, p.updated_at::date) < $2::date
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(
+             p.codigo_cliente::text,
+             nf.payload_ultimo->'nfDestInt'->>'nCodCli'
+           ))
+      WHERE 1=1
         ${etapaSql}
         ${pedidoSql}
-      ORDER BY p.codigo_pedido
     )
   `;
 }
@@ -308,42 +325,19 @@ const ITENS_CTE = `
 function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
   const itensBlock = ITENS_CTE.replace('__ITEM_SQL__', itemSql || '');
   return `
-    WITH ${VENDAS_CTES},
+    ${buildBaseCte(etapaSql, pedidoSql).replace(/\s+$/, '')},
     ${itensBlock},
-    base AS (
-      SELECT DISTINCT ON (p.codigo_pedido)
-        p.codigo_pedido,
-        COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado,
-        COALESCE(
-          NULLIF(TRIM(f.nome_fantasia), ''),
-          NULLIF(TRIM(f.razao_social), ''),
-          '(sem cliente)'
-        ) AS cliente,
-        nf.data_emissao_dt,
-        COALESCE(nf.data_emissao_dt, p.updated_at::date) AS data_ref
-      FROM vendas.pedidos_venda p
-      LEFT JOIN omie.fornecedores f
-        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
-      LEFT JOIN nf_por_pedido nf
-        ON ${vendasNfJoinPedidoSql('nf', 'p')}
-      WHERE p.codigo_pedido NOT IN (SELECT codigo_pedido FROM pedidos_cfop_ignorado)
-        AND COALESCE(nf.data_emissao_dt, p.updated_at::date) >= $1::date
-        AND COALESCE(nf.data_emissao_dt, p.updated_at::date) < $2::date
-        ${etapaSql}
-        ${pedidoSql}
-      ORDER BY p.codigo_pedido
-    ),
     itens AS (
       SELECT
         b.codigo_pedido,
         b.estado,
         b.cliente,
         b.data_emissao_dt,
-        ib.familia,
-        ib.quantidade,
-        ib.valor_total
+        COALESCE(ib.familia, '(sem família)') AS familia,
+        COALESCE(ib.quantidade, 0)::numeric(14,2) AS quantidade,
+        COALESCE(ib.valor_total, b.valor_total_pedido) AS valor_total
       FROM base b
-      JOIN itens_base ib ON ib.codigo_pedido = b.codigo_pedido
+      LEFT JOIN itens_base ib ON ib.codigo_pedido = b.codigo_pedido
     )
   `;
 }
@@ -825,8 +819,8 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       filtros_aplicados: {
         modo: filtros.modo,
         etapa: etapaParam,
-        ano: filtros.ano || null,
-        mes: filtros.mes || null,
+        data_inicio: filtros.data_inicio || null,
+        data_fim: filtros.data_fim || null,
         trimestre: filtros.trimestre || null,
         vendedor: filtros.vendedor || null,
         familia: filtros.familia || null,

@@ -6597,17 +6597,12 @@
               </div>
               <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px;padding:10px 12px;border-radius:10px;border:1px solid #1e293b;background:rgba(15,23,42,.5);">
                 <div style="display:flex;align-items:center;gap:6px;">
-                  <label for="vendRelGerAno" style="font-size:11px;font-weight:600;color:#94a3b8;">Ano</label>
-                  <select id="vendRelGerAno" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:88px;"><option value="">Todos</option></select>
+                  <label for="vendRelGerDataInicio" style="font-size:11px;font-weight:600;color:#94a3b8;">Data início</label>
+                  <input type="date" id="vendRelGerDataInicio" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:140px;color-scheme:dark;">
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
-                  <label for="vendRelGerMes" style="font-size:11px;font-weight:600;color:#94a3b8;">Mês</label>
-                  <select id="vendRelGerMes" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:88px;">
-                    <option value="">Todos</option>
-                    <option value="1">Jan</option><option value="2">Fev</option><option value="3">Mar</option><option value="4">Abr</option>
-                    <option value="5">Mai</option><option value="6">Jun</option><option value="7">Jul</option><option value="8">Ago</option>
-                    <option value="9">Set</option><option value="10">Out</option><option value="11">Nov</option><option value="12">Dez</option>
-                  </select>
+                  <label for="vendRelGerDataFim" style="font-size:11px;font-weight:600;color:#94a3b8;">Data fim</label>
+                  <input type="date" id="vendRelGerDataFim" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:140px;color-scheme:dark;">
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
                   <label for="vendRelGerTrimestre" style="font-size:11px;font-weight:600;color:#94a3b8;">Trimestre</label>
@@ -13344,40 +13339,78 @@
               </div>
               <form id="gembaForm" class="gemba-modal-body">
                 <input type="hidden" id="gembaFormId" value="" />
-                <label class="gemba-field">
-                  <span>Título</span>
-                  <input id="gembaFormTitulo" type="text" maxlength="180" required placeholder="Ex.: Vazamento no posto de solda" />
-                </label>
-                <label class="gemba-field">
-                  <span>Descrição</span>
-                  <textarea id="gembaFormDescricao" rows="5" placeholder="O que foi visto, onde e o impacto..."></textarea>
-                </label>
-                <div id="gembaFormStatusWrap" class="gemba-field" hidden>
-                  <span>Status</span>
-                  <select id="gembaFormStatus">
-                    <option value="aberta">Aberta</option>
-                    <option value="em_andamento">Em andamento</option>
-                    <option value="resolvida">Resolvida</option>
-                    <option value="cancelada">Cancelada</option>
-                  </select>
+                <div class="gemba-guias" role="tablist">
+                  <button type="button" class="gemba-guia is-active" data-gemba-tab="registro">Registro</button>
+                  <button type="button" class="gemba-guia" data-gemba-tab="acao">Plano de ação</button>
+                  <button type="button" class="gemba-guia" data-gemba-tab="fechamento">Fechamento</button>
                 </div>
-                <label id="gembaFormComentarioWrap" class="gemba-field" hidden>
-                  <span>Comentário da atualização (opcional)</span>
-                  <input id="gembaFormComentario" type="text" maxlength="240" placeholder="Ex.: Encaminhado para manutenção" />
-                </label>
-                <div class="gemba-midia-grid">
-                  <label class="gemba-midia-box">
-                    <span><i class="fa-solid fa-image"></i> Foto</span>
-                    <input id="gembaFormFoto" type="file" accept="image/*" />
-                    <div id="gembaFotoPreview" class="gemba-preview">Nenhuma foto selecionada</div>
+
+                <div data-gemba-panel="registro">
+                  <label class="gemba-field">
+                    <span>Título</span>
+                    <input id="gembaFormTitulo" type="text" maxlength="180" required placeholder="Ex.: Vazamento no posto de solda" />
+                  </label>
+                  <label class="gemba-field">
+                    <span>Descrição</span>
+                    <textarea id="gembaFormDescricao" rows="5" placeholder="O que foi visto, onde e o impacto..."></textarea>
+                  </label>
+                  <div id="gembaFormStatusWrap" class="gemba-field" hidden>
+                    <span>Status</span>
+                    <select id="gembaFormStatus">
+                      <option value="aberta">Aberta</option>
+                      <option value="em_andamento">Em andamento</option>
+                      <option value="resolvida">Resolvida</option>
+                      <option value="cancelada">Cancelada</option>
+                    </select>
+                  </div>
+                  <label id="gembaFormComentarioWrap" class="gemba-field" hidden>
+                    <span>Comentário da atualização (opcional)</span>
+                    <input id="gembaFormComentario" type="text" maxlength="240" placeholder="Ex.: Encaminhado para manutenção" />
+                  </label>
+                  <div class="gemba-midia-grid">
+                    <label class="gemba-midia-box">
+                      <span><i class="fa-solid fa-image"></i> Foto do registro</span>
+                      <small class="gemba-midia-hint">Esta é a foto do card. Só a primeira fica visível na lista.</small>
+                      <input id="gembaFormFoto" type="file" accept="image/*" />
+                      <div id="gembaFotoPreview" class="gemba-preview">Nenhuma foto selecionada</div>
+                    </label>
+                    <label class="gemba-midia-box">
+                      <span><i class="fa-solid fa-video"></i> Vídeo</span>
+                      <input id="gembaFormVideo" type="file" accept="video/*" />
+                      <div id="gembaVideoPreview" class="gemba-preview">Nenhum vídeo selecionado</div>
+                    </label>
+                  </div>
+                  <div id="gembaFormHistorico" class="gemba-historico" hidden></div>
+                </div>
+
+                <div data-gemba-panel="acao" hidden>
+                  <label class="gemba-field">
+                    <span>Responsável pela ação</span>
+                    <input id="gembaFormResponsavel" type="text" maxlength="120" placeholder="Quem vai tratar esta ocorrência" />
+                  </label>
+                  <label class="gemba-field">
+                    <span>Plano de ação</span>
+                    <textarea id="gembaFormPlanoAcao" rows="6" placeholder="O que será feito para corrigir e evitar que aconteça de novo..."></textarea>
+                  </label>
+                  <label class="gemba-field">
+                    <span>Prazo</span>
+                    <input id="gembaFormPrazo" type="date" />
+                  </label>
+                </div>
+
+                <div data-gemba-panel="fechamento" hidden>
+                  <label class="gemba-field">
+                    <span>Data de conclusão</span>
+                    <input id="gembaFormDataConclusao" type="date" />
                   </label>
                   <label class="gemba-midia-box">
-                    <span><i class="fa-solid fa-video"></i> Vídeo</span>
-                    <input id="gembaFormVideo" type="file" accept="video/*" />
-                    <div id="gembaVideoPreview" class="gemba-preview">Nenhum vídeo selecionado</div>
+                    <span><i class="fa-solid fa-image"></i> Foto do depois</span>
+                    <small class="gemba-midia-hint">Não aparece no card. Só neste modal.</small>
+                    <input id="gembaFormFotoDepois" type="file" accept="image/*" />
+                    <div id="gembaFotoDepoisPreview" class="gemba-preview">Nenhuma foto selecionada</div>
                   </label>
                 </div>
-                <div id="gembaFormHistorico" class="gemba-historico" hidden></div>
+
                 <div id="gembaFormErro" class="gemba-form-erro" hidden></div>
                 <div class="gemba-modal-actions">
                   <button id="gembaFormCancelar" type="button" class="content-button">Cancelar</button>

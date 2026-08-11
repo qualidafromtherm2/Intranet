@@ -72,14 +72,72 @@ function calcPeriodo(modoRaw, refDate = new Date()) {
   };
 }
 
+function parseYmd(value) {
+  const m = String(value || '').trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (y < 2000 || y > 2100 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+  return `${m[1]}-${m[2]}-${m[3]}`;
+}
+
+function addDaysYmd(ymd, days) {
+  const [y, m, d] = String(ymd).split('-').map(Number);
+  const dt = new Date(y, m - 1, d + days);
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
+function labelYmdBr(ymd) {
+  const [y, m, d] = String(ymd).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function mesesEntre(inicioYmd, fimInclusiveYmd) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const [y1, m1] = String(inicioYmd).split('-').map(Number);
+  const [y2, m2] = String(fimInclusiveYmd).split('-').map(Number);
+  const meses = [];
+  let y = y1;
+  let m = m1;
+  while (y < y2 || (y === y2 && m <= m2)) {
+    meses.push(`${y}-${pad(m)}`);
+    m += 1;
+    if (m > 12) {
+      m = 1;
+      y += 1;
+    }
+    if (meses.length > 120) break;
+  }
+  return meses;
+}
+
 /**
- * Ano / mês / trimestre têm prioridade sobre o select "Período".
+ * Data início/fim têm prioridade. Depois ano/mês/trimestre, depois o select "Período".
  */
 function calcPeriodoComFiltros(filtros = {}, refDate = new Date()) {
   const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
   const pad = (n) => String(n).padStart(2, '0');
   const fmtYmd = (y, m, d = 1) => `${y}-${pad(m)}-${pad(d)}`;
   const mesLabel = (y, m) => `${nomesMes[m - 1]}/${y}`;
+
+  const dataIni = parseYmd(filtros.data_inicio);
+  const dataFim = parseYmd(filtros.data_fim);
+  if (dataIni && dataFim) {
+    const inicio = dataIni <= dataFim ? dataIni : dataFim;
+    const fim = dataIni <= dataFim ? dataFim : dataIni;
+    const meses = mesesEntre(inicio, fim);
+    return {
+      modo: 'filtro',
+      mesRef: inicio.slice(0, 7),
+      inicio,
+      fimExclusive: addDaysYmd(fim, 1),
+      label: `${labelYmdBr(inicio)} a ${labelYmdBr(fim)}`,
+      meses,
+      evolucaoTipo: meses.length > 1 ? 'mes' : 'semana',
+    };
+  }
 
   const ano = Number.parseInt(String(filtros.ano || '').trim(), 10);
   const mes = Number.parseInt(String(filtros.mes || '').trim(), 10);
@@ -137,6 +195,8 @@ function parseFiltrosRelatorio(query = {}) {
   return {
     modo: String(query.modo || 'mes').trim().toLowerCase(),
     etapa: String(query.etapa || 'entregue').trim().toLowerCase(),
+    data_inicio: String(query.data_inicio || '').trim(),
+    data_fim: String(query.data_fim || '').trim(),
     ano: String(query.ano || '').trim(),
     mes: String(query.mes || '').trim(),
     trimestre: String(query.trimestre || '').trim(),

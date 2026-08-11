@@ -652,13 +652,46 @@
     if (current && [...el.options].some((opt) => opt.value === current)) el.value = current;
   }
 
+  function _pad2(n) { return String(n).padStart(2, '0'); }
+  function _fmtYmd(d) {
+    return `${d.getFullYear()}-${_pad2(d.getMonth() + 1)}-${_pad2(d.getDate())}`;
+  }
+  function _setDatas(ini, fim) {
+    const elI = document.getElementById('vendRelGerDataInicio');
+    const elF = document.getElementById('vendRelGerDataFim');
+    if (elI) elI.value = _fmtYmd(ini);
+    if (elF) elF.value = _fmtYmd(fim);
+  }
+  function _aplicarModoNasDatas() {
+    const modo = document.getElementById('vendRelGerModo')?.value || 'mes';
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    if (modo === 'mes') {
+      _setDatas(new Date(y, m, 1), new Date(y, m + 1, 0));
+      return;
+    }
+    const qtd = modo === '3m' ? 3 : (modo === '6m' ? 6 : 12);
+    _setDatas(new Date(y, m - qtd, 1), new Date(y, m, 0));
+  }
+  function _aplicarTrimestreNasDatas() {
+    const tri = Number.parseInt(document.getElementById('vendRelGerTrimestre')?.value || '', 10);
+    if (!Number.isFinite(tri) || tri < 1 || tri > 4) return;
+    const ymd = document.getElementById('vendRelGerDataInicio')?.value || '';
+    const y = Number.parseInt(ymd.slice(0, 4), 10) || new Date().getFullYear();
+    const mesIni = (tri - 1) * 3;
+    _setDatas(new Date(y, mesIni, 1), new Date(y, mesIni + 3, 0));
+  }
+
   function _filtrosQueryParams() {
     const qs = new URLSearchParams();
     qs.set('modo', document.getElementById('vendRelGerModo')?.value || 'mes');
     qs.set('etapa', document.getElementById('vendRelGerEtapa')?.value || 'entregue');
+    const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
+    const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
+    if (di) qs.set('data_inicio', di);
+    if (df) qs.set('data_fim', df);
     [
-      ['vendRelGerAno', 'ano'],
-      ['vendRelGerMes', 'mes'],
       ['vendRelGerTrimestre', 'trimestre'],
       ['vendRelGerVendedor', 'vendedor'],
       ['vendRelGerFamilia', 'familia'],
@@ -676,7 +709,6 @@
       const resp = await fetch('/api/sac/vendas/relatorio-gerencial/filtros-opcoes', { credentials: 'include' });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) return;
-      _preencherSelect('vendRelGerAno', data.anos || [], (a) => String(a), (a) => String(a));
       _preencherSelect('vendRelGerVendedor', data.vendedores || [], (v) => v.codigo, (v) => v.nome);
       _preencherSelect('vendRelGerFamilia', data.familias || [], (f) => f.codigo, (f) => f.descricao);
       _preencherSelect('vendRelGerEstado', data.estados || [], (e) => e, (e) => e);
@@ -841,9 +873,28 @@
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
-      document.getElementById('vendRelGerModo')?.addEventListener('change', _carregar);
+      document.getElementById('vendRelGerModo')?.addEventListener('change', () => {
+        const tri = document.getElementById('vendRelGerTrimestre');
+        if (tri) tri.value = '';
+        _aplicarModoNasDatas();
+        _carregar();
+      });
       document.getElementById('vendRelGerEtapa')?.addEventListener('change', _carregar);
-      ['vendRelGerAno', 'vendRelGerMes', 'vendRelGerTrimestre', 'vendRelGerVendedor', 'vendRelGerFamilia', 'vendRelGerEstado', 'vendRelGerTipo'].forEach((id) => {
+      document.getElementById('vendRelGerDataInicio')?.addEventListener('change', () => {
+        const tri = document.getElementById('vendRelGerTrimestre');
+        if (tri) tri.value = '';
+        _carregar();
+      });
+      document.getElementById('vendRelGerDataFim')?.addEventListener('change', () => {
+        const tri = document.getElementById('vendRelGerTrimestre');
+        if (tri) tri.value = '';
+        _carregar();
+      });
+      document.getElementById('vendRelGerTrimestre')?.addEventListener('change', () => {
+        _aplicarTrimestreNasDatas();
+        _carregar();
+      });
+      ['vendRelGerVendedor', 'vendRelGerFamilia', 'vendRelGerEstado', 'vendRelGerTipo'].forEach((id) => {
         document.getElementById(id)?.addEventListener('change', _carregar);
       });
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
@@ -886,6 +937,9 @@
       document.getElementById('vendRelGerStatusModal')?.addEventListener('click', (e) => {
         if (e.target?.id === 'vendRelGerStatusModal') _fecharModal('vendRelGerStatusModal');
       });
+    }
+    if (!document.getElementById('vendRelGerDataInicio')?.value || !document.getElementById('vendRelGerDataFim')?.value) {
+      _aplicarModoNasDatas();
     }
     _carregarFiltrosOpcoes();
     _carregar();

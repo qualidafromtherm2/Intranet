@@ -15,6 +15,7 @@
   let _lista = [];
   let _fotoObjUrl = null;
   let _videoObjUrl = null;
+  let _fotoDepoisObjUrl = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -39,8 +40,29 @@
   function revogarPreviews() {
     if (_fotoObjUrl) URL.revokeObjectURL(_fotoObjUrl);
     if (_videoObjUrl) URL.revokeObjectURL(_videoObjUrl);
+    if (_fotoDepoisObjUrl) URL.revokeObjectURL(_fotoDepoisObjUrl);
     _fotoObjUrl = null;
     _videoObjUrl = null;
+    _fotoDepoisObjUrl = null;
+  }
+
+  function toDateInput(v) {
+    if (!v) return '';
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const d = new Date(s);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toISOString().slice(0, 10);
+  }
+
+  function mostrarGuia(nome) {
+    const tab = nome || 'registro';
+    document.querySelectorAll('#gembaForm .gemba-guia').forEach((btn) => {
+      btn.classList.toggle('is-active', btn.dataset.gembaTab === tab);
+    });
+    document.querySelectorAll('#gembaForm [data-gemba-panel]').forEach((panel) => {
+      panel.hidden = panel.getAttribute('data-gemba-panel') !== tab;
+    });
   }
 
   function setStatusMsg(texto, isErro) {
@@ -128,15 +150,21 @@
   function preencherPreviewExistente(row) {
     const fotoBox = $('gembaFotoPreview');
     const videoBox = $('gembaVideoPreview');
+    const depoisBox = $('gembaFotoDepoisPreview');
     if (fotoBox) {
       fotoBox.innerHTML = row?.foto_url
-        ? `<img src="${esc(row.foto_url)}" alt="Foto atual">`
+        ? `<img src="${esc(row.foto_url)}" alt="Foto do registro">`
         : 'Nenhuma foto selecionada';
     }
     if (videoBox) {
       videoBox.innerHTML = row?.video_url
         ? `<video src="${esc(row.video_url)}" controls></video>`
         : 'Nenhum vídeo selecionado';
+    }
+    if (depoisBox) {
+      depoisBox.innerHTML = row?.foto_depois_url
+        ? `<img src="${esc(row.foto_depois_url)}" alt="Foto do depois">`
+        : 'Nenhuma foto selecionada';
     }
   }
 
@@ -164,6 +192,10 @@
     $('gembaFormDescricao').value = row?.descricao || '';
     $('gembaFormStatus').value = row?.status || 'aberta';
     $('gembaFormComentario').value = '';
+    if ($('gembaFormResponsavel')) $('gembaFormResponsavel').value = row?.responsavel_acao || '';
+    if ($('gembaFormPlanoAcao')) $('gembaFormPlanoAcao').value = row?.plano_acao || '';
+    if ($('gembaFormPrazo')) $('gembaFormPrazo').value = toDateInput(row?.prazo);
+    if ($('gembaFormDataConclusao')) $('gembaFormDataConclusao').value = toDateInput(row?.data_conclusao);
     $('gembaFormErro').hidden = true;
     $('gembaFormErro').textContent = '';
     const editando = !!row?.id;
@@ -179,6 +211,7 @@
     if (!modal) return;
     revogarPreviews();
     $('gembaForm')?.reset();
+    mostrarGuia('registro');
     preencherFormulario(row, []);
     modal.hidden = false;
     $('gembaFormTitulo')?.focus();
@@ -208,6 +241,7 @@
     const titulo = String($('gembaFormTitulo')?.value || '').trim();
     if (!titulo) {
       mostrarErroForm('Informe o título.');
+      mostrarGuia('registro');
       return;
     }
     const id = String($('gembaFormId')?.value || '').trim();
@@ -218,10 +252,16 @@
       fd.append('status', $('gembaFormStatus')?.value || 'aberta');
       fd.append('comentario', String($('gembaFormComentario')?.value || '').trim());
     }
+    fd.append('responsavel_acao', String($('gembaFormResponsavel')?.value || '').trim());
+    fd.append('plano_acao', String($('gembaFormPlanoAcao')?.value || '').trim());
+    fd.append('prazo', String($('gembaFormPrazo')?.value || '').trim());
+    fd.append('data_conclusao', String($('gembaFormDataConclusao')?.value || '').trim());
     const foto = $('gembaFormFoto')?.files?.[0];
     const video = $('gembaFormVideo')?.files?.[0];
+    const fotoDepois = $('gembaFormFotoDepois')?.files?.[0];
     if (foto) fd.append('foto', foto);
     if (video) fd.append('video', video);
+    if (fotoDepois) fd.append('foto_depois', fotoDepois);
 
     const btn = $('gembaFormSalvar');
     if (btn) btn.disabled = true;
@@ -251,6 +291,12 @@
     $('gembaFormModalClose')?.addEventListener('click', fecharModal);
     $('gembaFormCancelar')?.addEventListener('click', fecharModal);
     $('gembaForm')?.addEventListener('submit', salvar);
+
+    $('gembaForm')?.querySelector('.gemba-guias')?.addEventListener('click', (e) => {
+      const btn = e.target.closest('.gemba-guia');
+      if (!btn) return;
+      mostrarGuia(btn.dataset.gembaTab);
+    });
 
     $('gembaFormModal')?.addEventListener('click', (e) => {
       if (e.target === $('gembaFormModal')) fecharModal();
@@ -304,6 +350,19 @@
       }
       _videoObjUrl = URL.createObjectURL(file);
       box.innerHTML = `<video src="${_videoObjUrl}" controls></video>`;
+    });
+
+    $('gembaFormFotoDepois')?.addEventListener('change', () => {
+      const file = $('gembaFormFotoDepois').files?.[0];
+      const box = $('gembaFotoDepoisPreview');
+      if (!box) return;
+      if (_fotoDepoisObjUrl) URL.revokeObjectURL(_fotoDepoisObjUrl);
+      if (!file) {
+        box.textContent = 'Nenhuma foto selecionada';
+        return;
+      }
+      _fotoDepoisObjUrl = URL.createObjectURL(file);
+      box.innerHTML = `<img src="${_fotoDepoisObjUrl}" alt="Prévia da foto do depois">`;
     });
   }
 
