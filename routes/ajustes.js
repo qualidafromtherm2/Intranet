@@ -593,6 +593,29 @@ router.get('/historico-omie', exigirAuditoriaProduto, async (req, res) => {
       return (Number(b?.id_ajuste) || 0) - (Number(a?.id_ajuste) || 0);
     });
 
+    let saldosAtuais = [];
+    try {
+      const { rows: saldoRows } = await dbQuery(
+        `SELECT e.local_codigo, e.local_nome, COALESCE(e.saldo, 0)::numeric AS saldo
+           FROM logistica.estoque_atual e
+          WHERE e.omie_prod_id = $1
+             OR e.codigo = (
+                  SELECT p.codigo FROM produto.produtos_omie p
+                   WHERE p.codigo_produto = $1
+                   LIMIT 1
+                )
+          ORDER BY e.local_nome NULLS LAST, e.local_codigo`,
+        [idProd]
+      );
+      saldosAtuais = saldoRows.map((row) => ({
+        local_codigo: String(row.local_codigo || '').trim(),
+        local_nome: String(row.local_nome || '').trim(),
+        saldo: Number(row.saldo || 0)
+      })).filter((row) => row.local_codigo);
+    } catch (saldoErr) {
+      console.warn('[ajustes] historico-omie saldos atuais', saldoErr?.message || saldoErr);
+    }
+
     res.json({
       ok: true,
       id_prod: idProd,
@@ -604,7 +627,9 @@ router.get('/historico-omie', exigirAuditoriaProduto, async (req, res) => {
       periodo: { de: dataDe, ate: dataAte, meses },
       paginas_lidas: Math.min(pagina - 1, maxPaginas),
       registros: lista.length,
-      ajuste_estoque_lista: lista
+      ajuste_estoque_lista: lista,
+      saldos_atuais: saldosAtuais,
+      alinhado_omie: true
     });
   } catch (err) {
     console.error('[ajustes] historico-omie', err);

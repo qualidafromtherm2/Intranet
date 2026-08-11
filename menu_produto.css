@@ -121,6 +121,88 @@
 .movim-audit-reference { display: inline-flex; margin-top: 9px; padding: 4px 8px; border-radius: 6px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 800; }
 .movim-audit-main p { margin: 8px 0 0; color: #334155; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .movim-audit-people { display: flex; gap: 8px 18px; flex-wrap: wrap; margin-top: 9px; color: #475569; font-size: 12px; }
+.movim-audit-omie-agora {
+  margin: 0 14px 10px;
+  padding: 12px 14px;
+  border: 1px solid #86efac;
+  border-radius: 12px;
+  background: #f0fdf4;
+  color: #14532d;
+}
+.movim-audit-omie-agora-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 850;
+}
+.movim-audit-omie-agora-locs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.movim-audit-omie-chip {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid #bbf7d0;
+  font-size: 12px;
+  color: #166534;
+}
+.movim-audit-omie-agora p {
+  margin: 8px 0 0;
+  font-size: 12px;
+  line-height: 1.4;
+  color: #166534;
+}
+.movim-audit-card.is-recente .movim-audit-saldo-nums span:last-child strong {
+  color: #15803d;
+}
+.movim-audit-corte {
+  margin-top: 6px;
+  padding: 16px 12px 8px;
+  text-align: center;
+  color: #334155;
+}
+.movim-audit-corte-linha {
+  display: block;
+  height: 0;
+  margin: 0 8px 14px;
+  border-top: 2px dashed #f59e0b;
+}
+.movim-audit-corte strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #92400e;
+  font-size: 13px;
+}
+.movim-audit-corte p {
+  margin: 8px auto 0;
+  max-width: 42rem;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #57534e;
+}
+.movim-audit-corte-label {
+  width: 100%;
+  font-size: 11px;
+  font-weight: 800;
+  color: #92400e;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+.movim-audit-corte .movim-audit-omie-agora-locs {
+  justify-content: center;
+}
+.movim-audit-corte .movim-audit-omie-chip {
+  border-color: #fde68a;
+  color: #92400e;
+}
 
 /* Reconciliação temporária de saldo endereçado. */
 .produto-saldo-audit-overlay[hidden] { display: none !important; }
