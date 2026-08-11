@@ -10133,14 +10133,7 @@ table.tabela td.num {
 
 /* Navegador de m�s no painel lateral */
 .agenda-sidebar-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 6px;
-  padding: 8px 10px;
-  background: var(--content-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
+  display: none !important;
 }
 
 /* Legenda de �cones */
