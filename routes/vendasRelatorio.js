@@ -278,7 +278,11 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
           WHEN TRIM(COALESCE(p.etapa::text, '')) = '80' THEN 'Concluído'
           ELSE 'Outras'
         END AS etapa_descricao,
-        COALESCE(nf.valor_total, 0)::numeric(14,2) AS valor_total_pedido,
+        COALESCE(
+          NULLIF(nf.valor_total, 0),
+          NULLIF(p.valor_total_pedido, 0),
+          0
+        )::numeric(14,2) AS valor_total_pedido,
         COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado,
         COALESCE(
           NULLIF(TRIM(f.nome_fantasia), ''),
