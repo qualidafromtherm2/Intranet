@@ -1,6 +1,6 @@
 /**
  * ============================================================
- * CRON — Notificação diária via WhatsApp (08:00)
+ * CRON — Notificação diária via WhatsApp (06:00 Brasília)
  * ============================================================
  * Envia mensagens para usuários com receber_notificacao = true
  * e telefone_contato preenchido.
@@ -16,14 +16,12 @@
 
 const { dbQuery } = require('../src/db');
 const { enviarWhatsappNotificacao } = require('../utils/whatsappEnvio');
+const { entregarMensagemWhatsapp, partesBrasilia } = require('../utils/whatsappJanelaEnvio');
 
 const WHATSAPP_CLOUD_ACCESS_TOKEN = String(
   process.env.WHATSAPP_CLOUD_ACCESS_TOKEN ||
   process.env.META_WHATSAPP_ACCESS_TOKEN || ''
 ).trim();
-const WHATSAPP_GRAPH_API_VERSION = String(
-  process.env.WHATSAPP_GRAPH_API_VERSION || 'v25.0'
-).trim() || 'v25.0';
 const WHATSAPP_DEFAULT_PHONE_NUMBER_ID = String(
   process.env.WHATSAPP_DEFAULT_PHONE_NUMBER_ID || ''
 ).trim();
@@ -72,31 +70,23 @@ async function enviarWhatsappComBotao(phoneNumberId, toPhone, bodyText, buttons)
     }
   }));
 
-  const resp = await fetch(
-    `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(phoneNumberId)}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        messaging_product: 'whatsapp',
-        to: toPhone,
-        type: 'interactive',
-        interactive: {
-          type: 'button',
-          body: { text: bodyText },
-          action: { buttons: btns }
-        }
-      })
+  const result = await entregarMensagemWhatsapp(phoneNumberId, {
+    messaging_product: 'whatsapp',
+    to: toPhone,
+    type: 'interactive',
+    interactive: {
+      type: 'button',
+      body: { text: bodyText },
+      action: { buttons: btns }
     }
-  );
-  if (!resp.ok) {
-    const err = await resp.text().catch(() => '');
-    throw new Error(`WhatsApp API botão ${resp.status}: ${err}`);
+  }, { origem: 'notif_diaria_botao' });
+  if (!result.ok) {
+    const err = result.payload?.error?.message
+      || result.payload?.error?.error_user_msg
+      || `WhatsApp API botão ${result.status}`;
+    throw new Error(err);
   }
-  return true;
+  return result;
 }
 
 // ─── Lógica principal ─────────────────────────────────────────────────────────
@@ -312,14 +302,20 @@ async function marcarRodouHoje(hoje) {
   }
 }
 
+function dateKeyBrasilia(date = new Date()) {
+  const p = partesBrasilia(date);
+  return `${p.year}-${String(p.month).padStart(2, '0')}-${String(p.day).padStart(2, '0')}`;
+}
+
 function verificarHorarioNotificacao() {
   const now = new Date();
-  const hoje = now.toISOString().slice(0, 10);
-  const hora = now.getHours();
-  const minuto = now.getMinutes();
+  const p = partesBrasilia(now);
+  const hoje = dateKeyBrasilia(now);
+  const hora = p.hour;
+  const minuto = p.minute;
 
-  // Executa às 05:00 (janela até 05:04) se ainda não rodou hoje
-  if (hora === 5 && minuto < 5 && _lastRunDate !== hoje) {
+  // Executa às 06:00 de Brasília (janela até 06:04) se ainda não rodou hoje
+  if (hora === 6 && minuto < 5 && _lastRunDate !== hoje) {
     _lastRunDate = hoje; // guarda em memória imediatamente para evitar duplo disparo
     jaRodouHoje(hoje).then((jaRodou) => {
       if (jaRodou) {
@@ -334,7 +330,7 @@ function verificarHorarioNotificacao() {
 }
 
 function iniciarCronNotificacaoDiaria() {
-  console.log(TAG, 'Timer de notificação diária iniciado — verificando a cada minuto.');
+  console.log(TAG, 'Timer de notificação diária iniciado — disparo 06:00 Brasília.');
   setInterval(verificarHorarioNotificacao, 60 * 1000);
   verificarHorarioNotificacao();
 }

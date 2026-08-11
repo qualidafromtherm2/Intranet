@@ -7466,6 +7466,15 @@
 
                 <!-- Grade do calendário -->
                 <div class="agenda-cal-main" style="position:relative;">
+                  <div id="agendaMobileCalHeader" class="agenda-mobile-cal-header" hidden>
+                    <button id="agendaMesAnteriorMobile" type="button" class="agenda-mobile-cal-nav" aria-label="Mês anterior">
+                      <i class="fa-solid fa-chevron-left"></i>
+                    </button>
+                    <div id="agendaMesTituloMobile" class="agenda-mobile-cal-title">-</div>
+                    <button id="agendaMesProximoMobile" type="button" class="agenda-mobile-cal-nav" aria-label="Próximo mês">
+                      <i class="fa-solid fa-chevron-right"></i>
+                    </button>
+                  </div>
                   <div id="agendaCalendarioGrid" class="agenda-calendario-grid"></div>
                   <div id="agendaProcessingOverlay" class="agenda-processing-overlay" style="display:none;">
                     <div class="agenda-processing-spinner" aria-hidden="true"></div>
@@ -7546,9 +7555,14 @@
 
         <!-- Modal de Reserva do Calendário — modal unificado com seletor de tipo -->
         <div id="agendaReservaModal" class="agenda-modal-overlay" style="display:none;">
-          <div class="agenda-modal-card">
+          <div class="agenda-modal-card agenda-modal-card--v2">
             <button id="agendaFecharModal" type="button" class="agenda-modal-close" aria-label="Fechar">×</button>
-            <h3 id="agendaModalTitulo" style="margin:0 0 14px 0;color:var(--content-title-color);font-size:18px;">Reserva</h3>
+            <div class="agenda-modal-hero">
+              <div id="agendaModalTituloWrap">
+                <h3 id="agendaModalTitulo">Reserva</h3>
+                <span id="agendaModalResponsavel" style="display:none;"></span>
+              </div>
+            </div>
 
             <!-- select oculto mantido para compatibilidade com JS -->
             <select id="agendaTipoSelect" style="display:none;">
@@ -7671,20 +7685,27 @@
                 </div>
 
                 <!-- Repetir todos os meses + Café — mesma linha -->
-                <div style="grid-column:1/-1;display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+                <div class="agenda-opcoes-linha">
                   <div id="agendaGrupoRepetirMeses" style="display:none;">
                     <label class="agenda-cafe-check">
                       <span>Repetir todos os meses</span>
                       <input id="agendaRepetirTodosMeses" type="checkbox" />
                     </label>
                   </div>
-                  <!-- Café — apenas Auditório e Sala de reunião -->
                   <div id="agendaGrupoCafe">
                     <label class="agenda-cafe-check">
                       <span>Necessário café para a reunião</span>
                       <input id="agendaCafeCheckbox" type="checkbox" />
                     </label>
                   </div>
+                  <label class="agenda-cafe-check">
+                    <span>Lembrar via WhatsApp</span>
+                    <input id="agendaAvisoWhatsapp" type="checkbox" />
+                  </label>
+                  <label class="agenda-cafe-check">
+                    <span>Avisar por e-mail</span>
+                    <input id="agendaAvisoEmail" type="checkbox" />
+                  </label>
                 </div>
 
                 <!-- Link da reunião — apenas Reunião online -->
@@ -7743,6 +7764,9 @@
 
               <div style="display:flex;justify-content:space-between;gap:10px;margin-top:14px;align-items:center;">
                 <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+                  <button id="agendaCancelarReserva" type="button" class="content-button" style="display:none;background:rgba(245,158,11,.15);border:1px solid rgba(245,158,11,.45);color:#fbbf24;">
+                    <i class="fa-solid fa-ban" style="margin-right:5px;"></i>Cancelar reunião
+                  </button>
                   <button id="agendaExcluirReserva" type="button" class="content-button" style="display:none;background:rgba(220,38,38,.15);border:1px solid rgba(220,38,38,.45);color:#fca5a5;">
                     <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Excluir
                   </button>
@@ -7778,9 +7802,24 @@
                 <i class="fa-solid fa-triangle-exclamation" style="font-size:30px;color:#f87171;"></i>
                 <p id="agendaExcluirConfirmTexto" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
                 <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
-                  <button id="agendaExcluirConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Cancelar</button>
+                  <button id="agendaExcluirConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Voltar</button>
                   <button id="agendaExcluirConfirmSim" type="button" class="content-button" style="background:#dc2626;color:#fff;border:none;padding:8px 18px;">
                     <i class="fa-solid fa-trash" style="margin-right:5px;"></i>Sim, excluir
+                  </button>
+                </div>
+              </div>
+
+              <!-- Overlay de confirmação de cancelamento -->
+              <div id="agendaCancelarConfirm" style="display:none;position:absolute;inset:0;background:rgba(9,15,35,.95);border-radius:12px;z-index:20;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:28px;text-align:center;">
+                <i class="fa-solid fa-ban" style="font-size:30px;color:#fbbf24;"></i>
+                <p id="agendaCancelarConfirmTexto" style="color:#e5e7eb;font-size:14px;margin:0;line-height:1.5;"></p>
+                <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">
+                  <button id="agendaCancelarConfirmNao" type="button" class="content-button" style="padding:8px 18px;">Voltar</button>
+                  <button id="agendaCancelarConfirmEsteDia" type="button" class="content-button" style="display:none;background:#d97706;color:#fff;border:none;padding:8px 18px;">
+                    Só este dia
+                  </button>
+                  <button id="agendaCancelarConfirmSim" type="button" class="content-button" style="background:#d97706;color:#fff;border:none;padding:8px 18px;">
+                    <i class="fa-solid fa-ban" style="margin-right:5px;"></i>Sim, cancelar
                   </button>
                 </div>
               </div>

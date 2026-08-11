@@ -174,12 +174,17 @@ async function enviarLembretesReservasDoDia(dataIso) {
             r.criado_por AS "criadoPor",
             r.repetir,
             COALESCE(
-              array_agg(DISTINCT p.username) FILTER (WHERE p.username IS NOT NULL),
+              array_agg(DISTINCT p.username) FILTER (
+                WHERE p.username IS NOT NULL AND COALESCE(p.aviso_email, true) = true
+              ),
               ARRAY[]::text[]
             ) AS participantes
        FROM rh.reservas_ambientes r
        LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
       WHERE NOT ($1::date = ANY(COALESCE(r.datas_realizadas, ARRAY[]::date[])))
+        AND COALESCE(r.cancelada, false) = false
+        AND NOT ($1::date = ANY(COALESCE(r.datas_canceladas, ARRAY[]::date[])))
+        AND COALESCE(r.aviso_email, false) = true
         AND NOT (
           -- Legado: reserva única marcada realizada antes de datas_realizadas
           r.repetir = false

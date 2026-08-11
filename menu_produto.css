@@ -93,9 +93,31 @@
 .movim-audit-main { min-width: 0; }
 .movim-audit-topline { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
 .movim-audit-kind { font-size: 14px; font-weight: 850; }
-.movim-audit-topline time { flex: 0 0 auto; color: #64748b; font-size: 12px; }
+.movim-audit-topline time { flex: 0 0 auto; color: #64748b; font-size: 12px; white-space: nowrap; }
 .movim-audit-flow { display: flex; gap: 8px 14px; align-items: center; flex-wrap: wrap; margin-top: 7px; color: #475569; font-size: 12px; }
 .movim-audit-local { min-width: min(280px, 100%); }
+.movim-audit-saldos { display: grid; gap: 6px; margin-top: 8px; }
+.movim-audit-saldo-row {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+  font-size: 12px;
+}
+.movim-audit-saldo-label {
+  color: #64748b;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.movim-audit-saldo-nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #334155; }
+.movim-audit-saldo-nums { display: flex; gap: 10px; color: #64748b; white-space: nowrap; }
+.movim-audit-saldo-nums strong { color: #0f172a; }
 .movim-audit-reference { display: inline-flex; margin-top: 9px; padding: 4px 8px; border-radius: 6px; background: #e0f2fe; color: #075985; font-size: 11px; font-weight: 800; }
 .movim-audit-main p { margin: 8px 0 0; color: #334155; font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .movim-audit-people { display: flex; gap: 8px 18px; flex-wrap: wrap; margin-top: 9px; color: #475569; font-size: 12px; }
@@ -178,6 +200,7 @@
   .movim-audit-topline { align-items: flex-start; flex-direction: column; gap: 3px; }
   .movim-audit-card { grid-template-columns: 34px minmax(0, 1fr); padding: 11px; }
   .movim-audit-icon { width: 34px; height: 34px; }
+  .movim-audit-saldo-row { grid-template-columns: 1fr; gap: 3px; }
 }
 
 /* Guardar materiais: escolha do formato antes de regenerar a reimpressão. */
@@ -10759,6 +10782,19 @@ table.tabela td.num {
   color: #fca5a5;
 }
 
+.agenda-cal-reserva-item.is-cancelada {
+  opacity: .9;
+  background: rgba(148, 163, 184, .18);
+  border: 1px dashed rgba(148, 163, 184, .7);
+  color: #94a3b8;
+  text-decoration: line-through;
+}
+.agenda-cal-reserva-item.is-cancelada .agenda-chip-hora,
+.agenda-cal-reserva-item.is-cancelada .agenda-mobile-reserva-hora,
+.agenda-cal-reserva-item.is-cancelada .agenda-mobile-reserva-assunto {
+  text-decoration: line-through;
+}
+
 /* Linha de �cones de eventos passados � enfileirada no final da c�lula */
 .agenda-cal-past-row {
   display: flex;
@@ -10998,6 +11034,123 @@ table.tabela td.num {
   line-height: 1;
   font-size: 18px;
   padding: 0;
+}
+
+.agenda-modal-card--v2 {
+  padding: 0 0 16px;
+  overflow: hidden;
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(0,0,0,.35);
+}
+.agenda-modal-card--v2 .agenda-modal-hero {
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 55%, #5b21b6 100%);
+  padding: 18px 48px 16px 18px;
+  margin: 0 0 16px;
+}
+.agenda-modal-card--v2 #agendaModalTituloWrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 16px;
+}
+.agenda-modal-card--v2 #agendaModalTitulo,
+.agenda-modal-card--v2 #agendaModalResponsavel {
+  margin: 0;
+  color: #fff !important;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.agenda-modal-card--v2 #agendaModalResponsavel {
+  opacity: .92;
+  font-weight: 600;
+}
+.agenda-modal-card--v2 .agenda-modal-close {
+  top: 12px;
+  right: 12px;
+  border-color: rgba(255,255,255,.35);
+  color: #fff;
+  background: rgba(255,255,255,.12);
+  z-index: 2;
+}
+.agenda-modal-card--v2 #agendaEtapaFormulario {
+  padding: 0 16px;
+}
+.agenda-modal-card--v2 .agenda-form-grid input:not([type="checkbox"]),
+.agenda-modal-card--v2 .agenda-form-grid select,
+.agenda-modal-card--v2 .agenda-tipo-trigger {
+  border-radius: 12px;
+  min-height: 40px;
+}
+.agenda-opcoes-linha {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 12px 18px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.agenda-participante-avisos {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 4px;
+}
+.agenda-aviso-toggle {
+  border: 1px solid rgba(148,163,184,.4);
+  background: transparent;
+  color: #94a3b8;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  cursor: pointer;
+}
+.agenda-aviso-toggle.is-on {
+  color: #fff;
+  border-color: transparent;
+}
+.agenda-aviso-toggle[data-agenda-aviso-canal="whatsapp"].is-on {
+  background: #16a34a;
+}
+.agenda-aviso-toggle[data-agenda-aviso-canal="email"].is-on {
+  background: #2563eb;
+}
+.agenda-aviso-toggle:disabled {
+  cursor: default;
+  opacity: .7;
+}
+
+.agenda-mobile-cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  color: #fff;
+  border-radius: 18px 18px 0 0;
+  padding: 14px 12px;
+  margin-bottom: 0;
+}
+.agenda-mobile-cal-title {
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  text-align: center;
+  flex: 1;
+}
+.agenda-mobile-cal-nav {
+  width: 36px;
+  height: 36px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255,255,255,.18);
+  color: #fff;
+  cursor: pointer;
 }
 
 .agenda-opcao-btn {
@@ -11751,6 +11904,14 @@ table.tabela td.num {
     max-height: 92vh;
     padding: 12px;
     border-radius: 10px;
+  }
+  .agenda-modal-card--v2 {
+    padding: 0 0 14px;
+    border-radius: 18px;
+  }
+  .agenda-modal-overlay {
+    padding: 10px 8px;
+    align-items: flex-end;
   }
 
   /* Formul�rio de cria��o: colunas viram uma */
@@ -15480,12 +15641,24 @@ table.tabela td.num {
   border-color: #fcd34d;
   color: #78350f;
 }
+.light-mode .agenda-cal-reserva-item.is-cancelada {
+  background: #f1f5f9;
+  border-color: #94a3b8;
+  color: #64748b;
+}
 
 .light-mode .agenda-modal-card {
   background: #ffffff;
   color: #1f2937;
   border-color: #e5e7eb;
   box-shadow: 0 20px 60px rgba(0,0,0,0.12);
+}
+.light-mode .agenda-modal-card--v2 {
+  background: #f8fafc;
+}
+.light-mode .agenda-aviso-toggle {
+  color: #64748b;
+  border-color: #cbd5e1;
 }
 .light-mode .agenda-modal-card h3,
 .light-mode .agenda-modal-card label,
@@ -23858,21 +24031,36 @@ html.light-mode #minhasComprasWrapper {
   }
   .home-reservations-section #agendaMesTitulo { font-size: 14px !important; }
   .agenda-cal-main { width: 100%; }
+  .agenda-cal-main {
+    background: #f4f1fb;
+    border-radius: 18px;
+    overflow: hidden;
+    box-shadow: 0 10px 28px rgba(88, 28, 135, .12);
+  }
   .agenda-calendario-grid.is-mobile-agenda {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    padding: 10px 10px 14px;
+    background: #f4f1fb;
   }
   .agenda-calendario-grid.is-mobile-agenda .agenda-cal-day {
     width: 100%;
-    min-height: 72px;
+    min-height: 76px;
     display: grid;
-    grid-template-columns: 54px minmax(0, 1fr);
+    grid-template-columns: 58px minmax(0, 1fr);
     align-items: center;
     gap: 10px;
-    padding: 9px;
+    padding: 10px;
     text-align: left;
-    border-radius: 8px;
+    border-radius: 14px;
+    background: #fff;
+    border: 0;
+    color: #3b0764;
+    box-shadow: 0 4px 12px rgba(109, 40, 217, .08);
+  }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-day.is-today {
+    box-shadow: 0 0 0 2px #7c3aed inset;
   }
   .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num {
     align-self: stretch;
@@ -23882,21 +24070,25 @@ html.light-mode #minhasComprasWrapper {
     justify-content: center;
     gap: 1px;
     margin: 0;
-    border-right: 1px solid rgba(148, 163, 184, .22);
+    border-right: 2px solid #ddd6fe;
     font-size: 11px;
     text-transform: uppercase;
+    color: #6d28d9;
   }
-  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num strong { font-size: 22px; line-height: 1; }
-  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num small { font-size: 10px; color: #94a3b8; }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num strong { font-size: 22px; line-height: 1; color: #4c1d95; }
+  .agenda-calendario-grid.is-mobile-agenda .agenda-cal-num small { font-size: 10px; color: #7c3aed; }
   .agenda-calendario-grid.is-mobile-agenda .agenda-cal-reservas { min-width: 0; gap: 5px; }
   .agenda-calendario-grid.is-mobile-agenda .agenda-cal-reserva-item.is-mobile-stack {
-    min-height: 36px;
+    min-height: 40px;
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
-    padding: 7px 9px;
-    border-radius: 6px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: #faf5ff;
+    border: 1px solid #ede9fe;
+    color: #3b0764;
   }
   .agenda-mobile-reserva-hora { font-size: 12px; font-weight: 800; white-space: nowrap; }
   .agenda-mobile-reserva-assunto { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; }

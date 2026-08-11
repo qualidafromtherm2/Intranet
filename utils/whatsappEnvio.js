@@ -1,14 +1,12 @@
 'use strict';
 
 const { dbQuery } = require('../src/db');
+const { entregarMensagemWhatsapp } = require('./whatsappJanelaEnvio');
 
 const WHATSAPP_CLOUD_ACCESS_TOKEN = String(
   process.env.WHATSAPP_CLOUD_ACCESS_TOKEN ||
   process.env.META_WHATSAPP_ACCESS_TOKEN || ''
 ).trim();
-const WHATSAPP_GRAPH_API_VERSION = String(
-  process.env.WHATSAPP_GRAPH_API_VERSION || 'v25.0'
-).trim() || 'v25.0';
 const WHATSAPP_DEFAULT_PHONE_NUMBER_ID = String(
   process.env.WHATSAPP_DEFAULT_PHONE_NUMBER_ID || ''
 ).trim();
@@ -139,19 +137,7 @@ async function usuarioDentroJanela24h(telefone) {
 }
 
 async function postWhatsappMessage(phoneNumberId, body) {
-  const resp = await fetch(
-    `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(phoneNumberId)}/messages`,
-    {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }
-  );
-  const payload = await resp.json().catch(() => ({}));
-  return { ok: resp.ok, status: resp.status, payload };
+  return entregarMensagemWhatsapp(phoneNumberId, body, { origem: 'whatsappEnvio' });
 }
 
 async function enviarPayloadComCandidatos(phoneNumberId, toPhone, buildPayload) {
@@ -159,12 +145,22 @@ async function enviarPayloadComCandidatos(phoneNumberId, toPhone, buildPayload) 
   let lastError = null;
 
   for (const candidate of candidates) {
-    const { ok, payload } = await postWhatsappMessage(phoneNumberId, buildPayload(candidate));
-    if (ok) {
+    const result = await postWhatsappMessage(phoneNumberId, buildPayload(candidate));
+    if (result.ok) {
+      const payload = result.payload || {};
       const waId = payload?.contacts?.[0]?.wa_id || candidate;
       const wamid = payload?.messages?.[0]?.id || null;
-      return { ok: true, sent_to: candidate, wa_id: waId, wamid, payload };
+      return {
+        ok: true,
+        sent_to: candidate,
+        wa_id: waId,
+        wamid,
+        payload,
+        agendado: Boolean(result.agendado),
+        agendado_para: result.agendado_para || null,
+      };
     }
+    const payload = result.payload || {};
     lastError = payload?.error?.message
       || payload?.error?.error_user_msg
       || 'Falha ao enviar WhatsApp';

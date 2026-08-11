@@ -18,6 +18,7 @@ const {
 } = require('../utils/tecnicoEndereco');
 const { syncCustoPecasEnvio } = require('../utils/enviosCustoPecas');
 const { smtpConfigurado, parseListaEmails, enviarEmail } = require('../utils/mailer');
+const { entregarMensagemWhatsapp } = require('../utils/whatsappJanelaEnvio');
 
 const router = express.Router();
 
@@ -325,28 +326,21 @@ async function enviarMensagemWhatsappPayload({ phoneNumberId, toPhone, payloadBu
 
   for (const candidate of candidates) {
     const body = payloadBuilder(candidate);
-    const resp = await fetchWithTimeout(
-      `https://graph.facebook.com/${WHATSAPP_GRAPH_API_VERSION}/${encodeURIComponent(String(phoneNumberId))}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_CLOUD_ACCESS_TOKEN}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      },
-      15000
-    );
-
-    const payload = await resp.json().catch(() => ({}));
-    if (resp.ok) {
+    const result = await entregarMensagemWhatsapp(phoneNumberId, body, { origem: 'sacEnvios' });
+    const payload = result.payload || {};
+    if (result.ok) {
       if (!payload.__meta) payload.__meta = {};
       payload.__meta.sent_to = candidate;
       payload.__meta.request_body = body;
+      if (result.agendado) {
+        payload.__meta.agendado = true;
+        payload.__meta.agendado_para = result.agendado_para;
+        payload.__meta.agendado_para_fmt = result.agendado_para_fmt;
+      }
       return payload;
     }
 
-    lastError = payload?.error?.message || payload?.error?.error_user_msg || `Falha ao enviar WhatsApp (${resp.status})`;
+    lastError = payload?.error?.message || payload?.error?.error_user_msg || `Falha ao enviar WhatsApp (${result.status})`;
   }
 
   throw new Error(lastError || 'Falha ao enviar mensagem do WhatsApp.');
@@ -4036,6 +4030,24 @@ async function ensureSchema() {
 
     CREATE INDEX IF NOT EXISTS whatsapp_read_status_phone_idx
       ON sac.whatsapp_conversation_read_status(from_phone_digits);
+
+    CREATE TABLE IF NOT EXISTS sac.whatsapp_fila_envio (
+      id              BIGSERIAL PRIMARY KEY,
+      phone_number_id TEXT NOT NULL,
+      to_phone        TEXT,
+      payload_json    JSONB NOT NULL,
+      origem          TEXT,
+      agendado_para   TIMESTAMPTZ NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'pendente',
+      tentativas      INTEGER NOT NULL DEFAULT 0,
+      ultimo_erro     TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      enviado_em      TIMESTAMPTZ
+    );
+    CREATE INDEX IF NOT EXISTS whatsapp_fila_envio_pendente_idx
+      ON sac.whatsapp_fila_envio (agendado_para, id)
+      WHERE status = 'pendente';
 
     -- Cache local das planilhas de série/pedidos (AT)
     -- Alimentado via POST /api/sac/at/sync-cache; busca ignora filtros ativos no Sheets
@@ -12372,7 +12384,15 @@ router.post('/whatsapp/reply', express.json({ limit: '30kb' }), async (req, res)
       }
     } catch (_) {}
 
-    return res.json({ ok: true, phone: phoneDigits, mode });
+    const agendado = Boolean(sendPayload?.__meta?.agendado);
+    return res.json({
+      ok: true,
+      phone: phoneDigits,
+      mode,
+      agendado,
+      agendado_para: sendPayload?.__meta?.agendado_para || null,
+      agendado_para_fmt: sendPayload?.__meta?.agendado_para_fmt || null,
+    });
   } catch (err) {
     console.error('[SAC/WhatsApp] erro ao responder conversa:', err);
     return res.status(500).json({ ok: false, error: err?.message || 'Falha ao enviar resposta do WhatsApp.' });

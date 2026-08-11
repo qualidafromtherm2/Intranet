@@ -695,6 +695,16 @@ async function usuarioEhSetorRhCalendario(req) {
   return rows.length > 0;
 }
 
+function usuarioEhAdminCalendario(req) {
+  const roles = Array.isArray(req?.session?.user?.roles) ? req.session.user.roles : [];
+  return roles.some((role) => String(role || '').trim().toLowerCase() === 'admin');
+}
+
+async function usuarioPodeGerenciarReservaCalendario(req) {
+  if (usuarioEhAdminCalendario(req)) return true;
+  return usuarioEhSetorRhCalendario(req);
+}
+
 function isEnvValorValidoOAuth(valor) {
   const v = String(valor || '').trim();
   if (!v) return false;
@@ -1377,6 +1387,14 @@ async function ensureRhReservasSchema() {
     await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS realizada BOOLEAN NOT NULL DEFAULT FALSE`);
     // Datas em que a ocorrência foi marcada como realizada (recorrentes: um dia não bloqueia os outros)
     await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS datas_realizadas DATE[] NOT NULL DEFAULT ARRAY[]::date[]`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS cancelada BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS datas_canceladas DATE[] NOT NULL DEFAULT ARRAY[]::date[]`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS cancelada_por TEXT`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS cancelada_em TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS aviso_email BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE rh.reservas_ambientes ADD COLUMN IF NOT EXISTS aviso_whatsapp BOOLEAN NOT NULL DEFAULT FALSE`);
+    await pool.query(`ALTER TABLE rh.reservas_participantes ADD COLUMN IF NOT EXISTS aviso_email BOOLEAN NOT NULL DEFAULT TRUE`);
+    await pool.query(`ALTER TABLE rh.reservas_participantes ADD COLUMN IF NOT EXISTS aviso_whatsapp BOOLEAN NOT NULL DEFAULT TRUE`);
 
     // Tabela de presença: registra participantes confirmados ao marcar reunião como realizada
     await pool.query(`
@@ -4234,6 +4252,21 @@ function unirDatasExcecaoRh(datasAtuais, novasDatas) {
   ]);
 }
 
+function resolverAvisosParticipantesRh(participantes, avisosMap, avisoEmailGeral, avisoWhatsappGeral) {
+  const map = avisosMap && typeof avisosMap === 'object' && !Array.isArray(avisosMap) ? avisosMap : {};
+  return (participantes || []).map((username) => {
+    const nome = String(username || '').trim();
+    const raw = map[nome] || map[nome.toLowerCase()] || {};
+    const emailPessoal = raw.email !== false && raw.avisoEmail !== false;
+    const waPessoal = raw.whatsapp !== false && raw.avisoWhatsapp !== false;
+    return {
+      username: nome,
+      avisoEmail: !!avisoEmailGeral && emailPessoal,
+      avisoWhatsapp: !!avisoWhatsappGeral && waPessoal
+    };
+  }).filter((item) => item.username);
+}
+
 function gerarOcorrenciasReservaRecorrenteNoAnoRh({ ano, dataBaseIso, repetirTodosMeses, diasSemana, datasExcecao = [] }) {
   const dataBase = normalizarDataIsoRh(dataBaseIso) || String(dataBaseIso || '').slice(0, 10);
   const base = new Date(`${dataBase}T00:00:00`);
@@ -4292,8 +4325,10 @@ async function existeConflitoReservaRh(client, { dataReserva, tipoEspaco, horaIn
             )
             AND $6 = ANY(dias_semana)
             AND NOT ($1::date = ANY(COALESCE(datas_excecao, ARRAY[]::date[])))
+            AND NOT ($1::date = ANY(COALESCE(datas_canceladas, ARRAY[]::date[])))
           )
         )
+        AND COALESCE(cancelada, false) = false
       LIMIT 1`,
     [dataReserva, tipoEspaco, ignorarId, horaInicio, horaFim, diaSemana]
   );
@@ -4468,7 +4503,7 @@ app.post('/api/google-calendar/disconnect', async (req, res) => {
 app.get('/api/rh/reservas', async (req, res) => {
   try {
     const userLogado = (resolverUsuarioAuditoria(req) || '').trim().toLowerCase();
-    const userEhRh = await usuarioEhSetorRhCalendario(req);
+    const userPodeGerenciar = await usuarioPodeGerenciarReservaCalendario(req);
     const ano = Number(req.query?.ano);
     const mes = Number(req.query?.mes);
     if (!Number.isInteger(ano) || !Number.isInteger(mes) || mes < 1 || mes > 12) {
@@ -4498,8 +4533,19 @@ app.get('/api/rh/reservas', async (req, res) => {
               r.criado_por,
               r.realizada,
               r.datas_realizadas,
+              r.cancelada,
+              r.datas_canceladas,
+              r.aviso_email,
+              r.aviso_whatsapp,
               COALESCE(array_agg(p.username ORDER BY p.username)
-                FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
+                FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes,
+              COALESCE(
+                json_object_agg(p.username, json_build_object(
+                  'email', COALESCE(p.aviso_email, true),
+                  'whatsapp', COALESCE(p.aviso_whatsapp, true)
+                )) FILTER (WHERE p.username IS NOT NULL),
+                '{}'::json
+              ) AS participantes_avisos
          FROM rh.reservas_ambientes r
          LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
         WHERE EXTRACT(YEAR FROM r.data_reserva) = $1
@@ -4531,6 +4577,11 @@ app.get('/api/rh/reservas', async (req, res) => {
         : [];
       const datasRealizadasSet = new Set(datasRealizadas);
       const realizadaLegado = !!r.realizada && datasRealizadasSet.size === 0;
+      const datasCanceladas = Array.isArray(r.datas_canceladas)
+        ? r.datas_canceladas.map((d) => normalizarDataIsoRh(d)).filter(Boolean)
+        : [];
+      const datasCanceladasSet = new Set(datasCanceladas);
+      const canceladaSerie = !!r.cancelada;
 
       const baseReserva = {
         id: r.id,
@@ -4555,16 +4606,28 @@ app.get('/api/rh/reservas', async (req, res) => {
         googleEventLink: r.google_event_link || null,
         googleAgendado: !!r.google_event_id,
         criadoPor: r.criado_por,
-        podeEditar: userEhRh || (!!userLogado && String(r.criado_por || '').trim().toLowerCase() === userLogado),
-        participantes: Array.isArray(r.participantes) ? r.participantes : []
+        podeEditar: userPodeGerenciar || (!!userLogado && String(r.criado_por || '').trim().toLowerCase() === userLogado),
+        participantes: Array.isArray(r.participantes) ? r.participantes : [],
+        avisoEmail: !!r.aviso_email,
+        avisoWhatsapp: !!r.aviso_whatsapp,
+        participantesAvisos: r.participantes_avisos && typeof r.participantes_avisos === 'object'
+          ? r.participantes_avisos
+          : {}
       };
 
       const ocorrenciaRealizada = (dataIso) =>
         datasRealizadasSet.has(dataIso) || (realizadaLegado && !baseReserva.repetir);
+      const ocorrenciaCancelada = (dataIso) =>
+        canceladaSerie || datasCanceladasSet.has(dataIso);
 
       if (!baseReserva.repetir) {
         const dataIso = normalizarDataIsoRh(r.data_reserva) || r.data_reserva;
-        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
+        reservas.push({
+          ...baseReserva,
+          data: dataIso,
+          realizada: ocorrenciaRealizada(dataIso),
+          cancelada: ocorrenciaCancelada(dataIso)
+        });
         return;
       }
 
@@ -4572,7 +4635,12 @@ app.get('/api/rh/reservas', async (req, res) => {
       const datasExcecaoSet = new Set(normalizarDatasExcecaoRh(baseReserva.datasExcecao));
       if (!diasSemanaSet.size) {
         const dataIso = normalizarDataIsoRh(r.data_reserva) || r.data_reserva;
-        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
+        reservas.push({
+          ...baseReserva,
+          data: dataIso,
+          realizada: ocorrenciaRealizada(dataIso),
+          cancelada: ocorrenciaCancelada(dataIso)
+        });
         return;
       }
 
@@ -4583,7 +4651,12 @@ app.get('/api/rh/reservas', async (req, res) => {
         const dataIso = formatarDataIsoLocalRh(dataAtual);
         if (!dataIso) continue;
         if (datasExcecaoSet.has(dataIso)) continue;
-        reservas.push({ ...baseReserva, data: dataIso, realizada: ocorrenciaRealizada(dataIso) });
+        reservas.push({
+          ...baseReserva,
+          data: dataIso,
+          realizada: ocorrenciaRealizada(dataIso),
+          cancelada: ocorrenciaCancelada(dataIso)
+        });
       }
     });
 
@@ -4616,6 +4689,8 @@ app.post('/api/rh/reservas', async (req, res) => {
   const repetirTodosMeses = !!body.repetirTodosMeses;
   const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
   const cafe = !!body.cafe;
+  const avisoEmail = !!body.avisoEmail;
+  const avisoWhatsapp = !!body.avisoWhatsapp;
   const descricao = String(body.descricao || '').trim() || null;
   const visitantes = String(body.visitantes || '').trim() || null;
   const linkReuniao = String(body.linkReuniao || '').trim() || null;
@@ -4663,19 +4738,27 @@ app.post('/api/rh/reservas', async (req, res) => {
 
     const insertReserva = await client.query(
       `INSERT INTO rh.reservas_ambientes
-        (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome)
-       VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15)
+        (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, aviso_email, aviso_whatsapp)
+       VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING id`,
-      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniao, anexoUrl, anexoNome]
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniao, anexoUrl, anexoNome, avisoEmail, avisoWhatsapp]
     );
 
     const reservaId = insertReserva.rows[0].id;
-    for (const username of participantes) {
+    const avisosResolvidos = resolverAvisosParticipantesRh(
+      participantes,
+      body.participantesAvisos,
+      avisoEmail,
+      avisoWhatsapp
+    );
+    for (const item of avisosResolvidos) {
       await client.query(
-        `INSERT INTO rh.reservas_participantes (reserva_id, username)
-         VALUES ($1, $2)
-         ON CONFLICT DO NOTHING`,
-        [reservaId, username]
+        `INSERT INTO rh.reservas_participantes (reserva_id, username, aviso_email, aviso_whatsapp)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (reserva_id, username) DO UPDATE
+           SET aviso_email = EXCLUDED.aviso_email,
+               aviso_whatsapp = EXCLUDED.aviso_whatsapp`,
+        [reservaId, item.username, item.avisoEmail, item.avisoWhatsapp]
       );
     }
 
@@ -4739,28 +4822,52 @@ app.post('/api/rh/reservas', async (req, res) => {
       }
     }
 
+    const destinosEmail = avisosResolvidos.filter((item) => item.avisoEmail).map((item) => item.username);
+    const destinosWhats = avisosResolvidos.filter((item) => item.avisoWhatsapp).map((item) => item.username);
+
     let emailAviso = null;
-    try {
-      const { notificarNovaReserva } = require('./utils/reservasEmail');
-      emailAviso = await notificarNovaReserva({
-        id: reservaId,
-        tipo: tipoEspaco,
-        tema,
-        data: dataReserva,
-        inicio: horaInicio,
-        fim: horaFim,
-        cafe,
-        descricao,
-        visitantes,
-        linkReuniao,
-        participantes,
-        criadoPor: userLogado
-      });
-    } catch (errEmail) {
-      console.error('[API] /api/rh/reservas POST e-mail aviso falhou:', errEmail?.message || errEmail);
+    if (avisoEmail && destinosEmail.length) {
+      try {
+        const { notificarNovaReserva } = require('./utils/reservasEmail');
+        emailAviso = await notificarNovaReserva({
+          id: reservaId,
+          tipo: tipoEspaco,
+          tema,
+          data: dataReserva,
+          inicio: horaInicio,
+          fim: horaFim,
+          cafe,
+          descricao,
+          visitantes,
+          linkReuniao,
+          participantes: destinosEmail,
+          criadoPor: userLogado
+        });
+      } catch (errEmail) {
+        console.error('[API] /api/rh/reservas POST e-mail aviso falhou:', errEmail?.message || errEmail);
+      }
     }
 
-    return res.json({ ok: true, ids: [reservaId], googleAgenda, emailAviso });
+    let whatsappAviso = null;
+    if (avisoWhatsapp && destinosWhats.length) {
+      try {
+        const { notificarNovaReservaWhatsapp } = require('./utils/reservasWhatsapp');
+        whatsappAviso = await notificarNovaReservaWhatsapp({
+          id: reservaId,
+          tipo: tipoEspaco,
+          tema,
+          data: dataReserva,
+          inicio: horaInicio,
+          fim: horaFim,
+          criadoPor: userLogado,
+          participantes: destinosWhats
+        });
+      } catch (errWa) {
+        console.error('[API] /api/rh/reservas POST WhatsApp aviso falhou:', errWa?.message || errWa);
+      }
+    }
+
+    return res.json({ ok: true, ids: [reservaId], googleAgenda, emailAviso, whatsappAviso });
   } catch (err) {
     try { await client.query('ROLLBACK'); } catch {}
     console.error('[API] /api/rh/reservas POST erro:', err);
@@ -4790,6 +4897,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
   const repetirTodosMeses = !!body.repetirTodosMeses;
   const diasSemana = normalizarDiasSemanaRh(body.diasSemana);
   const cafe = !!body.cafe;
+  const avisoEmail = !!body.avisoEmail;
+  const avisoWhatsapp = !!body.avisoWhatsapp;
   const descricao = String(body.descricao || '').trim() || null;
   const visitantes = String(body.visitantes || '').trim() || null;
   const linkReuniaoPut = String(body.linkReuniao || '').trim() || null;
@@ -4833,10 +4942,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
 
     const criador = String(atualRows[0].criado_por || '').trim().toLowerCase();
     const userNorm = String(userLogado || '').trim().toLowerCase();
-    const userEhRh = await usuarioEhSetorRhCalendario(req);
-    if (!userNorm || (criador !== userNorm && !userEhRh)) {
+    const userPodeGerenciar = await usuarioPodeGerenciarReservaCalendario(req);
+    if (!userNorm || (criador !== userNorm && !userPodeGerenciar)) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ error: 'Somente o criador ou o setor RH pode alterar esta reserva' });
+      return res.status(403).json({ error: 'Somente o criador, o setor RH ou um administrador pode alterar esta reserva' });
     }
 
     const reservaAtual = atualRows[0];
@@ -4867,14 +4976,25 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
     let googleEventIdBaseSync = googleEventIdAtual;
     let googleCalendarIdBaseSync = googleCalendarIdAtual;
 
+    const avisosResolvidosPut = resolverAvisosParticipantesRh(
+      participantes,
+      body.participantesAvisos,
+      avisoEmail,
+      avisoWhatsapp
+    );
     const inserirParticipantesReservaRh = async (idReserva, listaUsuarios) => {
       await client.query(`DELETE FROM rh.reservas_participantes WHERE reserva_id = $1`, [idReserva]);
-      for (const username of listaUsuarios) {
+      const lista = Array.isArray(listaUsuarios) ? listaUsuarios : [];
+      for (const username of lista) {
+        const flags = avisosResolvidosPut.find((item) => item.username === username)
+          || { avisoEmail: avisoEmail, avisoWhatsapp: avisoWhatsapp };
         await client.query(
-          `INSERT INTO rh.reservas_participantes (reserva_id, username)
-           VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [idReserva, username]
+          `INSERT INTO rh.reservas_participantes (reserva_id, username, aviso_email, aviso_whatsapp)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (reserva_id, username) DO UPDATE
+             SET aviso_email = EXCLUDED.aviso_email,
+                 aviso_whatsapp = EXCLUDED.aviso_whatsapp`,
+          [idReserva, username, !!flags.avisoEmail, !!flags.avisoWhatsapp]
         );
       }
     };
@@ -4899,9 +5019,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       const insertNovo = await client.query(
         `INSERT INTO rh.reservas_ambientes
           (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
-           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao)
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao,
+           aviso_email, aviso_whatsapp)
          VALUES ($1, $2, $3::date, $4::time, $5::time, false, false, ARRAY[]::text[],
-                 $6, $7, $8, $9, $10, $11, $12, $13, ARRAY[]::date[])
+                 $6, $7, $8, $9, $10, $11, $12, $13, ARRAY[]::date[], $14, $15)
          RETURNING id`,
         [
           tipoEspaco,
@@ -4916,7 +5037,9 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
           linkReuniaoPut,
           anexoUrlPut,
           anexoNomePut,
-          manterAta ? reservaAtaOrigemId : null
+          manterAta ? reservaAtaOrigemId : null,
+          avisoEmail,
+          avisoWhatsapp
         ]
       );
       reservaIdFinal = insertNovo.rows[0].id;
@@ -4977,9 +5100,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       const insertSerieNova = await client.query(
         `INSERT INTO rh.reservas_ambientes
           (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana,
-           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao)
+           cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, ata_referencia_reserva_id, datas_excecao,
+           aviso_email, aviso_whatsapp)
          VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[],
-                 $9, $10, $11, $12, $13, $14, $15, $16, $17::date[])
+                 $9, $10, $11, $12, $13, $14, $15, $16, $17::date[], $18, $19)
          RETURNING id`,
         [
           tipoEspaco,
@@ -4998,7 +5122,9 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
           anexoUrlPut,
           anexoNomePut,
           manterAta ? reservaAtaOrigemId : null,
-          excecoesNovaSerie
+          excecoesNovaSerie,
+          avisoEmail,
+          avisoWhatsapp
         ]
       );
       reservaIdFinal = insertSerieNova.rows[0].id;
@@ -5022,9 +5148,11 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
                 link_reuniao = $12,
                 anexo_url = $13,
                 anexo_nome = $14,
+                aviso_email = $15,
+                aviso_whatsapp = $16,
                 atualizado_em = NOW()
-          WHERE id = $15`,
-        [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, reservaId]
+          WHERE id = $17`,
+        [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, avisoEmail, avisoWhatsapp, reservaId]
       );
       await inserirParticipantesReservaRh(reservaId, participantes);
       escopoAplicado = 'registro';
@@ -5137,9 +5265,9 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
     }
     const criador = String(rows[0].criado_por || '').trim().toLowerCase();
     const userNorm = String(userLogado).trim().toLowerCase();
-    const userEhRh = await usuarioEhSetorRhCalendario(req);
-    if (!userNorm || (criador !== userNorm && !userEhRh)) {
-      return res.status(403).json({ error: 'Somente o criador ou o setor RH pode excluir esta reserva' });
+    const userPodeGerenciar = await usuarioPodeGerenciarReservaCalendario(req);
+    if (!userNorm || (criador !== userNorm && !userPodeGerenciar)) {
+      return res.status(403).json({ error: 'Somente o criador, o setor RH ou um administrador pode excluir esta reserva' });
     }
 
     const reservaAtual = rows[0];
@@ -5212,6 +5340,125 @@ app.delete('/api/rh/reservas/:id', async (req, res) => {
   } catch (err) {
     console.error('[API] /api/rh/reservas DELETE erro:', err);
     return res.status(500).json({ error: 'Falha ao excluir reserva' });
+  } finally {
+    client.release();
+  }
+});
+
+// POST /api/rh/reservas/:id/cancelar — marca a ocorrência/série como cancelada e avisa no WhatsApp
+app.post('/api/rh/reservas/:id/cancelar', express.json(), async (req, res) => {
+  const userLogado = (resolverUsuarioAuditoria(req) || '').trim();
+  if (!userLogado) {
+    return res.status(401).json({ error: 'Usuário não autenticado' });
+  }
+  const reservaId = Number(req.params?.id);
+  if (!Number.isInteger(reservaId) || reservaId <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+
+  const body = req.body || {};
+  const escopoSolicitado = String(body.aplicarEm || '').trim().toLowerCase();
+  const dataOcorrenciaReq = normalizarDataIsoRh(body.data || null);
+
+  const client = await pool.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT r.id,
+              r.tipo_espaco,
+              r.tema_reuniao,
+              r.data_reserva,
+              to_char(r.hora_inicio, 'HH24:MI') AS hora_inicio,
+              to_char(r.hora_fim, 'HH24:MI') AS hora_fim,
+              r.repetir,
+              r.cancelada,
+              COALESCE(r.datas_canceladas, ARRAY[]::date[]) AS datas_canceladas,
+              r.criado_por,
+              COALESCE(array_agg(p.username ORDER BY p.username)
+                FILTER (WHERE p.username IS NOT NULL), ARRAY[]::TEXT[]) AS participantes
+         FROM rh.reservas_ambientes r
+         LEFT JOIN rh.reservas_participantes p ON p.reserva_id = r.id
+        WHERE r.id = $1
+        GROUP BY r.id`,
+      [reservaId]
+    );
+    if (!rows.length) {
+      return res.status(404).json({ error: 'Reserva não encontrada' });
+    }
+
+    const reserva = rows[0];
+    const criador = String(reserva.criado_por || '').trim().toLowerCase();
+    const userNorm = String(userLogado).trim().toLowerCase();
+    const userPodeGerenciar = await usuarioPodeGerenciarReservaCalendario(req);
+    if (!userNorm || (criador !== userNorm && !userPodeGerenciar)) {
+      return res.status(403).json({ error: 'Somente o criador, o setor RH ou um administrador pode cancelar esta reserva' });
+    }
+
+    const dataBaseIso = normalizarDataIsoRh(reserva.data_reserva) || String(reserva.data_reserva || '').slice(0, 10);
+    const dataAlvo = dataOcorrenciaReq || dataBaseIso;
+    const cancelarSerie = !reserva.repetir || escopoSolicitado === 'serie' || escopoSolicitado === 'todos_futuros';
+
+    if (reserva.cancelada) {
+      return res.status(409).json({ error: 'Esta reunião já está cancelada' });
+    }
+
+    const datasCanceladasAtuais = Array.isArray(reserva.datas_canceladas)
+      ? reserva.datas_canceladas.map((d) => normalizarDataIsoRh(d)).filter(Boolean)
+      : [];
+    if (!cancelarSerie && dataAlvo && datasCanceladasAtuais.includes(dataAlvo)) {
+      return res.status(409).json({ error: 'Esta ocorrência já está cancelada' });
+    }
+
+    if (cancelarSerie) {
+      await client.query(
+        `UPDATE rh.reservas_ambientes
+            SET cancelada = TRUE,
+                cancelada_por = $1,
+                cancelada_em = NOW(),
+                atualizado_em = NOW()
+          WHERE id = $2`,
+        [userLogado, reservaId]
+      );
+    } else {
+      const novasCanceladas = unirDatasExcecaoRh(datasCanceladasAtuais, [dataAlvo]);
+      await client.query(
+        `UPDATE rh.reservas_ambientes
+            SET datas_canceladas = $1::date[],
+                cancelada_por = $2,
+                cancelada_em = NOW(),
+                atualizado_em = NOW()
+          WHERE id = $3`,
+        [novasCanceladas, userLogado, reservaId]
+      );
+    }
+
+    let whatsapp = { ok: false };
+    try {
+      const { notificarReservaCanceladaWhatsapp } = require('./utils/reservasWhatsapp');
+      whatsapp = await notificarReservaCanceladaWhatsapp({
+        id: reservaId,
+        tipo: reserva.tipo_espaco,
+        tema: reserva.tema_reuniao,
+        data: dataAlvo,
+        inicio: reserva.hora_inicio,
+        fim: reserva.hora_fim,
+        criadoPor: reserva.criado_por,
+        canceladaPor: userLogado,
+        participantes: Array.isArray(reserva.participantes) ? reserva.participantes : []
+      });
+    } catch (errWa) {
+      console.error('[API] POST /api/rh/reservas/:id/cancelar WhatsApp falhou:', errWa?.message || errWa);
+    }
+
+    return res.json({
+      ok: true,
+      cancelada: true,
+      escopoAplicado: cancelarSerie ? 'serie' : 'este_dia',
+      data: dataAlvo,
+      whatsapp
+    });
+  } catch (err) {
+    console.error('[API] POST /api/rh/reservas/:id/cancelar erro:', err);
+    return res.status(500).json({ error: 'Falha ao cancelar reserva' });
   } finally {
     client.release();
   }
@@ -44269,6 +44516,8 @@ async function startServer() {
       iniciarCronTurnoDiaAutomatico();
       const { iniciarCronLembreteReservasEmail } = require('./cron/lembrete_reservas_email');
       iniciarCronLembreteReservasEmail();
+      const { iniciarProcessadorFilaWhatsapp } = require('./utils/whatsappJanelaEnvio');
+      iniciarProcessadorFilaWhatsapp();
     }, 15000);
   });
 }
