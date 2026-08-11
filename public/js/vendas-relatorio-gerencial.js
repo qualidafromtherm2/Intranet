@@ -3,6 +3,7 @@
   let _init = false;
   let _data = null;
   let _textos = null;
+  let _carregarAbort = null;
   let _secao = 'executivo';
   const _charts = {};
   const _chartsRendered = new Set();
@@ -613,14 +614,21 @@
     const statusEl = document.getElementById('vendRelGerStatus');
     const erroEl = document.getElementById('vendRelGerErro');
     const conteudoEl = document.getElementById('vendRelGerConteudo');
+    const aplicarBtn = document.getElementById('vendRelGerAplicarBtn');
+
+    if (_carregarAbort) _carregarAbort.abort();
+    _carregarAbort = new AbortController();
 
     if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando relatório...'; }
     if (erroEl) erroEl.style.display = 'none';
-    if (conteudoEl) conteudoEl.style.display = 'none';
+    if (aplicarBtn) aplicarBtn.disabled = true;
 
     try {
       const qs = _filtrosQueryParams();
-      const resp = await fetch(`/api/sac/vendas/relatorio-gerencial?${qs}`, { credentials: 'include' });
+      const resp = await fetch(`/api/sac/vendas/relatorio-gerencial?${qs}`, {
+        credentials: 'include',
+        signal: _carregarAbort.signal,
+      });
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
 
@@ -636,8 +644,11 @@
       if (statusEl) statusEl.style.display = 'none';
       if (conteudoEl) conteudoEl.style.display = 'block';
     } catch (err) {
+      if (err?.name === 'AbortError') return;
       if (statusEl) statusEl.style.display = 'none';
       if (erroEl) { erroEl.style.display = 'block'; erroEl.textContent = err.message || 'Erro.'; }
+    } finally {
+      if (aplicarBtn) aplicarBtn.disabled = false;
     }
   }
 
@@ -870,20 +881,15 @@
       document.getElementById('vendRelGerDataInicio')?.addEventListener('change', () => {
         const tri = document.getElementById('vendRelGerTrimestre');
         if (tri) tri.value = '';
-        _carregar();
       });
       document.getElementById('vendRelGerDataFim')?.addEventListener('change', () => {
         const tri = document.getElementById('vendRelGerTrimestre');
         if (tri) tri.value = '';
-        _carregar();
       });
       document.getElementById('vendRelGerTrimestre')?.addEventListener('change', () => {
         _aplicarTrimestreNasDatas();
-        _carregar();
       });
-      ['vendRelGerVendedor', 'vendRelGerFamilia', 'vendRelGerEstado', 'vendRelGerTipo'].forEach((id) => {
-        document.getElementById(id)?.addEventListener('change', _carregar);
-      });
+      document.getElementById('vendRelGerAplicarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => window.print());
 

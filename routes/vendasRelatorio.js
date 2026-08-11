@@ -613,132 +613,142 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
     const itensCte = buildItensCte(etapaCfg.sql, pedidoSql, itemSql);
 
     const evolucaoSql = evolucaoTipo === 'mes'
-      ? `${baseCte}
-        SELECT
+      ? `SELECT
           TO_CHAR(DATE_TRUNC('month', data_ref), 'YYYY-MM') AS mes_key,
           COUNT(*)::int AS total_pedidos,
           COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         GROUP BY 1
         ORDER BY 1`
-      : `${baseCte}
-        SELECT
+      : `SELECT
           LEAST(5, GREATEST(1, CEIL(EXTRACT(DAY FROM data_ref) / 7.0)::int)) AS semana,
           COUNT(*)::int AS total_pedidos,
           COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         GROUP BY 1
         ORDER BY 1`;
 
-    const [
-      rKpi,
-      rEstado,
-      rFamilia,
-      rCliente,
-      rEtapa,
-      rEvolucao,
-      rFinanceiro,
-      rFamiliaEstado,
-      rMesFamilia,
-      rMesTotal,
-      rFamiliaCliente,
-      rQtdItens,
-      rCfopCfg,
-      rVendedor,
-    ] = await Promise.all([
-      pool.query(`${baseCte}
+    const client = await pool.connect();
+    let rKpi;
+    let rEstado;
+    let rFamilia;
+    let rCliente;
+    let rEtapa;
+    let rEvolucao;
+    let rFinanceiro;
+    let rFamiliaEstado;
+    let rMesFamilia;
+    let rMesTotal;
+    let rFamiliaCliente;
+    let rQtdItens;
+    let rCfopCfg;
+    let rVendedor;
+    try {
+      await client.query('BEGIN');
+      await client.query(`
+        CREATE TEMP TABLE vend_rel_base ON COMMIT DROP AS
+        ${baseCte}
+        SELECT * FROM base
+      `, rangeParams);
+      await client.query(`
+        CREATE TEMP TABLE vend_rel_itens ON COMMIT DROP AS
+        ${itensCte}
+        SELECT * FROM itens
+      `, rangeParams);
+
+      rKpi = await client.query(`
         SELECT
           COUNT(*)::int AS total_pedidos,
           COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total,
           COALESCE(AVG(valor_total_pedido) FILTER (WHERE valor_total_pedido > 0), 0)::float AS ticket_medio,
           COUNT(DISTINCT cliente) FILTER (WHERE cliente <> '(sem cliente)')::int AS clientes,
           COUNT(DISTINCT estado) FILTER (WHERE estado <> 'N/D')::int AS estados_atendidos
-        FROM base
-      `, rangeParams),
-      pool.query(`${baseCte}
+        FROM vend_rel_base
+      `);
+      rEstado = await client.query(`
         SELECT estado, COUNT(*)::int AS total, COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         GROUP BY estado
         ORDER BY valor_total DESC, total DESC, estado
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rFamilia = await client.query(`
         SELECT familia,
           COUNT(DISTINCT codigo_pedido)::int AS total,
           COALESCE(SUM(quantidade), 0)::float AS quantidade,
           COALESCE(SUM(valor_total), 0)::float AS valor_total
-        FROM itens
+        FROM vend_rel_itens
         GROUP BY familia
         ORDER BY valor_total DESC, quantidade DESC, familia
         LIMIT 15
-      `, rangeParams),
-      pool.query(`${baseCte}
+      `);
+      rCliente = await client.query(`
         SELECT cliente, COUNT(*)::int AS total, COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         GROUP BY cliente
         ORDER BY valor_total DESC, total DESC, cliente
         LIMIT 15
-      `, rangeParams),
-      pool.query(`${baseCte}
+      `);
+      rEtapa = await client.query(`
         SELECT etapa, etapa_descricao, COUNT(*)::int AS total,
           COALESCE(SUM(valor_total_pedido), 0)::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         GROUP BY etapa, etapa_descricao
         ORDER BY total DESC
-      `, rangeParams),
-      pool.query(evolucaoSql, rangeParams),
-      pool.query(`${baseCte}
+      `);
+      rEvolucao = await client.query(evolucaoSql);
+      rFinanceiro = await client.query(`
         SELECT codigo_pedido, numero_pedido, cliente, estado, data_ref AS data,
           valor_total_pedido::float AS valor_total
-        FROM base
+        FROM vend_rel_base
         WHERE valor_total_pedido > 0
         ORDER BY valor_total_pedido DESC
         LIMIT 20
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rFamiliaEstado = await client.query(`
         SELECT familia, estado, COALESCE(SUM(valor_total), 0)::float AS valor_total
-        FROM itens
+        FROM vend_rel_itens
         GROUP BY familia, estado
         ORDER BY familia, valor_total DESC
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rMesFamilia = await client.query(`
         SELECT
           TO_CHAR(DATE_TRUNC('month', data_emissao_dt), 'YYYY-MM') AS mes,
           familia,
           COALESCE(SUM(quantidade), 0)::float AS quantidade,
           COALESCE(SUM(valor_total), 0)::float AS valor_total
-        FROM itens
+        FROM vend_rel_itens
         WHERE data_emissao_dt IS NOT NULL
         GROUP BY 1, 2
         ORDER BY 1, 4 DESC, 2
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rMesTotal = await client.query(`
         SELECT
           TO_CHAR(DATE_TRUNC('month', data_emissao_dt), 'YYYY-MM') AS mes,
           COALESCE(SUM(quantidade), 0)::float AS quantidade,
           COALESCE(SUM(valor_total), 0)::float AS valor_total
-        FROM itens
+        FROM vend_rel_itens
         WHERE data_emissao_dt IS NOT NULL
         GROUP BY 1
         ORDER BY 1
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rFamiliaCliente = await client.query(`
         SELECT familia, cliente, COALESCE(SUM(valor_total), 0)::float AS valor_total
-        FROM itens
+        FROM vend_rel_itens
         GROUP BY familia, cliente
         ORDER BY familia, valor_total DESC
-      `, rangeParams),
-      pool.query(`${itensCte}
+      `);
+      rQtdItens = await client.query(`
         SELECT COALESCE(SUM(quantidade), 0)::float AS quantidade_itens
-        FROM itens
-      `, rangeParams),
-      pool.query(`
+        FROM vend_rel_itens
+      `);
+      rCfopCfg = await client.query(`
         SELECT
           COUNT(*)::int AS total,
           COUNT(*) FILTER (WHERE incluido IS TRUE)::int AS incluidos,
           COUNT(*) FILTER (WHERE incluido IS FALSE)::int AS excluidos
         FROM vendas.relatorio_gerencial_cfop
-      `),
-      pool.query(`${baseCte}
+      `);
+      rVendedor = await client.query(`
         SELECT
           b.codigo_vendedor,
           COALESCE(
@@ -751,14 +761,20 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
           COALESCE(AVG(b.valor_total_pedido) FILTER (WHERE b.valor_total_pedido > 0), 0)::float AS ticket_medio,
           COUNT(DISTINCT b.cliente) FILTER (WHERE b.cliente <> '(sem cliente)')::int AS clientes,
           COUNT(DISTINCT b.estado) FILTER (WHERE b.estado <> 'N/D')::int AS estados
-        FROM base b
+        FROM vend_rel_base b
         LEFT JOIN vendas.vendedores_omie v
           ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
         GROUP BY b.codigo_vendedor, v.nome
         ORDER BY valor_total DESC, total_pedidos DESC, vendedor
         LIMIT 30
-      `, rangeParams),
-    ]);
+      `);
+      await client.query('COMMIT');
+    } catch (err) {
+      try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
+    }
 
     const kpi = rKpi.rows[0] || {};
     const familias = rFamilia.rows || [];
