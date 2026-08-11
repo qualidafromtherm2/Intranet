@@ -662,17 +662,11 @@
     if (elI) elI.value = _fmtYmd(ini);
     if (elF) elF.value = _fmtYmd(fim);
   }
-  function _aplicarModoNasDatas() {
-    const modo = document.getElementById('vendRelGerModo')?.value || 'mes';
+  function _aplicarMesAtualNasDatas() {
     const now = new Date();
     const y = now.getFullYear();
     const m = now.getMonth();
-    if (modo === 'mes') {
-      _setDatas(new Date(y, m, 1), new Date(y, m + 1, 0));
-      return;
-    }
-    const qtd = modo === '3m' ? 3 : (modo === '6m' ? 6 : 12);
-    _setDatas(new Date(y, m - qtd, 1), new Date(y, m, 0));
+    _setDatas(new Date(y, m, 1), new Date(y, m + 1, 0));
   }
   function _aplicarTrimestreNasDatas() {
     const tri = Number.parseInt(document.getElementById('vendRelGerTrimestre')?.value || '', 10);
@@ -685,8 +679,8 @@
 
   function _filtrosQueryParams() {
     const qs = new URLSearchParams();
-    qs.set('modo', document.getElementById('vendRelGerModo')?.value || 'mes');
-    qs.set('etapa', document.getElementById('vendRelGerEtapa')?.value || 'entregue');
+    qs.set('modo', 'mes');
+    qs.set('etapa', 'entregue');
     const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
     const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
     if (di) qs.set('data_inicio', di);
@@ -873,13 +867,6 @@
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
-      document.getElementById('vendRelGerModo')?.addEventListener('change', () => {
-        const tri = document.getElementById('vendRelGerTrimestre');
-        if (tri) tri.value = '';
-        _aplicarModoNasDatas();
-        _carregar();
-      });
-      document.getElementById('vendRelGerEtapa')?.addEventListener('change', _carregar);
       document.getElementById('vendRelGerDataInicio')?.addEventListener('change', () => {
         const tri = document.getElementById('vendRelGerTrimestre');
         if (tri) tri.value = '';
@@ -939,7 +926,7 @@
       });
     }
     if (!document.getElementById('vendRelGerDataInicio')?.value || !document.getElementById('vendRelGerDataFim')?.value) {
-      _aplicarModoNasDatas();
+      _aplicarMesAtualNasDatas();
     }
     _carregarFiltrosOpcoes();
     _carregar();
