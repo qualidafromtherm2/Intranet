@@ -7,6 +7,7 @@
 
 const { dbQuery } = require('../src/db');
 const { smtpConfigurado, enviarEmail } = require('./mailer');
+const { filtrarUsuarios } = require('./notificacaoPreferencias');
 
 function normalizarEmail(valor) {
   const email = String(valor || '').trim().toLowerCase();
@@ -76,7 +77,7 @@ function parseLinksSoltos(raw) {
 
 async function obterEmailsSetorCompras() {
   const { rows } = await dbQuery(
-    `SELECT u.username, u.email
+    `SELECT u.id, u.username, u.email
        FROM public.auth_user u
        INNER JOIN public.auth_user_profile up ON up.user_id = u.id
        INNER JOIN public.auth_sector s ON s.id = up.sector_id
@@ -84,15 +85,17 @@ async function obterEmailsSetorCompras() {
         AND COALESCE(u.is_active, TRUE) = TRUE`
   );
 
-  const emails = [];
+  const comEmail = [];
   const seen = new Set();
   for (const r of rows) {
     const email = normalizarEmail(r.email);
     if (!email || seen.has(email)) continue;
     seen.add(email);
-    emails.push(email);
+    comEmail.push({ id: r.id, username: r.username, email });
   }
-  return emails;
+
+  const aceitos = await filtrarUsuarios(comEmail, 'compras_requisicao', 'email');
+  return aceitos.map((d) => d.email);
 }
 
 async function carregarItensRequisicao(origem, itemIds) {

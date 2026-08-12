@@ -15,6 +15,7 @@ const {
   whatsappConfigurado,
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
+const { filtrarUsuarios } = require('./notificacaoPreferencias');
 
 const TAG = '[AlertaDevolucaoNFe]';
 const FUNCAO_ID_DESTINO = Number(process.env.ALERTA_DEVOLUCAO_FUNCAO_ID || 5) || 5;
@@ -301,10 +302,16 @@ async function avaliarENotificarDevolucaoPorRecebimento({
     return { ok: true, skipped: true, reason: 'ja_enviado' };
   }
 
-  const destinatarios = await listarDestinatariosAssistenciaTecnica();
-  if (!destinatarios.length) {
+  const destinatariosCargo = await listarDestinatariosAssistenciaTecnica();
+  if (!destinatariosCargo.length) {
     console.warn(TAG, `Nenhum telefone para funcao_id=${FUNCAO_ID_DESTINO}`);
     return { ok: false, reason: 'sem_destinatarios' };
+  }
+
+  const destinatarios = await filtrarUsuarios(destinatariosCargo, 'nfe_devolucao', 'whatsapp');
+  if (!destinatarios.length) {
+    console.log(TAG, 'Nenhum destinatário com preferência nfe_devolucao / whatsapp.');
+    return { ok: false, reason: 'sem_preferencia' };
   }
 
   const mensagem = montarMensagemAlerta({

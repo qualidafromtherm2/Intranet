@@ -5,11 +5,18 @@
  *
  * GET  /api/usuario/preferencias/:chave  → { valor } ou { valor: null }
  * POST /api/usuario/preferencias         → { chave, valor } upsert → { ok: true }
+ * GET  /api/usuario/notificacao-preferencias → catálogo + preferências do usuário
+ * PUT  /api/usuario/notificacao-preferencias → salva preferências de notificação
  */
 
 const express = require('express');
 const router  = express.Router();
 const { dbQuery } = require('../src/db.js');
+const {
+  ensureSchema: ensureNotificacaoPreferenciasSchema,
+  getPreferencias,
+  setPreferencias,
+} = require('../utils/notificacaoPreferencias');
 
 // Garante que a tabela existe na primeira execução
 (async () => {
@@ -28,6 +35,12 @@ const { dbQuery } = require('../src/db.js');
   } catch (e) {
     console.warn('[usuario] Falha ao criar tabela usuario_preferencias:', e.message);
   }
+  try {
+    await ensureNotificacaoPreferenciasSchema();
+    console.log('[usuario] Tabela notificacao_preferencias pronta.');
+  } catch (e) {
+    console.warn('[usuario] Falha ao criar tabela notificacao_preferencias:', e.message);
+  }
 })();
 
 // Middleware: exige sessão autenticada
@@ -36,6 +49,12 @@ function requireAuth(req, res, next) {
   if (!login) return res.status(401).json({ ok: false, error: 'Não autenticado' });
   req.loginUsuario = login;
   next();
+}
+
+function userIdDaSessao(req) {
+  const raw = req.session?.user?.id ?? req.session?.userId ?? null;
+  const id = Number(raw);
+  return Number.isFinite(id) && id > 0 ? id : null;
 }
 
 // GET /api/usuario/preferencias/:chave
@@ -69,6 +88,37 @@ router.post('/preferencias', requireAuth, async (req, res) => {
     return res.json({ ok: true });
   } catch (e) {
     console.error('[usuario] Erro ao salvar preferência:', e.message);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// GET /api/usuario/notificacao-preferencias
+router.get('/notificacao-preferencias', requireAuth, async (req, res) => {
+  try {
+    const userId = userIdDaSessao(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'Sessão sem user_id' });
+    }
+    const data = await getPreferencias(userId);
+    return res.json({ ok: true, ...data });
+  } catch (e) {
+    console.error('[usuario] Erro ao buscar notificacao-preferencias:', e.message);
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// PUT /api/usuario/notificacao-preferencias  — body: { preferencias: [{ tipo, canal, habilitado }] }
+router.put('/notificacao-preferencias', requireAuth, async (req, res) => {
+  try {
+    const userId = userIdDaSessao(req);
+    if (!userId) {
+      return res.status(401).json({ ok: false, error: 'Sessão sem user_id' });
+    }
+    const lista = req.body?.preferencias ?? req.body?.itens ?? req.body;
+    const data = await setPreferencias(userId, lista);
+    return res.json({ ok: true, ...data });
+  } catch (e) {
+    console.error('[usuario] Erro ao salvar notificacao-preferencias:', e.message);
     return res.status(500).json({ ok: false, error: e.message });
   }
 });

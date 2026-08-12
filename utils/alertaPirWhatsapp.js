@@ -19,6 +19,7 @@ const {
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
 const { codigoTemSegmentoMp, produtoEhFamiliaMp } = require('./etqRecebimentoPir');
+const { filtrarUsuarios } = require('./notificacaoPreferencias');
 
 const TAG = '[AlertaPirWhatsApp]';
 const FUNCAO_ID_DESTINO = Number(process.env.ALERTA_PIR_FUNCAO_ID || 4) || 4;
@@ -227,10 +228,16 @@ async function notificarEntradaListaPir(itens) {
   const mensagem = montarMensagemItens(paraEnviar);
   if (!mensagem) return { ok: false, reason: 'sem_mensagem' };
 
-  const destinatarios = await listarSupervisoresQualidade();
-  if (!destinatarios.length) {
+  const destinatariosCargo = await listarSupervisoresQualidade();
+  if (!destinatariosCargo.length) {
     console.warn(TAG, `Nenhum telefone para funcao_id=${FUNCAO_ID_DESTINO}`);
     return { ok: false, reason: 'sem_destinatarios' };
+  }
+
+  const destinatarios = await filtrarUsuarios(destinatariosCargo, 'pir_novo_item', 'whatsapp');
+  if (!destinatarios.length) {
+    console.log(TAG, 'Nenhum destinatário com preferência pir_novo_item / whatsapp.');
+    return { ok: false, reason: 'sem_preferencia' };
   }
 
   const phoneNumberId = await getWhatsappPhoneNumberId();

@@ -7,6 +7,7 @@
 
 const { dbQuery } = require('../src/db');
 const { smtpConfigurado, enviarEmail } = require('./mailer');
+const { filtrarUsuarios } = require('./notificacaoPreferencias');
 
 function normalizarEmail(valor) {
   const email = String(valor || '').trim().toLowerCase();
@@ -36,14 +37,14 @@ function siglaDiaSemanaBrasilia(dataIso) {
   return ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][d.getUTCDay()] || null;
 }
 
-async function obterEmailsParticipantes(usernames) {
+async function listarParticipantesComEmail(usernames) {
   const usuarios = Array.from(
     new Set((usernames || []).map((u) => String(u || '').trim()).filter(Boolean))
   );
   if (!usuarios.length) return [];
 
   const { rows } = await dbQuery(
-    `SELECT username, email
+    `SELECT id, username, email
        FROM public.auth_user
       WHERE username = ANY($1::text[])`,
     [usuarios]
@@ -53,7 +54,7 @@ async function obterEmailsParticipantes(usernames) {
     rows.map((r) => [String(r.username || '').trim().toLowerCase(), r])
   );
 
-  const emails = [];
+  const out = [];
   const seen = new Set();
   for (const username of usuarios) {
     const info = porUsuario.get(String(username).trim().toLowerCase());
@@ -62,9 +63,23 @@ async function obterEmailsParticipantes(usernames) {
     const escolhido = normalizarEmail(info.email);
     if (!escolhido || seen.has(escolhido)) continue;
     seen.add(escolhido);
-    emails.push(escolhido);
+    out.push({ id: info.id, username: info.username, email: escolhido });
   }
-  return emails;
+  return out;
+}
+
+/** @returns {Promise<string[]>} e-mails dos participantes (sem filtro de preferência). */
+async function obterEmailsParticipantes(usernames) {
+  const lista = await listarParticipantesComEmail(usernames);
+  return lista.map((d) => d.email);
+}
+
+/** Filtra participantes por preferência e devolve só os e-mails. */
+async function emailsComPreferencia(usernames, tipoPreferencia) {
+  const comEmail = await listarParticipantesComEmail(usernames);
+  if (!comEmail.length) return [];
+  const aceitos = await filtrarUsuarios(comEmail, tipoPreferencia, 'email');
+  return aceitos.map((d) => d.email);
 }
 
 function montarTextoReserva(reserva, { titulo }) {
@@ -121,9 +136,9 @@ async function notificarNovaReserva(reserva) {
     console.warn('[ReservasEmail] SMTP não configurado — pulando aviso de nova reserva.');
     return { ok: false, skipped: true, reason: 'smtp_nao_configurado' };
   }
-  const emails = await obterEmailsParticipantes(reserva.participantes);
+  const emails = await emailsComPreferencia(reserva.participantes, 'reuniao_nova');
   if (!emails.length) {
-    console.warn('[ReservasEmail] Nenhum e-mail de participante encontrado para reserva', reserva.id);
+    console.warn('[ReservasEmail] Nenhum e-mail com preferência reuniao_nova para reserva', reserva.id);
     return { ok: false, skipped: true, reason: 'sem_emails' };
   }
 
@@ -232,7 +247,7 @@ async function enviarLembretesReservasDoDia(dataIso) {
     const participantes = Array.isArray(r.participantes) ? r.participantes : [];
     if (!participantes.length) continue;
 
-    const emails = await obterEmailsParticipantes(participantes);
+    const emails = await emailsComPreferencia(participantes, 'reuniao_lembrete');
     if (!emails.length) continue;
 
     const reserva = {

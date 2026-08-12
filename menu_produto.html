@@ -199,8 +199,8 @@
     </button>
     <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
     <div id="notification-wrapper" class="notification" style="display:none;">
-      <span class="notification-number">5</span>
-      <i id="bell-icon" class="fa-solid fa-bell" title="Mensagens"></i>
+      <span class="notification-number" style="display:none;"></span>
+      <i id="bell-icon" class="fa-solid fa-bell" title="Notificações"></i>
     </div>
     <i id="cart-icon" class="fa-solid fa-shopping-bag" title="Painel de compras" style="display:none;"></i>
     <i id="chamado-icon" class="fa-solid fa-headset" title="Chamado de suporte" data-nav-key="top-shortcut:chamado"><span id="chamado-badge" class="chamado-badge" hidden>0</span></i>
@@ -975,35 +975,33 @@
 
       <div class="main-container">
 
-        <!-- Chat (tipo WhatsApp) dentro do content-wrapper padrão -->
+        <!-- Configurações de notificações (substitui o chat interno) -->
         <div id="chatPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
             <div class="content-wrapper-header">
               <div class="content-wrapper-context">
                 <h3 class="img-content" style="display:flex;align-items:center;gap:8px;">
-                  <i class="fa-solid fa-comments" style="color:#10b981;"></i>
-                  <span>Mensagens</span>
+                  <i class="fa-solid fa-bell" style="color:#f59e0b;"></i>
+                  <span>Configurações de notificações</span>
                 </h3>
-                <div class="content-text">Converse com os usuários do sistema.</div>
+                <div class="content-text">Escolha o que deseja receber por WhatsApp e e-mail.</div>
               </div>
             </div>
-            <div id="chatLayout">
-              <aside class="chat-users">
-                <div class="chat-users-header">
-                  <input id="chatSearch" type="text" placeholder="Buscar usuário..." />
-                </div>
-                <ul id="chatUserList" class="chat-user-list"></ul>
-              </aside>
-              <section class="chat-conv">
-                <header class="chat-conv-header">
-                  <div class="chat-with" id="chatWith">Selecione um usuário</div>
-                </header>
-                <div id="chatMessages" class="chat-messages"></div>
-                <footer class="chat-input">
-                  <input id="chatText" type="text" placeholder="Digite uma mensagem" disabled />
-                  <button id="chatSend" disabled>Enviar</button>
-                </footer>
-              </section>
+            <div id="notifPrefLayout" class="notif-pref-layout">
+              <div class="notif-pref-aviso" role="status">
+                <i class="fa-solid fa-circle-info"></i>
+                Tudo começa <strong>desligado</strong>. Ative apenas o que quiser receber.
+                É preciso ter telefone e/ou e-mail cadastrados no perfil.
+              </div>
+              <div id="notifPrefStatus" class="notif-pref-status" hidden></div>
+              <div id="notifPrefLista" class="notif-pref-lista">
+                <div class="notif-pref-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando…</div>
+              </div>
+              <div class="notif-pref-acoes">
+                <button type="button" id="notifPrefSalvar" class="notif-pref-salvar" disabled>
+                  <i class="fa-solid fa-check"></i> Salvar preferências
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -16636,27 +16634,30 @@ function attachDropZone(ul) {
 </style>
 
 <style>
-/* ===== Chat (escopado ao #chatPane) ===== */
-#chatPane #chatLayout{display:grid;grid-template-columns:280px 1fr;gap:0;height:calc(100vh - 220px);min-height:420px;border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,24,39,.6)}
-#chatPane .chat-users{background:rgba(31,41,55,.75);display:flex;flex-direction:column;overflow:hidden;min-height:0}
-#chatPane .chat-users-header{padding:10px;border-bottom:1px solid rgba(255,255,255,.08)}
-#chatPane .chat-users-header input{width:100%;padding:10px 12px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:#111827;color:#e8ecff}
-#chatPane .chat-user-list{list-style:none;margin:0;padding:0;overflow-y:auto;flex:1;min-height:0}
-#chatPane .chat-user-list li{display:flex;align-items:center;gap:10px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06);cursor:pointer}
-#chatPane .chat-user-list li:hover{background:rgba(255,255,255,.06)}
-#chatPane .chat-user-list li.active{background:rgba(59,130,246,.18)}
-#chatPane .chat-user-list .avatar{width:32px;height:32px;border-radius:50%;background:#374151;display:inline-flex;align-items:center;justify-content:center;color:#cbd5e1;font-weight:700}
-#chatPane .chat-conv{display:grid;grid-template-rows:auto 1fr auto;background:rgba(17,24,39,.2)}
-#chatPane .chat-conv-header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08);display:flex;align-items:center;gap:10px;color:#e5e7eb}
-#chatPane .chat-messages{padding:14px;overflow:auto;display:flex;flex-direction:column;gap:10px}
-#chatPane .msg{max-width:68%;padding:10px 12px;border-radius:14px;line-height:1.35}
-#chatPane .msg.you{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:6px}
-#chatPane .msg.other{align-self:flex-start;background:rgba(255,255,255,.08);color:#e5e7eb;border-bottom-left-radius:6px}
-#chatPane .msg .time{display:block;margin-top:4px;font-size:11px;opacity:.75}
-#chatPane .chat-input{padding:10px;border-top:1px solid rgba(255,255,255,.08);display:flex;gap:10px}
-#chatPane .chat-input input{flex:1;padding:10px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:#111827;color:#e8ecff}
-#chatPane .chat-input button{padding:0 16px;border-radius:999px;border:1px solid #3b82f6;background:#3b82f6;color:#fff;font-weight:600}
-@media(max-width:900px){#chatPane #chatLayout{grid-template-columns:1fr}}
+/* ===== Configurações de notificações (#chatPane reaproveitado) ===== */
+#chatPane .notif-pref-layout{max-width:820px;margin:0 auto;padding:8px 4px 24px;display:flex;flex-direction:column;gap:14px}
+#chatPane .notif-pref-aviso{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:#fde68a;font-size:13px;line-height:1.45}
+#chatPane .notif-pref-aviso i{margin-top:2px;color:#f59e0b}
+#chatPane .notif-pref-status{padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600}
+#chatPane .notif-pref-status.is-ok{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.35)}
+#chatPane .notif-pref-status.is-erro{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.35)}
+#chatPane .notif-pref-lista{display:flex;flex-direction:column;gap:14px}
+#chatPane .notif-pref-loading{padding:28px;text-align:center;color:#94a3b8;font-size:13px}
+#chatPane .notif-pref-grupo{border:1px solid rgba(255,255,255,.08);border-radius:12px;overflow:hidden;background:rgba(17,24,39,.55)}
+#chatPane .notif-pref-grupo-titulo{padding:10px 14px;font-size:12px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;background:rgba(255,255,255,.03);border-bottom:1px solid rgba(255,255,255,.06)}
+#chatPane .notif-pref-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 14px;border-bottom:1px solid rgba(255,255,255,.05)}
+#chatPane .notif-pref-item:last-child{border-bottom:none}
+#chatPane .notif-pref-item-rotulo{font-size:14px;font-weight:600;color:#e5e7eb;line-height:1.3}
+#chatPane .notif-pref-canais{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+#chatPane .notif-pref-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.2);color:#cbd5e1;font-size:12px;font-weight:700;cursor:pointer;user-select:none}
+#chatPane .notif-pref-toggle input{accent-color:#10b981;width:15px;height:15px;margin:0;cursor:pointer}
+#chatPane .notif-pref-toggle.is-on{border-color:rgba(16,185,129,.55);background:rgba(16,185,129,.15);color:#a7f3d0}
+#chatPane .notif-pref-acoes{display:flex;justify-content:flex-end;padding-top:4px}
+#chatPane .notif-pref-salvar{min-height:44px;padding:0 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:14px;font-weight:800;cursor:pointer}
+#chatPane .notif-pref-salvar:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:700px){
+  #chatPane .notif-pref-item{flex-direction:column;align-items:flex-start}
+}
 </style>
 
 <!-- ===== CADASTRO DE PRODUTO V2 ===== -->

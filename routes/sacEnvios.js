@@ -19,6 +19,7 @@ const {
 const { syncCustoPecasEnvio } = require('../utils/enviosCustoPecas');
 const { smtpConfigurado, parseListaEmails, enviarEmail } = require('../utils/mailer');
 const { entregarMensagemWhatsapp } = require('../utils/whatsappJanelaEnvio');
+const { filtrarUsuarios } = require('../utils/notificacaoPreferencias');
 
 const router = express.Router();
 
@@ -681,8 +682,7 @@ const MENU_PRINCIPAL_TEXTO =
   '2️⃣ Realizar compra\n' +
   '3️⃣ Consultar venda\n' +
   '4️⃣ Verificar agenda\n' +
-  '5️⃣ Verificar mensagens\n' +
-  '6️⃣ Manual de instrução\n\n' +
+  '5️⃣ Manual de instrução\n\n' +
   '_Digite o número da opção desejada._';
 
 const MENU_FINALIZAR_TEXTO =
@@ -692,8 +692,7 @@ const MENU_FINALIZAR_TEXTO =
   '2️⃣ Realizar compra\n' +
   '3️⃣ Consultar venda\n' +
   '4️⃣ Verificar agenda\n' +
-  '5️⃣ Verificar mensagens\n' +
-  '6️⃣ Manual de instrução\n\n' +
+  '5️⃣ Manual de instrução\n\n' +
   '_Digite o número da opção ou envie sua dúvida._';
 
 /**
@@ -815,39 +814,10 @@ async function consultarAgendaUsuario(username) {
 }
 
 /**
- * Consulta mensagens não lidas do chat interno para o usuário.
+ * Chat interno desativado — não consulta mais chatbot.chat_messages.
  */
-async function consultarMensagensNaoLidas(userId) {
-  try {
-    const { rows } = await pool.query(
-      `SELECT cm.id, au.username AS remetente, LEFT(cm.message_text, 100) AS msg,
-              cm.created_at
-       FROM chatbot.chat_messages cm
-       JOIN public.auth_user au ON au.id = cm.from_user_id
-       WHERE cm.to_user_id = $1
-         AND cm.is_read = false
-       ORDER BY cm.created_at DESC
-       LIMIT 20`,
-      [userId]
-    );
-    if (!rows.length) {
-      return '💬 *Suas Mensagens*\n\nVocê não tem mensagens não lidas. ✅';
-    }
-    let texto = `💬 *Suas Mensagens* — ${rows.length} não lida(s):\n\n`;
-    for (const m of rows) {
-      const data = new Date(m.created_at);
-      const dataStr = data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-      const horaStr = data.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-      const msgResumo = m.msg.length >= 100 ? m.msg + '...' : m.msg;
-      texto += `👤 *${m.remetente}* — ${dataStr} ${horaStr}\n`;
-      texto += `   ${msgResumo}\n\n`;
-    }
-    texto += '_Acesse o chat na intranet para responder._';
-    return texto;
-  } catch (err) {
-    console.error('[WhatsApp/Mensagens] erro ao consultar mensagens:', err?.message || err);
-    return '⚠️ Erro ao consultar suas mensagens. Tente novamente mais tarde.';
-  }
+async function consultarMensagensNaoLidas(_userId) {
+  return '💬 O chat interno foi desativado.\n\nUse *Configurações de notificações* na intranet.';
 }
 
 /* ========================================================================
@@ -2418,7 +2388,6 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
           { id: 'menu_realizar_compra', title: 'Realizar compra', description: 'Solicitar compra de material' },
           { id: 'menu_consultar_venda', title: 'Consultar venda', description: 'Consultar pedido e NFe de venda' },
           { id: 'menu_verificar_agenda', title: 'Verificar agenda', description: 'Ver reuniões agendadas' },
-          { id: 'menu_verificar_mensagens', title: 'Verificar mensagens', description: 'Ver mensagens não lidas' },
           { id: 'menu_manual_instrucao', title: 'Manual de instrução', description: 'Buscar manual do seu equipamento' }
         ]
       }]
@@ -3076,23 +3045,25 @@ async function processarRespostaAutomaticaWhatsapp({ phone, profileName, message
     }
 
     // Opção 4 — Verificar agenda
-    if (escolha === 'menu_verificar_agenda' || escolha === '4' || escolha === '3') {
+    if (escolha === 'menu_verificar_agenda' || escolha === '4') {
       const textoAgenda = await consultarAgendaUsuario(contatoInfo.username);
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
       await enviarMenuFinalizar(textoAgenda, 'menu → agenda');
       return;
     }
 
-    // Opção 5 — Verificar mensagens
-    if (escolha === 'menu_verificar_mensagens' || escolha === '5' || escolha === '4') {
-      const textoMensagens = await consultarMensagensNaoLidas(contatoInfo.userId);
+    // Chat interno desativado — opção "Verificar mensagens" removida do menu
+    if (escolha === 'menu_verificar_mensagens') {
       menuInternoState.set(phoneDigits, { fluxo: null, updatedAt: Date.now() });
-      await enviarMenuFinalizar(textoMensagens, 'menu → mensagens');
+      await enviarMenuFinalizar(
+        '💬 O chat interno foi desativado.\n\nUse *Configurações de notificações* na intranet.',
+        'menu → mensagens (desativado)'
+      );
       return;
     }
 
-    // Opção 6 — Manual de instrução → mostra lista de todos os manuais imediatamente
-    if (escolha === 'menu_manual_instrucao' || escolha === '6' || escolha === '5') {
+    // Opção 5 — Manual de instrução (aceita 6 por compatibilidade com menu antigo)
+    if (escolha === 'menu_manual_instrucao' || escolha === '5' || escolha === '6') {
       menuInternoState.set(phoneDigits, { fluxo: 'MANUAL_INSTRUCAO', step: 'ESCOLHENDO_MANUAL', updatedAt: Date.now() });
       await enviarListaTodosManuais();
       return;
@@ -10882,8 +10853,8 @@ router.delete('/at/devolucao-destinatarios/:id', async (req, res) => {
  * POST /at/devolucao/:id
  * Envia e-mail de devolução com dados da OS + PDF anexado (base64).
  * Body: { pdf_base64: string, pdf_filename?: string, emails?: string[] }
- * Destinatários: emails do body (selecionados no modal) OU auth_user com email_devolucao = true
- *   (+ fallback AT_DEVOLUCAO_EMAILS)
+ * Destinatários: emails do body (selecionados no modal) OU usuários com
+ *   preferência at_devolucao / email (+ fallback AT_DEVOLUCAO_EMAILS)
  * Remetente: SMTP_FROM (Hostinger / leandro.santos) — mesmo processo das reservas
  * Reply-To: e-mail do usuário logado (quando cadastrado)
  */
@@ -10936,24 +10907,32 @@ router.post('/at/devolucao/:id', async (req, res) => {
       }
     } else {
       const { rows: destRows } = await pool.query(
-        `SELECT email
+        `SELECT id, email
            FROM public.auth_user
-          WHERE email_devolucao = true
-            AND COALESCE(is_active, true) = true
+          WHERE COALESCE(is_active, true) = true
             AND email IS NOT NULL
             AND TRIM(email) <> ''`
       );
-      destinatarios = destRows
-        .map((r) => _emailValidoDevolucao(r.email))
-        .filter(Boolean);
-      // Fallback opcional do .env enquanto a lista ainda não foi configurada na tela
+      const comEmail = [];
+      const vistosEmail = new Set();
+      for (const r of destRows) {
+        const em = _emailValidoDevolucao(r.email);
+        if (!em) continue;
+        const key = em.toLowerCase();
+        if (vistosEmail.has(key)) continue;
+        vistosEmail.add(key);
+        comEmail.push({ id: r.id, email: em });
+      }
+      const aceitos = await filtrarUsuarios(comEmail, 'at_devolucao', 'email');
+      destinatarios = aceitos.map((d) => d.email);
+      // Fallback opcional do .env enquanto a preferência ainda não foi configurada
       if (!destinatarios.length) {
         destinatarios = parseListaEmails(process.env.AT_DEVOLUCAO_EMAILS || '');
       }
       if (!destinatarios.length) {
         return res.status(400).json({
           ok: false,
-          error: 'Nenhum destinatário ativo. Em AT → Configuração → Destinatários de devolução, marque quem deve receber.',
+          error: 'Nenhum destinatário com preferência de e-mail de devolução. Ative em Minha conta → Notificações, ou marque destinatários no modal.',
         });
       }
     }
@@ -12172,21 +12151,13 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
       for (const inbound of newInboundMessages) {
         enqueueWhatsappByPhone(inbound.phone, async () => {
           try {
-            // Intercepta clique do botão "Marcar como lidas" da notificação diária
+            // Chat interno desativado — botão "Marcar como lidas" não altera mais chat_messages
             if (inbound.buttonReplyId && inbound.buttonReplyId.startsWith('sgf_marcar_lidas_')) {
-              const uid = Number(inbound.buttonReplyId.replace('sgf_marcar_lidas_', ''));
-              if (uid > 0) {
-                await pool.query(
-                  'UPDATE chatbot.chat_messages SET is_read = true, updated_at = NOW() WHERE to_user_id = $1 AND is_read = false',
-                  [uid]
-                );
-                await enviarMensagemWhatsappTexto({
-                  phoneNumberId: inbound.phoneNumberId,
-                  toPhone: inbound.phone,
-                  text: '✅ Mensagens marcadas como lidas no SGF.'
-                });
-                console.log('[Notif] Mensagens marcadas como lidas para user_id:', uid);
-              }
+              await enviarMensagemWhatsappTexto({
+                phoneNumberId: inbound.phoneNumberId,
+                toPhone: inbound.phone,
+                text: '💬 O chat interno foi desativado. Use Configurações de notificações na intranet.'
+              });
               return;
             }
 

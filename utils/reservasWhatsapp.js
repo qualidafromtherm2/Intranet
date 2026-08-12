@@ -11,6 +11,7 @@ const {
   toWhatsappPhone,
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
+const { filtrarUsuarios } = require('./notificacaoPreferencias');
 
 function formatarDataPtBr(dataIso) {
   const raw = String(dataIso || '').slice(0, 10);
@@ -49,7 +50,7 @@ async function obterTelefonesParticipantes(usernames) {
   if (!usuarios.length) return [];
 
   const { rows } = await dbQuery(
-    `SELECT username, telefone_contato
+    `SELECT id, username, telefone_contato
        FROM public.auth_user
       WHERE lower(username) = ANY($1::text[])
         AND telefone_contato IS NOT NULL
@@ -58,6 +59,7 @@ async function obterTelefonesParticipantes(usernames) {
   );
 
   return rows.map((r) => ({
+    id: r.id,
     username: r.username,
     telefone: r.telefone_contato,
   }));
@@ -91,6 +93,12 @@ async function notificarReservaCanceladaWhatsapp(reserva) {
     return { ok: false, skipped: true, reason: 'sem_telefones', enviados: [], semTelefone };
   }
 
+  const aceitos = await filtrarUsuarios(comTelefone, 'reuniao_cancelada', 'whatsapp');
+  if (!aceitos.length) {
+    console.log('[ReservasWhatsapp] Nenhum destinatário com preferência reuniao_cancelada / whatsapp.');
+    return { ok: false, skipped: true, reason: 'sem_preferencia', enviados: [], semTelefone };
+  }
+
   const phoneNumberId = await getWhatsappPhoneNumberId();
   if (!phoneNumberId) {
     return { ok: false, skipped: true, reason: 'sem_phone_number_id', enviados: [], semTelefone };
@@ -101,7 +109,7 @@ async function notificarReservaCanceladaWhatsapp(reserva) {
   const erros = [];
   const vistos = new Set();
 
-  for (const dest of comTelefone) {
+  for (const dest of aceitos) {
     const phone = toWhatsappPhone(dest.telefone);
     if (!phone || vistos.has(phone)) continue;
     vistos.add(phone);
@@ -142,6 +150,12 @@ async function notificarNovaReservaWhatsapp(reserva) {
     return { ok: false, skipped: true, reason: 'sem_telefones', enviados: [], semTelefone: destinatarios };
   }
 
+  const aceitos = await filtrarUsuarios(comTelefone, 'reuniao_nova', 'whatsapp');
+  if (!aceitos.length) {
+    console.log('[ReservasWhatsapp] Nenhum destinatário com preferência reuniao_nova / whatsapp.');
+    return { ok: false, skipped: true, reason: 'sem_preferencia', enviados: [], semTelefone: destinatarios };
+  }
+
   const phoneNumberId = await getWhatsappPhoneNumberId();
   if (!phoneNumberId) {
     return { ok: false, skipped: true, reason: 'sem_phone_number_id', enviados: [] };
@@ -150,7 +164,7 @@ async function notificarNovaReservaWhatsapp(reserva) {
   const mensagem = montarMensagemReserva(reserva, 'Nova reunião agendada');
   const enviados = [];
   const vistos = new Set();
-  for (const dest of comTelefone) {
+  for (const dest of aceitos) {
     const phone = toWhatsappPhone(dest.telefone);
     if (!phone || vistos.has(phone)) continue;
     vistos.add(phone);

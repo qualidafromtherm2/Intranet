@@ -424,8 +424,15 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Carrega foto de perfil se disponível
       if (js.loggedIn && js.user) {
         const u = js.user;
-        if (uiNomeCompleto) uiNomeCompleto.textContent = u.nome || u.username || '';
-        if (uiUsername)     uiUsername.textContent = u.username ? `@${u.username}` : '';
+        const _nome = String(u.nome || '').trim();
+        const _uname = String(u.username || '').trim();
+        if (uiNomeCompleto) uiNomeCompleto.textContent = _nome || _uname || '';
+        if (uiUsername) {
+          // Evita duplicar: só mostra @username quando difere do nome exibido.
+          const _dup = _uname && _nome && _uname.toLowerCase() === _nome.toLowerCase();
+          uiUsername.textContent = (_uname && !_dup) ? `@${_uname}` : '';
+          uiUsername.style.display = uiUsername.textContent ? '' : 'none';
+        }
         if (uiCargo)        uiCargo.textContent = u.funcao_nome || '—';
         if (uiSetor)        uiSetor.textContent = u.setor || '—';
         if (uiEmailInput)   uiEmailInput.value = u.email || '';
@@ -1129,51 +1136,27 @@ function ativarInicioAposLogin() {
   try { history.replaceState(null, '', '#inicio'); } catch {}
 }
 
-// Atualiza contador de mensagens - só executa se usuário estiver logado
+// Badge do sino: chat desativado — sempre oculto
 async function updateMessageCount() {
-  // Verifica se está logado antes de fazer requisição
-  if (!window.__sessionUser) {
-    const badge = document.querySelector('.notification-number');
-    if (badge) badge.style.display = 'none';
-    return;
-  }
-  
   const badge = document.querySelector('.notification-number');
-  if (!badge) return;
-
-  const res = await fetch(`${API_BASE}/api/users/me/messages`, {
-    credentials: 'include'
-  });
-  if (!res.ok) {
-    badge.style.display = 'none';
-    return;
-  }
-  const { count } = await res.json();
-  if (count > 0) {
-    badge.textContent = count;
-    badge.style.display = 'inline-flex';
-  } else {
+  if (badge) {
+    badge.textContent = '';
     badge.style.display = 'none';
   }
 }
 
 async function openNotificacoes() {
-  // Verifica se está logado antes de abrir notificações
   if (!window.__sessionUser) {
     console.warn('[openNotificacoes] Usuário não logado - ignorando abertura');
     return;
   }
-  
-  console.warn('[openNotificacoes] Função DESABILITADA - usando chat ao invés de notificações');
-  
-  // Se o chat existe, redireciona para ele
-  if (typeof window.openChat === 'function') {
-    window.openChat();
+  if (typeof window.openNotificacaoPreferencias === 'function') {
+    window.openNotificacaoPreferencias();
     return;
   }
-  
-  // Se não existe, apenas loga o erro sem tentar acessar elementos inexistentes
-  console.error('[openNotificacoes] Sistema de chat não disponível');
+  if (typeof window.openChat === 'function') {
+    window.openChat();
+  }
 }
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 
@@ -1203,36 +1186,26 @@ window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 function bindNotificationBell() {
   const bell = document.querySelector('.notification');
   if (!bell) return; // página sem sininho → não binda
+  if (bell.__notifPrefBound) return;
+  bell.__notifPrefBound = true;
 
   bell.addEventListener('click', (e) => {
-    e.stopPropagation(); // evita interações colaterais (ex.: abrir login)
+    e.stopPropagation();
     e.preventDefault();
     try {
-      // Chama o chat se existir (prioridade para sistema novo)
+      if (typeof window.openNotificacaoPreferencias === 'function') {
+        window.openNotificacaoPreferencias();
+        return;
+      }
       if (typeof window.openChat === 'function') {
         window.openChat();
         return;
       }
-      
-      // Fallback para notificações antigas (se o chat não carregou)
-      console.warn('[bindNotificationBell] openChat não disponível, usando fallback');
       if (typeof window.openNotificacoes === 'function') {
         window.openNotificacoes();
       }
     } catch (err) {
-      console.error('[bindNotificationBell] erro ao abrir chat/notificações', err);
-    }
-  });
-
-  // fechar painel se clicar fora
-  document.addEventListener('click', (e) => {
-    const clicouSino   = e.target.closest('.notification');
-    const clicouPainel = e.target.closest('#notificacoes');
-    if (!clicouSino && !clicouPainel) {
-      const painel  = document.getElementById('notificacoes');
-      const acessos = document.getElementById('acessos');
-      painel?.classList.remove('visible');
-      acessos?.classList.remove('hidden');
+      console.error('[bindNotificationBell] erro ao abrir configurações de notificações', err);
     }
   });
 }

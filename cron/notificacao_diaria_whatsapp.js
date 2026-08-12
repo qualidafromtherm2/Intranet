@@ -2,21 +2,17 @@
  * ============================================================
  * CRON — Notificação diária via WhatsApp (06:00 Brasília)
  * ============================================================
- * Envia mensagens para usuários com receber_notificacao = true
- * e telefone_contato preenchido.
+ * Envia mensagens para usuários com telefone_contato preenchido
+ * e preferência resumo_diario / whatsapp habilitada (opt-in estrito).
  *
  * Conteúdo:
  *  1. Agenda do dia (rh.reservas_ambientes + rh.reservas_participantes)
- *  2. Mensagens não lidas no SGF (chatbot.chat_messages)
- *
- * Se houver mensagens não lidas, envia botão interativo
- * "Marcar como lidas". O clique é tratado no webhook do WhatsApp
- * (routes/sacEnvios.js).
  */
 
 const { dbQuery } = require('../src/db');
 const { enviarWhatsappNotificacao } = require('../utils/whatsappEnvio');
-const { entregarMensagemWhatsapp, partesBrasilia } = require('../utils/whatsappJanelaEnvio');
+const { partesBrasilia } = require('../utils/whatsappJanelaEnvio');
+const { filtrarUsuarios } = require('../utils/notificacaoPreferencias');
 
 const WHATSAPP_CLOUD_ACCESS_TOKEN = String(
   process.env.WHATSAPP_CLOUD_ACCESS_TOKEN ||
@@ -59,36 +55,6 @@ async function getPhoneNumberId() {
   } catch { return null; }
 }
 
-// ─── Envio WhatsApp ───────────────────────────────────────────────────────────
-
-async function enviarWhatsappComBotao(phoneNumberId, toPhone, bodyText, buttons) {
-  const btns = buttons.slice(0, 3).map((b) => ({
-    type: 'reply',
-    reply: {
-      id: String(b.id).slice(0, 256),
-      title: String(b.title).slice(0, 20)
-    }
-  }));
-
-  const result = await entregarMensagemWhatsapp(phoneNumberId, {
-    messaging_product: 'whatsapp',
-    to: toPhone,
-    type: 'interactive',
-    interactive: {
-      type: 'button',
-      body: { text: bodyText },
-      action: { buttons: btns }
-    }
-  }, { origem: 'notif_diaria_botao' });
-  if (!result.ok) {
-    const err = result.payload?.error?.message
-      || result.payload?.error?.error_user_msg
-      || `WhatsApp API botão ${result.status}`;
-    throw new Error(err);
-  }
-  return result;
-}
-
 // ─── Lógica principal ─────────────────────────────────────────────────────────
 
 async function executarNotificacaoDiaria() {
@@ -103,17 +69,18 @@ async function executarNotificacaoDiaria() {
     return;
   }
 
-  // Usuários com notificação ativada e telefone preenchido
-  const { rows: users } = await dbQuery(
+  // Usuários com telefone; preferência resumo_diario filtrada abaixo (opt-in)
+  const { rows: usersComTel } = await dbQuery(
     `SELECT id, username, telefone_contato
      FROM public.auth_user
-     WHERE receber_notificacao = true
-       AND telefone_contato IS NOT NULL
+     WHERE telefone_contato IS NOT NULL
        AND TRIM(telefone_contato) <> ''`
   );
 
+  const users = await filtrarUsuarios(usersComTel, 'resumo_diario', 'whatsapp');
+
   if (!users.length) {
-    console.log(TAG, 'Nenhum usuário com notificação ativada.');
+    console.log(TAG, 'Nenhum usuário com preferência resumo_diario / whatsapp.');
     return;
   }
 
@@ -203,65 +170,14 @@ async function executarNotificacaoDiaria() {
         });
       }
 
-      // ── 2. Mensagens não lidas ──────────────────────────────────────────
-      const { rows: mensagens } = await dbQuery(
-        `SELECT cm.id, cm.message_text, cm.from_user_id, cm.created_at
-         FROM chatbot.chat_messages cm
-         WHERE cm.to_user_id = $1
-           AND cm.is_read = false
-         ORDER BY cm.created_at DESC
-         LIMIT 10`,
-        [user.id]
-      );
-
-      let temMensagensNaoLidas = false;
-      if (mensagens.length) {
-        temMensagensNaoLidas = true;
-
-        // Buscar nomes dos remetentes
-        const fromIds = [...new Set(mensagens.map((m) => m.from_user_id))];
-        const { rows: remetentes } = await dbQuery(
-          `SELECT id, username FROM public.auth_user WHERE id = ANY($1::int[])`,
-          [fromIds]
-        );
-        const nomeMap = new Map(remetentes.map((r) => [r.id, r.username]));
-
-        partes.push('\nSegue mensagem não lida no sistema de mensagem do SGF:');
-        mensagens.forEach((m) => {
-          const de = nomeMap.get(m.from_user_id) || 'Desconhecido';
-          const texto = String(m.message_text || '').slice(0, 200);
-          partes.push(`\n💬 De: *${de}*\n   "${texto}"`);
-        });
-      }
-
-      // Se não tem nada para enviar, pula
+      // Sem agenda do dia → não envia (chat interno desativado)
       if (!partes.length) continue;
-
-      // Se não teve reservas, abre com bom dia genérico
-      if (!reservas.length) {
-        partes.unshift('📅 *Bom dia!* Você não tem reuniões agendadas para hoje.');
-      }
 
       const mensagemFinal = partes.join('\n');
 
-      // Envia a mensagem principal.
       // Dentro da janela de 24h → texto livre.
       // Fora da janela → template aprovado (WHATSAPP_TEMPLATE_NOTIF), senão a Meta bloqueia.
       const envio = await enviarWhatsappNotificacao(phone, mensagemFinal, phoneNumberId);
-
-      // Botão interativo só é aceito dentro da janela de 24h (fora dela a Meta rejeita).
-      if (temMensagensNaoLidas && envio?.dentro_janela_24h) {
-        try {
-          await enviarWhatsappComBotao(
-            phoneNumberId,
-            phone,
-            'Deseja marcar as mensagens como lidas?',
-            [{ id: `sgf_marcar_lidas_${user.id}`, title: 'Marcar como lidas' }]
-          );
-        } catch (btnErr) {
-          console.warn(TAG, `Botão não enviado para ${user.username}:`, btnErr?.message || btnErr);
-        }
-      }
 
       telefonesNotificados.add(phone);
       console.log(TAG, `✓ Notificação enviada para ${user.username} (${phone}) [${envio?.modo || 'texto'}]`);

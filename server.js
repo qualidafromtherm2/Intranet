@@ -5574,65 +5574,7 @@ app.post('/api/rh/atas', async (req, res) => {
     });
     await client.query('COMMIT');
 
-    // Disparo automático de mensagem para usuários mencionados via @
-    try {
-      const mencoesMatch = conteudo.match(/(^|[^\w])@([\w.\-]+)/g) || [];
-      const usernamesMencionados = [...new Set(
-        mencoesMatch
-          .map(m => m.replace(/^[^\w]*@/, '').trim().toLowerCase())
-          .filter(u => u && !/^prazo$/i.test(u))
-      )];
-
-      if (usernamesMencionados.length > 0) {
-        // Busca ID do remetente (quem mencionou)
-        const senderRs = await pool.query(
-          `SELECT id FROM public.auth_user WHERE LOWER(username) = LOWER($1) AND is_active = true LIMIT 1`,
-          [userLogado]
-        );
-        const senderId = senderRs.rows[0]?.id;
-        if (!senderId) throw new Error(`Remetente ${userLogado} não encontrado`);
-
-        // Formata data e hora da reunião
-        let dataHoraFormatada = '';
-        if (dataReserva) {
-          const d = new Date(dataReserva);
-          const dia = String(d.getUTCDate()).padStart(2, '0');
-          const mes = String(d.getUTCMonth() + 1).padStart(2, '0');
-          const ano = d.getUTCFullYear();
-          dataHoraFormatada = `${dia}/${mes}/${ano}`;
-        }
-        if (horaInicio) {
-          dataHoraFormatada += ` ${String(horaInicio).slice(0, 5)}`;
-        }
-
-        for (const username of usernamesMencionados) {
-          try {
-            const destRs = await pool.query(
-              `SELECT id FROM public.auth_user WHERE LOWER(username) = LOWER($1) AND is_active = true LIMIT 1`,
-              [username]
-            );
-            const destId = destRs.rows[0]?.id;
-            if (!destId) continue;
-
-            const textoMensagem =
-              `🤖 Mensagem automática\n` +
-              `Você foi mencionado em uma ata\n` +
-              `Data e hora da reunião: ${dataHoraFormatada}\n` +
-              `---\n` +
-              `${conteudo}`;
-
-            await pool.query(
-              'SELECT send_chat_message($1, $2, $3)',
-              [senderId, destId, textoMensagem]
-            );
-          } catch (msgErr) {
-            console.warn(`[atas] falha ao notificar @${username}:`, msgErr?.message || msgErr);
-          }
-        }
-      }
-    } catch (notifErr) {
-      console.warn('[atas] falha no bloco de notificações de @menção:', notifErr?.message || notifErr);
-    }
+    // Chat interno desativado — menções em atas não enviam mais DM
 
     return res.json({ ok: true, id: rows[0].id });
   } catch (err) {
@@ -26301,214 +26243,21 @@ app.post(
   // ============================================================================
 
   // Lista usuários ativos disponíveis para chat (exclui o próprio usuário logado)
+  // Chat interno desativado — use Configurações de notificações
   app.get('/api/chat/users', ensureLoggedIn, async (req, res) => {
-    try {
-      const currentUserId = req.session.user.id;
-      if (CHAT_DEBUG) console.log('[CHAT API] Buscando usuários para user ID:', currentUserId);
-      let users = [];
-
-      if (isDbEnabled) {
-        try {
-          if (CHAT_DEBUG) console.log('[CHAT API] Consultando banco de dados...');
-          // Usa função SQL que filtra usuários ativos e retorna contagem de não lidas
-          const { rows } = await pool.query(
-            'SELECT * FROM get_active_chat_users($1)',
-            [currentUserId]
-          );
-          if (CHAT_DEBUG) console.log('[CHAT API] Usuários retornados do SQL:', rows.length);
-          users = rows.map(r => ({
-            id: String(r.id),
-            username: r.username,
-            email: r.email,
-            unreadCount: parseInt(r.unread_count || 0)
-          }));
-        } catch (err) {
-          console.error('[CHAT] Erro ao buscar usuários ativos:', err);
-        }
-      }
-
-      // Fallback para users.json se DB falhar ou não estiver disponível
-      if (!users.length) {
-        if (CHAT_DEBUG) console.log('[CHAT API] Usando fallback users.json');
-        const raw = fs.readFileSync(USERS_FILE, 'utf8');
-        const arr = JSON.parse(raw);
-        users = (arr || [])
-          .filter(u => String(u.id) !== String(currentUserId))
-          .map(u => ({
-            id: String(u.id),
-            username: u.username,
-            unreadCount: 0
-          }));
-      }
-
-      if (CHAT_DEBUG) console.log('[CHAT API] Total de usuários a retornar:', users.length);
-      res.json({ users });
-    } catch (e) {
-      console.error('[CHAT] Erro ao carregar usuários:', e);
-      res.status(500).json({ error: 'Falha ao carregar usuários' });
-    }
+    return res.status(410).json({ ok: false, error: 'Chat interno desativado. Use Configurações de notificações.' });
   });
 
-  // Obter conversa entre usuário logado e outro usuário
   app.get('/api/chat/conversation', ensureLoggedIn, async (req, res) => {
-    try {
-      const me = req.session.user.id;
-      const other = req.query.userId;
-
-      if (!other) {
-        return res.status(400).json({ error: 'userId obrigatório' });
-      }
-
-      let messages = [];
-
-      if (isDbEnabled) {
-        try {
-          // Usa função SQL para obter histórico da conversa
-          const { rows } = await pool.query(
-            'SELECT * FROM get_conversation($1, $2, 100)',
-            [me, other]
-          );
-
-          messages = rows.map(r => ({
-            id: String(r.id),
-            from: String(r.from_user_id),
-            to: String(r.to_user_id),
-            text: r.message_text,
-            timestamp: r.created_at,
-            read: r.is_read
-          }));
-
-          // Marca mensagens como lidas quando abre a conversa
-          await pool.query(
-            'SELECT mark_messages_as_read($1, $2)',
-            [me, other]
-          );
-
-        } catch (err) {
-          console.error('[CHAT] Erro ao buscar conversa:', err);
-        }
-      }
-
-      // Fallback para arquivo JSON
-      if (!messages.length && !isDbEnabled) {
-        const all = loadChatMessages();
-        messages = all
-          .filter(m => (m.from === String(me) && m.to === String(other)) ||
-                       (m.from === String(other) && m.to === String(me)))
-          .sort((a,b) => new Date(a.timestamp) - new Date(b.timestamp));
-      }
-
-      res.json({ messages });
-    } catch (e) {
-      console.error('[CHAT] Erro ao carregar conversa:', e);
-      res.status(500).json({ error: 'Falha ao carregar conversa' });
-    }
+    return res.status(410).json({ ok: false, error: 'Chat interno desativado. Use Configurações de notificações.' });
   });
 
-  // Enviar nova mensagem
   app.post('/api/chat/send', ensureLoggedIn, express.json(), async (req, res) => {
-    try {
-      const me = req.session.user.id;
-      const { to, text } = req.body || {};
-      const content = String(text || '').trim();
-
-      if (!to || !content) {
-        return res.status(400).json({ error: 'Parâmetros inválidos' });
-      }
-
-      let message = null;
-
-      if (isDbEnabled) {
-        try {
-          // Usa função SQL para enviar mensagem (valida usuários ativos automaticamente)
-          const { rows } = await pool.query(
-            'SELECT send_chat_message($1, $2, $3) as message_id',
-            [me, to, content]
-          );
-
-          const messageId = rows[0].message_id;
-
-          // Busca a mensagem recém criada para retornar
-          const { rows: msgRows } = await pool.query(
-            'SELECT * FROM chat_messages WHERE id = $1',
-            [messageId]
-          );
-
-          if (msgRows.length > 0) {
-            const r = msgRows[0];
-            message = {
-              id: String(r.id),
-              from: String(r.from_user_id),
-              to: String(r.to_user_id),
-              text: r.message_text,
-              timestamp: r.created_at,
-              read: r.is_read
-            };
-          }
-
-        } catch (err) {
-          console.error('[CHAT] Erro ao enviar mensagem:', err);
-          // Se erro SQL for de validação, retorna erro específico
-          if (err.message) {
-            return res.status(400).json({ error: err.message });
-          }
-        }
-      }
-
-      // Fallback para arquivo JSON
-      if (!message && !isDbEnabled) {
-        const all = loadChatMessages();
-        message = {
-          id: String(Date.now()),
-          from: String(me),
-          to: String(to),
-          text: content,
-          timestamp: new Date().toISOString(),
-          read: false
-        };
-        all.push(message);
-        saveChatMessages(all);
-      }
-
-      if (message) {
-        res.json({ ok: true, message });
-      } else {
-        res.status(500).json({ error: 'Falha ao enviar mensagem' });
-      }
-
-    } catch (e) {
-      console.error('[CHAT] Erro ao enviar mensagem:', e);
-      res.status(500).json({ error: 'Falha ao enviar mensagem' });
-    }
+    return res.status(410).json({ ok: false, error: 'Chat interno desativado. Use Configurações de notificações.' });
   });
 
-  // Contar mensagens não lidas (para badge de notificação)
   app.get('/api/chat/unread-count', ensureLoggedIn, async (req, res) => {
-    try {
-      const userId = req.session.user.id;
-      let count = 0;
-
-      if (isDbEnabled) {
-        try {
-          const { rows } = await pool.query(
-            'SELECT count_unread_messages($1) as count',
-            [userId]
-          );
-          count = parseInt(rows[0].count || 0);
-        } catch (err) {
-          console.error('[CHAT] Erro ao contar não lidas:', err);
-        }
-      } else {
-        // Fallback para arquivo JSON
-        const all = loadChatMessages();
-        count = all.filter(m => m.to === String(userId) && !m.read).length;
-      }
-
-      res.json({ count });
-    } catch (e) {
-      console.error('[CHAT] Erro ao contar mensagens não lidas:', e);
-      res.status(500).json({ error: 'Falha ao contar mensagens' });
-    }
+    return res.status(410).json({ ok: false, error: 'Chat interno desativado. Use Configurações de notificações.' });
   });
 
   app.use('/api/omie/estoque',       estoqueRouter);
