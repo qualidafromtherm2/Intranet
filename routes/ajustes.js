@@ -823,7 +823,7 @@ router.post('/', express.json(), exigirSupervisorMovimentacao, async (req, res) 
 });
 
 // PATCH /api/ajustes/:id/aprovar — aprova e executa ajuste no Omie
-router.patch('/:id/aprovar', express.json(), async (req, res) => {
+router.patch('/:id/aprovar', express.json(), exigirSupervisorMovimentacao, async (req, res) => {
   try {
     await ensureAjustesSchema();
     const id = Number(req.params.id);
@@ -922,7 +922,7 @@ router.patch('/:id/aprovar', express.json(), async (req, res) => {
 });
 
 // PATCH /api/ajustes/:id/reprovar — reprova a solicitação
-router.patch('/:id/reprovar', express.json(), async (req, res) => {
+router.patch('/:id/reprovar', express.json(), exigirSupervisorMovimentacao, async (req, res) => {
   try {
     await ensureAjustesSchema();
     const id = Number(req.params.id);

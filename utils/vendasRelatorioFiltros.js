@@ -191,6 +191,18 @@ function calcPeriodoComFiltros(filtros = {}, refDate = new Date()) {
   return calcPeriodo(filtros.modo || 'mes', refDate);
 }
 
+function parseListaFiltro(raw) {
+  if (Array.isArray(raw)) {
+    return [...new Set(raw.map((v) => String(v || '').trim()).filter(Boolean))];
+  }
+  return [...new Set(
+    String(raw || '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+  )];
+}
+
 function parseFiltrosRelatorio(query = {}) {
   return {
     modo: String(query.modo || 'mes').trim().toLowerCase(),
@@ -201,7 +213,7 @@ function parseFiltrosRelatorio(query = {}) {
     mes: String(query.mes || '').trim(),
     trimestre: String(query.trimestre || '').trim(),
     vendedor: String(query.vendedor || '').trim(),
-    familia: String(query.familia || '').trim(),
+    familia: parseListaFiltro(query.familia),
     estado: String(query.estado || '').trim().toUpperCase(),
     tipo: String(query.tipo || '').trim(),
   };
@@ -231,18 +243,23 @@ function appendFiltrosSql(filtros, params) {
     );
   }
 
-  if (filtros.familia) {
-    params.push(filtros.familia);
-    const idx = params.length;
-    const exists = `EXISTS (
+  if (Array.isArray(filtros.familia) ? filtros.familia.length : filtros.familia) {
+    const familias = Array.isArray(filtros.familia)
+      ? filtros.familia.map((v) => String(v || '').trim()).filter(Boolean)
+      : [String(filtros.familia).trim()].filter(Boolean);
+    if (familias.length) {
+      params.push(familias);
+      const idx = params.length;
+      const exists = `EXISTS (
       SELECT 1
         FROM vendas.pedidos_venda_itens ix
         JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
        WHERE ix.codigo_pedido = p.codigo_pedido
-         AND TRIM(COALESCE(pox.codigo_familia::text, '')) = $${idx}
+         AND TRIM(COALESCE(pox.codigo_familia::text, '')) = ANY($${idx}::text[])
     )`;
-    clausesPedido.push(`AND ${exists}`);
-    clausesItem.push(`AND TRIM(COALESCE(po.codigo_familia::text, '')) = $${idx}`);
+      clausesPedido.push(`AND ${exists}`);
+      clausesItem.push(`AND TRIM(COALESCE(po.codigo_familia::text, '')) = ANY($${idx}::text[])`);
+    }
   }
 
   if (filtros.tipo) {

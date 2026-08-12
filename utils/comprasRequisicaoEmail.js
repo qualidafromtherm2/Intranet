@@ -126,7 +126,26 @@ async function carregarItensRequisicao(origem, itemIds) {
   return rows;
 }
 
+// 🔒 Anti-SSRF: só baixamos anexos de hosts de armazenamento conhecidos (R2,
+// Supabase, Omie). Bloqueia http://127.0.0.1, metadata cloud e rede interna.
+function urlDeAnexoPermitida(url) {
+  let u;
+  try { u = new URL(String(url)); } catch { return false; }
+  if (u.protocol !== 'https:') return false;
+  const host = u.hostname.toLowerCase();
+  const permitidos = [
+    '.r2.dev', '.r2.cloudflarestorage.com',
+    '.supabase.co', '.amazonaws.com',
+    'omie.com.br', '.omie.com.br',
+    'fromtherm.com.br', '.fromtherm.com.br',
+  ];
+  return permitidos.some(suf => suf.startsWith('.') ? host.endsWith(suf) : host === suf);
+}
+
 async function baixarAnexo({ nome, url, tipo }) {
+  if (!urlDeAnexoPermitida(url)) {
+    throw new Error(`URL de anexo não permitida: ${url}`);
+  }
   const resp = await fetch(url, { redirect: 'follow' });
   if (!resp.ok) {
     throw new Error(`HTTP ${resp.status} ao baixar ${url}`);

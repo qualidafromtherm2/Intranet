@@ -8,7 +8,7 @@ router.use(express.json()); // garante req.body em /login
 async function carregarExtrasDoUsuario(userId) {
   try {
     const { rows } = await pool.query(
-      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, u.email, f.name AS funcao_nome
+      `SELECT s.name AS setor_nome, up.sector_id, u.foto_perfil_url, u.conta_google, u.email, u.telefone_contato, f.name AS funcao_nome
          FROM public.auth_user u
          LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
          LEFT JOIN public.auth_sector s ON s.id = up.sector_id
@@ -23,6 +23,7 @@ async function carregarExtrasDoUsuario(userId) {
       foto_perfil_url: rows[0]?.foto_perfil_url || null,
       conta_google: rows[0]?.conta_google || null,
       email: rows[0]?.email || null,
+      telefone: rows[0]?.telefone_contato || null,
       funcao_nome: rows[0]?.funcao_nome || null
     };
   } catch (e) {
@@ -170,6 +171,40 @@ router.put('/meu-email', async (req, res) => {
   } catch (err) {
     console.error('[auth/meu-email]', err);
     return res.status(500).json({ error: 'Falha ao atualizar e-mail' });
+  }
+});
+
+// PUT /auth/meu-telefone — usuário logado altera o telefone de contato
+router.put('/meu-telefone', async (req, res) => {
+  try {
+    const userId = req.session?.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: 'Não autenticado' });
+    }
+
+    const telefoneRaw = String(req.body?.telefone || '').trim();
+    // Aceita vazio (para limpar) ou entre 8 e 20 dígitos/caracteres de telefone
+    if (telefoneRaw && !/^[0-9()\s+-]{8,20}$/.test(telefoneRaw)) {
+      return res.status(400).json({ error: 'Telefone inválido' });
+    }
+
+    const telefone = telefoneRaw || null;
+
+    await pool.query(
+      `UPDATE public.auth_user
+          SET telefone_contato = $1, updated_at = NOW()
+        WHERE id = $2`,
+      [telefone, userId]
+    );
+
+    if (req.session.user) {
+      req.session.user.telefone = telefone;
+    }
+
+    return res.json({ ok: true, telefone });
+  } catch (err) {
+    console.error('[auth/meu-telefone]', err);
+    return res.status(500).json({ error: 'Falha ao atualizar telefone' });
   }
 });
 

@@ -8,6 +8,31 @@ const {
   salvarPermissaoSeparacao
 } = require('../utils/separacaoPermissoes');
 
+// 🔒 Gerir colaboradores (criar/editar/excluir/permissões) exige permissão de
+// gestão de RH — a mesma do botão "Cadastro de colaboradores" (side:rh:cad-colab).
+async function temPermissaoGestaoColaborador(userId) {
+  if (!userId) return false;
+  try {
+    const { rows } = await pool.query(
+      `SELECT EXISTS(
+         SELECT 1 FROM public.auth_user_permissions_tree($1) t
+         WHERE t.key = 'side:rh:cad-colab' AND t.allowed
+       ) AS ok`,
+      [userId]
+    );
+    return !!rows[0]?.ok;
+  } catch (e) {
+    console.warn('[colaboradores] falha ao checar permissão de gestão:', e.message);
+    return false;
+  }
+}
+async function exigirGestaoColaborador(req, res, next) {
+  const me = req.session?.user;
+  if (!me?.id) return res.status(401).json({ error: 'Não autenticado' });
+  if (await temPermissaoGestaoColaborador(me.id)) return next();
+  return res.status(403).json({ error: 'Sem permissão para gerenciar colaboradores' });
+}
+
 let _hasOperacaoProfileCol = null;
 async function hasOperacaoProfileColumn() {
   if (_hasOperacaoProfileCol !== null) return _hasOperacaoProfileCol;
@@ -170,7 +195,7 @@ router.get('/setores', async (req, res) => {
 });
 
 // Salva local de estoque padrão por setor (Definições → Logística)
-router.put('/setores/locais-padrao', async (req, res) => {
+router.put('/setores/locais-padrao', exigirGestaoColaborador, async (req, res) => {
   const setores = Array.isArray(req.body?.setores) ? req.body.setores : [];
   if (!setores.length) {
     return res.status(400).json({ ok: false, error: 'Nenhum setor informado.' });
@@ -206,7 +231,7 @@ router.put('/setores/locais-padrao', async (req, res) => {
   }
 });
 
-router.post('/setores', async (req, res) => {
+router.post('/setores', exigirGestaoColaborador, async (req, res) => {
   const { name } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório' });
   try {
@@ -232,7 +257,7 @@ router.get('/funcoes', async (req, res) => {
   }
 });
 
-router.post('/funcoes', async (req, res) => {
+router.post('/funcoes', exigirGestaoColaborador, async (req, res) => {
   const { name } = req.body || {};
   if (!name?.trim()) return res.status(400).json({ error: 'Nome obrigatório' });
   try {
@@ -294,7 +319,7 @@ router.get('/operacoes', async (_req, res) => {
 });
 
 /* ======= CRIAR COLABORADOR ======= */
-router.post('/', async (req, res) => {
+router.post('/', exigirGestaoColaborador, async (req, res) => {
   const { username, senha, roles, funcao_id, setor_id, email } = req.body || {};
   const separacao_permissao = req.body?.separacao_permissao;
   const bodyOperacaoId = req.body?.operacao_id;
@@ -400,7 +425,7 @@ SELECT * FROM upsert;
 
 // === Atualizar colaborador (username, função, setor, roles) ===
 // === Atualizar colaborador (username, função, setor, roles) ===
-router.put('/:id', async (req, res) => {
+router.put('/:id', exigirGestaoColaborador, async (req, res) => {
   const { id } = req.params;
   const { username, funcao_id, setor_id, roles, email } = req.body || {};
   const separacao_permissao = req.body?.separacao_permissao;
@@ -509,7 +534,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // === Excluir colaborador ===
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', exigirGestaoColaborador, async (req, res) => {
   const { id } = req.params;
 
   // (opcional) impedir se o próprio usuário logado for deletar a si mesmo
@@ -546,7 +571,7 @@ router.delete('/:id', async (req, res) => {
 const bcrypt = require('bcrypt');           // se já usa hash no login
 const USE_BCRYPT = true;                    // deixe true se seu login compara hash
 
-router.put('/api/users/update-password-by-username', express.json(), async (req, res) => {
+router.put('/api/users/update-password-by-username', exigirGestaoColaborador, express.json(), async (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ ok:false, error:'username e password obrigatórios' });

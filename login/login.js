@@ -253,6 +253,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   const uiEmailInput   = overlay.querySelector('#uiEmailInput');
   const btnSalvarEmail = overlay.querySelector('#btnSalvarEmail');
   const uiEmailStatus  = overlay.querySelector('#uiEmailStatus');
+  const uiTelefoneInput   = overlay.querySelector('#uiTelefoneInput');
+  const btnSalvarTelefone = overlay.querySelector('#btnSalvarTelefone');
+  const uiTelefoneStatus  = overlay.querySelector('#uiTelefoneStatus');
   const uiVersaoApp    = overlay.querySelector('#uiVersaoApp');
 
   /* Mostra a versão em produção (PR# + commit) para conferir atualização.
@@ -356,6 +359,49 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
   }
 
+  async function salvarTelefonePerfil() {
+    if (!uiTelefoneInput || !btnSalvarTelefone) return;
+    const telefone = String(uiTelefoneInput.value || '').trim();
+    if (telefone && !/^[0-9()\s+-]{8,20}$/.test(telefone)) {
+      if (uiTelefoneStatus) uiTelefoneStatus.textContent = 'Telefone inválido.';
+      return;
+    }
+
+    btnSalvarTelefone.disabled = true;
+    if (uiTelefoneStatus) uiTelefoneStatus.textContent = 'Salvando...';
+    try {
+      const resp = await fetch(`${BASE}/api/auth/meu-telefone`, {
+        method: 'PUT',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telefone })
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok) {
+        throw new Error(data.error || `Erro ao salvar (${resp.status})`);
+      }
+      if (uiTelefoneInput) uiTelefoneInput.value = data.telefone || '';
+      if (uiTelefoneStatus) uiTelefoneStatus.textContent = 'Telefone salvo.';
+      window.dispatchEvent(new Event('auth:changed'));
+    } catch (err) {
+      if (uiTelefoneStatus) uiTelefoneStatus.textContent = err.message || 'Falha ao salvar telefone.';
+    } finally {
+      btnSalvarTelefone.disabled = false;
+    }
+  }
+
+  if (btnSalvarTelefone) {
+    btnSalvarTelefone.addEventListener('click', salvarTelefonePerfil);
+  }
+  if (uiTelefoneInput) {
+    uiTelefoneInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        salvarTelefonePerfil();
+      }
+    });
+  }
+
   /* =========================================================
    *  Carrega dados do colaborador (incluindo foto de perfil)
    * ========================================================= */
@@ -384,6 +430,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (uiSetor)        uiSetor.textContent = u.setor || '—';
         if (uiEmailInput)   uiEmailInput.value = u.email || '';
         if (uiEmailStatus)  uiEmailStatus.textContent = 'Avisos de reunião chegam neste e-mail.';
+        if (uiTelefoneInput)  uiTelefoneInput.value = u.telefone || '';
+        if (uiTelefoneStatus) uiTelefoneStatus.textContent = 'Telefone usado para contato interno.';
         loadProfilePhoto(u.id);
         // Atualiza também o profile-icon do header usando o foto_perfil_url do objeto
         updateHeaderProfileIconFromUser(u);

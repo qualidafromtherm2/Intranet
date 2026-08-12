@@ -904,7 +904,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         data_fim: filtros.data_fim || null,
         trimestre: filtros.trimestre || null,
         vendedor: filtros.vendedor || null,
-        familia: filtros.familia || null,
+        familia: (Array.isArray(filtros.familia) && filtros.familia.length) ? filtros.familia : null,
         estado: filtros.estado || null,
         tipo: filtros.tipo || null,
       },

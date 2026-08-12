@@ -3801,11 +3801,27 @@ const SQL_TABELAS_BLOQUEADAS = new Set([
 ]);
 const SQL_IDENTIFICADORES_PROIBIDOS = /\b(senha|password|passwd|password_hash|token|secret|api_key|apikey|private_key|pg_shadow|pg_authid|pg_read_file|pg_read_binary_file|pg_ls_dir|pg_stat_file|dblink|lo_import|lo_export|current_setting|set_config)\b/i;
 
-function validarSqlSomenteLeitura(sql) {
-  if (!sql) return 'SQL vazio.';
+// Remove comentários SQL (/* */ e --) e normaliza espaços.
+// Sem isso, "SEL/**/ECT" ou "UP/**/DATE" driblam os regex de palavra-chave.
+function normalizarSqlParaValidacao(sql) {
+  return String(sql || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')   // comentários de bloco
+    .replace(/--[^\n]*/g, ' ')            // comentários de linha
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function validarSqlSomenteLeitura(sqlOriginal) {
+  if (!sqlOriginal) return 'SQL vazio.';
+  // Bloqueia comentários explicitamente: são usados p/ quebrar palavras-chave.
+  if (/\/\*|\*\/|--/.test(sqlOriginal)) {
+    return 'A consulta não pode conter comentários.';
+  }
+  const sql = normalizarSqlParaValidacao(sqlOriginal);
   if (sql.includes(';')) return 'A consulta deve conter apenas um comando.';
+  if (/\$[a-z0-9_]*\$/i.test(sql)) return 'A consulta contém delimitadores não permitidos.'; // dollar-quoting $$...$$
   if (!/^\s*(select|with)\b/i.test(sql)) return 'A consulta deve iniciar com SELECT ou WITH.';
-  if (/\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|call|do|execute|prepare|deallocate|vacuum|analyze|refresh|reindex|cluster|listen|notify|unlisten)\b/i.test(sql)) {
+  if (/\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|comment|copy|call|do|execute|prepare|deallocate|vacuum|analyze|refresh|reindex|cluster|listen|notify|unlisten|merge|lock|set|reset|begin|commit|rollback|savepoint)\b/i.test(sql)) {
     return 'A consulta contém comandos não permitidos.';
   }
   if (/\bpg_sleep\s*\(/i.test(sql)) return 'A consulta contém função não permitida.';
@@ -3814,6 +3830,10 @@ function validarSqlSomenteLeitura(sql) {
   }
   if (/\b(public\.)?session\b/i.test(sql)) {
     return 'A consulta tenta acessar dados sigilosos (credenciais/sessões).';
+  }
+  // Bloqueia acesso a catálogos internos do Postgres (metadados/credenciais do servidor).
+  if (/\b(pg_catalog|information_schema|pg_[a-z_]+)\b/i.test(sql)) {
+    return 'A consulta não pode acessar catálogos internos do banco.';
   }
   return null;
 }

@@ -6,6 +6,8 @@
   let _carregarAbort = null;
   let _registrosAbort = null;
   let _registrosRows = [];
+  let _familiasSelecionadas = new Set();
+  let _familiasOpcoes = [];
   let _secao = 'executivo';
   const _charts = {};
   const _chartsRendered = new Set();
@@ -709,10 +711,55 @@
       }
       .vend-rel-ger-modo-btn.is-active { background: #0ea5e9; color: #fff; }
       .vend-rel-ger-modo-btn:hover:not(.is-active) { background: rgba(255,255,255,.06); color: #e2e8f0; }
+      #vendRelGerFiltroBtn.is-open {
+        border-color: #0ea5e9 !important;
+        background: rgba(14,165,233,.22) !important;
+        color: #7dd3fc !important;
+      }
       .at-rel-ger-kpi.is-clickable { cursor: pointer; transition: box-shadow .15s, transform .15s; }
       .at-rel-ger-kpi.is-clickable:hover { box-shadow: 0 4px 14px rgba(30,58,95,.18); transform: translateY(-1px); }
       #vendRelGerRegistrosModal .r { text-align: right; font-variant-numeric: tabular-nums; }
       #vendRelGerRegistrosModal tfoot td { font-weight: 800; background: #f1f5f9; }
+      .vend-rel-ms { position: relative; min-width: 180px; max-width: 260px; }
+      .vend-rel-ms-btn {
+        width: 100%; padding: 5px 28px 5px 8px; border-radius: 8px; border: 1px solid #374151;
+        background: #111827; color: #e5e7eb; font-size: 12px; text-align: left; cursor: pointer;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis; position: relative;
+      }
+      .vend-rel-ms-btn::after {
+        content: ''; position: absolute; right: 10px; top: 50%; width: 0; height: 0;
+        border-left: 4px solid transparent; border-right: 4px solid transparent;
+        border-top: 5px solid #94a3b8; transform: translateY(-40%);
+      }
+      .vend-rel-ms-btn.is-open { border-color: #0ea5e9; }
+      .vend-rel-ms-panel {
+        display: none; position: absolute; z-index: 80; top: calc(100% + 4px); left: 0;
+        width: min(320px, 70vw); max-height: 280px; overflow: hidden;
+        background: #0f172a; border: 1px solid #334155; border-radius: 10px;
+        box-shadow: 0 12px 28px rgba(0,0,0,.35); flex-direction: column;
+      }
+      .vend-rel-ms-panel.is-open { display: flex; }
+      .vend-rel-ms-panel input[type="search"] {
+        margin: 8px; padding: 6px 8px; border-radius: 7px; border: 1px solid #334155;
+        background: #111827; color: #e5e7eb; font-size: 12px; outline: none;
+      }
+      .vend-rel-ms-actions {
+        display: flex; gap: 6px; padding: 0 8px 8px; flex-shrink: 0;
+      }
+      .vend-rel-ms-actions button {
+        padding: 4px 8px; border-radius: 6px; border: 1px solid #334155;
+        background: rgba(255,255,255,.04); color: #cbd5e1; font-size: 11px; cursor: pointer;
+      }
+      .vend-rel-ms-list { overflow: auto; padding: 0 6px 8px; flex: 1; min-height: 0; }
+      .vend-rel-ms-item {
+        display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px;
+        border-radius: 7px; cursor: pointer; color: #e2e8f0; font-size: 12px; line-height: 1.3;
+      }
+      .vend-rel-ms-item:hover { background: rgba(56,189,248,.12); }
+      .vend-rel-ms-item input {
+        width: 14px !important; height: 14px !important; min-width: 14px !important;
+        margin-top: 2px !important; flex: 0 0 14px !important; accent-color: #0ea5e9; cursor: pointer;
+      }
     `;
     document.head.appendChild(st);
   }
@@ -729,42 +776,213 @@
     el.value = list.includes(current) ? String(current) : String(yNow);
   }
 
+  function _atualizarLabelFamilia() {
+    const btn = document.getElementById('vendRelGerFamiliaBtn');
+    if (!btn) return;
+    const n = _familiasSelecionadas.size;
+    if (!n) {
+      btn.textContent = 'Todos';
+      btn.title = 'Todas as famílias';
+      return;
+    }
+    const labels = _familiasOpcoes
+      .filter((f) => _familiasSelecionadas.has(String(f.codigo)))
+      .map((f) => f.descricao || f.codigo);
+    const txt = n === 1 ? (labels[0] || '1 família') : `${n} famílias`;
+    btn.textContent = txt;
+    btn.title = labels.join(', ') || txt;
+  }
+
+  function _fecharFamiliaMs() {
+    document.getElementById('vendRelGerFamiliaPanel')?.classList.remove('is-open');
+    document.getElementById('vendRelGerFamiliaBtn')?.classList.remove('is-open');
+  }
+
+  function _toggleFamiliaMs(force) {
+    const panel = document.getElementById('vendRelGerFamiliaPanel');
+    const btn = document.getElementById('vendRelGerFamiliaBtn');
+    if (!panel || !btn) return;
+    const open = force === true ? true : (force === false ? false : !panel.classList.contains('is-open'));
+    panel.classList.toggle('is-open', open);
+    btn.classList.toggle('is-open', open);
+  }
+
+  function _renderFamiliaLista(filtro = '') {
+    const list = document.getElementById('vendRelGerFamiliaLista');
+    if (!list) return;
+    const q = String(filtro || '').trim().toLowerCase();
+    const rows = (_familiasOpcoes || []).filter((f) => {
+      if (!q) return true;
+      const blob = `${f.codigo || ''} ${f.descricao || ''}`.toLowerCase();
+      return blob.includes(q);
+    });
+    if (!rows.length) {
+      list.innerHTML = '<div style="padding:10px;color:#64748b;font-size:12px;">Nenhuma família.</div>';
+      return;
+    }
+    list.innerHTML = rows.map((f) => {
+      const cod = String(f.codigo ?? '');
+      const id = `vendFamChk_${_esc(cod).replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+      const checked = _familiasSelecionadas.has(cod) ? 'checked' : '';
+      return `<label class="vend-rel-ms-item" for="${id}">
+        <input type="checkbox" id="${id}" data-familia="${_esc(cod)}" ${checked}>
+        <span>${_esc(f.descricao || f.codigo || '—')}</span>
+      </label>`;
+    }).join('');
+    list.querySelectorAll('input[type="checkbox"][data-familia]').forEach((chk) => {
+      chk.addEventListener('change', () => {
+        const cod = chk.getAttribute('data-familia') || '';
+        if (chk.checked) _familiasSelecionadas.add(cod);
+        else _familiasSelecionadas.delete(cod);
+        _atualizarLabelFamilia();
+      });
+    });
+  }
+
+  function _preencherFamiliaMulti(familias) {
+    _familiasOpcoes = (familias || []).map((f) => ({
+      codigo: String(f.codigo ?? ''),
+      descricao: String(f.descricao || f.codigo || ''),
+    })).filter((f) => f.codigo);
+    // Mantém só códigos ainda existentes
+    _familiasSelecionadas = new Set([..._familiasSelecionadas].filter((c) => _familiasOpcoes.some((f) => f.codigo === c)));
+    _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
+    _atualizarLabelFamilia();
+  }
+
+  function _injetarFamiliaMulti() {
+    if (document.getElementById('vendRelGerFamiliaMs')) return;
+    const sel = document.getElementById('vendRelGerFamilia');
+    if (!sel?.parentElement) return;
+    const wrap = sel.parentElement;
+    sel.style.display = 'none';
+    sel.setAttribute('aria-hidden', 'true');
+    const ms = document.createElement('div');
+    ms.id = 'vendRelGerFamiliaMs';
+    ms.className = 'vend-rel-ms';
+    ms.innerHTML = `
+      <button type="button" id="vendRelGerFamiliaBtn" class="vend-rel-ms-btn" title="Todas as famílias">Todos</button>
+      <div id="vendRelGerFamiliaPanel" class="vend-rel-ms-panel" role="listbox" aria-multiselectable="true">
+        <input id="vendRelGerFamiliaBusca" type="search" placeholder="Buscar família..." autocomplete="off">
+        <div class="vend-rel-ms-actions">
+          <button type="button" id="vendRelGerFamiliaSelTudo">Selecionar tudo</button>
+          <button type="button" id="vendRelGerFamiliaLimpar">Limpar</button>
+        </div>
+        <div id="vendRelGerFamiliaLista" class="vend-rel-ms-list"></div>
+      </div>`;
+    wrap.appendChild(ms);
+
+    document.getElementById('vendRelGerFamiliaBtn')?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      _toggleFamiliaMs();
+    });
+    document.getElementById('vendRelGerFamiliaPanel')?.addEventListener('click', (e) => e.stopPropagation());
+    document.getElementById('vendRelGerFamiliaBusca')?.addEventListener('input', (e) => {
+      _renderFamiliaLista(e.target.value);
+    });
+    document.getElementById('vendRelGerFamiliaSelTudo')?.addEventListener('click', () => {
+      _familiasOpcoes.forEach((f) => _familiasSelecionadas.add(f.codigo));
+      _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
+      _atualizarLabelFamilia();
+    });
+    document.getElementById('vendRelGerFamiliaLimpar')?.addEventListener('click', () => {
+      _familiasSelecionadas.clear();
+      _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
+      _atualizarLabelFamilia();
+    });
+    document.addEventListener('click', () => _fecharFamiliaMs());
+  }
+
+    function _trimestreAtual() {
+    return Math.floor(new Date().getMonth() / 3) + 1;
+  }
+
+  function _injetarBotaoFiltro() {
+    if (document.getElementById('vendRelGerFiltroBtn')) return;
+    const cfg = document.getElementById('vendRelGerConfigBtn');
+    if (!cfg?.parentElement) return;
+    const btn = document.createElement('button');
+    btn.id = 'vendRelGerFiltroBtn';
+    btn.type = 'button';
+    btn.title = 'Mostrar / ocultar filtros';
+    btn.style.cssText = 'padding:6px 14px;border-radius:8px;border:1px solid #64748b;background:rgba(100,116,139,.15);color:#cbd5e1;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;';
+    btn.innerHTML = '<i class="fa-solid fa-filter"></i> Filtro';
+    cfg.parentElement.insertBefore(btn, cfg);
+  }
+
+  function _barraFiltrosEl() {
+    return document.getElementById('vendRelGerFiltrosBar');
+  }
+
+  function _setBarraFiltrosVisivel(visivel) {
+    const bar = _barraFiltrosEl();
+    const btn = document.getElementById('vendRelGerFiltroBtn');
+    if (bar) bar.style.display = visivel ? 'flex' : 'none';
+    btn?.classList.toggle('is-open', !!visivel);
+  }
+
+  function _toggleBarraFiltros() {
+    const bar = _barraFiltrosEl();
+    const aberto = bar && bar.style.display !== 'none';
+    _setBarraFiltrosVisivel(!aberto);
+  }
+
   function _injetarUiFiltro() {
     if (document.getElementById('vendRelGerModoToggle')) return;
     const di = document.getElementById('vendRelGerDataInicio');
     const df = document.getElementById('vendRelGerDataFim');
-    if (!di || !df) return;
+    const tri = document.getElementById('vendRelGerTrimestre');
+    if (!di || !df || !tri) return;
     const wrapDi = di.parentElement;
     const wrapDf = df.parentElement;
+    const wrapTriOrig = tri.parentElement;
     const bar = wrapDi?.parentElement;
-    if (!wrapDi || !wrapDf || !bar) return;
+    if (!wrapDi || !wrapDf || !wrapTriOrig || !bar) return;
+
+    bar.id = 'vendRelGerFiltrosBar';
+    bar.style.display = 'none';
+
+    _injetarBotaoFiltro();
 
     const toggle = document.createElement('div');
     toggle.id = 'vendRelGerModoToggle';
     toggle.style.cssText = 'display:flex;align-items:stretch;border-radius:8px;border:1px solid #374151;overflow:hidden;flex-shrink:0;';
     toggle.innerHTML = `
       <button type="button" id="vendRelGerModoMesAno" class="vend-rel-ger-modo-btn is-active" title="Filtrar por mês e ano">Mês e ano</button>
+      <button type="button" id="vendRelGerModoTrimestre" class="vend-rel-ger-modo-btn" title="Filtrar por trimestre e ano">Trimestre</button>
       <button type="button" id="vendRelGerModoPeriodo" class="vend-rel-ger-modo-btn" title="Filtrar por data início e data fim">Período</button>`;
     bar.insertBefore(toggle, wrapDi);
 
     const wrapMes = document.createElement('div');
-    wrapMes.id = 'vendRelGerWrapMesAno';
-    wrapMes.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+    wrapMes.id = 'vendRelGerWrapMes';
+    wrapMes.style.cssText = 'display:flex;align-items:center;gap:6px;';
     wrapMes.innerHTML = `
-      <div style="display:flex;align-items:center;gap:6px;">
-        <label for="vendRelGerMes" style="font-size:11px;font-weight:600;color:#94a3b8;">Mês</label>
-        <select id="vendRelGerMes" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:120px;">
-          <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
-          <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
-          <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
-          <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
-        </select>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;">
-        <label for="vendRelGerAno" style="font-size:11px;font-weight:600;color:#94a3b8;">Ano</label>
-        <select id="vendRelGerAno" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:88px;"></select>
-      </div>`;
+      <label for="vendRelGerMes" style="font-size:11px;font-weight:600;color:#94a3b8;">Mês</label>
+      <select id="vendRelGerMes" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:120px;">
+        <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+        <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+        <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+        <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+      </select>`;
     bar.insertBefore(wrapMes, wrapDi);
+
+    const wrapAno = document.createElement('div');
+    wrapAno.id = 'vendRelGerWrapAno';
+    wrapAno.style.cssText = 'display:flex;align-items:center;gap:6px;';
+    wrapAno.innerHTML = `
+      <label for="vendRelGerAno" style="font-size:11px;font-weight:600;color:#94a3b8;">Ano</label>
+      <select id="vendRelGerAno" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:88px;"></select>`;
+    bar.insertBefore(wrapAno, wrapDi);
+
+    const wrapTri = document.createElement('div');
+    wrapTri.id = 'vendRelGerWrapTrimestre';
+    wrapTri.style.cssText = 'display:none;align-items:center;gap:6px;';
+    bar.insertBefore(wrapTri, wrapDi);
+    wrapTri.appendChild(wrapTriOrig);
+    // No modo Trimestre o filtro é obrigatório (sem "Todos")
+    const optTodos = [...tri.options].find((o) => o.value === '');
+    if (optTodos) optTodos.remove();
+    if (!tri.value) tri.value = String(_trimestreAtual());
 
     const wrapPer = document.createElement('div');
     wrapPer.id = 'vendRelGerWrapPeriodo';
@@ -823,17 +1041,37 @@
   }
 
   function _modoAtual() {
-    return document.getElementById('vendRelGerModoPeriodo')?.classList.contains('is-active') ? 'periodo' : 'mes_ano';
+    if (document.getElementById('vendRelGerModoPeriodo')?.classList.contains('is-active')) return 'periodo';
+    if (document.getElementById('vendRelGerModoTrimestre')?.classList.contains('is-active')) return 'trimestre';
+    return 'mes_ano';
   }
 
   function _setModoFiltro(modo) {
+    const isMes = modo === 'mes_ano';
+    const isTri = modo === 'trimestre';
     const isPeriodo = modo === 'periodo';
-    document.getElementById('vendRelGerModoMesAno')?.classList.toggle('is-active', !isPeriodo);
+    document.getElementById('vendRelGerModoMesAno')?.classList.toggle('is-active', isMes);
+    document.getElementById('vendRelGerModoTrimestre')?.classList.toggle('is-active', isTri);
     document.getElementById('vendRelGerModoPeriodo')?.classList.toggle('is-active', isPeriodo);
-    const wrapMes = document.getElementById('vendRelGerWrapMesAno');
+
+    const wrapMes = document.getElementById('vendRelGerWrapMes');
+    const wrapAno = document.getElementById('vendRelGerWrapAno');
+    const wrapTri = document.getElementById('vendRelGerWrapTrimestre');
     const wrapPer = document.getElementById('vendRelGerWrapPeriodo');
-    if (wrapMes) wrapMes.style.display = isPeriodo ? 'none' : 'flex';
+    // Compat com versão anterior (wrap único Mês+Ano)
+    const wrapMesAnoLegado = document.getElementById('vendRelGerWrapMesAno');
+
+    if (wrapMes) wrapMes.style.display = isMes ? 'flex' : 'none';
+    if (wrapAno) wrapAno.style.display = (isMes || isTri) ? 'flex' : 'none';
+    if (wrapTri) wrapTri.style.display = isTri ? 'flex' : 'none';
     if (wrapPer) wrapPer.style.display = isPeriodo ? 'flex' : 'none';
+    if (wrapMesAnoLegado) wrapMesAnoLegado.style.display = isMes ? 'flex' : 'none';
+
+    if (isTri) {
+      const triEl = document.getElementById('vendRelGerTrimestre');
+      if (triEl && !triEl.value) triEl.value = String(_trimestreAtual());
+    }
+
     if (isPeriodo) {
       const di = document.getElementById('vendRelGerDataInicio');
       const df = document.getElementById('vendRelGerDataFim');
@@ -842,13 +1080,15 @@
         const mes = Number.parseInt(document.getElementById('vendRelGerMes')?.value, 10) || (new Date().getMonth() + 1);
         _setDatas(new Date(ano, mes - 1, 1), new Date(ano, mes, 0));
       }
-    } else {
+    }
+
+    if (isMes || isTri) {
       const di = document.getElementById('vendRelGerDataInicio')?.value || '';
       const y = Number.parseInt(di.slice(0, 4), 10);
       const m = Number.parseInt(di.slice(5, 7), 10);
       const mesEl = document.getElementById('vendRelGerMes');
       const anoEl = document.getElementById('vendRelGerAno');
-      if (mesEl && m >= 1 && m <= 12) mesEl.value = String(m);
+      if (isMes && mesEl && m >= 1 && m <= 12) mesEl.value = String(m);
       if (anoEl && y >= 2000) {
         if (![...anoEl.options].some((o) => o.value === String(y))) {
           const opt = document.createElement('option');
@@ -856,7 +1096,9 @@
           opt.textContent = String(y);
           anoEl.appendChild(opt);
         }
-        anoEl.value = String(y);
+        if (![...anoEl.options].some((o) => o.value === anoEl.value)) {
+          anoEl.value = String(y);
+        }
       }
     }
   }
@@ -953,31 +1195,33 @@
     const qs = new URLSearchParams();
     qs.set('modo', 'mes');
     qs.set('etapa', 'entregue');
-    if (_modoAtual() === 'periodo') {
+    const modo = _modoAtual();
+    if (modo === 'periodo') {
       const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
       const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
       if (di) qs.set('data_inicio', di);
       if (df) qs.set('data_fim', df);
+    } else if (modo === 'trimestre') {
+      const ano = document.getElementById('vendRelGerAno')?.value?.trim();
+      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim() || String(_trimestreAtual());
+      if (ano) qs.set('ano', ano);
+      if (tri) qs.set('trimestre', tri);
     } else {
       const ano = document.getElementById('vendRelGerAno')?.value?.trim();
       const mes = document.getElementById('vendRelGerMes')?.value?.trim();
-      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim();
       if (ano) qs.set('ano', ano);
-      if (tri) qs.set('trimestre', tri);
-      else if (mes) qs.set('mes', mes);
+      if (mes) qs.set('mes', mes);
     }
     [
       ['vendRelGerVendedor', 'vendedor'],
-      ['vendRelGerFamilia', 'familia'],
       ['vendRelGerEstado', 'estado'],
       ['vendRelGerTipo', 'tipo'],
     ].forEach(([id, key]) => {
       const v = document.getElementById(id)?.value?.trim();
       if (v) qs.set(key, v);
     });
-    if (_modoAtual() === 'periodo') {
-      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim();
-      if (tri) qs.set('trimestre', tri);
+    if (_familiasSelecionadas.size) {
+      qs.set('familia', [..._familiasSelecionadas].join(','));
     }
     return qs;
   }
@@ -988,7 +1232,7 @@
       const data = await resp.json().catch(() => ({}));
       if (!resp.ok || data.ok === false) return;
       _preencherSelect('vendRelGerVendedor', data.vendedores || [], (v) => v.codigo, (v) => v.nome);
-      _preencherSelect('vendRelGerFamilia', data.familias || [], (f) => f.codigo, (f) => f.descricao);
+      _preencherFamiliaMulti(data.familias || []);
       _preencherSelect('vendRelGerEstado', data.estados || [], (e) => e, (e) => e);
       _preencherSelect('vendRelGerTipo', data.tipos || [], (t) => t.codigo, (t) => t.label);
       _preencherAnos(data.anos || []);
@@ -1154,24 +1398,17 @@
       _init = true;
       _injetarEstilosFiltro();
       _injetarUiFiltro();
+      _injetarFamiliaMulti();
       _injetarModalRegistros();
       _setModoFiltro('mes_ano');
+      _setBarraFiltrosVisivel(false);
+      document.getElementById('vendRelGerFiltroBtn')?.addEventListener('click', _toggleBarraFiltros);
       document.getElementById('vendRelGerModoMesAno')?.addEventListener('click', () => _setModoFiltro('mes_ano'));
+      document.getElementById('vendRelGerModoTrimestre')?.addEventListener('click', () => _setModoFiltro('trimestre'));
       document.getElementById('vendRelGerModoPeriodo')?.addEventListener('click', () => _setModoFiltro('periodo'));
       document.getElementById('vendRelGerMes')?.addEventListener('change', () => {
         const tri = document.getElementById('vendRelGerTrimestre');
-        if (tri) tri.value = '';
-      });
-      document.getElementById('vendRelGerDataInicio')?.addEventListener('change', () => {
-        const tri = document.getElementById('vendRelGerTrimestre');
-        if (tri) tri.value = '';
-      });
-      document.getElementById('vendRelGerDataFim')?.addEventListener('change', () => {
-        const tri = document.getElementById('vendRelGerTrimestre');
-        if (tri) tri.value = '';
-      });
-      document.getElementById('vendRelGerTrimestre')?.addEventListener('change', () => {
-        if (_modoAtual() === 'periodo') _aplicarTrimestreNasDatas();
+        if (tri && _modoAtual() !== 'trimestre') tri.value = '';
       });
       document.getElementById('vendRelGerAplicarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);

@@ -235,6 +235,16 @@ function camposParaEdicao(row, skip = new Set(['id'])) {
   return fields;
 }
 
+// 🔒 Nomes de coluna vêm do JSON do cliente e são interpolados no SQL (SET ${key}).
+// Só aceitamos identificadores simples — bloqueia injeção como "x = 1, y".
+const IDENT_COLUNA_RE = /^[a-z_][a-z0-9_]*$/;
+function assertColunaSegura(key) {
+  if (!IDENT_COLUNA_RE.test(String(key))) {
+    throw new Error(`Nome de coluna inválido: ${key}`);
+  }
+  return key;
+}
+
 function parseValorCampo(key, raw) {
   const txt = raw == null ? '' : String(raw).trim();
   if (JSONB_FIELDS.has(key)) {
@@ -293,6 +303,7 @@ async function atualizarFichaCompletaPorId(fichaId, payload = {}) {
   let idx = 1;
   for (const [key, raw] of Object.entries(fichaBody)) {
     if (key === 'id' || key === 'sincronizado_em') continue;
+    assertColunaSegura(key);
     fichaSets.push(`${key} = $${idx++}`);
     fichaVals.push(parseValorCampo(key, raw));
   }
@@ -314,6 +325,7 @@ async function atualizarFichaCompletaPorId(fichaId, payload = {}) {
     let j = 1;
     for (const [key, raw] of Object.entries(op.fields)) {
       if (key === 'operacao' || key === 'ficha_id') continue;
+      assertColunaSegura(key);
       sets.push(`${key} = $${j++}`);
       vals.push(parseValorCampo(key, raw));
     }
@@ -510,6 +522,7 @@ async function atualizarItemCompletoPorId(itemId, payload = {}) {
   let i = 1;
   for (const [key, raw] of Object.entries(itemBody)) {
     if (key === 'id') continue;
+    assertColunaSegura(key);
     itemSets.push(`${key} = $${i++}`);
     itemVals.push(parseValorCampo(key, raw));
   }
@@ -529,6 +542,7 @@ async function atualizarItemCompletoPorId(itemId, payload = {}) {
     let p = 1;
     for (const [key, raw] of Object.entries(produtoBody)) {
       if (key === 'id' || key === 'sincronizado_em') continue;
+      assertColunaSegura(key);
       prodSets.push(`${key} = $${p++}`);
       prodVals.push(parseValorCampo(key, raw));
     }
@@ -551,6 +565,7 @@ async function atualizarItemCompletoPorId(itemId, payload = {}) {
     let o = 1;
     for (const [key, raw] of Object.entries(operacaoBody)) {
       if (key === 'operacao' || key === 'ficha_id') continue;
+      assertColunaSegura(key);
       opSets.push(`${key} = $${o++}`);
       opVals.push(parseValorCampo(key, raw));
     }
