@@ -16,7 +16,7 @@ import {
   getFiltered,
   reapplyFilters,
   populateFilters
-} from './filtro_produto.js?v=20260807-central-relatorios';
+} from './filtro_produto.js?v=20260812-qr-contem';
 
 /* --------------------- SPINNER helpers -------------------------------- */
 let spinnerVisible  = false;
@@ -192,28 +192,39 @@ function getListaSearchTerm() {
   return (document.getElementById('codeFilter')?.value || '').trim();
 }
 
-/** Extrai termo de busca a partir do conteúdo do QR (etiqueta: COD|DESC|LOTE|IDxxx). */
+/** Extrai termo de busca a partir do conteúdo do QR (etiqueta: COD|DESC|LOTE|IDxxx ou COD-----sufixo). */
 function extrairTermoBuscaQrLista(raw) {
-  const s = String(raw || '').trim();
+  let s = String(raw || '').trim();
   if (!s) return '';
   if (s.includes('|')) {
     const codigo = s.split('|')[0].trim();
-    if (codigo) return codigo;
+    if (codigo) s = codigo;
+  }
+  // Etiqueta com sufixo extra: 03.PP.N.10926-----2058 → 03.PP.N.10926
+  if (s.includes('-----')) {
+    s = s.split('-----')[0].trim();
   }
   return s;
 }
 
 function fecharListaProdutosQrScanner() {
-  const overlay = document.getElementById('listaProdutosQrOverlay');
-  const stream = overlay?.__stream || null;
-  if (overlay?.__interval) {
-    clearInterval(overlay.__interval);
-    overlay.__interval = null;
+  const modal = document.getElementById('listaProdutosQrModal');
+  if (modal) modal.__scanGen = (modal.__scanGen || 0) + 1;
+  if (modal?.__interval) {
+    clearInterval(modal.__interval);
+    modal.__interval = null;
   }
+  const stream = modal?.__stream || null;
   if (stream) {
     try { stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+    if (modal) modal.__stream = null;
   }
-  overlay?.remove();
+  const video = document.getElementById('listaProdutosQrVideo');
+  if (video) video.srcObject = null;
+  if (modal) {
+    modal.classList.remove('is-camera-unavailable');
+    modal.style.display = 'none';
+  }
 }
 
 function aplicarBuscaListaPorQr(raw) {
@@ -228,42 +239,41 @@ function aplicarBuscaListaPorQr(raw) {
   return true;
 }
 
+function _listaQrCropRegion(video) {
+  const vw = video?.videoWidth || 0;
+  const vh = video?.videoHeight || 0;
+  if (!vw || !vh) return null;
+  const size = Math.round(Math.min(vw, vh) * 0.65);
+  return {
+    sx: Math.round((vw - size) / 2),
+    sy: Math.round((vh - size) / 2),
+    sw: size,
+    sh: size
+  };
+}
+
 async function abrirListaProdutosQrScanner() {
+  const modal = document.getElementById('listaProdutosQrModal');
+  if (!modal) return;
+
   fecharListaProdutosQrScanner();
+  modal.style.display = 'flex';
+  const scanGen = (modal.__scanGen || 0);
 
-  const overlay = document.createElement('div');
-  overlay.id = 'listaProdutosQrOverlay';
-  overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:12px;';
-  overlay.innerHTML = `
-    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:min(420px,96vw);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
-      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-bottom:1px solid #334155;">
-        <div style="display:flex;align-items:center;gap:8px;">
-          <i class="fa-solid fa-qrcode" style="color:#34d399;font-size:1.1rem;"></i>
-          <span style="font-weight:700;color:#f1f5f9;font-size:.95rem;">Ler QR Code</span>
-        </div>
-        <button type="button" id="listaProdutosQrFechar" style="background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;" aria-label="Fechar">&times;</button>
-      </div>
-      <div style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">
-        <video id="listaProdutosQrVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;display:block;background:#000;"></video>
-        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
-          <div id="listaProdutosQrMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);"></div>
-        </div>
-      </div>
-      <div id="listaProdutosQrStatus" style="padding:12px 18px;font-size:.85rem;color:#94a3b8;text-align:center;min-height:44px;">Iniciando câmera...</div>
-      <div style="padding:0 16px 16px;display:flex;gap:8px;">
-        <input id="listaProdutosQrManual" type="text" placeholder="Ou digite/cole o código..."
-          style="flex:1;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
-        <button id="listaProdutosQrOk" type="button"
-          style="background:#059669;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer;white-space:nowrap;">OK</button>
-      </div>
-    </div>`;
-  document.body.appendChild(overlay);
-
-  const statusEl = overlay.querySelector('#listaProdutosQrStatus');
-  const video = overlay.querySelector('#listaProdutosQrVideo');
-  const mira = overlay.querySelector('#listaProdutosQrMira');
-  const manualInput = overlay.querySelector('#listaProdutosQrManual');
+  const statusEl = document.getElementById('listaProdutosQrStatus');
+  const video = document.getElementById('listaProdutosQrVideo');
+  const mira = document.getElementById('listaProdutosQrMira');
+  const inputEl = document.getElementById('listaProdutosQrInput');
+  const okBtn = document.getElementById('listaProdutosQrOk');
+  const fecharBtn = document.getElementById('listaProdutosQrFechar');
   let processado = false;
+
+  if (inputEl) inputEl.value = '';
+  if (mira) mira.style.borderColor = 'rgba(52,211,153,.85)';
+  if (statusEl) {
+    statusEl.textContent = 'Iniciando câmera...';
+    statusEl.style.color = '';
+  }
 
   const processar = (valor) => {
     if (processado) return;
@@ -271,74 +281,97 @@ async function abrirListaProdutosQrScanner() {
     if (!ok) {
       if (statusEl) {
         statusEl.textContent = 'Código vazio. Tente novamente.';
-        statusEl.style.color = '#f87171';
+        statusEl.style.color = '#b91c1c';
       }
       return;
     }
     processado = true;
     if (mira) mira.style.borderColor = '#4ade80';
     if (statusEl) {
-      statusEl.textContent = 'Código lido. Filtrando lista...';
-      statusEl.style.color = '#4ade80';
+      statusEl.textContent = `Código lido: ${extrairTermoBuscaQrLista(valor)}. Filtrando lista...`;
+      statusEl.style.color = '#047857';
     }
-    setTimeout(() => fecharListaProdutosQrScanner(), 250);
+    setTimeout(() => {
+      if (modal.__scanGen === scanGen) fecharListaProdutosQrScanner();
+    }, 280);
   };
 
-  overlay.querySelector('#listaProdutosQrFechar')?.addEventListener('click', fecharListaProdutosQrScanner);
-  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) fecharListaProdutosQrScanner(); });
-  overlay.querySelector('#listaProdutosQrOk')?.addEventListener('click', () => processar(manualInput?.value));
-  manualInput?.addEventListener('keydown', (ev) => {
-    if (ev.key === 'Enter') {
-      ev.preventDefault();
-      processar(manualInput.value);
-    }
-  });
+  if (!modal.__boundListaQrUi) {
+    modal.__boundListaQrUi = true;
+    fecharBtn?.addEventListener('click', fecharListaProdutosQrScanner);
+    modal.addEventListener('click', (ev) => { if (ev.target === modal) fecharListaProdutosQrScanner(); });
+    okBtn?.addEventListener('click', () => {
+      const fn = modal.__processarAtual;
+      if (typeof fn === 'function') fn(inputEl?.value);
+    });
+    inputEl?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        const fn = modal.__processarAtual;
+        if (typeof fn === 'function') fn(inputEl.value);
+      }
+    });
+  }
+
+  // Mantém referência do processar atual (reabre sem rebind)
+  modal.__processarAtual = processar;
 
   try {
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      video: {
+        facingMode: 'environment',
+        width: { ideal: 1920 },
+        height: { ideal: 1080 }
+      },
       audio: false
     });
-    overlay.__stream = stream;
+    modal.__stream = stream;
+    modal.classList.remove('is-camera-unavailable');
     if (video) {
       video.srcObject = stream;
       await video.play().catch(() => {});
     }
     if (statusEl) {
       statusEl.textContent = 'Aponte a câmera para o QR Code do produto.';
-      statusEl.style.color = '#94a3b8';
+      statusEl.style.color = '';
     }
   } catch (_) {
+    modal.classList.add('is-camera-unavailable');
     if (statusEl) {
-      statusEl.textContent = 'Câmera indisponível. Digite o código abaixo.';
-      statusEl.style.color = '#f59e0b';
+      statusEl.textContent = 'Câmera indisponível. Use o bipador ou digite o código abaixo.';
+      statusEl.style.color = '#b45309';
     }
-    setTimeout(() => manualInput?.focus(), 100);
+    setTimeout(() => inputEl?.focus(), 100);
     return;
   }
 
   if (!('BarcodeDetector' in window)) {
     if (statusEl) {
-      statusEl.textContent = 'Leitura automática indisponível neste navegador. Digite o código abaixo.';
-      statusEl.style.color = '#f59e0b';
+      statusEl.textContent = 'Scanner automático não suportado neste navegador. Use o campo abaixo.';
+      statusEl.style.color = '#b45309';
     }
-    setTimeout(() => manualInput?.focus(), 100);
+    setTimeout(() => inputEl?.focus(), 100);
     return;
   }
 
   const detector = new BarcodeDetector({ formats: ['qr_code', 'data_matrix'] });
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
-  overlay.__interval = setInterval(async () => {
+  modal.__interval = setInterval(async () => {
     if (processado || !video || video.readyState < 2) return;
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-    ctx.drawImage(video, 0, 0);
+    const crop = _listaQrCropRegion(video);
+    if (!crop) return;
+    canvas.width = crop.sw;
+    canvas.height = crop.sh;
+    ctx.drawImage(video, crop.sx, crop.sy, crop.sw, crop.sh, 0, 0, crop.sw, crop.sh);
     try {
       const barcodes = await detector.detect(canvas);
-      if (barcodes.length > 0) processar(barcodes[0].rawValue);
+      if (barcodes.length > 0) {
+        const fn = modal.__processarAtual || processar;
+        fn(barcodes[0].rawValue);
+      }
     } catch (_) { /* frame */ }
-  }, 300);
+  }, 250);
 }
 
 function deveMostrarSolicitacaoCompraCard() {

@@ -483,13 +483,21 @@ function applyFilters() {
   let filtered = allItems.slice();
 
   // Busca unificada - procura tanto em codigo quanto em descricao
+  // Também aceita bipagem com sufixo extra (ex.: 03.PP.N.10926-----2058 → acha 03.PP.N.10926)
   const searchTerm = codeInput?.value.trim().toLowerCase() || '';
   if (searchTerm) {
     const terms = searchTerm.split(/\s+/).filter(t => t);
     filtered = filtered.filter(i => {
       const codigo    = (i.codigo   || '').toLowerCase();
       const descricao = (i.descricao || '').toLowerCase();
-      return terms.every(t => `${codigo} ${descricao}`.includes(t));
+      const hay = `${codigo} ${descricao}`;
+      return terms.every(t => {
+        const tBase = t.includes('-----') ? t.split('-----')[0] : t;
+        if (hay.includes(t) || (tBase && hay.includes(tBase))) return true;
+        // termo bipado contém o código do produto (ignora lixo à direita)
+        if (codigo.length >= 4 && (t.includes(codigo) || (tBase && tBase.includes(codigo)))) return true;
+        return false;
+      });
     });
   }
 

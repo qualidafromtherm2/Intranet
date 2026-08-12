@@ -19678,7 +19678,55 @@ body.mobile-modal-open {
 .cad-prod-field { display: grid; gap: 6px; margin-bottom: 12px; }
 .cad-prod-field > span { font-size: .78rem; font-weight: 700; color: #cbd5e1; }
 .cad-prod-field small { color: #94a3b8; font-weight: 500; }
-.cad-prod-field input, .cad-prod-field select, .cad-prod-field textarea { width: 100%; box-sizing: border-box; border: 1px solid #475569; border-radius: 8px; background: #252c3b; color: #f8fafc; padding: 10px 11px; font: inherit; }
+/* Modal sempre escuro: forçar texto claro (modo claro do site sobrescrevia color). */
+.cad-prod-dialog,
+#cadProdutoV2 .cad-prod-dialog {
+  color-scheme: dark;
+}
+.cad-prod-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.cad-prod-field select,
+.cad-prod-field textarea,
+.light-mode .cad-prod-field input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.light-mode .cad-prod-field select,
+.light-mode .cad-prod-field textarea,
+.light-mode #cadProdutoV2 input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+.light-mode #cadProdutoV2 select,
+.light-mode #cadProdutoV2 textarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  background: #252c3b !important;
+  color: #f8fafc !important;
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #f8fafc;
+  padding: 10px 11px;
+  font: inherit;
+}
+.cad-prod-field input::placeholder,
+.cad-prod-field textarea::placeholder,
+.light-mode .cad-prod-field input::placeholder,
+.light-mode .cad-prod-field textarea::placeholder,
+.light-mode #cadProdutoV2 input::placeholder,
+.light-mode #cadProdutoV2 textarea::placeholder {
+  color: #94a3b8 !important;
+  -webkit-text-fill-color: #94a3b8 !important;
+  opacity: 1;
+}
+.cad-prod-field input:-webkit-autofill,
+.cad-prod-field input:-webkit-autofill:hover,
+.cad-prod-field input:-webkit-autofill:focus,
+.light-mode .cad-prod-field input:-webkit-autofill {
+  -webkit-text-fill-color: #f8fafc !important;
+  caret-color: #f8fafc;
+  transition: background-color 99999s ease-in-out 0s;
+  box-shadow: 0 0 0 1000px #252c3b inset !important;
+}
+.cad-prod-field select option,
+.light-mode .cad-prod-field select option {
+  background: #1a1f2b;
+  color: #f8fafc;
+}
 .cad-prod-field textarea { resize: vertical; min-height: 120px; }
 .cad-prod-reveal { justify-self: start; border: 0; background: transparent; color: #60a5fa; padding: 2px 0; font-size: .75rem; font-weight: 700; cursor: pointer; }
 .cad-prod-origin, .cad-prod-mode, .cad-prod-actions, .cad-prod-image-picker { display: flex; gap: 8px; }
@@ -22281,13 +22329,15 @@ html.light-mode #minhasComprasWrapper {
 }
 
 /* Leitura e endereçamento: painel claro, guiado e adequado para câmera ou bipador. */
-#etqArmazenarModal.etq-scan-modal {
+#etqArmazenarModal.etq-scan-modal,
+#listaProdutosQrModal.etq-scan-modal {
   padding: 18px !important;
   background: rgba(15, 23, 42, .62) !important;
   backdrop-filter: blur(6px) !important;
 }
 
-#etqArmazenarModal .etq-scan-box {
+#etqArmazenarModal .etq-scan-box,
+#listaProdutosQrModal .etq-scan-box {
   box-sizing: border-box;
   width: min(680px, calc(100vw - 36px)) !important;
   max-width: 680px !important;
@@ -22300,7 +22350,8 @@ html.light-mode #minhasComprasWrapper {
   overflow: auto !important;
 }
 
-#etqArmazenarModal .etq-scan-header {
+#etqArmazenarModal .etq-scan-header,
+#listaProdutosQrModal .etq-scan-header {
   position: sticky;
   top: 0;
   z-index: 3;
@@ -22310,12 +22361,14 @@ html.light-mode #minhasComprasWrapper {
   border-bottom: 3px solid #34d399 !important;
 }
 
-#etqArmazenarModal .etq-scan-camera {
+#etqArmazenarModal .etq-scan-camera,
+#listaProdutosQrModal .etq-scan-camera {
   aspect-ratio: 16 / 7 !important;
   background: #101827 !important;
 }
 
-#etqArmazenarModal.is-camera-unavailable .etq-scan-camera::after {
+#etqArmazenarModal.is-camera-unavailable .etq-scan-camera::after,
+#listaProdutosQrModal.is-camera-unavailable .etq-scan-camera::after {
   content: "Câmera indisponível · use o bipador ou digite o código";
   position: absolute;
   inset: 0;
@@ -22329,7 +22382,8 @@ html.light-mode #minhasComprasWrapper {
   font-size: 13px;
 }
 
-#etqArmazenarModal #etqArmazenarStatus {
+#etqArmazenarModal #etqArmazenarStatus,
+#listaProdutosQrModal #listaProdutosQrStatus {
   min-height: 38px !important;
   padding: 9px 16px !important;
   color: #53657a !important;
@@ -22338,7 +22392,8 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #etqArmazenarModal #etqArmazenarInput,
-#etqArmazenarModal #etqArmazenarComplemento {
+#etqArmazenarModal #etqArmazenarComplemento,
+#listaProdutosQrModal #listaProdutosQrInput {
   min-height: 44px;
   color: #142033 !important;
   background: #fff !important;
@@ -22348,12 +22403,14 @@ html.light-mode #minhasComprasWrapper {
 }
 
 #etqArmazenarModal #etqArmazenarInput::placeholder,
-#etqArmazenarModal #etqArmazenarComplemento::placeholder {
+#etqArmazenarModal #etqArmazenarComplemento::placeholder,
+#listaProdutosQrModal #listaProdutosQrInput::placeholder {
   color: #718096;
   opacity: 1;
 }
 
-#etqArmazenarModal #etqArmazenarOk {
+#etqArmazenarModal #etqArmazenarOk,
+#listaProdutosQrModal #listaProdutosQrOk {
   min-width: 48px;
   min-height: 44px;
   border-radius: 6px !important;
@@ -22622,12 +22679,14 @@ html.light-mode #minhasComprasWrapper {
     min-height: 44px;
   }
 
-  #etqArmazenarModal.etq-scan-modal {
+  #etqArmazenarModal.etq-scan-modal,
+  #listaProdutosQrModal.etq-scan-modal {
     align-items: flex-end !important;
     padding: 0 !important;
   }
 
-  #etqArmazenarModal .etq-scan-box {
+  #etqArmazenarModal .etq-scan-box,
+  #listaProdutosQrModal .etq-scan-box {
     width: 100% !important;
     max-width: none !important;
     max-height: 96dvh;
@@ -22637,7 +22696,8 @@ html.light-mode #minhasComprasWrapper {
     border-radius: 14px 14px 0 0 !important;
   }
 
-  #etqArmazenarModal .etq-scan-camera {
+  #etqArmazenarModal .etq-scan-camera,
+  #listaProdutosQrModal .etq-scan-camera {
     aspect-ratio: 16 / 9 !important;
     max-height: 34dvh;
   }

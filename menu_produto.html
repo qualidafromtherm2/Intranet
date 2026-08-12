@@ -13831,6 +13831,32 @@
   </div>
 </div>
 
+<div id="listaProdutosQrModal" class="etq-scan-modal" style="display:none;position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
+  <div class="etq-scan-box" style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:92vw;max-width:460px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
+    <div class="etq-scan-header" style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-bottom:1px solid #334155;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <i class="fa-solid fa-qrcode" style="color:#34d399;font-size:1.1rem;"></i>
+        <span id="listaProdutosQrTitle" style="font-weight:700;color:#f1f5f9;font-size:1rem;">Ler QR Code do produto</span>
+      </div>
+      <button id="listaProdutosQrFechar" class="etiquetas-modal-close" type="button" title="Fechar">&times;</button>
+    </div>
+    <div class="etq-scan-camera" style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">
+      <video id="listaProdutosQrVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;display:block;background:#000;"></video>
+      <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+        <div id="listaProdutosQrMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);transition:border-color .3s;"></div>
+      </div>
+    </div>
+    <div id="listaProdutosQrStatus" style="padding:12px 18px;font-size:.88rem;color:#94a3b8;min-height:44px;text-align:center;line-height:1.4;">Aponte a câmera para o QR Code</div>
+    <div style="padding:2px 18px 8px;display:flex;gap:8px;">
+      <input id="listaProdutosQrInput" type="text" placeholder="Bipe, leia pela câmera ou digite o código..."
+        style="flex:1;background:#0f172a;border:1px solid #334155;border-radius:8px;padding:9px 12px;color:#f1f5f9;font-size:.9rem;outline:none;box-sizing:border-box;" autocomplete="off" />
+      <button id="listaProdutosQrOk" type="button" style="background:#059669;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;white-space:nowrap;">
+        <i class="fa-solid fa-check"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
 <div id="etqArmazenarModal" class="etq-scan-modal" style="display:none;position:fixed;inset:0;z-index:2200;background:rgba(0,0,0,.88);backdrop-filter:blur(6px);align-items:center;justify-content:center;">
   <div class="etq-scan-box" style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:92vw;max-width:460px;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
     <!-- Cabeçalho -->
@@ -13923,8 +13949,8 @@
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260811a"></script>
 
-  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260730-filtro-expedicao"></script>
-  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260812-qr-lista"></script>
+  <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260812-qr-contem"></script>
+  <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260812-qr-contem"></script>
   <script type="module" src="./requisicoes_omie/Dados_produto.js?v=20260710c" defer></script>
   <script type="module" src="./requisicoes_omie/dados_colaboradores.js"></script>
   <script src="produtos/produto_foto.js?v=20260430c" defer></script>
