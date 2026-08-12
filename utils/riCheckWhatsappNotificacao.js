@@ -96,6 +96,21 @@ function montarMensagemRegistroTempo(reg) {
   ].join('\n');
 }
 
+function montarMensagemOcorrencia({ tipo, numeroOp, codigo, falha, usuario, dataHora }) {
+  const corrigida = tipo === 'corrigida';
+  return [
+    corrigida ? '*Ocorrência — falha corrigida*' : '*Ocorrência — falha detectada*',
+    '',
+    `Número OP: ${numeroOp ?? '—'}`,
+    `Código: ${codigo ?? '—'}`,
+    `Falha: ${falha || '—'}`,
+    corrigida
+      ? `Liberada por: ${usuario ?? '—'}`
+      : `Registrado por: ${usuario ?? '—'}`,
+    `Data: ${formatarDataHoraBr(dataHora)}`,
+  ].join('\n');
+}
+
 function montarMensagemTransicaoPosto({ numeroOp, postoDe, postoPara, inicio, fim, usuarioFim }) {
   const de = String(postoDe || '').trim();
   const para = String(postoPara || '').trim();
@@ -113,6 +128,22 @@ function montarMensagemTransicaoPosto({ numeroOp, postoDe, postoPara, inicio, fi
     `Fim: ${formatarDataHoraBr(fim)}`,
     `Usuário fim: ${usuarioFim ?? '—'}`,
   ].join('\n');
+}
+
+async function listarDestinatariosOpOuRi() {
+  const [op, ri] = await Promise.all([
+    listarDestinatariosPorPermissao('permissao_op'),
+    listarDestinatariosPorPermissao('permissao_ri'),
+  ]);
+  const seen = new Set();
+  const out = [];
+  for (const dest of [...op, ...ri]) {
+    const key = String(dest.user_id || dest.telefone_contato || '');
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(dest);
+  }
+  return out;
 }
 
 async function listarDestinatariosPorPermissao(campoPermissao) {
@@ -225,6 +256,57 @@ async function notificarTransicaoPostoWhatsapp({
     usuarioFim,
   });
   await enviarParaDestinatarios(destinatarios, mensagem);
+}
+
+async function notificarOcorrenciaWhatsapp({
+  tipo,
+  numeroOp,
+  opId,
+  codigo,
+  falha,
+  usuario,
+  dataHora,
+}) {
+  if (!whatsappConfigurado()) return;
+
+  await garantirSchemaWhatsConfig();
+
+  let codigoFinal = String(codigo || '').trim();
+  let numeroFinal = String(numeroOp || '').trim();
+  const opRef = Number(opId) || 0;
+  if (opRef && (!codigoFinal || !numeroFinal)) {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT n_op AS numero_op, codigo
+           FROM producao."OP_producao"
+          WHERE id = $1
+          LIMIT 1`,
+        [opRef]
+      );
+      if (rows[0]) {
+        if (!numeroFinal) numeroFinal = String(rows[0].numero_op || '').trim();
+        if (!codigoFinal) codigoFinal = String(rows[0].codigo || '').trim();
+      }
+    } catch (_) { /* silencioso */ }
+  }
+
+  const destinatarios = await listarDestinatariosOpOuRi();
+  const mensagem = montarMensagemOcorrencia({
+    tipo,
+    numeroOp: numeroFinal || numeroOp,
+    codigo: codigoFinal || codigo,
+    falha,
+    usuario,
+    dataHora: dataHora || new Date(),
+  });
+  await enviarParaDestinatarios(destinatarios, mensagem);
+}
+
+function dispararNotificacaoOcorrencia(dados) {
+  if (!dados?.falha && !dados?.numeroOp && !dados?.opId) return;
+  notificarOcorrenciaWhatsapp(dados).catch((err) => {
+    console.error(TAG, err?.message || err);
+  });
 }
 
 const RI_DEBOUNCE_MS = 3000;
@@ -360,9 +442,11 @@ module.exports = {
   dispararNotificacaoRiCheck,
   dispararNotificacaoRegistroTempo,
   dispararNotificacaoTransicaoPosto,
+  dispararNotificacaoOcorrencia,
   notificarRiCheckWhatsappPorId,
   notificarRegistroTempoWhatsappPorId,
   notificarTransicaoPostoWhatsapp,
+  notificarOcorrenciaWhatsapp,
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
   obterConfigRiWhatsUsuario,

@@ -4,6 +4,7 @@
 const { registrarRiConcluida } = require('../utils/tempoProducao');
 const {
   dispararNotificacaoRiCheck,
+  dispararNotificacaoOcorrencia,
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
 } = require('../utils/riCheckWhatsappNotificacao');
@@ -152,6 +153,14 @@ async function garantirSchemaRi() {
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_ri_niq_numero_op
       ON qualidade."RI_NIQ" (numero_op)
+  `);
+  await dbQuery(`ALTER TABLE qualidade."RI_NIQ" ADD COLUMN IF NOT EXISTS corrigido BOOLEAN NOT NULL DEFAULT false`);
+  await dbQuery(`ALTER TABLE qualidade."RI_NIQ" ADD COLUMN IF NOT EXISTS corrigido_por TEXT`);
+  await dbQuery(`ALTER TABLE qualidade."RI_NIQ" ADD COLUMN IF NOT EXISTS corrigido_em TIMESTAMPTZ`);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_ri_niq_aberta
+      ON qualidade."RI_NIQ" (op_iapp_id)
+      WHERE COALESCE(corrigido, false) = false
   `);
 
   // Vários arquivos por verificação / ocorrência (foto, vídeo, documento)
@@ -834,17 +843,35 @@ async function urlAindaReferenciadaNoRi(url, excluirId) {
   return rowsV.length > 0;
 }
 
+const NIQ_SELECT = `id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
+            COALESCE(anexos, '[]'::jsonb) AS anexos,
+            usuario, created_at::text AS created_at,
+            COALESCE(corrigido, false) AS corrigido,
+            corrigido_por,
+            corrigido_em::text AS corrigido_em`;
+
 async function listarNiqPorOp(opIappId) {
   const { rows } = await dbQuery(
-    `SELECT id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
-            COALESCE(anexos, '[]'::jsonb) AS anexos,
-            usuario, created_at::text AS created_at
+    `SELECT ${NIQ_SELECT}
        FROM qualidade."RI_NIQ"
       WHERE op_iapp_id = $1
       ORDER BY created_at DESC, id DESC`,
     [opIappId]
   );
   return rows;
+}
+
+function dispararNotifOcorrenciaRegistrada(row, codigo) {
+  if (!row) return;
+  dispararNotificacaoOcorrencia({
+    tipo: 'registrada',
+    numeroOp: row.numero_op,
+    opId: row.op_iapp_id,
+    codigo: codigo || '',
+    falha: row.falha_detectada,
+    usuario: row.usuario,
+    dataHora: row.created_at,
+  });
 }
 
 // POST /api/qualidade/ri-check/status-por-ops — flag RI (checkbox) por OP (montagem)
@@ -885,6 +912,39 @@ router.post('/status-por-ops', requireAuth, express.json(), async (req, res) => 
   } catch (err) {
     console.error('[qualidade/ri-check/status-por-ops]', err);
     return res.status(500).json({ ok: false, error: err.message || 'Falha ao consultar status RI.' });
+  }
+});
+
+// POST /api/qualidade/ri-check/ocorrencias-por-ops — ocorrências abertas por OP (kanban)
+router.post('/ocorrencias-por-ops', requireAuth, express.json(), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const ids = [...new Set(
+      ops.map(o => Number(o.op_producao_id || o.op_id || o.op_iapp_id || 0)).filter(n => n > 0)
+    )];
+    if (!ids.length) {
+      return res.json({ ok: true, por_op: {}, ocorrencias: [] });
+    }
+
+    const { rows } = await dbQuery(
+      `SELECT ${NIQ_SELECT}
+         FROM qualidade."RI_NIQ"
+        WHERE op_iapp_id = ANY($1::bigint[])
+          AND COALESCE(corrigido, false) = false
+        ORDER BY created_at DESC, id DESC`,
+      [ids]
+    );
+
+    const porOp = {};
+    for (const row of rows) {
+      const key = Number(row.op_iapp_id);
+      if (key > 0) porOp[String(key)] = true;
+    }
+    return res.json({ ok: true, por_op: porOp, ocorrencias: rows });
+  } catch (err) {
+    console.error('[qualidade/ri-check/ocorrencias-por-ops]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao consultar ocorrências.' });
   }
 });
 
@@ -1704,16 +1764,63 @@ router.post('/niq', requireAuth, upload.fields([
       `INSERT INTO qualidade."RI_NIQ"
          (codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video, anexos, usuario)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-       RETURNING id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
-                 COALESCE(anexos, '[]'::jsonb) AS anexos,
-                 usuario, created_at::text AS created_at`,
+       RETURNING ${NIQ_SELECT}`,
       [codigoProdutoGravar, opRefId, numeroOp, falhaDetectada, fotoUrl, videoUrl, JSON.stringify(anexos), usuario]
     );
+
+    dispararNotifOcorrenciaRegistrada(ins.rows[0], codigo);
 
     return res.json({ ok: true, ocorrencia: ins.rows[0] });
   } catch (err) {
     console.error('[qualidade/ri-check/niq POST por OP]', err);
     return res.status(500).json({ ok: false, error: err.message || 'Falha ao registrar ocorrência.' });
+  }
+});
+
+// PATCH /api/qualidade/ri-check/niq/:id/corrigir — marca ocorrência como corrigida
+router.patch('/niq/:id/corrigir', requireAuth, express.json(), async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const id = Number(req.params.id) || 0;
+    if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    const usuario = getUsuario(req);
+    const { rows } = await dbQuery(
+      `UPDATE qualidade."RI_NIQ"
+          SET corrigido = true,
+              corrigido_por = $2,
+              corrigido_em = NOW()
+        WHERE id = $1
+          AND COALESCE(corrigido, false) = false
+      RETURNING ${NIQ_SELECT}`,
+      [id, usuario]
+    );
+
+    if (!rows.length) {
+      const { rows: existing } = await dbQuery(
+        `SELECT ${NIQ_SELECT} FROM qualidade."RI_NIQ" WHERE id = $1`,
+        [id]
+      );
+      if (!existing.length) {
+        return res.status(404).json({ ok: false, error: 'Ocorrência não encontrada.' });
+      }
+      return res.json({ ok: true, ocorrencia: existing[0], ja_corrigida: true });
+    }
+
+    const oc = rows[0];
+    dispararNotificacaoOcorrencia({
+      tipo: 'corrigida',
+      numeroOp: oc.numero_op,
+      opId: oc.op_iapp_id,
+      falha: oc.falha_detectada,
+      usuario: oc.corrigido_por || usuario,
+      dataHora: oc.corrigido_em,
+    });
+
+    return res.json({ ok: true, ocorrencia: oc });
+  } catch (err) {
+    console.error('[qualidade/ri-check/niq PATCH corrigir]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao corrigir ocorrência.' });
   }
 });
 
@@ -1842,14 +1949,13 @@ router.post('/:id/niq', requireAuth, upload.fields([
       `INSERT INTO qualidade."RI_NIQ"
          (codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video, anexos, usuario)
        VALUES ($1, $2, $3, $4, $5, $6, $7::jsonb, $8)
-       RETURNING id, codigo_produto, op_iapp_id, numero_op, falha_detectada, foto, video,
-                 COALESCE(anexos, '[]'::jsonb) AS anexos,
-                 usuario, created_at::text AS created_at`,
+       RETURNING ${NIQ_SELECT}`,
       [codigoProdutoGravar, opIappId, numeroOp, falhaDetectada, fotoUrl, videoUrl, JSON.stringify(anexos), usuario]
     );
 
     await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [checkId]);
     dispararNotificacaoRiCheck(checkId);
+    dispararNotifOcorrenciaRegistrada(ins.rows[0], check.codigo);
 
     return res.json({ ok: true, ocorrencia: ins.rows[0] });
   } catch (err) {
