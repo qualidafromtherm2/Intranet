@@ -351,6 +351,17 @@
       Gemba
     </a>
     <a href="#"
+       id="menu-producao-ocorrencias"
+       class="menu-link"
+       data-nav-key="side:producao:ocorrencias"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Ocorrencias registradas"
+       data-nav-selector="#menu-producao-ocorrencias">
+      <i class="fa-solid fa-triangle-exclamation" style="margin-right:8px;"></i>
+      Ocorrencias registradas
+    </a>
+    <a href="#"
        id="menu-preparacoes"
        class="menu-link"
        data-nav-key="side:producao:preparacoes"
@@ -13409,6 +13420,41 @@
           </div>
         </div>
 
+        <!-- Painel Produção: Ocorrências registradas (falhas detectadas no RI) -->
+        <div id="producaoOcorrenciasPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div>
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-triangle-exclamation" style="color:#f87171;"></i>
+                    Ocorrencias registradas
+                  </div>
+                  <div style="font-size:13px;color:#94a3b8;margin-top:4px;">Falhas detectadas no RI — da mais nova para a mais antiga.</div>
+                </div>
+                <button id="prodOcorrenciasRefreshBtn" class="content-button" type="button" title="Atualizar">
+                  <i class="fa-solid fa-rotate"></i>
+                  <span>Atualizar</span>
+                </button>
+              </div>
+
+              <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:14px 0 12px;">
+                <input id="prodOcorrenciasBusca" type="search" placeholder="Pesquisar falha, OP ou código..." autocomplete="off"
+                  style="flex:1;min-width:220px;padding:8px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:#111827;color:#e5e7eb;font-size:13px;" />
+                <div id="prodOcorrenciasFiltros" style="display:flex;gap:6px;flex-wrap:wrap;">
+                  <button type="button" data-status="" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(248,113,113,.45);background:rgba(248,113,113,.18);color:#fecaca;font-size:12px;font-weight:600;cursor:pointer;">Todas <span data-count="total">0</span></button>
+                  <button type="button" data-status="aberta" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#cbd5e1;font-size:12px;font-weight:600;cursor:pointer;">Abertas <span data-count="aberta">0</span></button>
+                  <button type="button" data-status="corrigida" style="padding:6px 12px;border-radius:8px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#cbd5e1;font-size:12px;font-weight:600;cursor:pointer;">Corrigidas <span data-count="corrigida">0</span></button>
+                </div>
+              </div>
+
+              <div id="prodOcorrenciasStatusMsg" style="display:none;margin:0 0 10px;font-size:13px;color:#94a3b8;"></div>
+              <div style="font-size:11px;font-weight:700;color:#fecaca;text-transform:uppercase;letter-spacing:.04em;margin:0 0 8px;">Ocorrências (falhas detectadas)</div>
+              <div id="prodOcorrenciasLista"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Painel Produção: Testes — relatório de bombas de calor -->
         <div id="producaoTestesPane" class="tab-pane" style="display:none;">
           <div class="content-wrapper">
@@ -13870,7 +13916,8 @@
   <script src="/public/js/producao-relatorio-gerencial.js?v=20260807a" defer></script>
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script src="/public/js/producao-gemba.js?v=20260811a" defer></script>
-  <script type="module" src="menu_produto.js?v=20260811-estoque-maq"></script>
+  <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
+  <script type="module" src="menu_produto.js?v=20260812-ocorrencias-anexos"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260811a"></script>
 

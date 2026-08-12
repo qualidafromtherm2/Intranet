@@ -521,6 +521,67 @@ router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
   }
 });
 
+// GET /vendas/relatorio-gerencial/registros — lista dos pedidos do KPI Pedidos/Faturamento
+router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
+  try {
+    await syncRelatorioCfopCatalog();
+    await syncRelatorioStatusCatalog();
+    const filtros = parseFiltrosRelatorio(req.query);
+    const periodoCfg = calcPeriodoComFiltros(filtros);
+    const etapaCfg = buildEtapaFilter(filtros.etapa);
+    const rangeParams = [periodoCfg.inicio, periodoCfg.fimExclusive];
+    const { pedidoSql } = appendFiltrosSql(filtros, rangeParams);
+    const LIMITE = 5000;
+    const sql = `
+      ${buildBaseCte(etapaCfg.sql, pedidoSql)}
+      SELECT
+        b.codigo_pedido,
+        b.numero_pedido,
+        b.cliente,
+        b.estado,
+        b.data_ref AS data,
+        b.valor_total_pedido::float AS valor_total,
+        b.etapa_descricao,
+        COALESCE(
+          NULLIF(TRIM(v.nome), ''),
+          NULLIF(TRIM(b.codigo_vendedor), ''),
+          '—'
+        ) AS vendedor
+      FROM base b
+      LEFT JOIN vendas.vendedores_omie v
+        ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
+      ORDER BY b.data_ref DESC NULLS LAST, b.valor_total_pedido DESC, b.numero_pedido
+      LIMIT ${LIMITE}
+    `;
+    const { rows } = await pool.query(sql, rangeParams);
+    const registros = (rows || []).map((r) => ({
+      codigo_pedido: r.codigo_pedido,
+      numero_pedido: r.numero_pedido,
+      cliente: r.cliente,
+      estado: r.estado,
+      data: r.data,
+      valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
+      etapa: r.etapa_descricao,
+      vendedor: r.vendedor,
+    }));
+    const valor_total = Math.round(
+      registros.reduce((s, r) => s + (Number(r.valor_total) || 0), 0) * 100
+    ) / 100;
+    return res.json({
+      ok: true,
+      periodo: periodoCfg.label,
+      etapa: etapaCfg.label,
+      total_pedidos: registros.length,
+      valor_total,
+      truncated: registros.length >= LIMITE,
+      registros,
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro registros relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // GET /vendas/relatorio-gerencial/filtros-opcoes
 router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
   try {

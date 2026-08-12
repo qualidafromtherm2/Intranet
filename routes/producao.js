@@ -29,7 +29,7 @@ const {
   listarTurnosDia,
   dateKeyInTz,
 } = require('../utils/tempoProducao');
-const { registrarOpsGeradasNaPlanilha } = require('../utils/googleSheetsOpProducao');
+const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
 const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
 const {
   obterConfigNotificacaoUsuario,
@@ -249,6 +249,7 @@ async function garantirSchemaOpProducao() {
     CREATE INDEX IF NOT EXISTS idx_op_producao_n_op
       ON producao."OP_producao" (n_op);
   `);
+  await dbQuery(`ALTER TABLE producao."OP_producao" ADD COLUMN IF NOT EXISTS ordem_producao TEXT`);
   opProducaoSchemaOk = true;
 }
 
@@ -662,6 +663,7 @@ async function fromOpProducaoDb() {
     SELECT
       op.id,
       op.n_op                         AS identificacao,
+      op.ordem_producao,
       'A PRODUZIR'                    AS status,
       '1'::text                       AS qtde,
       op.created_at::text             AS data_abertura,
@@ -783,6 +785,66 @@ router.get('/ordens', async (req, res) => {
   } catch (err) {
     console.error('[producao] Erro ao ler OP_producao:', err.message);
     return res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/ops/sincronizar-ordem-producao
+ * Se a OP ainda não tem ordem_producao (coluna F da planilha),
+ * busca CONTROLADOR (coluna G) = n_op e grava o valor de F.
+ * --------------------------------------------------------------- */
+router.post('/ops/sincronizar-ordem-producao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaOpProducao();
+    const ops = Array.isArray(req.body?.ops) ? req.body.ops : [];
+    const ids = [...new Set(
+      ops.map((o) => Number(o.op_producao_id || o.id || 0)).filter((n) => n > 0)
+    )];
+    if (!ids.length) {
+      return res.json({ success: true, por_op: {} });
+    }
+
+    const { rows } = await dbQuery(
+      `SELECT id, n_op, ordem_producao
+         FROM producao."OP_producao"
+        WHERE id = ANY($1::bigint[])`,
+      [ids]
+    );
+
+    const porOp = {};
+    const faltando = [];
+    for (const row of rows) {
+      const atual = String(row.ordem_producao || '').trim();
+      if (atual) {
+        porOp[String(row.id)] = atual;
+      } else {
+        faltando.push(row);
+      }
+    }
+
+    if (faltando.length) {
+      const encontrados = await buscarOrdensProducaoPorControladores(
+        faltando.map((r) => r.n_op)
+      );
+      for (const row of faltando) {
+        const nOp = String(row.n_op || '').trim();
+        const valor = String(encontrados[nOp] || '').trim();
+        if (!valor) continue;
+        await dbQuery(
+          `UPDATE producao."OP_producao"
+              SET ordem_producao = $2
+            WHERE id = $1
+              AND (ordem_producao IS NULL OR TRIM(ordem_producao) = '')`,
+          [row.id, valor]
+        );
+        porOp[String(row.id)] = valor;
+      }
+    }
+
+    return res.json({ success: true, por_op: porOp });
+  } catch (err) {
+    console.error('[producao] sincronizar-ordem-producao:', err.message || err);
+    return res.status(500).json({ success: false, error: err.message || 'Falha ao sincronizar ordem de produção.' });
   }
 });
 

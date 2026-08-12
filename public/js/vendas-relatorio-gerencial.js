@@ -4,6 +4,8 @@
   let _data = null;
   let _textos = null;
   let _carregarAbort = null;
+  let _registrosAbort = null;
+  let _registrosRows = [];
   let _secao = 'executivo';
   const _charts = {};
   const _chartsRendered = new Set();
@@ -320,14 +322,22 @@
     const wrap = document.getElementById('vendRelGerKpis');
     if (!wrap) return;
     const cards = [
-      { label: 'Pedidos', value: kpis.total_pedidos, cor: '#1e3a5f' },
-      { label: 'Faturamento', value: MOEDA.format(kpis.valor_total || 0), cor: '#38bdf8' },
+      { label: 'Pedidos', value: kpis.total_pedidos, cor: '#1e3a5f', kpi: 'pedidos' },
+      { label: 'Faturamento', value: MOEDA.format(kpis.valor_total || 0), cor: '#38bdf8', kpi: 'faturamento' },
       { label: 'Ticket médio', value: MOEDA.format(kpis.ticket_medio || 0), cor: '#10b981' },
       { label: 'Clientes', value: kpis.clientes, cor: '#f59e0b' },
       { label: 'Estados', value: kpis.estados_atendidos, cor: '#8b5cf6' },
       { label: 'Qtd. itens', value: QTD.format(kpis.quantidade_itens || 0), cor: '#06b6d4' },
     ];
-    wrap.innerHTML = cards.map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+    wrap.innerHTML = cards.map(c => {
+      const extra = c.kpi
+        ? ` data-kpi="${c.kpi}" class="at-rel-ger-kpi is-clickable" title="Clique para ver a lista"`
+        : ' class="at-rel-ger-kpi"';
+      return `<div${extra} style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`;
+    }).join('');
+    wrap.querySelectorAll('[data-kpi]').forEach((el) => {
+      el.addEventListener('click', () => _abrirModalRegistros(el.getAttribute('data-kpi')));
+    });
   }
 
   function _chartOptsBarH() {
@@ -688,16 +698,275 @@
     _setDatas(new Date(y, mesIni, 1), new Date(y, mesIni + 3, 0));
   }
 
+  function _injetarEstilosFiltro() {
+    if (document.getElementById('vendRelGerExtraCss')) return;
+    const st = document.createElement('style');
+    st.id = 'vendRelGerExtraCss';
+    st.textContent = `
+      .vend-rel-ger-modo-btn {
+        padding: 6px 12px; border: none; background: transparent; color: #94a3b8;
+        font-size: 12px; font-weight: 700; cursor: pointer; white-space: nowrap;
+      }
+      .vend-rel-ger-modo-btn.is-active { background: #0ea5e9; color: #fff; }
+      .vend-rel-ger-modo-btn:hover:not(.is-active) { background: rgba(255,255,255,.06); color: #e2e8f0; }
+      .at-rel-ger-kpi.is-clickable { cursor: pointer; transition: box-shadow .15s, transform .15s; }
+      .at-rel-ger-kpi.is-clickable:hover { box-shadow: 0 4px 14px rgba(30,58,95,.18); transform: translateY(-1px); }
+      #vendRelGerRegistrosModal .r { text-align: right; font-variant-numeric: tabular-nums; }
+      #vendRelGerRegistrosModal tfoot td { font-weight: 800; background: #f1f5f9; }
+    `;
+    document.head.appendChild(st);
+  }
+
+  function _preencherAnos(anos) {
+    const el = document.getElementById('vendRelGerAno');
+    if (!el) return;
+    const yNow = new Date().getFullYear();
+    const set = new Set((anos || []).map(Number).filter((n) => Number.isFinite(n) && n >= 2000 && n <= 2100));
+    set.add(yNow);
+    const current = Number.parseInt(el.value, 10) || yNow;
+    const list = [...set].sort((a, b) => b - a);
+    el.innerHTML = list.map((y) => `<option value="${y}">${y}</option>`).join('');
+    el.value = list.includes(current) ? String(current) : String(yNow);
+  }
+
+  function _injetarUiFiltro() {
+    if (document.getElementById('vendRelGerModoToggle')) return;
+    const di = document.getElementById('vendRelGerDataInicio');
+    const df = document.getElementById('vendRelGerDataFim');
+    if (!di || !df) return;
+    const wrapDi = di.parentElement;
+    const wrapDf = df.parentElement;
+    const bar = wrapDi?.parentElement;
+    if (!wrapDi || !wrapDf || !bar) return;
+
+    const toggle = document.createElement('div');
+    toggle.id = 'vendRelGerModoToggle';
+    toggle.style.cssText = 'display:flex;align-items:stretch;border-radius:8px;border:1px solid #374151;overflow:hidden;flex-shrink:0;';
+    toggle.innerHTML = `
+      <button type="button" id="vendRelGerModoMesAno" class="vend-rel-ger-modo-btn is-active" title="Filtrar por mês e ano">Mês e ano</button>
+      <button type="button" id="vendRelGerModoPeriodo" class="vend-rel-ger-modo-btn" title="Filtrar por data início e data fim">Período</button>`;
+    bar.insertBefore(toggle, wrapDi);
+
+    const wrapMes = document.createElement('div');
+    wrapMes.id = 'vendRelGerWrapMesAno';
+    wrapMes.style.cssText = 'display:flex;align-items:center;gap:8px;flex-wrap:wrap;';
+    wrapMes.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label for="vendRelGerMes" style="font-size:11px;font-weight:600;color:#94a3b8;">Mês</label>
+        <select id="vendRelGerMes" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:120px;">
+          <option value="1">Janeiro</option><option value="2">Fevereiro</option><option value="3">Março</option>
+          <option value="4">Abril</option><option value="5">Maio</option><option value="6">Junho</option>
+          <option value="7">Julho</option><option value="8">Agosto</option><option value="9">Setembro</option>
+          <option value="10">Outubro</option><option value="11">Novembro</option><option value="12">Dezembro</option>
+        </select>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;">
+        <label for="vendRelGerAno" style="font-size:11px;font-weight:600;color:#94a3b8;">Ano</label>
+        <select id="vendRelGerAno" style="padding:5px 8px;border-radius:8px;border:1px solid #374151;background:#111827;color:#e5e7eb;font-size:12px;min-width:88px;"></select>
+      </div>`;
+    bar.insertBefore(wrapMes, wrapDi);
+
+    const wrapPer = document.createElement('div');
+    wrapPer.id = 'vendRelGerWrapPeriodo';
+    wrapPer.style.cssText = 'display:none;align-items:center;gap:8px;flex-wrap:wrap;';
+    bar.insertBefore(wrapPer, wrapDi);
+    wrapPer.appendChild(wrapDi);
+    wrapPer.appendChild(wrapDf);
+
+    const now = new Date();
+    const mesEl = document.getElementById('vendRelGerMes');
+    if (mesEl) mesEl.value = String(now.getMonth() + 1);
+    _preencherAnos([now.getFullYear()]);
+  }
+
+  function _injetarModalRegistros() {
+    if (document.getElementById('vendRelGerRegistrosModal')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div id="vendRelGerRegistrosModal" class="at-rel-ger-lote-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="vendRelGerRegistrosTitulo">
+        <div class="at-rel-ger-lote-modal-card">
+          <div class="at-rel-ger-lote-modal-head">
+            <div>
+              <div class="at-rel-ger-lote-modal-kicker" style="color:#0284c7;">Relatório Gerencial — Vendas</div>
+              <h3 id="vendRelGerRegistrosTitulo">Pedidos</h3>
+              <div id="vendRelGerRegistrosSub" class="at-rel-ger-lote-modal-sub"></div>
+            </div>
+            <button type="button" id="vendRelGerRegistrosFechar" class="at-rel-ger-lote-modal-close" title="Fechar" aria-label="Fechar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div id="vendRelGerRegistrosStatus" class="at-rel-ger-lote-modal-status">Carregando...</div>
+          <div class="at-rel-ger-lote-modal-toolbar">
+            <input id="vendRelGerRegistrosBusca" type="search" placeholder="Pesquisar pedido, cliente, estado ou vendedor..." autocomplete="off">
+            <span id="vendRelGerRegistrosQtd" class="at-rel-ger-lote-modal-qtd"></span>
+          </div>
+          <div class="at-rel-ger-lote-modal-body">
+            <table class="at-rel-ger-lote-modal-tbl">
+              <thead>
+                <tr>
+                  <th>Pedido</th>
+                  <th>Cliente</th>
+                  <th>Estado</th>
+                  <th>Data</th>
+                  <th>Vendedor</th>
+                  <th>Etapa</th>
+                  <th class="r">Valor</th>
+                </tr>
+              </thead>
+              <tbody id="vendRelGerRegistrosBody"></tbody>
+              <tfoot id="vendRelGerRegistrosFoot"></tfoot>
+            </table>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap.firstElementChild);
+  }
+
+  function _modoAtual() {
+    return document.getElementById('vendRelGerModoPeriodo')?.classList.contains('is-active') ? 'periodo' : 'mes_ano';
+  }
+
+  function _setModoFiltro(modo) {
+    const isPeriodo = modo === 'periodo';
+    document.getElementById('vendRelGerModoMesAno')?.classList.toggle('is-active', !isPeriodo);
+    document.getElementById('vendRelGerModoPeriodo')?.classList.toggle('is-active', isPeriodo);
+    const wrapMes = document.getElementById('vendRelGerWrapMesAno');
+    const wrapPer = document.getElementById('vendRelGerWrapPeriodo');
+    if (wrapMes) wrapMes.style.display = isPeriodo ? 'none' : 'flex';
+    if (wrapPer) wrapPer.style.display = isPeriodo ? 'flex' : 'none';
+    if (isPeriodo) {
+      const di = document.getElementById('vendRelGerDataInicio');
+      const df = document.getElementById('vendRelGerDataFim');
+      if (!di?.value || !df?.value) {
+        const ano = Number.parseInt(document.getElementById('vendRelGerAno')?.value, 10) || new Date().getFullYear();
+        const mes = Number.parseInt(document.getElementById('vendRelGerMes')?.value, 10) || (new Date().getMonth() + 1);
+        _setDatas(new Date(ano, mes - 1, 1), new Date(ano, mes, 0));
+      }
+    } else {
+      const di = document.getElementById('vendRelGerDataInicio')?.value || '';
+      const y = Number.parseInt(di.slice(0, 4), 10);
+      const m = Number.parseInt(di.slice(5, 7), 10);
+      const mesEl = document.getElementById('vendRelGerMes');
+      const anoEl = document.getElementById('vendRelGerAno');
+      if (mesEl && m >= 1 && m <= 12) mesEl.value = String(m);
+      if (anoEl && y >= 2000) {
+        if (![...anoEl.options].some((o) => o.value === String(y))) {
+          const opt = document.createElement('option');
+          opt.value = String(y);
+          opt.textContent = String(y);
+          anoEl.appendChild(opt);
+        }
+        anoEl.value = String(y);
+      }
+    }
+  }
+
+  function _filtrarRegistrosVisiveis() {
+    const q = (document.getElementById('vendRelGerRegistrosBusca')?.value || '').trim().toLowerCase();
+    if (!q) return _registrosRows;
+    return _registrosRows.filter((r) => {
+      const blob = `${r.numero_pedido || ''} ${r.cliente || ''} ${r.estado || ''} ${r.vendedor || ''} ${r.etapa || ''}`.toLowerCase();
+      return blob.includes(q);
+    });
+  }
+
+  function _renderTabelaRegistros() {
+    const body = document.getElementById('vendRelGerRegistrosBody');
+    const foot = document.getElementById('vendRelGerRegistrosFoot');
+    const qtdEl = document.getElementById('vendRelGerRegistrosQtd');
+    if (!body) return;
+    const rows = _filtrarRegistrosVisiveis();
+    if (!rows.length) {
+      body.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Nenhum registro neste filtro.</td></tr>';
+      if (foot) foot.innerHTML = '';
+      if (qtdEl) qtdEl.textContent = _registrosRows.length ? `0 de ${_registrosRows.length}` : '0 registro(s)';
+      return;
+    }
+    body.innerHTML = rows.map((r) => `
+      <tr>
+        <td class="os-id">${_esc(r.numero_pedido || r.codigo_pedido || '—')}</td>
+        <td>${_esc(r.cliente || '—')}</td>
+        <td>${_esc(r.estado || '—')}</td>
+        <td>${_esc(_fmtData(r.data))}</td>
+        <td>${_esc(r.vendedor || '—')}</td>
+        <td>${_esc(r.etapa || '—')}</td>
+        <td class="r">${MOEDA.format(r.valor_total || 0)}</td>
+      </tr>`).join('');
+    const soma = rows.reduce((s, r) => s + (Number(r.valor_total) || 0), 0);
+    if (foot) {
+      foot.innerHTML = `<tr><td colspan="6">Total (${rows.length})</td><td class="r">${MOEDA.format(soma)}</td></tr>`;
+    }
+    if (qtdEl) {
+      qtdEl.textContent = rows.length === _registrosRows.length
+        ? `${rows.length} registro(s)`
+        : `${rows.length} de ${_registrosRows.length}`;
+    }
+  }
+
+  function _fecharModalRegistros() {
+    const modal = document.getElementById('vendRelGerRegistrosModal');
+    if (modal) modal.style.display = 'none';
+    if (_registrosAbort) _registrosAbort.abort();
+  }
+
+  async function _abrirModalRegistros(tipo) {
+    _injetarModalRegistros();
+    const modal = document.getElementById('vendRelGerRegistrosModal');
+    const titulo = document.getElementById('vendRelGerRegistrosTitulo');
+    const sub = document.getElementById('vendRelGerRegistrosSub');
+    const statusEl = document.getElementById('vendRelGerRegistrosStatus');
+    const busca = document.getElementById('vendRelGerRegistrosBusca');
+    if (!modal) return;
+    const isFat = tipo === 'faturamento';
+    if (titulo) titulo.textContent = isFat ? 'Faturamento' : 'Pedidos';
+    if (sub) sub.textContent = _data?.periodo ? `Período: ${_data.periodo}` : 'Carregando...';
+    if (busca) busca.value = '';
+    _registrosRows = [];
+    _renderTabelaRegistros();
+    modal.style.display = 'flex';
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando registros...'; }
+
+    if (_registrosAbort) _registrosAbort.abort();
+    _registrosAbort = new AbortController();
+    try {
+      const qs = _filtrosQueryParams();
+      const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
+        credentials: 'include',
+        signal: _registrosAbort.signal,
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar registros.');
+      _registrosRows = data.registros || [];
+      if (sub) {
+        const extra = data.truncated ? ' · lista limitada aos 5.000 primeiros' : '';
+        sub.textContent = `${data.periodo || _data?.periodo || '—'} · ${data.total_pedidos || 0} pedido(s) · ${MOEDA.format(data.valor_total || 0)}${extra}`;
+      }
+      _renderTabelaRegistros();
+      if (statusEl) statusEl.style.display = 'none';
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = err.message || 'Erro.'; }
+    }
+  }
+
   function _filtrosQueryParams() {
     const qs = new URLSearchParams();
     qs.set('modo', 'mes');
     qs.set('etapa', 'entregue');
-    const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
-    const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
-    if (di) qs.set('data_inicio', di);
-    if (df) qs.set('data_fim', df);
+    if (_modoAtual() === 'periodo') {
+      const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
+      const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
+      if (di) qs.set('data_inicio', di);
+      if (df) qs.set('data_fim', df);
+    } else {
+      const ano = document.getElementById('vendRelGerAno')?.value?.trim();
+      const mes = document.getElementById('vendRelGerMes')?.value?.trim();
+      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim();
+      if (ano) qs.set('ano', ano);
+      if (tri) qs.set('trimestre', tri);
+      else if (mes) qs.set('mes', mes);
+    }
     [
-      ['vendRelGerTrimestre', 'trimestre'],
       ['vendRelGerVendedor', 'vendedor'],
       ['vendRelGerFamilia', 'familia'],
       ['vendRelGerEstado', 'estado'],
@@ -706,6 +975,10 @@
       const v = document.getElementById(id)?.value?.trim();
       if (v) qs.set(key, v);
     });
+    if (_modoAtual() === 'periodo') {
+      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim();
+      if (tri) qs.set('trimestre', tri);
+    }
     return qs;
   }
 
@@ -718,6 +991,7 @@
       _preencherSelect('vendRelGerFamilia', data.familias || [], (f) => f.codigo, (f) => f.descricao);
       _preencherSelect('vendRelGerEstado', data.estados || [], (e) => e, (e) => e);
       _preencherSelect('vendRelGerTipo', data.tipos || [], (t) => t.codigo, (t) => t.label);
+      _preencherAnos(data.anos || []);
     } catch (_) { /* silencioso */ }
   }
 
@@ -878,6 +1152,16 @@
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
+      _injetarEstilosFiltro();
+      _injetarUiFiltro();
+      _injetarModalRegistros();
+      _setModoFiltro('mes_ano');
+      document.getElementById('vendRelGerModoMesAno')?.addEventListener('click', () => _setModoFiltro('mes_ano'));
+      document.getElementById('vendRelGerModoPeriodo')?.addEventListener('click', () => _setModoFiltro('periodo'));
+      document.getElementById('vendRelGerMes')?.addEventListener('change', () => {
+        const tri = document.getElementById('vendRelGerTrimestre');
+        if (tri) tri.value = '';
+      });
       document.getElementById('vendRelGerDataInicio')?.addEventListener('change', () => {
         const tri = document.getElementById('vendRelGerTrimestre');
         if (tri) tri.value = '';
@@ -887,11 +1171,22 @@
         if (tri) tri.value = '';
       });
       document.getElementById('vendRelGerTrimestre')?.addEventListener('change', () => {
-        _aplicarTrimestreNasDatas();
+        if (_modoAtual() === 'periodo') _aplicarTrimestreNasDatas();
       });
       document.getElementById('vendRelGerAplicarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => window.print());
+
+      document.getElementById('vendRelGerRegistrosFechar')?.addEventListener('click', _fecharModalRegistros);
+      document.getElementById('vendRelGerRegistrosModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerRegistrosModal') _fecharModalRegistros();
+      });
+      document.getElementById('vendRelGerRegistrosBusca')?.addEventListener('input', _renderTabelaRegistros);
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('vendRelGerRegistrosModal')?.style.display === 'flex') {
+          _fecharModalRegistros();
+        }
+      });
 
       document.getElementById('vendRelGerConfigBtn')?.addEventListener('click', () => _abrirModal('vendRelGerConfigModal'));
       document.getElementById('vendRelGerConfigFechar')?.addEventListener('click', () => _fecharModal('vendRelGerConfigModal'));

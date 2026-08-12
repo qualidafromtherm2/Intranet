@@ -948,6 +948,63 @@ router.post('/ocorrencias-por-ops', requireAuth, express.json(), async (req, res
   }
 });
 
+// GET /api/qualidade/ri-check/ocorrencias — todas as falhas detectadas (mais nova → mais antiga)
+router.get('/ocorrencias', requireAuth, async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const q = String(req.query?.q || '').trim();
+    const status = String(req.query?.status || '').trim().toLowerCase();
+    const limit = Math.min(Math.max(Number(req.query?.limit) || 400, 1), 1000);
+    const offset = Math.max(Number(req.query?.offset) || 0, 0);
+
+    const params = [];
+    const whereBusca = [];
+    if (q) {
+      params.push(`%${q}%`);
+      const i = params.length;
+      whereBusca.push(`(
+        COALESCE(falha_detectada, '') ILIKE $${i}
+        OR COALESCE(numero_op, '') ILIKE $${i}
+        OR COALESCE(codigo_produto, '') ILIKE $${i}
+        OR COALESCE(usuario, '') ILIKE $${i}
+      )`);
+    }
+    const whereBuscaSql = whereBusca.length ? `WHERE ${whereBusca.join(' AND ')}` : '';
+
+    const whereLista = [...whereBusca];
+    if (status === 'aberta') whereLista.push(`COALESCE(corrigido, false) = false`);
+    if (status === 'corrigida') whereLista.push(`COALESCE(corrigido, false) = true`);
+    const whereListaSql = whereLista.length ? `WHERE ${whereLista.join(' AND ')}` : '';
+
+    const { rows: countRows } = await dbQuery(
+      `SELECT
+          COUNT(*)::int AS total,
+          COUNT(*) FILTER (WHERE COALESCE(corrigido, false) = false)::int AS aberta,
+          COUNT(*) FILTER (WHERE COALESCE(corrigido, false) = true)::int AS corrigida
+         FROM qualidade."RI_NIQ"
+        ${whereBuscaSql}`,
+      params
+    );
+
+    const listParams = params.slice();
+    listParams.push(limit, offset);
+    const { rows } = await dbQuery(
+      `SELECT ${NIQ_SELECT}
+         FROM qualidade."RI_NIQ"
+        ${whereListaSql}
+        ORDER BY created_at DESC, id DESC
+        LIMIT $${listParams.length - 1} OFFSET $${listParams.length}`,
+      listParams
+    );
+
+    const contagens = countRows[0] || { total: 0, aberta: 0, corrigida: 0 };
+    return res.json({ ok: true, ocorrencias: rows, contagens, limit, offset });
+  } catch (err) {
+    console.error('[qualidade/ri-check/ocorrencias GET]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao listar ocorrências.' });
+  }
+});
+
 // GET /api/qualidade/ri-check/pendentes — OPs com checkbox RI ativo em Kanban_programacao
 router.get('/pendentes', requireAuth, async (_req, res) => {
   try {
