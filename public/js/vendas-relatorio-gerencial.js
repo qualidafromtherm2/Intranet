@@ -1393,6 +1393,257 @@
     }
   }
 
+  const CHART_KEYS_POR_SECAO = {
+    executivo: ['etapa', 'valorEstado'],
+    geografico: ['estado', 'estadoDonut'],
+    familias: ['familia'],
+    clientes: ['cliente'],
+    vendedores: ['vendedor'],
+    evolucao: ['evol', 'evolPed'],
+    pareto: ['pareto'],
+    itens: ['itens'],
+  };
+
+  function _canvasParaImg(canvas) {
+    if (!canvas) return '';
+    try {
+      const chartInst = typeof Chart !== 'undefined' ? Chart.getChart(canvas) : null;
+      if (chartInst) {
+        try {
+          chartInst.options.animation = false;
+          chartInst.resize();
+          chartInst.update('none');
+        } catch (_) { /* segue */ }
+      }
+      if (!canvas.width || !canvas.height) return '';
+      return canvas.toDataURL('image/png');
+    } catch (_) {
+      return '';
+    }
+  }
+
+  async function _prepararSecaoPdf(sec) {
+    if (!sec || !_data) return;
+    _secao = sec;
+    document.querySelectorAll('#vendRelGerNav .at-rel-ger-nav-btn').forEach((b) => {
+      b.classList.toggle('is-active', b.dataset.sec === sec);
+    });
+    document.querySelectorAll('#vendRelGerPages .at-rel-ger-page').forEach((p) => {
+      p.classList.toggle('is-active', p.dataset.sec === sec);
+    });
+    (CHART_KEYS_POR_SECAO[sec] || []).forEach(_destroyChart);
+    _chartsRendered.delete(sec);
+    _renderChartsSecao(sec, _data);
+    await new Promise((r) => setTimeout(r, 160));
+  }
+
+  function _pdfCss() {
+    return `
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 10.5px; color: #1e293b; background: #fff; }
+  .pdf-page { page-break-after: always; padding: 14px 22px 12px; display: flex; flex-direction: column; min-height: 100vh; }
+  .pdf-page:last-child { page-break-after: auto; }
+  .pdf-hdr { display: grid; grid-template-columns: 1fr 2fr 1fr; gap: 10px; align-items: center; margin-bottom: 6px; }
+  .pdf-brand { display: flex; gap: 8px; align-items: center; }
+  .pdf-logo { width: 32px; height: 32px; border-radius: 8px; background: #1e3a5f; color: #fff; font-weight: 900; display: flex; align-items: center; justify-content: center; font-size: 12px; }
+  .pdf-name { font-size: 12px; font-weight: 800; color: #1e3a5f; }
+  .pdf-sub { font-size: 7px; color: #64748b; letter-spacing: .06em; }
+  .pdf-title { text-align: center; }
+  .pdf-type { font-size: 9px; font-weight: 800; color: #1e3a5f; text-transform: uppercase; }
+  .pdf-per { font-size: 14px; font-weight: 900; color: #0284c7; }
+  .pdf-meta { font-size: 8px; color: #475569; text-align: right; line-height: 1.45; }
+  .pdf-bar { height: 3px; background: linear-gradient(90deg,#1e3a5f,#0ea5e9,#38bdf8); border-radius: 2px; margin-bottom: 8px; }
+  .sec { background: #1e3a5f; color: #fff; padding: 6px 10px; border-radius: 6px; font-weight: 800; font-size: 11px; margin: 8px 0; }
+  .kpis { display: grid; grid-template-columns: repeat(3,1fr); gap: 6px; margin-bottom: 8px; }
+  .kpi { border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; background: #f8fafc; }
+  .kpi .lbl { font-size: 7px; color: #64748b; text-transform: uppercase; font-weight: 700; }
+  .kpi .val { font-size: 13px; font-weight: 900; color: #1e3a5f; margin-top: 1px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+  .box { flex: 1; min-width: 180px; border: 1px solid #e2e8f0; border-radius: 6px; padding: 6px 8px; page-break-inside: avoid; }
+  .box h3 { font-size: 10px; color: #1e3a5f; margin-bottom: 4px; }
+  .chart-img { max-width: 100%; max-height: 200px; object-fit: contain; display: block; margin: 0 auto; }
+  .chart-img.wide { max-height: 230px; }
+  table { width: 100%; border-collapse: collapse; font-size: 9px; margin-bottom: 6px; }
+  th { background: #1e3a5f; color: #fff; padding: 4px 6px; text-align: left; }
+  td { padding: 3px 6px; border-bottom: 1px solid #e2e8f0; }
+  th.r, td.r { text-align: right; }
+  ul { padding-left: 14px; margin: 6px 0; line-height: 1.45; }
+  .pdf-ftr { margin-top: auto; padding-top: 8px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8px; color: #64748b; }
+  .pdf-slogan { font-style: italic; color: #1e3a5f; font-weight: 600; }
+  .pdf-pg { font-weight: 700; color: #0284c7; }
+  @page { size: A4; margin: 10mm 8mm; }
+`;
+  }
+
+  function _pdfHeader(periodo, etapa) {
+    const etapaTxt = etapa ? ` · ${_esc(etapa)}` : '';
+    return `
+      <div class="pdf-hdr">
+        <div class="pdf-brand"><div class="pdf-logo">FT</div><div><div class="pdf-name">FROMTHERM</div><div class="pdf-sub">BOMBAS DE CALOR</div></div></div>
+        <div class="pdf-title"><div class="pdf-type">Relatório Gerencial de Vendas</div><div class="pdf-per">${_esc(periodo)}${etapaTxt}</div></div>
+        <div class="pdf-meta"><div><b>Departamento:</b> Comercial / Vendas</div><div><b>Data:</b> ${_esc(_fmtDataGeracao())}</div><div><b>Versão:</b> 1.0</div></div>
+      </div>
+      <div class="pdf-bar"></div>`;
+  }
+
+  function _pdfFooter(pg, total) {
+    return `<div class="pdf-ftr"><div class="pdf-slogan">Qualidade que transforma. Conforto que dura.</div><div class="pdf-pg">Página ${pg} de ${total}</div></div>`;
+  }
+
+  function _imgBox(titulo, src, wide) {
+    if (!src) return '';
+    return `<div class="box"><h3>${_esc(titulo)}</h3><img class="chart-img${wide ? ' wide' : ''}" src="${src}"></div>`;
+  }
+
+  async function _exportarPdf() {
+    if (!_data) {
+      alert('Carregue o relatório antes de exportar.');
+      return;
+    }
+    const btn = document.getElementById('vendRelGerPdfBtn');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Gerando...';
+    }
+    const secaoSalva = _secao;
+    try {
+      const d = _data;
+      const kpis = d.kpis || {};
+      const periodo = d.periodo || '—';
+      const etapa = d.etapa || '';
+      const hdr = () => _pdfHeader(periodo, etapa);
+      const imgs = {};
+
+      await _prepararSecaoPdf('executivo');
+      imgs.etapa = _canvasParaImg(document.getElementById('vendRelGerChartEtapa'));
+      imgs.valorEstado = _canvasParaImg(document.getElementById('vendRelGerChartValorEstado'));
+
+      await _prepararSecaoPdf('geografico');
+      imgs.estado = _canvasParaImg(document.getElementById('vendRelGerChartEstado'));
+      imgs.estadoDonut = _canvasParaImg(document.getElementById('vendRelGerChartEstadoDonut'));
+
+      await _prepararSecaoPdf('familias');
+      imgs.familia = _canvasParaImg(document.getElementById('vendRelGerChartFamilia'));
+
+      await _prepararSecaoPdf('clientes');
+      imgs.cliente = _canvasParaImg(document.getElementById('vendRelGerChartCliente'));
+
+      await _prepararSecaoPdf('vendedores');
+      imgs.vendedor = _canvasParaImg(document.getElementById('vendRelGerChartVendedor'));
+
+      await _prepararSecaoPdf('evolucao');
+      imgs.evol = _canvasParaImg(document.getElementById('vendRelGerChartEvol'));
+      imgs.evolPed = _canvasParaImg(document.getElementById('vendRelGerChartEvolPedidos'));
+
+      await _prepararSecaoPdf('pareto');
+      imgs.pareto = _canvasParaImg(document.getElementById('vendRelGerChartPareto'));
+
+      await _prepararSecaoPdf('itens');
+      imgs.itens = _canvasParaImg(document.getElementById('vendRelGerChartItens'));
+
+      // Restaura seção que o usuário estava vendo
+      _trocarSecao(secaoSalva);
+      if (_data && !_chartsRendered.has(secaoSalva)) _renderChartsSecao(secaoSalva, _data);
+
+      const kpiHtml = [
+        ['Pedidos', kpis.total_pedidos],
+        ['Faturamento', MOEDA.format(kpis.valor_total || 0)],
+        ['Ticket médio', MOEDA.format(kpis.ticket_medio || 0)],
+        ['Clientes', kpis.clientes],
+        ['Estados', kpis.estados_atendidos],
+        ['Qtd. itens', QTD.format(kpis.quantidade_itens || 0)],
+      ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
+
+      const famTbl = (d.por_familia || []).slice(0, 15).map((r) =>
+        `<tr><td>${_esc(r.familia)}</td><td class="r">${QTD.format(r.quantidade || 0)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="3">—</td></tr>';
+      const cliTbl = (d.por_cliente || []).slice(0, 15).map((r) =>
+        `<tr><td>${_esc(r.cliente)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="3">—</td></tr>';
+      const vendTbl = (d.por_vendedor || []).slice(0, 15).map((r) =>
+        `<tr><td>${_esc(r.vendedor)}</td><td class="r">${r.total_pedidos}</td><td class="r">${r.clientes}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${MOEDA.format(r.ticket_medio || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="5">—</td></tr>';
+      const paretoTbl = (d.pareto || []).slice(0, 15).map((r) =>
+        `<tr><td>${_esc(r.familia)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`
+      ).join('') || '<tr><td colspan="4">—</td></tr>';
+      const finTbl = (d.financeiro || []).slice(0, 20).map((r) =>
+        `<tr><td>${_esc(r.numero_pedido || r.codigo_pedido)}</td><td>${_esc(r.cliente)}</td><td>${_esc(r.estado)}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
+      ).join('') || '<tr><td colspan="5">—</td></tr>';
+
+      const textos = _coletarTextosForm();
+      const planoHtml = (textos.plano_acao || []).filter((r) => r.acao || r.descricao).map((r) =>
+        `<tr><td>${_esc(r.acao)}</td><td>${_esc(r.descricao)}</td><td>${_esc(r.responsavel)}</td><td>${_esc(r.prazo)}</td><td>${_esc((r.prioridade || '').toUpperCase())}</td></tr>`
+      ).join('') || '<tr><td colspan="5">Sem ações cadastradas.</td></tr>';
+      const criticos = _linhasParaLista(textos.conclusao_pontos_criticos).map((l) => `<li>${_esc(l)}</li>`).join('') || '<li>—</li>';
+      const oport = _linhasParaLista(textos.conclusao_oportunidades).map((l) => `<li>${_esc(l)}</li>`).join('') || '<li>—</li>';
+
+      const TOTAL = 6;
+      const pg = (n) => _pdfFooter(n, TOTAL);
+      const pages = [
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Dashboard Executivo</div>
+          <div class="kpis">${kpiHtml}</div>
+          <div class="row">${_imgBox('Pedidos por Etapa', imgs.etapa)}${_imgBox('Valor por Estado', imgs.valorEstado)}</div>
+          <div class="sec">Distribuição Geográfica</div>
+          <div class="row">${_imgBox('Valor por Estado', imgs.estado)}${_imgBox('Participação por Estado', imgs.estadoDonut)}</div>
+          ${pg(1)}</div>`,
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Famílias de Produto</div>
+          <div class="row">${_imgBox('Faturamento por Família', imgs.familia)}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Família</th><th class="r">Qtd</th><th class="r">Valor</th></tr></thead><tbody>${famTbl}</tbody></table></div></div>
+          <div class="sec">Principais Clientes</div>
+          <div class="row">${_imgBox('Top Clientes', imgs.cliente)}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Cliente</th><th class="r">Pedidos</th><th class="r">Valor</th></tr></thead><tbody>${cliTbl}</tbody></table></div></div>
+          ${pg(2)}</div>`,
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Vendedores</div>
+          <div class="row">${_imgBox('Ranking por Faturamento', imgs.vendedor)}<div class="box"><h3>Tabela</h3><table><thead><tr><th>Vendedor</th><th class="r">Pedidos</th><th class="r">Clientes</th><th class="r">Valor</th><th class="r">Ticket</th></tr></thead><tbody>${vendTbl}</tbody></table></div></div>
+          <div class="sec">Evolução no Período</div>
+          <div class="row">${_imgBox('Faturamento', imgs.evol)}${_imgBox('Pedidos', imgs.evolPed)}</div>
+          ${pg(3)}</div>`,
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Pareto 80/20 — Famílias</div>
+          ${_imgBox('Pareto por Faturamento', imgs.pareto, true)}
+          <table><thead><tr><th>Família</th><th class="r">Valor</th><th class="r">%</th><th class="r">% Acum.</th></tr></thead><tbody>${paretoTbl}</tbody></table>
+          <div class="sec">Análise Financeira — Top Pedidos</div>
+          <table><thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Data</th><th class="r">Valor</th></tr></thead><tbody>${finTbl}</tbody></table>
+          ${pg(4)}</div>`,
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Análise de Itens</div>
+          ${_imgBox('Itens por mês de NF e família', imgs.itens, true)}
+          <p style="margin-top:8px;color:#64748b;font-size:10px;">Período ${ _esc(periodo) } · ${QTD.format(kpis.quantidade_itens || 0)} item(ns) no relatório.</p>
+          ${pg(5)}</div>`,
+        `<div class="pdf-page">${hdr()}
+          <div class="sec">Plano de Ação</div>
+          <table><thead><tr><th>Ação</th><th>Descrição</th><th>Responsável</th><th>Prazo</th><th>Prioridade</th></tr></thead><tbody>${planoHtml}</tbody></table>
+          <div class="sec">Conclusão Executiva</div>
+          <div class="box" style="margin-bottom:8px;"><h3>Resumo</h3><p>${_esc(textos.conclusao_resumo || '—')}</p></div>
+          <div class="row">
+            <div class="box"><h3>Pontos críticos</h3><ul>${criticos}</ul></div>
+            <div class="box"><h3>Oportunidades</h3><ul>${oport}</ul></div>
+          </div>
+          ${pg(6)}</div>`,
+      ].join('');
+
+      const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8">
+<title>Relatório Gerencial Vendas — ${_esc(periodo)}</title>
+<style>${_pdfCss()}</style></head><body>${pages}
+<script>window.onload=function(){setTimeout(function(){window.print();},500);};</script>
+</body></html>`;
+
+      const w = window.open('', '_blank');
+      if (!w) throw new Error('Pop-up bloqueado. Permita pop-ups neste site para exportar o PDF.');
+      w.document.open();
+      w.document.write(html);
+      w.document.close();
+    } catch (err) {
+      alert('Erro ao exportar PDF: ' + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-file-pdf"></i> Exportar PDF';
+      }
+    }
+  }
+
   window._iniciarRelatorioGerencialVendas = function () {
     if (!_init) {
       _init = true;
@@ -1412,7 +1663,7 @@
       });
       document.getElementById('vendRelGerAplicarBtn')?.addEventListener('click', _carregar);
       document.getElementById('vendRelGerAtualizarBtn')?.addEventListener('click', _carregar);
-      document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => window.print());
+      document.getElementById('vendRelGerPdfBtn')?.addEventListener('click', () => { _exportarPdf(); });
 
       document.getElementById('vendRelGerRegistrosFechar')?.addEventListener('click', _fecharModalRegistros);
       document.getElementById('vendRelGerRegistrosModal')?.addEventListener('click', (e) => {
