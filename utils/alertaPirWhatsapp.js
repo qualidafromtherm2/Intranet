@@ -218,16 +218,8 @@ async function notificarEntradaListaPir(itens) {
     return { ok: false, reason: 'whatsapp_nao_configurado' };
   }
 
-  const idsNovos = await reservarEnvios(lista.map((it) => it.id));
-  if (!idsNovos.length) {
-    console.log(TAG, `Já alertado anteriormente: ids=${lista.map((i) => i.id).join(',')}`);
-    return { ok: true, skipped: true, reason: 'ja_enviado' };
-  }
-
-  const paraEnviar = lista.filter((it) => idsNovos.includes(it.id));
-  const mensagem = montarMensagemItens(paraEnviar);
-  if (!mensagem) return { ok: false, reason: 'sem_mensagem' };
-
+  // Preferência e destinatários ANTES de reservar — senão o item fica
+  // marcado como enviado sem ninguém ter recebido (opt-in desligado).
   const destinatariosCargo = await listarSupervisoresQualidade();
   if (!destinatariosCargo.length) {
     console.warn(TAG, `Nenhum telefone para funcao_id=${FUNCAO_ID_DESTINO}`);
@@ -245,6 +237,16 @@ async function notificarEntradaListaPir(itens) {
     console.warn(TAG, 'Phone Number ID não encontrado.');
     return { ok: false, reason: 'sem_phone_number_id' };
   }
+
+  const idsNovos = await reservarEnvios(lista.map((it) => it.id));
+  if (!idsNovos.length) {
+    console.log(TAG, `Já alertado anteriormente: ids=${lista.map((i) => i.id).join(',')}`);
+    return { ok: true, skipped: true, reason: 'ja_enviado' };
+  }
+
+  const paraEnviar = lista.filter((it) => idsNovos.includes(it.id));
+  const mensagem = montarMensagemItens(paraEnviar);
+  if (!mensagem) return { ok: false, reason: 'sem_mensagem' };
 
   const enviados = [];
   const vistos = new Set();

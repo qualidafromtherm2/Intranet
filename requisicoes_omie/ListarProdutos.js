@@ -192,6 +192,155 @@ function getListaSearchTerm() {
   return (document.getElementById('codeFilter')?.value || '').trim();
 }
 
+/** Extrai termo de busca a partir do conteúdo do QR (etiqueta: COD|DESC|LOTE|IDxxx). */
+function extrairTermoBuscaQrLista(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (s.includes('|')) {
+    const codigo = s.split('|')[0].trim();
+    if (codigo) return codigo;
+  }
+  return s;
+}
+
+function fecharListaProdutosQrScanner() {
+  const overlay = document.getElementById('listaProdutosQrOverlay');
+  const stream = overlay?.__stream || null;
+  if (overlay?.__interval) {
+    clearInterval(overlay.__interval);
+    overlay.__interval = null;
+  }
+  if (stream) {
+    try { stream.getTracks().forEach(t => t.stop()); } catch (_) {}
+  }
+  overlay?.remove();
+}
+
+function aplicarBuscaListaPorQr(raw) {
+  const termo = extrairTermoBuscaQrLista(raw);
+  if (!termo) return false;
+  const input = document.getElementById('codeFilter');
+  if (!input) return false;
+  input.value = termo;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  const clearBtn = document.getElementById('clearSearchBtn');
+  if (clearBtn) clearBtn.style.display = 'block';
+  return true;
+}
+
+async function abrirListaProdutosQrScanner() {
+  fecharListaProdutosQrScanner();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'listaProdutosQrOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:12000;background:rgba(0,0,0,.88);display:flex;align-items:center;justify-content:center;padding:12px;';
+  overlay.innerHTML = `
+    <div style="background:#1e293b;border:1px solid #334155;border-radius:14px;width:min(420px,96vw);overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.6);">
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 18px;background:#0f172a;border-bottom:1px solid #334155;">
+        <div style="display:flex;align-items:center;gap:8px;">
+          <i class="fa-solid fa-qrcode" style="color:#34d399;font-size:1.1rem;"></i>
+          <span style="font-weight:700;color:#f1f5f9;font-size:.95rem;">Ler QR Code</span>
+        </div>
+        <button type="button" id="listaProdutosQrFechar" style="background:none;border:none;color:#94a3b8;font-size:1.4rem;cursor:pointer;line-height:1;" aria-label="Fechar">&times;</button>
+      </div>
+      <div style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">
+        <video id="listaProdutosQrVideo" autoplay playsinline muted style="width:100%;height:100%;object-fit:contain;display:block;background:#000;"></video>
+        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">
+          <div id="listaProdutosQrMira" style="width:200px;height:200px;border:3px solid rgba(52,211,153,.85);border-radius:12px;box-shadow:0 0 0 3000px rgba(0,0,0,.38);"></div>
+        </div>
+      </div>
+      <div id="listaProdutosQrStatus" style="padding:12px 18px;font-size:.85rem;color:#94a3b8;text-align:center;min-height:44px;">Iniciando câmera...</div>
+      <div style="padding:0 16px 16px;display:flex;gap:8px;">
+        <input id="listaProdutosQrManual" type="text" placeholder="Ou digite/cole o código..."
+          style="flex:1;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e2e8f0;font-size:13px;">
+        <button id="listaProdutosQrOk" type="button"
+          style="background:#059669;color:#fff;border:none;border-radius:8px;padding:9px 14px;font-weight:700;cursor:pointer;white-space:nowrap;">OK</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  const statusEl = overlay.querySelector('#listaProdutosQrStatus');
+  const video = overlay.querySelector('#listaProdutosQrVideo');
+  const mira = overlay.querySelector('#listaProdutosQrMira');
+  const manualInput = overlay.querySelector('#listaProdutosQrManual');
+  let processado = false;
+
+  const processar = (valor) => {
+    if (processado) return;
+    const ok = aplicarBuscaListaPorQr(valor);
+    if (!ok) {
+      if (statusEl) {
+        statusEl.textContent = 'Código vazio. Tente novamente.';
+        statusEl.style.color = '#f87171';
+      }
+      return;
+    }
+    processado = true;
+    if (mira) mira.style.borderColor = '#4ade80';
+    if (statusEl) {
+      statusEl.textContent = 'Código lido. Filtrando lista...';
+      statusEl.style.color = '#4ade80';
+    }
+    setTimeout(() => fecharListaProdutosQrScanner(), 250);
+  };
+
+  overlay.querySelector('#listaProdutosQrFechar')?.addEventListener('click', fecharListaProdutosQrScanner);
+  overlay.addEventListener('click', (ev) => { if (ev.target === overlay) fecharListaProdutosQrScanner(); });
+  overlay.querySelector('#listaProdutosQrOk')?.addEventListener('click', () => processar(manualInput?.value));
+  manualInput?.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      processar(manualInput.value);
+    }
+  });
+
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+      audio: false
+    });
+    overlay.__stream = stream;
+    if (video) {
+      video.srcObject = stream;
+      await video.play().catch(() => {});
+    }
+    if (statusEl) {
+      statusEl.textContent = 'Aponte a câmera para o QR Code do produto.';
+      statusEl.style.color = '#94a3b8';
+    }
+  } catch (_) {
+    if (statusEl) {
+      statusEl.textContent = 'Câmera indisponível. Digite o código abaixo.';
+      statusEl.style.color = '#f59e0b';
+    }
+    setTimeout(() => manualInput?.focus(), 100);
+    return;
+  }
+
+  if (!('BarcodeDetector' in window)) {
+    if (statusEl) {
+      statusEl.textContent = 'Leitura automática indisponível neste navegador. Digite o código abaixo.';
+      statusEl.style.color = '#f59e0b';
+    }
+    setTimeout(() => manualInput?.focus(), 100);
+    return;
+  }
+
+  const detector = new BarcodeDetector({ formats: ['qr_code', 'data_matrix'] });
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d');
+  overlay.__interval = setInterval(async () => {
+    if (processado || !video || video.readyState < 2) return;
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0);
+    try {
+      const barcodes = await detector.detect(canvas);
+      if (barcodes.length > 0) processar(barcodes[0].rawValue);
+    } catch (_) { /* frame */ }
+  }, 300);
+}
+
 function deveMostrarSolicitacaoCompraCard() {
   return getListaSearchTerm().length > 0;
 }
@@ -872,6 +1021,14 @@ export async function initListarProdutosUI(
     
     // Atualiza visibilidade inicial
     updateClearButton();
+  }
+
+  const listaQrBtn = document.getElementById('listaProdutosQrBtn');
+  if (listaQrBtn && !listaQrBtn.__boundListaQr) {
+    listaQrBtn.__boundListaQr = true;
+    listaQrBtn.addEventListener('click', () => {
+      void abrirListaProdutosQrScanner();
+    });
   }
 
   populateFilters();
