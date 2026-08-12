@@ -1771,6 +1771,9 @@ app.set('sseBroadcast', sseBroadcast);
 
 // ============================================================================
 app.post('/api/users/:id/permissions/override', express.json(), async (req, res) => {
+  if (!(await usuarioTemPermissaoNav(req.session?.user?.id, 'side:rh:cad-colab'))) {
+    return res.status(403).json({ error: 'Sem permissão' });
+  }
   const { id } = req.params;
   const { permissions, overrides } = req.body || {};
 
@@ -1814,6 +1817,9 @@ app.post('/api/users/:id/permissions/override', express.json(), async (req, res)
 
 // Resetar senha para 123 (provisória)
 app.post('/api/users/:id/password/reset', express.json(), async (req, res) => {
+  if (!(await usuarioTemPermissaoNav(req.session?.user?.id, 'side:rh:cad-colab'))) {
+    return res.status(403).json({ error: 'Sem permissão' });
+  }
   const { id } = req.params;
   try {
     await pool.query(
@@ -1832,6 +1838,9 @@ app.post('/api/users/:id/password/reset', express.json(), async (req, res) => {
 
 
 app.get('/api/users/:id/permissions', async (req,res)=>{
+  if (!(await usuarioTemPermissaoNav(req.session?.user?.id, 'side:rh:cad-colab'))) {
+    return res.status(403).json({ error: 'Sem permissão' });
+  }
   const { id } = req.params;
   try {
     const q = await pool.query(`
@@ -6433,6 +6442,9 @@ function ensureLoggedIn(req, res, next) {
 
 app.post('/api/nav/sync', ensureLoggedIn, async (req, res) => {
   try {
+    if (!(await usuarioTemPermissaoNav(req.session?.user?.id, 'side:rh:cad-colab'))) {
+      return res.status(403).json({ error: 'Sem permissão' });
+    }
     const { nodes } = req.body || {};
     if (!Array.isArray(nodes) || nodes.length === 0) {
       return res.json({ ok: true, updated: 0 });
@@ -11934,8 +11946,26 @@ const etiquetasRoot = path.join(__dirname, 'etiquetas');   // raiz única
 fs.mkdirSync(path.join(etiquetasRoot, 'Expedicao',  'Printed'), { recursive: true });
 fs.mkdirSync(path.join(etiquetasRoot, 'Recebimento', 'Printed'), { recursive: true });
 
+// 🔒 Anti path-traversal: "tipo"/"file"/"id" vêm do body/params e viram caminho
+// em disco. Sem validar, "../.." escapa da pasta de etiquetas.
+function tipoEtiquetaSeguro(tipo) {
+  const t = String(tipo || 'Expedicao').trim();
+  if (!/^[A-Za-z0-9 _-]{1,40}$/.test(t)) throw new Error('Tipo de etiqueta inválido');
+  return t;
+}
+function nomeArquivoEtiquetaSeguro(nome) {
+  const base = path.basename(String(nome || ''));
+  if (!base || base === '.' || base === '..' || /[\\/]/.test(base)) throw new Error('Nome de arquivo inválido');
+  return base;
+}
+function idEtiquetaSeguro(id) {
+  const s = String(id || '').trim();
+  if (!/^[A-Za-z0-9._-]{1,80}$/.test(s) || s.includes('..')) throw new Error('ID de etiqueta inválido');
+  return s;
+}
+
 function getDirs(tipo = 'Expedicao') {
-  const dirTipo   = path.join(etiquetasRoot, tipo);                // p.ex. …/Expedicao
+  const dirTipo   = path.join(etiquetasRoot, tipoEtiquetaSeguro(tipo)); // p.ex. …/Expedicao
   const dirPrint  = path.join(dirTipo,    'Printed');              // …/Expedicao/Printed
   fs.mkdirSync(dirPrint, { recursive: true });
   return { dirTipo, dirPrint };
@@ -19274,10 +19304,18 @@ app.post('/api/etiquetas/gravar', express.json(), (req, res) => {
   const { file, zpl, tipo = 'Teste' } = req.body || {};
   if (!file || !zpl) return res.status(400).json({ error: 'faltam campos' });
 
-  const pasta = path.join(__dirname, 'etiquetas', tipo);
+  let tipoSafe, fileSafe;
+  try {
+    tipoSafe = tipoEtiquetaSeguro(tipo);
+    fileSafe = nomeArquivoEtiquetaSeguro(file);
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+
+  const pasta = path.join(etiquetasRoot, tipoSafe);
   if (!fs.existsSync(pasta)) fs.mkdirSync(pasta, { recursive: true });
 
-  fs.writeFileSync(path.join(pasta, file), zpl.trim(), 'utf8');
+  fs.writeFileSync(path.join(pasta, fileSafe), zpl.trim(), 'utf8');
   res.json({ ok: true });
 });
 
@@ -19336,7 +19374,9 @@ app.post('/api/etiquetas/salvar-db', express.json(), async (req, res) => {
    3) Marca como impressa (move para …/Printed)
    ============================================================================ */
 app.post('/api/etiquetas/:id/printed', (req, res) => {
-  const id = req.params.id;
+  let id;
+  try { id = idEtiquetaSeguro(req.params.id); }
+  catch (e) { return res.status(400).json({ error: e.message }); }
   const { dirTipo, dirPrint } = getDirs('Expedicao');
   const src = path.join(dirTipo,  `etiqueta_${id}.zpl`);
   const dst = path.join(dirPrint, `etiqueta_${id}.zpl`);
@@ -19863,14 +19903,18 @@ app.post('/api/etiquetas', async (req, res) => {
   try {
     const { numeroOP, tipo = 'Expedicao', codigo, ns } = req.body;
 
-    const folder = path.join(__dirname, 'etiquetas', tipo);
+    let tipoSafe;
+    try { tipoSafe = tipoEtiquetaSeguro(tipo); }
+    catch (e) { return res.status(400).json({ error: e.message }); }
+
+    const folder = path.join(etiquetasRoot, tipoSafe);
     if (!fs.existsSync(folder)) {
       fs.mkdirSync(folder, { recursive: true });
     }
 
     if (!numeroOP) return res.status(400).json({ error: 'Falta numeroOP' });
 
-    const { dirTipo } = getDirs(tipo);
+    const { dirTipo } = getDirs(tipoSafe);
     const zpl = await gerarEtiquetaCompactaZPL({ numeroOP, codigo, ns });
     const fileName = `etiqueta_${numeroOP}.zpl`;
     fs.writeFileSync(path.join(dirTipo, fileName), zpl, 'utf8');
