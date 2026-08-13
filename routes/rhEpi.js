@@ -341,7 +341,20 @@ router.get('/epi/catalogo-unico', async (req, res) => {
          MIN(ec.ordem) AS ordem,
          (SELECT COUNT(*)::int
             FROM rh.epi_catalogo_produto cp
-           WHERE cp.epi_catalogo_id = c.id) AS qtd_produtos
+           WHERE cp.epi_catalogo_id = c.id) AS qtd_produtos,
+         COALESCE((
+           SELECT json_agg(
+                    json_build_object(
+                      'id', cp.id,
+                      'codigo', cp.codigo,
+                      'descricao', cp.descricao,
+                      'url_imagem', cp.url_imagem
+                    )
+                    ORDER BY cp.codigo
+                  )
+             FROM rh.epi_catalogo_produto cp
+            WHERE cp.epi_catalogo_id = c.id
+         ), '[]'::json) AS produtos
        FROM rh.epi_catalogo c
        JOIN rh.epi_cargo ec ON ec.epi_catalogo_id = c.id
        ${where}
@@ -379,6 +392,41 @@ router.patch('/epi/catalogo/:id/ativo', async (req, res) => {
   } catch (err) {
     console.error('[PATCH /api/rh/epi/catalogo/:id/ativo]', err?.message || err);
     return res.status(500).json({ error: 'Erro ao atualizar ativação do EPI' });
+  }
+});
+
+/** Atualiza C.A. (e opcionalmente descrição) do item do catálogo */
+router.patch('/epi/catalogo/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const hasCa = Object.prototype.hasOwnProperty.call(req.body || {}, 'ca');
+    const hasDesc = Object.prototype.hasOwnProperty.call(req.body || {}, 'descricao');
+    if (!hasCa && !hasDesc) {
+      return res.status(400).json({ error: 'Informe ca e/ou descricao' });
+    }
+    const ca = hasCa ? (String(req.body.ca || '').trim() || null) : undefined;
+    const descricao = hasDesc ? String(req.body.descricao || '').trim() : undefined;
+    if (hasDesc && !descricao) {
+      return res.status(400).json({ error: 'Descrição não pode ser vazia' });
+    }
+    const { rows } = await dbQuery(
+      `UPDATE rh.epi_catalogo
+          SET
+            ca = CASE WHEN $2::boolean THEN $3 ELSE ca END,
+            descricao = CASE WHEN $4::boolean THEN $5 ELSE descricao END,
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, descricao, ca, ativo`,
+      [id, hasCa, ca ?? null, hasDesc, descricao ?? null]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'Item do catálogo não encontrado' });
+    return res.json(rows[0]);
+  } catch (err) {
+    console.error('[PATCH /api/rh/epi/catalogo/:id]', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao atualizar catálogo de EPI' });
   }
 });
 

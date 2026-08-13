@@ -698,38 +698,6 @@ async function openEpiModal(_pane, userId) {
           <button id="rhEpiSalvarTam" type="button" class="content-button status-button" style="margin-top:18px">Salvar tamanhos</button>
         </div>
         <div class="span2" style="border-top:1px solid rgba(255,255,255,.08);padding-top:12px;margin-top:4px">
-          <h4 style="margin:0 0 8px;font-size:15px">Registrar entrega de EPI</h4>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div>
-              <label for="rhEpiEntregaItem">Item entregue</label>
-              <select id="rhEpiEntregaItem">
-                <option value="">Selecionar...</option>
-                <option value="Camiseta">Camiseta</option>
-                <option value="Short/Calça">Short/Calça</option>
-                <option value="Sapato">Sapato</option>
-                <option value="Luva">Luva</option>
-                <option value="Óculos">Óculos</option>
-                <option value="Capacete">Capacete</option>
-                <option value="Protetor auricular">Protetor auricular</option>
-                <option value="Outro">Outro</option>
-              </select>
-            </div>
-            <div>
-              <label for="rhEpiEntregaTam">Tamanho</label>
-              <input id="rhEpiEntregaTam" type="text" placeholder="ex.: M, 42">
-            </div>
-            <div>
-              <label for="rhEpiEntregaData">Data da entrega</label>
-              <input id="rhEpiEntregaData" type="date">
-            </div>
-            <div>
-              <label for="rhEpiEntregaObs">Observação</label>
-              <input id="rhEpiEntregaObs" type="text" placeholder="(opcional)">
-            </div>
-          </div>
-          <button id="rhEpiRegistrarEntrega" type="button" class="content-button status-button" style="margin-top:10px">Registrar entrega</button>
-        </div>
-        <div class="span2">
           <h4 style="margin:0 0 6px;font-size:15px">Histórico de entregas</h4>
           <div id="rhEpiEntregasLista"></div>
         </div>
@@ -742,9 +710,6 @@ async function openEpiModal(_pane, userId) {
 
   document.body.appendChild(back);
   document.body.style.overflow = 'hidden';
-
-  // Set today as default date
-  val('#rhEpiEntregaData', back).value = new Date().toISOString().slice(0, 10);
 
   const close = () => closeEpiModal();
   val('.rh-colab-modal-close', back)?.addEventListener('click', close);
@@ -802,32 +767,6 @@ async function openEpiModal(_pane, userId) {
   }
 
   await carregarEntregas();
-
-  // Register delivery
-  val('#rhEpiRegistrarEntrega', back).addEventListener('click', async () => {
-    const item = val('#rhEpiEntregaItem', back).value;
-    if (!item) { alert('Selecione o item entregue.'); return; }
-    try {
-      await fetchJson(`/api/rh/funcionarios/epi-entregas/${encodeURIComponent(userId)}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          item,
-          tamanho: val('#rhEpiEntregaTam', back).value.trim(),
-          data_entrega: val('#rhEpiEntregaData', back).value || null,
-          observacao: val('#rhEpiEntregaObs', back).value.trim(),
-          registrado_por: window.__sessionUser?.username || null,
-        }),
-      });
-      val('#rhEpiEntregaItem', back).value = '';
-      val('#rhEpiEntregaTam', back).value = '';
-      val('#rhEpiEntregaObs', back).value = '';
-      val('#rhEpiEntregaData', back).value = new Date().toISOString().slice(0, 10);
-      await carregarEntregas();
-    } catch (err) {
-      alert('Falha ao registrar entrega: ' + (err.message || err));
-    }
-  });
 
   // Delete delivery
   val('#rhEpiEntregasLista', back).addEventListener('click', async (ev) => {

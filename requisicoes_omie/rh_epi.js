@@ -15,9 +15,43 @@ let _epiCarrinho = []; // { key, epi_catalogo_id, codigo, descricao, ca, url_ima
 let _epiSolicitacoes = [];
 let _epiEntregas = [];
 let _epiConfigView = 'menu'; // menu | catalogo
+let _epiConfigCatalogoTab = 'ativos'; // ativos | inativos
 let _epiProdCatalogoId = null;
+let _epiProdCatalogoCa = '';
 let _epiProdBuscaTimer = null;
 let _epiProdBuscaSeq = 0;
+
+function epiRoles() {
+  const raw = window.userRoles ?? window.__sessionUser?.roles ?? [];
+  if (Array.isArray(raw)) return raw;
+  return String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+/** RH ou admin: configuração, controle de entregues e botões Informações/Editar */
+function epiPodeGerenciar() {
+  if (epiRoles().some((r) => String(r || '').trim().toLowerCase() === 'admin')) return true;
+  const setor = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '').trim().toLowerCase();
+  if (setor === 'rh' || setor.includes('recursos humanos') || /(^|[^a-z])rh([^a-z]|$)/i.test(setor)) return true;
+  const funcao = String(window.__sessionUser?.funcao_nome || window.__sessionUser?.funcao || '').trim().toLowerCase();
+  if (funcao.includes('recursos humanos') || /(^|[^a-z])rh([^a-z]|$)/i.test(funcao)) return true;
+  return false;
+}
+
+function applyEpiPermissions(pane) {
+  if (!pane) return;
+  const pode = epiPodeGerenciar();
+  pane.classList.toggle('epi-somente-solicitacao', !pode);
+  const cfg = epiVal('#epiBtnConfig', pane);
+  if (cfg) cfg.style.display = pode ? '' : 'none';
+  const tabEnt = epiVal('[data-epi-tab="entregas"]', pane);
+  if (tabEnt) tabEnt.style.display = pode ? '' : 'none';
+  if (!pode) {
+    epiValAll('[data-epi-tab]', pane).forEach((b) => b.classList.remove('lp-tab-active'));
+    epiVal('[data-epi-tab="solicitacao"]', pane)?.classList.add('lp-tab-active');
+    epiVal('#epiTabSolicitacao', pane)?.classList.add('is-active');
+    epiVal('#epiTabEntregas', pane)?.classList.remove('is-active');
+  }
+}
 
 function epiVal(sel, root = document) {
   return root.querySelector(sel);
@@ -172,10 +206,22 @@ function ensureEpiPane(root) {
     #rhEpi .epi-cfg-item:hover{border-color:rgba(95,142,255,.45);background:rgba(58,109,240,.14)}
     #rhEpi .epi-cfg-item i.fa-chevron-right{color:#9ca3af;font-size:12px}
     #rhEpi .epi-cfg-back{margin-bottom:10px}
-    #rhEpi .epi-cfg-toggle-row{display:flex;align-items:center;gap:10px;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,.06)}
+    #rhEpi .epi-cfg-toggle-row{display:flex;flex-direction:column;align-items:stretch;gap:8px;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.06)}
+    #rhEpi .epi-cfg-toggle-row .epi-cfg-row-top{display:flex;align-items:center;gap:10px;width:100%}
     #rhEpi .epi-cfg-toggle-row .epi-chk-label{display:flex;align-items:center;gap:8px;flex:1;min-width:0;cursor:pointer;color:#e1e6f8;font-size:13px;margin:0}
     #rhEpi .epi-cfg-toggle-row.is-off{opacity:.55}
     #rhEpi .epi-cfg-prod-count{font-size:11px;color:#93c5fd;white-space:nowrap}
+    #rhEpi .epi-cfg-prods{display:flex;flex-wrap:wrap;gap:8px;padding-left:26px}
+    #rhEpi .epi-cfg-prod-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.04);font-size:11px;color:#cfe0ff;max-width:100%}
+    #rhEpi .epi-cfg-prod-chip img,#rhEpi .epi-cfg-prod-chip .ph{width:28px;height:28px;object-fit:contain;border-radius:6px;background:#0b1220;flex-shrink:0}
+    #rhEpi .epi-cfg-prod-chip .ph{display:flex;align-items:center;justify-content:center;color:#6b7280;font-size:12px}
+    #rhEpi .epi-cfg-tabs{display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap}
+    #rhEpi .epi-cfg-tab{padding:7px 12px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.04);color:#c8d0e8;cursor:pointer;font-size:12px;font-weight:600}
+    #rhEpi .epi-cfg-tab.is-active{background:rgba(58,109,240,.28);border-color:rgba(95,142,255,.55);color:#dbeafe}
+    #rhEpi .epi-prod-ca-box{display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap}
+    #rhEpi .epi-prod-ca-box .epi-field{flex:1;min-width:140px}
+    #rhEpi.epi-somente-solicitacao .epi-btn-info,
+    #rhEpi.epi-somente-solicitacao .epi-btn-editar{display:none !important}
     #rhEpi .epi-prod-modal{width:min(640px,100%);max-height:min(90vh,860px)}
     #rhEpi .epi-prod-search{width:100%;margin-bottom:10px}
     #rhEpi .epi-prod-results,#rhEpi .epi-prod-linked{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
@@ -381,6 +427,12 @@ function ensureEpiPane(root) {
         </div>
         <div class="epi-modal-body">
           <p class="epi-hint" id="epiProdHint">Vincule produtos do cadastro a este tipo de EPI.</p>
+          <div class="epi-prod-ca-box">
+            <label class="epi-field">C.A.
+              <input id="epiProdCaInput" type="text" placeholder="Número do C.A." />
+            </label>
+            <button type="button" class="epi-btn" id="epiProdCaSalvar">Salvar C.A.</button>
+          </div>
           <input id="epiProdSearch" class="epi-prod-search" type="search" placeholder="Pesquisar código ou descrição (mín. 4 letras)…" autocomplete="off" />
           <div id="epiProdResults" class="epi-prod-results" style="margin-bottom:14px"></div>
           <strong style="font-size:13px;color:#cfe0ff">Produtos vinculados</strong>
@@ -393,6 +445,7 @@ function ensureEpiPane(root) {
   root.appendChild(pane);
   _epiPane = pane;
   bindEpiPane(pane);
+  applyEpiPermissions(pane);
   return pane;
 }
 
@@ -563,6 +616,21 @@ function addToCarrinho(item) {
   _epiCarrinho.push({ ...item, key });
 }
 
+function epiCfgProdutosMini(produtos) {
+  const list = Array.isArray(produtos) ? produtos : [];
+  if (!list.length) {
+    return '<div class="epi-cfg-prods"><span class="epi-hint" style="margin:0">Nenhum produto vinculado.</span></div>';
+  }
+  return `<div class="epi-cfg-prods">${list.map((p) => `
+    <div class="epi-cfg-prod-chip" title="${epiEscape(p.descricao || p.codigo || '')}">
+      ${p.url_imagem
+        ? `<img src="${epiEscape(p.url_imagem)}" alt="" loading="lazy" onerror="this.outerHTML='<div class=\\'ph\\'><i class=\\'fa-solid fa-box\\'></i></div>'" />`
+        : `<div class="ph"><i class="fa-solid fa-box"></i></div>`}
+      <span>${epiEscape(p.codigo || '—')}</span>
+    </div>
+  `).join('')}</div>`;
+}
+
 function renderConfigBody(pane) {
   const body = epiVal('#epiConfigBody', pane);
   const title = epiVal('#epiConfigTitle', pane);
@@ -591,26 +659,40 @@ function renderConfigBody(pane) {
       `;
       return;
     }
+    const ativos = _epiCatalogoUnico.filter((c) => c.ativo !== false);
+    const inativos = _epiCatalogoUnico.filter((c) => c.ativo === false);
+    const list = _epiConfigCatalogoTab === 'inativos' ? inativos : ativos;
     body.innerHTML = `
       <button type="button" class="epi-btn epi-btn-ghost epi-cfg-back" id="epiCfgBack"><i class="fa-solid fa-arrow-left" style="margin-right:6px"></i>Voltar</button>
-      <p class="epi-hint">Itens únicos da planilha Fromtherm (sem repetir). Desmarque para ocultar na solicitação. Use Configurar para vincular produtos.</p>
+      <p class="epi-hint">Use o checkbox para ativar/inativar. Ativos aparecem na solicitação. Em Configurar você altera o C.A. e vincula produtos.</p>
+      <div class="epi-cfg-tabs">
+        <button type="button" class="epi-cfg-tab ${_epiConfigCatalogoTab === 'ativos' ? 'is-active' : ''}" data-epi-cfg-tab="ativos">
+          Ativos <span class="lp-tab-count">${ativos.length}</span>
+        </button>
+        <button type="button" class="epi-cfg-tab ${_epiConfigCatalogoTab === 'inativos' ? 'is-active' : ''}" data-epi-cfg-tab="inativos">
+          Inativos <span class="lp-tab-count">${inativos.length}</span>
+        </button>
+      </div>
       <div class="epi-check-list" style="max-height:none">
         <div class="epi-cargo-group">
-          ${_epiCatalogoUnico.map((c) => `
+          ${list.length ? list.map((c) => `
             <div class="epi-cfg-toggle-row ${c.ativo !== false ? '' : 'is-off'}" data-epi-catalogo-id="${c.epi_catalogo_id}">
-              <label class="epi-chk-label">
-                <input type="checkbox" class="epi-cfg-ativo" data-id="${c.epi_catalogo_id}" ${c.ativo !== false ? 'checked' : ''} />
-                <span>${epiEscape(c.descricao)}</span>
-              </label>
-              <span class="epi-ca">CA: ${epiEscape(c.ca || '—')}</span>
-              <span class="epi-cfg-prod-count">${Number(c.qtd_produtos || 0)} prod.</span>
-              <button type="button" class="epi-btn epi-btn-ghost epi-cfg-produtos"
-                data-catalogo-id="${c.epi_catalogo_id}"
-                data-desc="${epiEscape(c.descricao)}"
-                data-ca="${epiEscape(c.ca || '')}"
-                title="Vincular produtos">Configurar</button>
+              <div class="epi-cfg-row-top">
+                <label class="epi-chk-label">
+                  <input type="checkbox" class="epi-cfg-ativo" data-id="${c.epi_catalogo_id}" ${c.ativo !== false ? 'checked' : ''} />
+                  <span>${epiEscape(c.descricao)}</span>
+                </label>
+                <span class="epi-ca">CA: ${epiEscape(c.ca || '—')}</span>
+                <span class="epi-cfg-prod-count">${Number(c.qtd_produtos || (c.produtos || []).length || 0)} prod.</span>
+                <button type="button" class="epi-btn epi-btn-ghost epi-cfg-produtos"
+                  data-catalogo-id="${c.epi_catalogo_id}"
+                  data-desc="${epiEscape(c.descricao)}"
+                  data-ca="${epiEscape(c.ca || '')}"
+                  title="Vincular produtos e C.A.">Configurar</button>
+              </div>
+              ${epiCfgProdutosMini(c.produtos)}
             </div>
-          `).join('')}
+          `).join('') : `<div class="epi-empty" style="padding:16px">Nenhum item nesta guia.</div>`}
         </div>
       </div>
     `;
@@ -650,7 +732,7 @@ function renderSolicitacoes(pane) {
       <td>${assinatura}</td>
       <td style="white-space:nowrap">
         <button type="button" class="epi-btn epi-btn-ghost epi-sol-ver" data-id="${s.id}">Ver</button>
-        ${s.status === 'aberta' ? `
+        ${s.status === 'aberta' && epiPodeGerenciar() ? `
           <button type="button" class="epi-btn epi-btn-ghost epi-sol-atender" data-id="${s.id}">Atender</button>
           <button type="button" class="epi-btn epi-btn-danger epi-sol-cancelar" data-id="${s.id}">Cancelar</button>
         ` : ''}
@@ -763,12 +845,15 @@ async function loadEpiProdutosVinculados(pane) {
 
 async function openEpiProdModal(pane, { catalogoId, descricao, ca }) {
   _epiProdCatalogoId = Number(catalogoId);
+  _epiProdCatalogoCa = ca || '';
   const title = epiVal('#epiProdTitle', pane);
   const hint = epiVal('#epiProdHint', pane);
-  if (title) title.textContent = `Produtos — ${descricao || 'EPI'}`;
+  const caInput = epiVal('#epiProdCaInput', pane);
+  if (title) title.textContent = `Configurar — ${descricao || 'EPI'}`;
   if (hint) {
-    hint.textContent = `Tipo: ${descricao || '—'}${ca ? ` · CA ${ca}` : ''}. Pesquise e clique para vincular (contém, após 4 letras, até 10 resultados).`;
+    hint.textContent = `Tipo: ${descricao || '—'}. Atualize o C.A. e vincule produtos (pesquisa contém, após 4 letras, até 10 resultados).`;
   }
+  if (caInput) caInput.value = ca || '';
   const search = epiVal('#epiProdSearch', pane);
   if (search) search.value = '';
   renderEpiProdResults(pane, []);
@@ -787,6 +872,7 @@ async function openEpiProdModal(pane, { catalogoId, descricao, ca }) {
 
 function closeEpiProdModal(pane) {
   _epiProdCatalogoId = null;
+  _epiProdCatalogoCa = '';
   const modal = epiVal('#epiProdModal', pane);
   if (modal) {
     modal.style.display = 'none';
@@ -800,6 +886,21 @@ function updateQtdProdutosBadge(pane, catalogoId, qtd) {
   });
   for (const it of _epiCatalogoUnico) {
     if (Number(it.epi_catalogo_id) === Number(catalogoId)) it.qtd_produtos = qtd;
+  }
+}
+
+function syncCatalogoProdutosCache(catalogoId, produtos) {
+  const list = Array.isArray(produtos) ? produtos : [];
+  for (const it of _epiCatalogoUnico) {
+    if (Number(it.epi_catalogo_id) === Number(catalogoId)) {
+      it.produtos = list.map((p) => ({
+        id: p.id,
+        codigo: p.codigo,
+        descricao: p.descricao,
+        url_imagem: p.url_imagem,
+      }));
+      it.qtd_produtos = list.length;
+    }
   }
 }
 
@@ -876,9 +977,16 @@ function bindEpiPane(pane) {
   });
 
   epiVal('#epiConfigBody', pane)?.addEventListener('click', async (ev) => {
+    const cfgTab = ev.target.closest('[data-epi-cfg-tab]');
+    if (cfgTab) {
+      _epiConfigCatalogoTab = cfgTab.dataset.epiCfgTab === 'inativos' ? 'inativos' : 'ativos';
+      renderConfigBody(pane);
+      return;
+    }
     const cfgBtn = ev.target.closest('[data-epi-cfg]');
     if (cfgBtn) {
       _epiConfigView = cfgBtn.dataset.epiCfg;
+      if (_epiConfigView === 'catalogo') _epiConfigCatalogoTab = 'ativos';
       renderConfigBody(pane);
       return;
     }
@@ -896,6 +1004,34 @@ function bindEpiPane(pane) {
         descricao: prodBtn.dataset.desc || '',
         ca: prodBtn.dataset.ca || '',
       }).catch((err) => alert(err.message || err));
+    }
+  });
+
+  epiVal('#epiProdCaSalvar', pane)?.addEventListener('click', async () => {
+    if (!_epiProdCatalogoId) return;
+    const ca = epiVal('#epiProdCaInput', pane)?.value?.trim() || '';
+    try {
+      const updated = await epiFetchJson(`/api/rh/epi/catalogo/${_epiProdCatalogoId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ca }),
+      });
+      _epiProdCatalogoCa = updated.ca || '';
+      for (const it of _epiCatalogoUnico) {
+        if (Number(it.epi_catalogo_id) === Number(_epiProdCatalogoId)) {
+          it.ca = updated.ca || null;
+        }
+      }
+      const hint = epiVal('#epiProdHint', pane);
+      const item = _epiCatalogoUnico.find((c) => Number(c.epi_catalogo_id) === Number(_epiProdCatalogoId));
+      if (hint) {
+        hint.textContent = `Tipo: ${item?.descricao || '—'}. C.A. atualizado. Vincule produtos abaixo.`;
+      }
+      if (_epiConfigView === 'catalogo') renderConfigBody(pane);
+      await loadRelacao(pane);
+      alert('C.A. salvo.');
+    } catch (err) {
+      alert('Falha ao salvar C.A.: ' + (err.message || err));
     }
   });
 
@@ -944,6 +1080,8 @@ function bindEpiPane(pane) {
       });
       const data = await loadEpiProdutosVinculados(pane);
       updateQtdProdutosBadge(pane, _epiProdCatalogoId, (data?.produtos || []).length);
+      syncCatalogoProdutosCache(_epiProdCatalogoId, data?.produtos || []);
+      if (_epiConfigView === 'catalogo') renderConfigBody(pane);
       await loadRelacao(pane);
       const search = epiVal('#epiProdSearch', pane);
       if (search) search.value = '';
@@ -965,6 +1103,8 @@ function bindEpiPane(pane) {
       });
       const data = await loadEpiProdutosVinculados(pane);
       updateQtdProdutosBadge(pane, _epiProdCatalogoId, (data?.produtos || []).length);
+      syncCatalogoProdutosCache(_epiProdCatalogoId, data?.produtos || []);
+      if (_epiConfigView === 'catalogo') renderConfigBody(pane);
       await loadRelacao(pane);
     } catch (err) {
       alert('Falha ao remover: ' + (err.message || err));
@@ -982,11 +1122,11 @@ function bindEpiPane(pane) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ativo }),
       });
-      const row = chk.closest('.epi-cfg-toggle-row');
-      if (row) row.classList.toggle('is-off', !ativo);
       for (const it of _epiCatalogoUnico) {
         if (Number(it.epi_catalogo_id) === id) it.ativo = ativo;
       }
+      // Mantém a guia atual; o item some da lista atual e aparece na outra
+      renderConfigBody(pane);
       await loadRelacao(pane);
     } catch (err) {
       chk.checked = !ativo;
@@ -1262,6 +1402,7 @@ async function carregarPainelEpi() {
 async function doOpenEpi() {
   const root = findTabsRoot();
   const pane = ensureEpiPane(root);
+  applyEpiPermissions(pane);
 
   if (typeof window.showMainTab === 'function') {
     window.showMainTab('rhEpi');
