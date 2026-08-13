@@ -574,16 +574,17 @@ router.get('/epi/cargos', async (_req, res) => {
   }
 });
 
-/** Busca produtos (contém) com miniatura — min 4 caracteres, máx 10 */
+/** Busca produtos (contém) com miniatura — min 4 caracteres, páginas de 10 */
 router.get('/epi/produtos/buscar', async (req, res) => {
   try {
     const q = String(req.query.q || '').trim();
     if (q.length < 4) {
-      return res.json({ ok: true, produtos: [] });
+      return res.json({ ok: true, produtos: [], hasMore: false, offset: 0 });
     }
     const limit = Math.min(Math.max(parseInt(req.query.limit || '10', 10) || 10, 1), 10);
+    const offset = Math.max(parseInt(req.query.offset || '0', 10) || 0, 0);
     const tokens = q.split(/\s+/).map((t) => t.trim()).filter(Boolean);
-    if (!tokens.length) return res.json({ ok: true, produtos: [] });
+    if (!tokens.length) return res.json({ ok: true, produtos: [], hasMore: false, offset: 0 });
 
     const whereSql = tokens
       .map((_, i) => {
@@ -592,6 +593,9 @@ router.get('/epi/produtos/buscar', async (req, res) => {
       })
       .join(' AND ');
     const likeParams = tokens.map((t) => `%${t}%`);
+    const pPrefix = tokens.length + 1;
+    const pLimit = tokens.length + 2;
+    const pOffset = tokens.length + 3;
 
     const { rows } = await dbQuery(
       `SELECT
@@ -616,12 +620,18 @@ router.get('/epi/produtos/buscar', async (req, res) => {
        WHERE COALESCE(p.inativo, 'N') <> 'S'
          AND ${whereSql}
        ORDER BY
-         (CASE WHEN p.codigo ILIKE $${tokens.length + 1} THEN 0 ELSE 1 END),
+         (CASE WHEN p.codigo ILIKE $${pPrefix} THEN 0 ELSE 1 END),
          p.codigo
-       LIMIT $${tokens.length + 2}`,
-      [...likeParams, `${q}%`, limit]
+       LIMIT $${pLimit} OFFSET $${pOffset}`,
+      [...likeParams, `${q}%`, limit, offset]
     );
-    return res.json({ ok: true, produtos: rows });
+    return res.json({
+      ok: true,
+      produtos: rows,
+      hasMore: rows.length === limit,
+      offset,
+      limit,
+    });
   } catch (err) {
     console.error('[GET /api/rh/epi/produtos/buscar]', err?.message || err);
     return res.status(500).json({ error: 'Erro ao buscar produtos' });

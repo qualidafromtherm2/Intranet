@@ -20,6 +20,10 @@ let _epiProdCatalogoId = null;
 let _epiProdCatalogoCa = '';
 let _epiProdBuscaTimer = null;
 let _epiProdBuscaSeq = 0;
+let _epiProdBuscaQ = '';
+let _epiProdBuscaOffset = 0;
+let _epiProdBuscaHasMore = false;
+let _epiProdBuscaLoading = false;
 
 function epiRoles() {
   const raw = window.userRoles ?? window.__sessionUser?.roles ?? [];
@@ -813,14 +817,15 @@ function renderEpiProdLinked(pane, produtos) {
   `).join('');
 }
 
-function renderEpiProdResults(pane, produtos) {
+function renderEpiProdResults(pane, produtos, { append = false, hasMore = false } = {}) {
   const box = epiVal('#epiProdResults', pane);
   if (!box) return;
-  if (!produtos.length) {
+  box.querySelector('.epi-prod-more')?.remove();
+  if (!append && !produtos.length) {
     box.innerHTML = '<div class="epi-empty" style="padding:12px">Nenhum produto encontrado.</div>';
     return;
   }
-  box.innerHTML = produtos.map((p) => `
+  const html = produtos.map((p) => `
     <button type="button" class="epi-prod-row epi-prod-pick"
       data-codigo="${epiEscape(p.codigo)}"
       data-codigo-produto="${epiEscape(p.codigo_produto || '')}"
@@ -834,6 +839,65 @@ function renderEpiProdResults(pane, produtos) {
       <i class="fa-solid fa-plus" style="color:#93c5fd"></i>
     </button>
   `).join('');
+  if (append) box.insertAdjacentHTML('beforeend', html);
+  else box.innerHTML = html;
+  if (hasMore) {
+    box.insertAdjacentHTML('beforeend', '<div class="epi-prod-more epi-empty" style="padding:8px;font-size:11px">Role para carregar mais…</div>');
+  }
+}
+
+function resetEpiProdBusca() {
+  _epiProdBuscaQ = '';
+  _epiProdBuscaOffset = 0;
+  _epiProdBuscaHasMore = false;
+  _epiProdBuscaLoading = false;
+}
+
+async function buscarEpiProdutos(pane, { q, offset = 0, append = false, seq = null } = {}) {
+  const box = epiVal('#epiProdResults', pane);
+  if (!box) return;
+  const termo = String(q || '').trim();
+  if (termo.length < 4) return;
+  if (_epiProdBuscaLoading) return;
+  _epiProdBuscaLoading = true;
+  try {
+    if (!append) {
+      box.innerHTML = '<div class="epi-empty" style="padding:12px">Buscando…</div>';
+    } else {
+      const tip = box.querySelector('.epi-prod-more');
+      if (tip) tip.textContent = 'Carregando mais…';
+    }
+    const data = await epiFetchJson(
+      `/api/rh/epi/produtos/buscar?q=${encodeURIComponent(termo)}&limit=10&offset=${Number(offset) || 0}`
+    );
+    if (seq != null && seq !== _epiProdBuscaSeq) return;
+    const lista = Array.isArray(data.produtos) ? data.produtos : [];
+    _epiProdBuscaQ = termo;
+    _epiProdBuscaOffset = (Number(offset) || 0) + lista.length;
+    _epiProdBuscaHasMore = !!data.hasMore;
+    renderEpiProdResults(pane, lista, { append, hasMore: _epiProdBuscaHasMore });
+  } catch (err) {
+    if (seq != null && seq !== _epiProdBuscaSeq) return;
+    if (!append) {
+      box.innerHTML = `<div class="epi-empty" style="padding:12px">${epiEscape(err.message || 'Erro na busca')}</div>`;
+    } else {
+      const tip = box.querySelector('.epi-prod-more');
+      if (tip) tip.textContent = 'Falha ao carregar mais. Role novamente.';
+      _epiProdBuscaHasMore = true;
+    }
+  } finally {
+    _epiProdBuscaLoading = false;
+  }
+}
+
+async function carregarMaisEpiProdutos(pane) {
+  if (_epiProdBuscaLoading || !_epiProdBuscaHasMore || !_epiProdBuscaQ) return;
+  await buscarEpiProdutos(pane, {
+    q: _epiProdBuscaQ,
+    offset: _epiProdBuscaOffset,
+    append: true,
+    seq: _epiProdBuscaSeq,
+  });
 }
 
 async function loadEpiProdutosVinculados(pane) {
@@ -851,11 +915,12 @@ async function openEpiProdModal(pane, { catalogoId, descricao, ca }) {
   const caInput = epiVal('#epiProdCaInput', pane);
   if (title) title.textContent = `Configurar — ${descricao || 'EPI'}`;
   if (hint) {
-    hint.textContent = `Tipo: ${descricao || '—'}. Atualize o C.A. e vincule produtos (pesquisa contém, após 4 letras, até 10 resultados).`;
+    hint.textContent = `Tipo: ${descricao || '—'}. Atualize o C.A. e vincule produtos (pesquisa contém, após 4 letras; role a lista para ver mais 10).`;
   }
   if (caInput) caInput.value = ca || '';
   const search = epiVal('#epiProdSearch', pane);
   if (search) search.value = '';
+  resetEpiProdBusca();
   renderEpiProdResults(pane, []);
   try {
     await loadEpiProdutosVinculados(pane);
@@ -1044,6 +1109,7 @@ function bindEpiPane(pane) {
     clearTimeout(_epiProdBuscaTimer);
     const q = epiVal('#epiProdSearch', pane)?.value?.trim() || '';
     const box = epiVal('#epiProdResults', pane);
+    resetEpiProdBusca();
     if (q.length < 4) {
       if (box) box.innerHTML = q.length
         ? '<div class="epi-empty" style="padding:12px">Digite pelo menos 4 letras…</div>'
@@ -1051,17 +1117,17 @@ function bindEpiPane(pane) {
       return;
     }
     const seq = ++_epiProdBuscaSeq;
-    if (box) box.innerHTML = '<div class="epi-empty" style="padding:12px">Buscando…</div>';
-    _epiProdBuscaTimer = setTimeout(async () => {
-      try {
-        const data = await epiFetchJson(`/api/rh/epi/produtos/buscar?q=${encodeURIComponent(q)}&limit=10`);
-        if (seq !== _epiProdBuscaSeq) return;
-        renderEpiProdResults(pane, Array.isArray(data.produtos) ? data.produtos : []);
-      } catch (err) {
-        if (seq !== _epiProdBuscaSeq) return;
-        if (box) box.innerHTML = `<div class="epi-empty" style="padding:12px">${epiEscape(err.message || 'Erro na busca')}</div>`;
-      }
+    _epiProdBuscaTimer = setTimeout(() => {
+      buscarEpiProdutos(pane, { q, offset: 0, append: false, seq }).catch(() => {});
     }, 300);
+  });
+
+  epiVal('#epiProdResults', pane)?.addEventListener('scroll', () => {
+    const box = epiVal('#epiProdResults', pane);
+    if (!box || _epiProdBuscaLoading || !_epiProdBuscaHasMore) return;
+    if (box.scrollTop + box.clientHeight >= box.scrollHeight - 36) {
+      carregarMaisEpiProdutos(pane).catch(() => {});
+    }
   });
 
   epiVal('#epiProdResults', pane)?.addEventListener('click', async (ev) => {
