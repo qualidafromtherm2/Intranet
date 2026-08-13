@@ -32,6 +32,10 @@ async function ensureVariacaoSchema() {
         UNIQUE (codigo, tipo_id, valor)
       )`);
     await dbQuery(`CREATE INDEX IF NOT EXISTS idx_produto_variacao_codigo ON produto.produto_variacao (codigo)`);
+    await dbQuery(
+      `ALTER TABLE produto.produto_variacao
+         ADD COLUMN IF NOT EXISTS estoque_qtd NUMERIC(18,4) NOT NULL DEFAULT 0`
+    );
   })().catch((err) => {
     _ensurePromise = null;
     throw err;
@@ -95,6 +99,7 @@ router.get('/variacoes/por-codigos', async (req, res) => {
          v.codigo,
          v.valor,
          v.tipo_id,
+         v.estoque_qtd,
          t.nome AS tipo_nome
        FROM produto.produto_variacao v
        JOIN produto.variacao_tipo t ON t.id = v.tipo_id
@@ -111,7 +116,11 @@ router.get('/variacoes/por-codigos', async (req, res) => {
         tipo = { tipo_id: r.tipo_id, tipo_nome: r.tipo_nome, valores: [] };
         map[r.codigo].push(tipo);
       }
-      tipo.valores.push({ id: r.id, valor: r.valor });
+      tipo.valores.push({
+        id: r.id,
+        valor: r.valor,
+        estoque_qtd: Number(r.estoque_qtd) || 0,
+      });
     }
     return res.json(map);
   } catch (err) {
@@ -132,6 +141,7 @@ router.get('/:codigo/variacoes', async (req, res) => {
          v.valor,
          v.tipo_id,
          v.ativo,
+         v.estoque_qtd,
          t.nome AS tipo_nome
        FROM produto.produto_variacao v
        JOIN produto.variacao_tipo t ON t.id = v.tipo_id
@@ -147,7 +157,11 @@ router.get('/:codigo/variacoes', async (req, res) => {
         g = { tipo_id: r.tipo_id, tipo_nome: r.tipo_nome, valores: [] };
         agrupado.push(g);
       }
-      g.valores.push({ id: r.id, valor: r.valor });
+      g.valores.push({
+        id: r.id,
+        valor: r.valor,
+        estoque_qtd: Number(r.estoque_qtd) || 0,
+      });
     }
     return res.json({ codigo, tipos: tipos.rows, variacoes: agrupado });
   } catch (err) {
@@ -224,6 +238,58 @@ router.delete('/variacoes/:id', async (req, res) => {
   } catch (err) {
     console.error('[DELETE /variacoes/:id]', err?.message || err);
     return res.status(500).json({ error: 'Erro ao excluir variação' });
+  }
+});
+
+/** Ajuste fino de estoque da variação (controle interno RH) */
+router.patch('/variacoes/:id/estoque', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  try {
+    const hasAbs = req.body?.estoque_qtd != null && req.body?.estoque_qtd !== '';
+    const hasDelta = req.body?.delta != null && req.body?.delta !== '';
+    if (!hasAbs && !hasDelta) {
+      return res.status(400).json({ error: 'Informe estoque_qtd ou delta' });
+    }
+
+    let rows;
+    if (hasAbs) {
+      const estoque_qtd = Number(req.body.estoque_qtd);
+      if (!Number.isFinite(estoque_qtd) || estoque_qtd < 0) {
+        return res.status(400).json({ error: 'estoque_qtd inválido' });
+      }
+      ({ rows } = await dbQuery(
+        `UPDATE produto.produto_variacao
+            SET estoque_qtd = $1
+          WHERE id = $2
+          RETURNING id, codigo, tipo_id, valor, ativo, estoque_qtd, created_at`,
+        [estoque_qtd, id]
+      ));
+    } else {
+      const delta = Number(req.body.delta);
+      if (!Number.isFinite(delta) || delta === 0) {
+        return res.status(400).json({ error: 'delta inválido' });
+      }
+      ({ rows } = await dbQuery(
+        `UPDATE produto.produto_variacao
+            SET estoque_qtd = GREATEST(0, COALESCE(estoque_qtd, 0) + $1)
+          WHERE id = $2
+          RETURNING id, codigo, tipo_id, valor, ativo, estoque_qtd, created_at`,
+        [delta, id]
+      ));
+    }
+
+    if (!rows[0]) return res.status(404).json({ error: 'Variação não encontrada' });
+    return res.json({
+      ok: true,
+      ...rows[0],
+      estoque_qtd: Number(rows[0].estoque_qtd) || 0,
+    });
+  } catch (err) {
+    console.error('[PATCH /variacoes/:id/estoque]', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao ajustar estoque da variação' });
   }
 });
 

@@ -10,8 +10,10 @@ let _epiUsuarios = [];
 let _epiCatalogo = [];
 let _epiCatalogoUnico = []; // config: itens únicos
 let _epiProdutosDisp = []; // solicitação: produtos vinculados ativos
-let _epiVariacoesMap = {}; // codigo -> [{ tipo_id, tipo_nome, valores:[{id,valor}] }]
-let _epiCarrinho = []; // { key, epi_catalogo_id, codigo, descricao, ca, url_imagem, epi_tipo, quantidade, tamanho }
+let _epiVariacoesMap = {}; // codigo -> [{ tipo_id, tipo_nome, valores:[{id,valor,estoque_qtd}] }]
+let _epiSaldoRhMap = {}; // codigo -> { saldo_rh, fisico_rh, cmc, variacoes:[] }
+let _epiCarrinho = []; // { key, epi_catalogo_id, codigo, descricao, ca, url_imagem, epi_tipo, quantidade, tamanho, produto_variacao_id }
+let _epiReceberCodigo = null;
 let _epiSolicitacoes = [];
 let _epiEntregas = [];
 let _epiConfigView = 'menu'; // menu | catalogo
@@ -177,7 +179,12 @@ function ensureEpiPane(root) {
     #rhEpi .epi-prod-card-cod{font-weight:700;font-size:13px;color:#edf4fc}
     #rhEpi .epi-prod-card-desc{font-size:12px;color:#9eb0c5;line-height:1.35;min-height:32px}
     #rhEpi .epi-prod-card-tipo{font-size:11px;color:#93c5fd}
-    #rhEpi .epi-prod-card-estoque{margin:2px 0 4px;min-height:36px;padding:6px 8px;border-radius:6px;background:#f9fafb;border:1px solid rgba(0,0,0,.06)}
+    #rhEpi .epi-prod-card-estoque{margin:2px 0 4px;min-height:36px;padding:6px 8px;border-radius:6px;background:rgba(15,23,42,.55);border:1px solid rgba(255,255,255,.08);color:#dbeafe;font-size:12px;line-height:1.35}
+    #rhEpi .epi-prod-card-estoque .epi-rh-saldo{font-weight:700;color:#86efac}
+    #rhEpi .epi-prod-card-estoque .epi-rh-zero{color:#fca5a5}
+    .light-mode #rhEpi .epi-prod-card-estoque{background:#f9fafb;border:1px solid rgba(0,0,0,.06);color:#1f2937}
+    .light-mode #rhEpi .epi-prod-card-estoque .epi-rh-saldo{color:#15803d}
+    .light-mode #rhEpi .epi-prod-card-estoque .epi-rh-zero{color:#b91c1c}
     #rhEpi .epi-prod-card-footer{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:4px}
     #rhEpi .epi-prod-card-vars{display:flex;flex-direction:column;gap:6px;width:100%;min-height:28px}
     #rhEpi .epi-prod-card-vars select{width:100%;padding:6px 8px !important;font-size:12px}
@@ -489,6 +496,31 @@ function ensureEpiPane(root) {
         </div>
       </div>
     </div>
+
+    <div id="epiReceberModal" class="epi-modal-back" style="display:none;z-index:12200" aria-hidden="true">
+      <div class="epi-modal" style="width:min(420px,100%)" role="dialog" aria-modal="true" aria-labelledby="epiReceberTitle">
+        <div class="epi-modal-head">
+          <h3 id="epiReceberTitle">Receber no ##RH</h3>
+          <button type="button" class="epi-modal-close" id="epiReceberClose" aria-label="Fechar">×</button>
+        </div>
+        <div class="epi-modal-body">
+          <p class="epi-hint" id="epiReceberHint">Entrada no armazém ##RH (Omie) e no saldo da variação, se houver.</p>
+          <label class="epi-field">Quantidade
+            <input id="epiReceberQtd" type="number" min="0.001" step="0.001" value="1" />
+          </label>
+          <label class="epi-field" id="epiReceberVarWrap" style="margin-top:10px;display:none">Variação
+            <select id="epiReceberVar"></select>
+          </label>
+          <label class="epi-field" style="margin-top:10px">Observação (opcional)
+            <input id="epiReceberObs" type="text" placeholder="Ex.: NF 12345" />
+          </label>
+          <div class="epi-actions" style="margin-top:14px">
+            <button type="button" class="epi-btn epi-btn-ghost" id="epiReceberCancel">Cancelar</button>
+            <button type="button" class="epi-btn" id="epiReceberOk">Confirmar entrada</button>
+          </div>
+        </div>
+      </div>
+    </div>
   `;
 
   root.appendChild(pane);
@@ -550,9 +582,52 @@ function renderVariacaoSelects(codigo) {
   return grupos.map((g) => `
     <select class="epi-card-var" data-tipo-id="${g.tipo_id}" data-tipo-nome="${epiEscape(g.tipo_nome)}" title="${epiEscape(g.tipo_nome)}">
       <option value="">${epiEscape(g.tipo_nome)}…</option>
-      ${(g.valores || []).map((v) => `<option value="${epiEscape(v.valor)}">${epiEscape(v.valor)}</option>`).join('')}
+      ${(g.valores || []).map((v) => {
+        const est = Number(v.estoque_qtd) || 0;
+        return `<option value="${v.id}" data-valor="${epiEscape(v.valor)}" data-estoque="${est}">${epiEscape(v.valor)} (saldo ${est})</option>`;
+      }).join('')}
     </select>
   `).join('');
+}
+
+function renderSaldoRhCard(codigo) {
+  const info = _epiSaldoRhMap[codigo] || { saldo_rh: 0 };
+  const saldo = Number(info.saldo_rh) || 0;
+  const cls = saldo > 0 ? 'epi-rh-saldo' : 'epi-rh-zero';
+  const vars = Array.isArray(info.variacoes) ? info.variacoes : [];
+  const varTxt = vars.length
+    ? `<div style="font-size:11px;opacity:.9;margin-top:2px">${vars
+        .slice(0, 6)
+        .map((v) => `${epiEscape(v.valor)}: ${Number(v.estoque_qtd) || 0}`)
+        .join(' · ')}${vars.length > 6 ? '…' : ''}</div>`
+    : '';
+  return `<div><span class="${cls}">##RH: ${saldo.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>${varTxt}</div>`;
+}
+
+function aplicarSaldoRhNosCards(pane, codigos = null) {
+  const root = pane || _epiPane;
+  if (!root) return;
+  const filtro = Array.isArray(codigos) && codigos.length ? new Set(codigos.map(String)) : null;
+  root.querySelectorAll('.epi-prod-card-estoque[data-codigo]').forEach((el) => {
+    const cod = el.dataset.codigo;
+    if (!cod || (filtro && !filtro.has(cod))) return;
+    el.innerHTML = renderSaldoRhCard(cod);
+  });
+}
+
+async function loadSaldoRhParaCards(pane) {
+  const codigos = [...new Set(_epiProdutosDisp.map((p) => String(p.codigo || '').trim()).filter(Boolean))];
+  if (!codigos.length) {
+    _epiSaldoRhMap = {};
+    return;
+  }
+  try {
+    const data = await epiFetchJson(`/api/rh/epi/estoque/saldo?codigos=${encodeURIComponent(codigos.join(','))}`);
+    _epiSaldoRhMap = data?.itens && typeof data.itens === 'object' ? data.itens : {};
+  } catch (_) {
+    _epiSaldoRhMap = {};
+  }
+  aplicarSaldoRhNosCards(pane, codigos);
 }
 
 function renderProdutosCards(pane) {
@@ -573,6 +648,7 @@ function renderProdutosCards(pane) {
     return;
   }
   box.className = 'epi-prod-grid';
+  const podeReceber = epiPodeGerenciar();
   box.innerHTML = list.map((p) => {
     const key = `${p.epi_catalogo_id}::${p.codigo}`;
     const cod = String(p.codigo || '');
@@ -591,7 +667,7 @@ function renderProdutosCards(pane) {
         <div class="epi-prod-card-cod">${epiEscape(cod)}</div>
         <div class="epi-prod-card-desc">${epiEscape(p.descricao || '')}</div>
         <div class="epi-prod-card-tipo">${epiEscape(p.epi_tipo || 'EPI')}${p.epi_ca ? ` · CA ${epiEscape(p.epi_ca)}` : ''}</div>
-        <div id="estoque-card-${epiEscape(cod)}" class="epi-prod-card-estoque" data-codigo="${epiEscape(cod)}"></div>
+        <div id="estoque-card-rh-${epiEscape(cod)}" class="epi-prod-card-estoque" data-codigo="${epiEscape(cod)}">${renderSaldoRhCard(cod)}</div>
         <div class="epi-prod-card-footer">
           <div class="epi-prod-card-actions">
             <input type="number" class="epi-card-qtd" min="1" value="1" title="Quantidade" />
@@ -604,6 +680,10 @@ function renderProdutosCards(pane) {
             <button type="button" class="epi-btn epi-btn-ghost epi-btn-editar">
               <i class="fa-solid fa-pen-to-square" style="margin-right:4px"></i>Editar produto
             </button>
+            ${podeReceber ? `
+            <button type="button" class="epi-btn epi-btn-ghost epi-btn-receber">
+              <i class="fa-solid fa-box-open" style="margin-right:4px"></i>Receber
+            </button>` : ''}
             <button type="button" class="epi-btn epi-add-cart">
               <i class="fa-solid fa-cart-plus" style="margin-right:4px"></i>Adicionar
             </button>
@@ -612,9 +692,7 @@ function renderProdutosCards(pane) {
       </div>
     `;
   }).join('');
-  if (typeof window.carregarEstoqueCards === 'function') {
-    setTimeout(() => window.carregarEstoqueCards({ force: true }), 80);
-  }
+  void loadSaldoRhParaCards(pane);
 }
 
 async function loadVariacoesParaCards() {
@@ -657,12 +735,79 @@ function renderCarrinho(pane) {
 
 function addToCarrinho(item) {
   const key = item.key || `${item.epi_catalogo_id}::${item.codigo}`;
-  const existing = _epiCarrinho.find((x) => x.key === key && String(x.tamanho || '') === String(item.tamanho || ''));
+  const existing = _epiCarrinho.find((x) =>
+    x.key === key
+    && String(x.tamanho || '') === String(item.tamanho || '')
+    && Number(x.produto_variacao_id || 0) === Number(item.produto_variacao_id || 0)
+  );
   if (existing) {
     existing.quantidade = (Number(existing.quantidade) || 1) + (Number(item.quantidade) || 1);
     return;
   }
   _epiCarrinho.push({ ...item, key });
+}
+
+function cartItemsPayload() {
+  return _epiCarrinho.map((it) => ({
+    epi_catalogo_id: it.epi_catalogo_id || null,
+    descricao: it.codigo
+      ? `${it.codigo} — ${it.descricao || it.epi_tipo || 'EPI'}`
+      : (it.descricao || it.epi_tipo || it.codigo || 'EPI'),
+    ca: it.ca || '',
+    quantidade: Math.max(1, Number(it.quantidade) || 1),
+    tamanho: it.tamanho || '',
+    codigo: it.codigo || null,
+    produto_variacao_id: it.produto_variacao_id || null,
+  }));
+}
+
+function openReceberModal(pane, card) {
+  const codigo = String(card?.dataset?.codigo || '').trim();
+  if (!codigo) return;
+  _epiReceberCodigo = codigo;
+  const hint = epiVal('#epiReceberHint', pane);
+  if (hint) hint.textContent = `Produto ${codigo} — entrada no armazém ##RH (Omie) e no saldo da variação, se houver.`;
+  const qtd = epiVal('#epiReceberQtd', pane);
+  if (qtd) qtd.value = '1';
+  const obs = epiVal('#epiReceberObs', pane);
+  if (obs) obs.value = '';
+
+  const wrap = epiVal('#epiReceberVarWrap', pane);
+  const sel = epiVal('#epiReceberVar', pane);
+  const grupos = _epiVariacoesMap[codigo] || [];
+  const valores = grupos.flatMap((g) => (g.valores || []).map((v) => ({
+    ...v,
+    tipo_nome: g.tipo_nome,
+  })));
+  if (sel && wrap) {
+    if (!valores.length) {
+      wrap.style.display = 'none';
+      sel.innerHTML = '';
+    } else {
+      wrap.style.display = '';
+      sel.innerHTML = ['<option value="">Selecione a variação…</option>']
+        .concat(valores.map((v) => {
+          const est = Number(v.estoque_qtd) || 0;
+          return `<option value="${v.id}">${epiEscape(v.tipo_nome)}: ${epiEscape(v.valor)} (saldo ${est})</option>`;
+        }))
+        .join('');
+    }
+  }
+
+  const modal = epiVal('#epiReceberModal', pane);
+  if (modal) {
+    modal.style.display = 'flex';
+    modal.setAttribute('aria-hidden', 'false');
+  }
+}
+
+function closeReceberModal(pane) {
+  _epiReceberCodigo = null;
+  const modal = epiVal('#epiReceberModal', pane);
+  if (modal) {
+    modal.style.display = 'none';
+    modal.setAttribute('aria-hidden', 'true');
+  }
 }
 
 function epiCfgProdutosMini(produtos) {
@@ -788,6 +933,9 @@ function renderSolicitacoes(pane) {
         ${s.status === 'aberta' && epiPodeGerenciar() ? `
           <button type="button" class="epi-btn epi-btn-ghost epi-sol-atender" data-id="${s.id}">Atender</button>
           <button type="button" class="epi-btn epi-btn-danger epi-sol-cancelar" data-id="${s.id}">Cancelar</button>
+        ` : ''}
+        ${epiPodeGerenciar() && s.assinado_em && !s.estoque_baixado_em ? `
+          <button type="button" class="epi-btn epi-btn-ghost epi-sol-reprocessar" data-id="${s.id}" title="${epiEscape(s.estoque_baixa_erro || 'Reprocessar baixa ##RH')}">Reprocessar estoque</button>
         ` : ''}
       </td>
     </tr>`;
@@ -1053,19 +1201,6 @@ async function loadEntregas(pane) {
   renderEntregas(pane);
 }
 
-function cartItemsPayload() {
-  return _epiCarrinho.map((it) => ({
-    epi_catalogo_id: it.epi_catalogo_id || null,
-    descricao: it.codigo
-      ? `${it.codigo} — ${it.descricao || it.epi_tipo || 'EPI'}`
-      : (it.descricao || it.epi_tipo || it.codigo || 'EPI'),
-    ca: it.ca || '',
-    quantidade: Math.max(1, Number(it.quantidade) || 1),
-    tamanho: it.tamanho || '',
-    codigo: it.codigo || null,
-  }));
-}
-
 function bindEpiPane(pane) {
   epiValAll('[data-epi-tab]', pane).forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1195,6 +1330,51 @@ function bindEpiPane(pane) {
   });
 
   epiVal('#epiProdClose', pane)?.addEventListener('click', () => closeEpiProdModal(pane));
+
+  epiVal('#epiReceberClose', pane)?.addEventListener('click', () => closeReceberModal(pane));
+  epiVal('#epiReceberCancel', pane)?.addEventListener('click', () => closeReceberModal(pane));
+  epiVal('#epiReceberModal', pane)?.addEventListener('click', (ev) => {
+    if (ev.target?.id === 'epiReceberModal') closeReceberModal(pane);
+  });
+  epiVal('#epiReceberOk', pane)?.addEventListener('click', async () => {
+    const codigo = String(_epiReceberCodigo || '').trim();
+    if (!codigo) return;
+    const quantidade = Number(epiVal('#epiReceberQtd', pane)?.value);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      alert('Informe a quantidade.');
+      return;
+    }
+    const grupos = _epiVariacoesMap[codigo] || [];
+    const temVar = grupos.some((g) => (g.valores || []).length);
+    const varId = Number(epiVal('#epiReceberVar', pane)?.value) || null;
+    if (temVar && !varId) {
+      alert('Selecione a variação para entrar no estoque.');
+      return;
+    }
+    const btn = epiVal('#epiReceberOk', pane);
+    if (btn) btn.disabled = true;
+    try {
+      await epiFetchJson('/api/rh/epi/estoque/entrada', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          codigo,
+          quantidade,
+          produto_variacao_id: varId || null,
+          observacao: epiVal('#epiReceberObs', pane)?.value?.trim() || null,
+        }),
+      });
+      closeReceberModal(pane);
+      await loadVariacoesParaCards();
+      await loadSaldoRhParaCards(pane);
+      renderProdutosCards(pane);
+      alert('Entrada ##RH registrada.');
+    } catch (err) {
+      alert('Falha na entrada ##RH: ' + (err.message || err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  });
   epiVal('#epiProdModal', pane)?.addEventListener('click', (ev) => {
     if (ev.target === epiVal('#epiProdModal', pane)) closeEpiProdModal(pane);
   });
@@ -1324,34 +1504,65 @@ function bindEpiPane(pane) {
       return;
     }
 
+    const btnReceber = ev.target.closest('.epi-btn-receber');
+    if (btnReceber) {
+      const card = btnReceber.closest('.epi-prod-card');
+      if (card) openReceberModal(pane, card);
+      return;
+    }
+
     const btn = ev.target.closest('.epi-add-cart');
     if (!btn) return;
     const card = btn.closest('.epi-prod-card');
     if (!card) return;
     const qtd = Number(card.querySelector('.epi-card-qtd')?.value) || 1;
+    const codigo = String(card.dataset.codigo || '').trim();
     const selects = Array.from(card.querySelectorAll('.epi-card-var'));
     const partes = [];
+    let produto_variacao_id = null;
+    let estoqueVarMin = null;
     for (const sel of selects) {
-      const val = String(sel.value || '').trim();
+      const opt = sel.selectedOptions?.[0];
+      const valId = Number(sel.value) || 0;
+      const valorTxt = String(opt?.dataset?.valor || opt?.textContent || '').replace(/\s*\(saldo.*$/, '').trim();
       const tipoNome = sel.dataset.tipoNome || 'Variação';
-      if (!val) {
+      if (!valId && !valorTxt) {
         alert(`Selecione: ${tipoNome}`);
         sel.focus();
         return;
       }
-      partes.push(`${tipoNome}: ${val}`);
+      if (!produto_variacao_id && valId) produto_variacao_id = valId;
+      const estOpt = Number(opt?.dataset?.estoque);
+      if (Number.isFinite(estOpt)) {
+        estoqueVarMin = estoqueVarMin == null ? estOpt : Math.min(estoqueVarMin, estOpt);
+      }
+      partes.push(`${tipoNome}: ${valorTxt || valId}`);
     }
+
+    if (produto_variacao_id && estoqueVarMin != null && estoqueVarMin < qtd) {
+      alert(`Saldo da variação insuficiente (saldo ${estoqueVarMin}, pedido ${qtd}). Use Receber para entrar estoque no ##RH.`);
+      return;
+    }
+    if (!selects.length) {
+      const saldoRh = Number(_epiSaldoRhMap[codigo]?.saldo_rh) || 0;
+      if (saldoRh < qtd) {
+        alert(`Saldo ##RH insuficiente para ${codigo} (saldo ${saldoRh}, pedido ${qtd}). Use Receber antes de solicitar.`);
+        return;
+      }
+    }
+
     const tamanho = partes.join(' · ');
     addToCarrinho({
       key: card.dataset.key,
       epi_catalogo_id: Number(card.dataset.catalogoId) || null,
-      codigo: card.dataset.codigo || '',
+      codigo,
       descricao: card.dataset.desc || '',
       ca: card.dataset.ca || '',
       epi_tipo: card.dataset.tipo || '',
       url_imagem: card.dataset.img || '',
       quantidade: qtd,
       tamanho,
+      produto_variacao_id,
     });
     renderCarrinho(pane);
   });
@@ -1451,6 +1662,16 @@ function bindEpiPane(pane) {
           body: JSON.stringify({ status: 'cancelada' }),
         });
         await loadSolicitacoes(pane);
+      } else if (btn.classList.contains('epi-sol-reprocessar')) {
+        if (!confirm('Reprocessar baixa de estoque ##RH desta solicitação?')) return;
+        await epiFetchJson(`/api/rh/epi/solicitacoes/${id}/reprocessar-estoque`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        });
+        alert('Baixa ##RH reprocessada com sucesso.');
+        await loadSolicitacoes(pane);
+        await loadSaldoRhParaCards(pane);
       }
     } catch (err) {
       alert(err.message || err);

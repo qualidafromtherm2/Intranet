@@ -5,6 +5,13 @@
 const express = require('express');
 const router = express.Router();
 const { dbQuery } = require('../src/db');
+const { sessionEhAdmin, sessionEhRh } = require('../utils/navPermissions');
+const {
+  EPI_RH_LOCAL_CODIGO,
+  EPI_RH_LOCAL_NOME,
+  incluirAjusteEpiRh,
+} = require('../utils/epiEstoqueRh');
+const { ensureVariacaoSchema } = require('./produtoVariacoes');
 
 /* ---------- Seed (planilha RELAÇÃO DE EPI) ---------- */
 
@@ -113,6 +120,9 @@ let _ensurePromise = null;
 async function ensureEpiSchema() {
   if (_ensurePromise) return _ensurePromise;
   _ensurePromise = (async () => {
+    await ensureVariacaoSchema().catch((err) => {
+      console.warn('[rh/epi] ensureVariacaoSchema:', err?.message || err);
+    });
     await dbQuery('CREATE SCHEMA IF NOT EXISTS rh');
 
     await dbQuery(`
@@ -161,6 +171,8 @@ async function ensureEpiSchema() {
     await dbQuery(`ALTER TABLE rh.epi_solicitacao ADD COLUMN IF NOT EXISTS assinatura_url TEXT`);
     await dbQuery(`ALTER TABLE rh.epi_solicitacao ADD COLUMN IF NOT EXISTS assinatura_path TEXT`);
     await dbQuery(`ALTER TABLE rh.epi_solicitacao ADD COLUMN IF NOT EXISTS assinado_em TIMESTAMPTZ`);
+    await dbQuery(`ALTER TABLE rh.epi_solicitacao ADD COLUMN IF NOT EXISTS estoque_baixado_em TIMESTAMPTZ`);
+    await dbQuery(`ALTER TABLE rh.epi_solicitacao ADD COLUMN IF NOT EXISTS estoque_baixa_erro TEXT`);
 
     // Produtos do cadastro vinculados a cada tipo de EPI do catálogo
     await dbQuery(`
@@ -189,6 +201,11 @@ async function ensureEpiSchema() {
       )`);
 
     await dbQuery(`CREATE INDEX IF NOT EXISTS idx_epi_solicitacao_item_sol ON rh.epi_solicitacao_item(solicitacao_id)`);
+    await dbQuery(`ALTER TABLE rh.epi_solicitacao_item ADD COLUMN IF NOT EXISTS codigo VARCHAR(120)`);
+    await dbQuery(`ALTER TABLE rh.epi_solicitacao_item ADD COLUMN IF NOT EXISTS produto_variacao_id INTEGER`);
+    await dbQuery(
+      `ALTER TABLE rh.epi_solicitacao_item ALTER COLUMN tamanho TYPE VARCHAR(255)`
+    ).catch(() => {});
 
     // Tabela base de entrega (pode já existir)
     await dbQuery(`
@@ -274,6 +291,168 @@ function sessionUserId(req) {
 
 function sessionUserName(req) {
   return String(req.session?.user?.username || req.session?.user?.nome || '').trim() || null;
+}
+
+function podeGerirEpiEstoque(req) {
+  return sessionEhAdmin(req) || sessionEhRh(req);
+}
+
+function codigoDoItem(item) {
+  const direto = String(item?.codigo || '').trim();
+  if (direto) return direto;
+  const desc = String(item?.descricao || '');
+  const m = /^([^\s—\-]+)\s*[—\-]/.exec(desc);
+  return m ? String(m[1]).trim() : '';
+}
+
+/**
+ * Baixa estoque ##RH (Omie SAI + variação) e registra entregas.
+ * Idempotente via estoque_baixado_em / entregas já gravadas (codigo_item = item.id).
+ */
+async function baixarEstoqueSolicitacao(solId, { usuario } = {}) {
+  const { rows: sols } = await dbQuery(
+    `SELECT id, user_id, status, estoque_baixado_em, estoque_baixa_erro, assinado_em
+       FROM rh.epi_solicitacao WHERE id = $1 LIMIT 1`,
+    [solId]
+  );
+  const sol = sols[0];
+  if (!sol) {
+    const err = new Error('Solicitação não encontrada');
+    err.status = 404;
+    throw err;
+  }
+  if (sol.estoque_baixado_em) {
+    return { ok: true, already: true, solicitacao: sol, erros: [] };
+  }
+
+  const { rows: itens } = await dbQuery(
+    `SELECT id, epi_catalogo_id, descricao, ca, quantidade, tamanho, codigo, produto_variacao_id
+       FROM rh.epi_solicitacao_item
+      WHERE solicitacao_id = $1
+      ORDER BY id`,
+    [solId]
+  );
+  const { rows: entregasExistentes } = await dbQuery(
+    `SELECT codigo_item FROM rh.epi_entrega WHERE solicitacao_id = $1`,
+    [solId]
+  );
+  const jaEntregue = new Set(
+    entregasExistentes.map((e) => String(e.codigo_item || '')).filter(Boolean)
+  );
+
+  const erros = [];
+  const processados = [];
+
+  for (const item of itens) {
+    const itemKey = String(item.id);
+    if (jaEntregue.has(itemKey)) {
+      processados.push(item.id);
+      continue;
+    }
+
+    const qtd = Math.max(1, Number(item.quantidade) || 1);
+    const codigo = codigoDoItem(item);
+    const variacaoId = Number(item.produto_variacao_id) || null;
+    let variacaoBaixada = false;
+
+    try {
+      if (!codigo) {
+        throw new Error('Item sem código de produto para baixa no ##RH');
+      }
+
+      if (variacaoId) {
+        const { rows: varRows } = await dbQuery(
+          `UPDATE produto.produto_variacao
+              SET estoque_qtd = estoque_qtd - $1
+            WHERE id = $2
+              AND codigo = $3
+              AND estoque_qtd >= $1
+            RETURNING id, estoque_qtd, valor`,
+          [qtd, variacaoId, codigo]
+        );
+        if (!varRows[0]) {
+          throw new Error(
+            `Estoque da variação insuficiente (produto ${codigo}, variação #${variacaoId}, qtd ${qtd})`
+          );
+        }
+        variacaoBaixada = true;
+      }
+
+      await incluirAjusteEpiRh({
+        dbQuery,
+        tipo: 'SAI',
+        codigo,
+        qtd,
+        usuario: usuario || 'sistema',
+        obs: `EPI assinatura sol.#${solId} item#${item.id} — ${codigo} x${qtd}`,
+      });
+
+      await dbQuery(
+        `INSERT INTO rh.epi_entrega
+           (user_id, item, tamanho, ca, quantidade, data_entrega, observacao,
+            registrado_por, epi_catalogo_id, solicitacao_id, codigo_item)
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, $6, $7, $8, $9, $10)`,
+        [
+          sol.user_id,
+          String(item.descricao || codigo).slice(0, 255),
+          item.tamanho || null,
+          item.ca || null,
+          qtd,
+          `Baixa automática ##RH (${EPI_RH_LOCAL_CODIGO})`,
+          usuario || 'sistema',
+          item.epi_catalogo_id || null,
+          solId,
+          itemKey,
+        ]
+      );
+      processados.push(item.id);
+    } catch (err) {
+      if (variacaoBaixada && variacaoId) {
+        await dbQuery(
+          `UPDATE produto.produto_variacao
+              SET estoque_qtd = COALESCE(estoque_qtd, 0) + $1
+            WHERE id = $2`,
+          [qtd, variacaoId]
+        ).catch(() => {});
+      }
+      erros.push({
+        item_id: item.id,
+        codigo: codigo || null,
+        erro: err.message || String(err),
+      });
+    }
+  }
+
+  if (!erros.length && processados.length === itens.length) {
+    const { rows } = await dbQuery(
+      `UPDATE rh.epi_solicitacao
+          SET status = 'atendida',
+              estoque_baixado_em = NOW(),
+              estoque_baixa_erro = NULL,
+              updated_at = NOW()
+        WHERE id = $1
+        RETURNING *`,
+      [solId]
+    );
+    return { ok: true, already: false, solicitacao: rows[0], erros: [], processados };
+  }
+
+  const msgErro = erros.map((e) => `#${e.item_id} ${e.codigo || ''}: ${e.erro}`).join(' | ').slice(0, 2000);
+  const { rows } = await dbQuery(
+    `UPDATE rh.epi_solicitacao
+        SET estoque_baixa_erro = $1,
+            updated_at = NOW()
+      WHERE id = $2
+      RETURNING *`,
+    [msgErro || 'Falha parcial na baixa de estoque ##RH', solId]
+  );
+  return {
+    ok: false,
+    already: false,
+    solicitacao: rows[0],
+    erros,
+    processados,
+  };
 }
 
 /* ---------- Catálogo ---------- */
@@ -804,6 +983,156 @@ router.delete('/epi/catalogo/:id/produtos/:vinculoId', async (req, res) => {
   }
 });
 
+/* ---------- Estoque ##RH ---------- */
+
+router.get('/epi/estoque/saldo', async (req, res) => {
+  try {
+    const raw = String(req.query.codigos || '').trim();
+    if (!raw) return res.json({ local: EPI_RH_LOCAL_CODIGO, local_nome: EPI_RH_LOCAL_NOME, itens: {} });
+    const codigos = [...new Set(raw.split(',').map((c) => c.trim()).filter(Boolean))].slice(0, 200);
+    if (!codigos.length) {
+      return res.json({ local: EPI_RH_LOCAL_CODIGO, local_nome: EPI_RH_LOCAL_NOME, itens: {} });
+    }
+
+    const [saldos, variacoes] = await Promise.all([
+      dbQuery(
+        `SELECT codigo, COALESCE(saldo, 0) AS saldo, COALESCE(fisico, 0) AS fisico, cmc, local_nome
+           FROM logistica.estoque_atual
+          WHERE local_codigo = $1
+            AND codigo = ANY($2::text[])`,
+        [EPI_RH_LOCAL_CODIGO, codigos]
+      ),
+      dbQuery(
+        `SELECT
+           v.id,
+           v.codigo,
+           v.valor,
+           v.tipo_id,
+           v.estoque_qtd,
+           t.nome AS tipo_nome
+         FROM produto.produto_variacao v
+         JOIN produto.variacao_tipo t ON t.id = v.tipo_id
+         WHERE v.codigo = ANY($1::text[])
+           AND v.ativo IS DISTINCT FROM false
+         ORDER BY t.nome, v.valor`,
+        [codigos]
+      ),
+    ]);
+
+    const itens = {};
+    for (const c of codigos) {
+      itens[c] = { saldo_rh: 0, fisico_rh: 0, cmc: null, variacoes: [] };
+    }
+    for (const r of saldos.rows) {
+      itens[r.codigo] = {
+        saldo_rh: Number(r.saldo) || 0,
+        fisico_rh: Number(r.fisico) || 0,
+        cmc: r.cmc != null ? Number(r.cmc) : null,
+        variacoes: [],
+      };
+    }
+    for (const v of variacoes.rows) {
+      if (!itens[v.codigo]) {
+        itens[v.codigo] = { saldo_rh: 0, fisico_rh: 0, cmc: null, variacoes: [] };
+      }
+      itens[v.codigo].variacoes.push({
+        id: v.id,
+        tipo_id: v.tipo_id,
+        tipo_nome: v.tipo_nome,
+        valor: v.valor,
+        estoque_qtd: Number(v.estoque_qtd) || 0,
+      });
+    }
+
+    return res.json({
+      local: EPI_RH_LOCAL_CODIGO,
+      local_nome: EPI_RH_LOCAL_NOME,
+      itens,
+    });
+  } catch (err) {
+    console.error('[GET /api/rh/epi/estoque/saldo]', err?.message || err);
+    return res.status(500).json({ error: 'Erro ao consultar saldo ##RH' });
+  }
+});
+
+router.post('/epi/estoque/entrada', async (req, res) => {
+  if (!podeGerirEpiEstoque(req)) {
+    return res.status(403).json({ error: 'Somente RH/admin pode registrar entrada no ##RH' });
+  }
+  try {
+    const codigo = String(req.body?.codigo || '').trim();
+    const quantidade = Number(req.body?.quantidade);
+    const produto_variacao_id = Number(req.body?.produto_variacao_id) || null;
+    const observacao = String(req.body?.observacao || '').trim() || null;
+    if (!codigo) return res.status(400).json({ error: 'Código obrigatório' });
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      return res.status(400).json({ error: 'Quantidade inválida' });
+    }
+
+    if (produto_variacao_id) {
+      const { rows: vars } = await dbQuery(
+        `SELECT id, codigo, valor, estoque_qtd
+           FROM produto.produto_variacao
+          WHERE id = $1 AND ativo IS DISTINCT FROM false
+          LIMIT 1`,
+        [produto_variacao_id]
+      );
+      if (!vars[0]) return res.status(404).json({ error: 'Variação não encontrada' });
+      if (String(vars[0].codigo).trim() !== codigo) {
+        return res.status(400).json({ error: 'Variação não pertence a este código' });
+      }
+    }
+
+    const mov = await incluirAjusteEpiRh({
+      dbQuery,
+      tipo: 'ENT',
+      codigo,
+      qtd: quantidade,
+      usuario: sessionUserName(req) || 'rh',
+      obs:
+        observacao ||
+        `EPI entrada ##RH — ${codigo} x${quantidade}${produto_variacao_id ? ` (var #${produto_variacao_id})` : ''}`,
+    });
+
+    let variacao = null;
+    if (produto_variacao_id) {
+      const { rows } = await dbQuery(
+        `UPDATE produto.produto_variacao
+            SET estoque_qtd = COALESCE(estoque_qtd, 0) + $1
+          WHERE id = $2
+          RETURNING id, codigo, valor, estoque_qtd, tipo_id`,
+        [quantidade, produto_variacao_id]
+      );
+      variacao = rows[0]
+        ? { ...rows[0], estoque_qtd: Number(rows[0].estoque_qtd) || 0 }
+        : null;
+    }
+
+    const { rows: saldoRows } = await dbQuery(
+      `SELECT COALESCE(saldo, 0) AS saldo, COALESCE(fisico, 0) AS fisico
+         FROM logistica.estoque_atual
+        WHERE local_codigo = $1 AND codigo = $2
+        LIMIT 1`,
+      [EPI_RH_LOCAL_CODIGO, codigo]
+    );
+
+    return res.json({
+      ok: true,
+      local: EPI_RH_LOCAL_CODIGO,
+      local_nome: EPI_RH_LOCAL_NOME,
+      codigo,
+      quantidade,
+      omie: mov.omie,
+      variacao,
+      saldo_rh: Number(saldoRows[0]?.saldo) || 0,
+      fisico_rh: Number(saldoRows[0]?.fisico) || 0,
+    });
+  } catch (err) {
+    console.error('[POST /api/rh/epi/estoque/entrada]', err?.message || err);
+    return res.status(err.status || 500).json({ error: err.message || 'Erro ao registrar entrada ##RH' });
+  }
+});
+
 /* ---------- Solicitações ---------- */
 
 router.get('/epi/solicitacoes', async (req, res) => {
@@ -826,6 +1155,8 @@ router.get('/epi/solicitacoes', async (req, res) => {
          s.assinatura_url,
          s.assinatura_path,
          s.assinado_em,
+         s.estoque_baixado_em,
+         s.estoque_baixa_erro,
          s.created_at,
          s.updated_at,
          COALESCE(u.nome_completo, u.username) AS colaborador,
@@ -923,12 +1254,14 @@ router.post('/epi/solicitacoes', async (req, res) => {
       const quantidade = Math.max(1, Number(it.quantidade) || 1);
       const tamanho = String(it.tamanho || '').trim() || null;
       const epi_catalogo_id = Number(it.epi_catalogo_id) || null;
+      const codigo = String(it.codigo || '').trim() || null;
+      const produto_variacao_id = Number(it.produto_variacao_id) || null;
       const { rows } = await dbQuery(
         `INSERT INTO rh.epi_solicitacao_item
-           (solicitacao_id, epi_catalogo_id, descricao, ca, quantidade, tamanho)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (solicitacao_id, epi_catalogo_id, descricao, ca, quantidade, tamanho, codigo, produto_variacao_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
          RETURNING *`,
-        [sol.id, epi_catalogo_id, descricao, ca, quantidade, tamanho]
+        [sol.id, epi_catalogo_id, descricao, ca, quantidade, tamanho, codigo, produto_variacao_id]
       );
       inserted.push(rows[0]);
     }
@@ -953,11 +1286,13 @@ router.get('/epi/meus', async (req, res) => {
         `SELECT
            s.id, s.user_id, s.cargo_funcao, s.status, s.observacao, s.solicitado_por,
            s.assinatura_url, s.assinatura_path, s.assinado_em, s.created_at, s.updated_at,
+           s.estoque_baixado_em, s.estoque_baixa_erro,
            (SELECT COUNT(*)::int FROM rh.epi_solicitacao_item i WHERE i.solicitacao_id = s.id) AS qtd_itens,
            COALESCE(
              (SELECT json_agg(json_build_object(
                 'id', i.id, 'descricao', i.descricao, 'ca', i.ca,
-                'quantidade', i.quantidade, 'tamanho', i.tamanho
+                'quantidade', i.quantidade, 'tamanho', i.tamanho,
+                'codigo', i.codigo, 'produto_variacao_id', i.produto_variacao_id
               ) ORDER BY i.id)
               FROM rh.epi_solicitacao_item i WHERE i.solicitacao_id = s.id),
              '[]'::json
@@ -1057,10 +1392,89 @@ router.post('/epi/solicitacoes/:id/assinar', async (req, res) => {
         RETURNING *`,
       [url, savedPath || pathKey, id]
     );
-    return res.json(rows[0]);
+
+    let baixa = null;
+    try {
+      baixa = await baixarEstoqueSolicitacao(id, {
+        usuario: sessionUserName(req) || `user#${userId}`,
+      });
+    } catch (baixaErr) {
+      console.error('[epi/assinar] baixa estoque', baixaErr?.message || baixaErr);
+      await dbQuery(
+        `UPDATE rh.epi_solicitacao
+            SET estoque_baixa_erro = $1, updated_at = NOW()
+          WHERE id = $2`,
+        [String(baixaErr.message || baixaErr).slice(0, 2000), id]
+      );
+      baixa = {
+        ok: false,
+        erros: [{ erro: baixaErr.message || String(baixaErr) }],
+        solicitacao: null,
+      };
+    }
+
+    const solAtual = baixa?.solicitacao || rows[0];
+    return res.json({
+      ...solAtual,
+      estoque_baixa_ok: !!(baixa && baixa.ok),
+      estoque_baixa_ja_feita: !!(baixa && baixa.already),
+      estoque_baixa_erro: solAtual?.estoque_baixa_erro || (baixa?.ok ? null : (baixa?.erros?.[0]?.erro || 'Falha na baixa ##RH')),
+      estoque_baixa_erros: baixa?.erros || [],
+    });
   } catch (err) {
     console.error('[POST /api/rh/epi/solicitacoes/:id/assinar]', err?.message || err);
     return res.status(500).json({ error: err.message || 'Erro ao gravar assinatura' });
+  }
+});
+
+router.post('/epi/solicitacoes/:id/reprocessar-estoque', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) {
+    return res.status(400).json({ error: 'ID inválido' });
+  }
+  if (!podeGerirEpiEstoque(req)) {
+    return res.status(403).json({ error: 'Somente RH/admin pode reprocessar estoque EPI' });
+  }
+  try {
+    const { rows: sols } = await dbQuery(
+      `SELECT id, assinado_em, estoque_baixado_em, estoque_baixa_erro
+         FROM rh.epi_solicitacao WHERE id = $1 LIMIT 1`,
+      [id]
+    );
+    const sol = sols[0];
+    if (!sol) return res.status(404).json({ error: 'Solicitação não encontrada' });
+    if (!sol.assinado_em) {
+      return res.status(400).json({ error: 'Solicitação ainda não foi assinada' });
+    }
+    if (sol.estoque_baixado_em) {
+      return res.json({
+        ok: true,
+        already: true,
+        message: 'Estoque ##RH já baixado',
+        solicitacao: sol,
+      });
+    }
+
+    const baixa = await baixarEstoqueSolicitacao(id, {
+      usuario: sessionUserName(req) || 'rh',
+    });
+    if (!baixa.ok) {
+      return res.status(502).json({
+        ok: false,
+        error: 'Falha ao reprocessar baixa ##RH',
+        estoque_baixa_erro: baixa.solicitacao?.estoque_baixa_erro,
+        erros: baixa.erros,
+        solicitacao: baixa.solicitacao,
+      });
+    }
+    return res.json({
+      ok: true,
+      already: !!baixa.already,
+      solicitacao: baixa.solicitacao,
+    });
+  } catch (err) {
+    console.error('[POST /api/rh/epi/solicitacoes/:id/reprocessar-estoque]', err?.message || err);
+    return res.status(err.status || 500).json({ error: err.message || 'Erro ao reprocessar estoque' });
   }
 });
 

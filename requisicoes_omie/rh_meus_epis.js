@@ -368,14 +368,22 @@ function bindMeusEpiPane(pane) {
     const btn = meVal('#meSignSave', pane);
     if (btn) btn.disabled = true;
     try {
-      await meFetchJson(`/api/rh/epi/solicitacoes/${_meSignSolId}/assinar`, {
+      const data = await meFetchJson(`/api/rh/epi/solicitacoes/${_meSignSolId}/assinar`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ assinatura_base64: base64 }),
       });
       closeSignModal(pane);
       await loadMeusEpis(pane);
-      alert('Assinatura gravada com sucesso.');
+      if (data?.estoque_baixa_ok === false || data?.estoque_baixa_erro) {
+        alert(
+          'Assinatura gravada, mas a baixa no estoque ##RH falhou.\n'
+          + 'Avise o RH para usar “Reprocessar estoque”.\n\n'
+          + (data.estoque_baixa_erro || '')
+        );
+      } else {
+        alert('Assinado e estoque ##RH baixado com sucesso.');
+      }
     } catch (err) {
       alert('Falha ao gravar assinatura: ' + (err.message || err));
     } finally {
