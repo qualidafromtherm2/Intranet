@@ -362,7 +362,18 @@ router.get('/epi/catalogo-unico', async (req, res) => {
                       'id', cp.id,
                       'codigo', cp.codigo,
                       'descricao', cp.descricao,
-                      'url_imagem', cp.url_imagem
+                      'url_imagem', COALESCE((
+                        SELECT TRIM(i.url_imagem)
+                          FROM produto.produtos_omie_imagens i
+                         WHERE COALESCE(i.ativo, TRUE) = TRUE
+                           AND TRIM(COALESCE(i.url_imagem, '')) <> ''
+                           AND (
+                             i.codigo_produto::text = NULLIF(TRIM(cp.codigo_produto), '')
+                             OR i.codigo_produto::text = TRIM(cp.codigo)
+                           )
+                         ORDER BY i.pos NULLS LAST, i.id DESC
+                         LIMIT 1
+                      ), cp.url_imagem)
                     )
                     ORDER BY cp.codigo
                   )
@@ -454,11 +465,23 @@ router.get('/epi/produtos-disponiveis', async (_req, res) => {
          cp.codigo,
          cp.codigo_produto,
          cp.descricao,
-         cp.url_imagem,
+         COALESCE(img.url_imagem, cp.url_imagem) AS url_imagem,
          c.descricao AS epi_tipo,
          c.ca AS epi_ca
        FROM rh.epi_catalogo_produto cp
        JOIN rh.epi_catalogo c ON c.id = cp.epi_catalogo_id
+       LEFT JOIN LATERAL (
+         SELECT TRIM(i.url_imagem) AS url_imagem
+           FROM produto.produtos_omie_imagens i
+          WHERE COALESCE(i.ativo, TRUE) = TRUE
+            AND TRIM(COALESCE(i.url_imagem, '')) <> ''
+            AND (
+              i.codigo_produto::text = NULLIF(TRIM(cp.codigo_produto), '')
+              OR i.codigo_produto::text = TRIM(cp.codigo)
+            )
+          ORDER BY i.pos NULLS LAST, i.id DESC
+          LIMIT 1
+       ) img ON TRUE
        WHERE c.ativo IS DISTINCT FROM false
        ORDER BY c.descricao ASC, cp.descricao ASC NULLS LAST, cp.codigo ASC`
     );
@@ -664,10 +687,29 @@ router.get('/epi/catalogo/:id/produtos', async (req, res) => {
     );
     if (!cat.rows[0]) return res.status(404).json({ error: 'Item do catálogo não encontrado' });
     const { rows } = await dbQuery(
-      `SELECT id, epi_catalogo_id, codigo, codigo_produto, descricao, url_imagem, created_at
-         FROM rh.epi_catalogo_produto
-        WHERE epi_catalogo_id = $1
-        ORDER BY created_at DESC, id DESC`,
+      `SELECT
+         cp.id,
+         cp.epi_catalogo_id,
+         cp.codigo,
+         cp.codigo_produto,
+         cp.descricao,
+         COALESCE(img.url_imagem, cp.url_imagem) AS url_imagem,
+         cp.created_at
+       FROM rh.epi_catalogo_produto cp
+       LEFT JOIN LATERAL (
+         SELECT TRIM(i.url_imagem) AS url_imagem
+           FROM produto.produtos_omie_imagens i
+          WHERE COALESCE(i.ativo, TRUE) = TRUE
+            AND TRIM(COALESCE(i.url_imagem, '')) <> ''
+            AND (
+              i.codigo_produto::text = NULLIF(TRIM(cp.codigo_produto), '')
+              OR i.codigo_produto::text = TRIM(cp.codigo)
+            )
+          ORDER BY i.pos NULLS LAST, i.id DESC
+          LIMIT 1
+       ) img ON TRUE
+        WHERE cp.epi_catalogo_id = $1
+        ORDER BY cp.created_at DESC, cp.id DESC`,
       [id]
     );
     return res.json({ catalogo: cat.rows[0], produtos: rows });

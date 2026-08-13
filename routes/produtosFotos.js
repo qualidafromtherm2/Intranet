@@ -127,6 +127,34 @@ router.post('/:codigo/fotos', upload.single('foto'), async (req, res) => {
       console.warn('[auditoria][produtos/fotos:add] falhou ao registrar:', e?.message || e);
     }
 
+    // Mantém vínculos de EPI com a foto atual (cards da solicitação)
+    try {
+      const prod = await dbQuery(
+        `SELECT TRIM(codigo) AS codigo, codigo_produto::text AS codigo_produto
+           FROM produto.produtos_omie
+          WHERE codigo_produto = $1
+          LIMIT 1`,
+        [codigoNum]
+      );
+      const codigoTxt = prod.rows[0]?.codigo || null;
+      await dbQuery(
+        `UPDATE rh.epi_catalogo_produto
+            SET url_imagem = $1
+          WHERE (
+                  $2::text IS NOT NULL
+                  AND TRIM(codigo) = TRIM($2::text)
+                )
+             OR codigo_produto::text = $3
+             OR (
+                  $2::text IS NOT NULL
+                  AND codigo_produto::text = TRIM($2::text)
+                )`,
+        [publicUrl, codigoTxt, String(codigoNum)]
+      );
+    } catch (e) {
+      console.warn('[upload foto] sync EPI url_imagem falhou:', e?.message || e);
+    }
+
     res.json({
       ok: true,
       codigo: codigoNum,

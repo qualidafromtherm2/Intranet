@@ -303,9 +303,14 @@ function ensureEpiPane(root) {
 
     <div class="epi-header">
       <div class="epi-title"><i class="fa-solid fa-hard-hat" style="margin-right:8px"></i>EPI — Equipamento de Proteção Individual</div>
-      <button type="button" class="epi-btn epi-btn-ghost" id="epiBtnConfig" title="Configurações">
-        <i class="fa-solid fa-gear" style="margin-right:6px"></i>Configuração
-      </button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+        <button type="button" class="epi-btn epi-btn-ghost" id="epiBtnRefresh" title="Atualizar dados desta página">
+          <i class="fa-solid fa-rotate" style="margin-right:6px"></i>Atualizar
+        </button>
+        <button type="button" class="epi-btn epi-btn-ghost" id="epiBtnConfig" title="Configurações">
+          <i class="fa-solid fa-gear" style="margin-right:6px"></i>Configuração
+        </button>
+      </div>
     </div>
 
     <div class="lp-tabs-nav" role="tablist">
@@ -1073,6 +1078,24 @@ function bindEpiPane(pane) {
     });
   });
 
+  epiVal('#epiBtnRefresh', pane)?.addEventListener('click', async () => {
+    const btn = epiVal('#epiBtnRefresh', pane);
+    try {
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin" style="margin-right:6px"></i>Atualizando…';
+      }
+      await carregarPainelEpi();
+    } catch (err) {
+      alert('Falha ao atualizar: ' + (err.message || err));
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="fa-solid fa-rotate" style="margin-right:6px"></i>Atualizar';
+      }
+    }
+  });
+
   epiVal('#epiBtnConfig', pane)?.addEventListener('click', async () => {
     try {
       _epiCatalogoUnico = await epiFetchJson('/api/rh/epi/catalogo-unico');
@@ -1555,6 +1578,33 @@ async function doOpenEpi() {
 export function initRhEpiUI() {
   if (_epiInited) return;
   _epiInited = true;
+
+  window.__rhEpiAtualizarFotoProduto = (codigo, url) => {
+    const cod = String(codigo || '').trim();
+    const novaUrl = String(url || '').trim();
+    if (!cod || !novaUrl) return;
+    for (const p of _epiProdutosDisp) {
+      if (String(p.codigo || '').trim() === cod) p.url_imagem = novaUrl;
+    }
+    for (const c of _epiCatalogoUnico) {
+      const prods = Array.isArray(c.produtos) ? c.produtos : [];
+      for (const p of prods) {
+        if (String(p.codigo || '').trim() === cod) p.url_imagem = novaUrl;
+      }
+    }
+    document.querySelectorAll(`#rhEpi .epi-prod-card[data-codigo="${CSS.escape(cod)}"]`).forEach((card) => {
+      card.dataset.img = novaUrl;
+      const img = card.querySelector('img.epi-prod-card-img');
+      if (img) {
+        img.src = novaUrl;
+      } else {
+        const ph = card.querySelector('.epi-prod-card-img');
+        if (ph) {
+          ph.outerHTML = `<img class="epi-prod-card-img" src="${novaUrl.replace(/"/g, '&quot;')}" alt="" loading="lazy" />`;
+        }
+      }
+    });
+  };
 
   const btn = document.querySelector('#btn-rh-epi');
   if (!btn) return;
