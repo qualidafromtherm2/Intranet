@@ -479,6 +479,30 @@
     Controle de férias
    </a>
 
+   <a href="#"
+     id="btn-rh-epi"
+     class="menu-link"
+     data-nav-key="side:rh:epi"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="EPI"
+     data-nav-selector="#btn-rh-epi">
+    <i class="fa-solid fa-hard-hat" style="margin-right:8px;"></i>
+    EPI
+   </a>
+
+   <a href="#"
+     id="btn-rh-meus-epis"
+     class="menu-link"
+     data-nav-key="side:rh:meus-epis"
+     data-nav-parent="side:rh"
+     data-nav-pos="side"
+     data-nav-label="Meus EPIs"
+     data-nav-selector="#btn-rh-meus-epis">
+    <i class="fa-solid fa-file-signature" style="margin-right:8px;"></i>
+    Meus EPIs
+   </a>
+
   </div>
 </div>
 
@@ -10909,6 +10933,15 @@
        Desenho técnico
     </a>
 
+    <a href="#" class="main-header-link" data-subtarget="variacaoTab"
+       data-nav-key="produto:dados:variacao"
+       data-nav-parent="produto:dados"
+       data-nav-pos="top"
+       data-nav-label="Variação"
+       data-nav-selector='#produtoTabs .main-header .main-header-link[data-subtarget="variacaoTab"]'>
+       Variação
+    </a>
+
   </div>
 </div>
 
@@ -11068,6 +11101,36 @@
         </div>
         <p id="desenhoTecnicoVazio" style="color: var(--inactive-color); font-size: 14px; padding: 16px 0;">Nenhum desenho técnico registrado para este produto.</p>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Aba: Variação -->
+<div id="variacaoTab" class="sub-content" style="display:none">
+  <div class="content-wrapper">
+    <div class="content-section">
+      <div class="content-section-title">Variação</div>
+      <p style="font-size:13px;color:var(--inactive-color);margin:0 0 14px;">
+        Cadastre tipos (ex.: tamanho) e os valores (ex.: 41, 42). Depois eles aparecem na solicitação de EPI.
+      </p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px;">
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
+          Tipo de variação
+          <select id="variacaoTipoSelect" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);"></select>
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
+          Ou novo tipo
+          <input id="variacaoTipoNovo" type="text" placeholder="Ex.: tamanho" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);" />
+        </label>
+        <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
+          Variações (separe por vírgula)
+          <input id="variacaoValoresInput" type="text" placeholder="Ex.: 41, 42, 43" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);" />
+        </label>
+      </div>
+      <button type="button" id="variacaoSalvarBtn" class="btn" style="padding:9px 16px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:none;color:#fff;font-weight:600;">
+        <i class="fa-solid fa-plus"></i> Incluir variação
+      </button>
+      <div id="variacaoLista" style="margin-top:16px;"></div>
     </div>
   </div>
 </div>

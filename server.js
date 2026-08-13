@@ -434,6 +434,7 @@ if (REQUIRE_API_AUTH) {
 app.use('/api/nav', require('./routes/nav'));
 app.use('/api/colaboradores', require('./routes/colaboradores'));
 app.use('/api/rh', require('./routes/rhCargos'));
+app.use('/api/rh', require('./routes/rhEpi'));
 app.use('/api/ri', require('./routes/ri'));
 app.use('/api/pir', require('./routes/pir'));
 app.use('/api/qualidade', require('./routes/qualidadeFotos'));
@@ -11796,6 +11797,7 @@ const { registrarEventoReq: monEventoReq } = require('./utils/monitoramento');
 
 //app.use(require('express').json({ limit: '5mb' }));
 
+app.use('/api/produtos', require('./routes/produtoVariacoes'));
 app.use('/api/produtos', produtosRouter);
 
 // adiciona o router das fotos no MESMO prefixo:
