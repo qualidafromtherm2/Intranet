@@ -26777,12 +26777,8 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
 
   app.post('/api/produtos/alterar', async (req, res) => {
     try {
-      if (!await exigirPermissaoNav(
-        req,
-        res,
-        'top:produto',
-        'Seu usuário não possui permissão para editar produtos.'
-      )) return;
+      const { exigirPermissaoEditarProduto } = require('./utils/navPermissions');
+      if (!await exigirPermissaoEditarProduto(req, res, pool)) return;
       const data = await omieCall(
         'https://app.omie.com.br/api/v1/geral/produtos/',
         {
@@ -26965,12 +26961,8 @@ app.get('/api/produtos/detalhes/:codigo', async (req, res) => {
   // Endpoint PUT: Atualizar produto (apenas campos permitidos)
   app.put('/api/produtos/:codigo', express.json(), async (req, res) => {
     try {
-      if (!await exigirPermissaoNav(
-        req,
-        res,
-        'top:produto',
-        'Seu usuário não possui permissão para editar produtos.'
-      )) return;
+      const { exigirPermissaoEditarProduto } = require('./utils/navPermissions');
+      if (!await exigirPermissaoEditarProduto(req, res, pool)) return;
       const codigo = req.params.codigo;
       const {
         descricao,

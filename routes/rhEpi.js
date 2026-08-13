@@ -308,6 +308,7 @@ router.post('/epi/catalogo', async (req, res) => {
   try {
     const descricao = String(req.body?.descricao || '').trim();
     const ca = String(req.body?.ca || '').trim() || null;
+    const ativar = req.body?.ativo !== false;
     if (!descricao) return res.status(400).json({ error: 'Descrição é obrigatória' });
     const found = await dbQuery(
       `SELECT * FROM rh.epi_catalogo
@@ -315,10 +316,23 @@ router.post('/epi/catalogo', async (req, res) => {
         LIMIT 1`,
       [descricao, ca]
     );
-    if (found.rows[0]) return res.json(found.rows[0]);
+    if (found.rows[0]) {
+      if (ativar && found.rows[0].ativo === false) {
+        const { rows } = await dbQuery(
+          `UPDATE rh.epi_catalogo
+              SET ativo = TRUE, updated_at = NOW()
+            WHERE id = $1
+            RETURNING *`,
+          [found.rows[0].id]
+        );
+        await dbQuery(`UPDATE rh.epi_cargo SET ativo = TRUE WHERE epi_catalogo_id = $1`, [found.rows[0].id]);
+        return res.json(rows[0]);
+      }
+      return res.json(found.rows[0]);
+    }
     const { rows } = await dbQuery(
-      `INSERT INTO rh.epi_catalogo (descricao, ca) VALUES ($1, $2) RETURNING *`,
-      [descricao, ca]
+      `INSERT INTO rh.epi_catalogo (descricao, ca, ativo) VALUES ($1, $2, $3) RETURNING *`,
+      [descricao, ca, ativar]
     );
     return res.status(201).json(rows[0]);
   } catch (err) {
@@ -338,7 +352,7 @@ router.get('/epi/catalogo-unico', async (req, res) => {
          c.descricao,
          c.ca,
          c.ativo,
-         MIN(ec.ordem) AS ordem,
+         COALESCE(MIN(ec.ordem), 9999) AS ordem,
          (SELECT COUNT(*)::int
             FROM rh.epi_catalogo_produto cp
            WHERE cp.epi_catalogo_id = c.id) AS qtd_produtos,
@@ -356,10 +370,10 @@ router.get('/epi/catalogo-unico', async (req, res) => {
             WHERE cp.epi_catalogo_id = c.id
          ), '[]'::json) AS produtos
        FROM rh.epi_catalogo c
-       JOIN rh.epi_cargo ec ON ec.epi_catalogo_id = c.id
+       LEFT JOIN rh.epi_cargo ec ON ec.epi_catalogo_id = c.id
        ${where}
        GROUP BY c.id, c.descricao, c.ca, c.ativo
-       ORDER BY MIN(ec.ordem) ASC, c.descricao ASC`
+       ORDER BY COALESCE(MIN(ec.ordem), 9999) ASC, c.descricao ASC`
     );
     return res.json(rows);
   } catch (err) {

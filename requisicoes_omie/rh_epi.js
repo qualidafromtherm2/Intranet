@@ -187,14 +187,54 @@ function ensureEpiPane(root) {
     #rhEpi .epi-prod-card-btns{display:flex;flex-direction:column;gap:6px;width:100%}
     #rhEpi .epi-prod-card-btns .epi-btn{width:100%;text-align:center;padding:8px 10px;font-size:12px}
     #rhEpi .epi-cart{margin-top:14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;background:rgba(255,255,255,.03)}
+    #rhEpi .epi-cart-cod{color:#e8ecff;font-weight:700}
+    #rhEpi .epi-cart-desc{color:#9ca3af}
+    #rhEpi .epi-cart-meta{color:#93c5fd}
     #rhEpi .epi-cart-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:8px}
     #rhEpi .epi-cart-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06)}
     #rhEpi .epi-cart-item:last-child{border-bottom:none}
     #rhEpi .epi-cart-thumb{width:40px;height:40px;object-fit:cover;border-radius:8px;background:#0b1220;flex-shrink:0}
+    #rhEpi .epi-cfg-add{
+      display:grid;grid-template-columns:1fr 140px auto;gap:8px;align-items:end;
+      margin:0 0 14px;padding:12px;border-radius:10px;border:1px dashed rgba(95,142,255,.35);
+      background:rgba(58,109,240,.08)
+    }
+    #rhEpi .epi-cfg-add .epi-field{margin:0}
+    @media (max-width:560px){
+      #rhEpi .epi-cfg-add{grid-template-columns:1fr}
+    }
+    .light-mode #rhEpi .epi-btn{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+    .light-mode #rhEpi .epi-btn:hover{background:#dbeafe}
+    .light-mode #rhEpi .epi-btn-ghost{background:#f3f4f6;border-color:#d1d5db;color:#374151}
+    .light-mode #rhEpi .epi-btn-ghost:hover{background:#e5e7eb;color:#111827}
+    .light-mode #rhEpi .epi-btn-danger{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
+    .light-mode #rhEpi .epi-add-cart{background:linear-gradient(135deg,#3b82f6,#2563eb);border-color:transparent;color:#fff}
+    .light-mode #rhEpi .epi-add-cart:hover{background:linear-gradient(135deg,#2563eb,#1d4ed8)}
     .light-mode #rhEpi .epi-prod-card{background:#fff;border-color:#e5e7eb}
     .light-mode #rhEpi .epi-prod-card-cod{color:#111827}
     .light-mode #rhEpi .epi-prod-card-desc{color:#6b7280}
+    .light-mode #rhEpi .epi-prod-card-tipo{color:#2563eb}
+    .light-mode #rhEpi .epi-prod-card-img{background:#f3f4f6;border-color:#e5e7eb}
+    .light-mode #rhEpi .epi-prod-card-img.ph{color:#9ca3af}
+    .light-mode #rhEpi .epi-prod-card-vars .epi-var-empty{color:#6b7280}
     .light-mode #rhEpi .epi-cart{background:#f9fafb;border-color:#e5e7eb}
+    .light-mode #rhEpi .epi-cart-head strong,.light-mode #rhEpi .epi-cart-cod{color:#111827}
+    .light-mode #rhEpi .epi-cart-desc{color:#6b7280}
+    .light-mode #rhEpi .epi-cart-meta{color:#2563eb}
+    .light-mode #rhEpi .epi-hint{color:#6b7280}
+    .light-mode #rhEpi .epi-ca{color:#4b5563}
+    .light-mode #rhEpi .epi-empty{color:#6b7280}
+    .light-mode #rhEpi .epi-cfg-toggle-row .epi-chk-label{color:#1f2937}
+    .light-mode #rhEpi .epi-cfg-prod-count{color:#2563eb}
+    .light-mode #rhEpi .epi-cfg-prod-chip{background:#f3f4f6;border-color:#e5e7eb;color:#1f2937}
+    .light-mode #rhEpi .epi-cfg-prod-chip .ph{background:#e5e7eb;color:#6b7280}
+    .light-mode #rhEpi .epi-cfg-tab{background:#f3f4f6;border-color:#d1d5db;color:#4b5563}
+    .light-mode #rhEpi .epi-cfg-tab.is-active{background:#dbeafe;border-color:#93c5fd;color:#1d4ed8}
+    .light-mode #rhEpi .epi-cfg-add{background:#eff6ff;border-color:#93c5fd}
+    .light-mode #rhEpi .lp-tab-count{background:#dbeafe;color:#1d4ed8}
+    .light-mode #rhEpi .epi-modal-close{color:#6b7280}
+    .light-mode #rhEpi strong[style*="color:#cfe0ff"],
+    .light-mode #rhEpi strong[style*="color:#e8ecff"]{color:#111827 !important}
     #rhEpi .epi-sign-thumb{height:36px;max-width:120px;object-fit:contain;background:#fff;border-radius:6px;border:1px solid rgba(255,255,255,.15);cursor:pointer;vertical-align:middle}
     #rhEpi .epi-badge-assinado{background:rgba(34,197,94,.18);color:#4ade80}
     #rhEpi .epi-badge-pend-assin{background:rgba(245,158,11,.18);color:#fbbf24}
@@ -601,9 +641,9 @@ function renderCarrinho(pane) {
         ? `<img class="epi-cart-thumb" src="${epiEscape(it.url_imagem)}" alt="" />`
         : `<div class="epi-cart-thumb ph" style="display:flex;align-items:center;justify-content:center;color:#6b7280"><i class="fa-solid fa-box"></i></div>`}
       <div style="flex:1;min-width:0">
-        <div style="font-weight:700;color:#e8ecff;font-size:13px">${epiEscape(it.codigo)}</div>
-        <div style="font-size:12px;color:#9ca3af">${epiEscape(it.descricao || it.epi_tipo || '')}</div>
-        <div style="font-size:11px;color:#93c5fd">qtd ${it.quantidade}${it.tamanho ? ` · ${epiEscape(it.tamanho)}` : ''}${it.ca ? ` · CA ${epiEscape(it.ca)}` : ''}</div>
+        <div class="epi-cart-cod" style="font-weight:700;font-size:13px">${epiEscape(it.codigo)}</div>
+        <div class="epi-cart-desc" style="font-size:12px">${epiEscape(it.descricao || it.epi_tipo || '')}</div>
+        <div class="epi-cart-meta" style="font-size:11px">qtd ${it.quantidade}${it.tamanho ? ` · ${epiEscape(it.tamanho)}` : ''}${it.ca ? ` · CA ${epiEscape(it.ca)}` : ''}</div>
       </div>
       <button type="button" class="epi-btn epi-btn-danger epi-cart-del" data-idx="${idx}">Remover</button>
     </div>
@@ -656,19 +696,23 @@ function renderConfigBody(pane) {
 
   if (_epiConfigView === 'catalogo') {
     if (title) title.textContent = 'EPIs sugeridos / catálogo';
-    if (!_epiCatalogoUnico.length) {
-      body.innerHTML = `
-        <button type="button" class="epi-btn epi-btn-ghost epi-cfg-back" id="epiCfgBack"><i class="fa-solid fa-arrow-left" style="margin-right:6px"></i>Voltar</button>
-        <div class="epi-empty">Catálogo vazio.</div>
-      `;
-      return;
-    }
     const ativos = _epiCatalogoUnico.filter((c) => c.ativo !== false);
     const inativos = _epiCatalogoUnico.filter((c) => c.ativo === false);
     const list = _epiConfigCatalogoTab === 'inativos' ? inativos : ativos;
     body.innerHTML = `
       <button type="button" class="epi-btn epi-btn-ghost epi-cfg-back" id="epiCfgBack"><i class="fa-solid fa-arrow-left" style="margin-right:6px"></i>Voltar</button>
       <p class="epi-hint">Use o checkbox para ativar/inativar. Ativos aparecem na solicitação. Em Configurar você altera o C.A. e vincula produtos.</p>
+      <div class="epi-cfg-add">
+        <label class="epi-field">Novo EPI sugerido
+          <input id="epiCfgNovoDesc" type="text" placeholder="Ex.: Uniforme, Óculos de proteção…" />
+        </label>
+        <label class="epi-field">C.A. (opcional)
+          <input id="epiCfgNovoCa" type="text" placeholder="Ex.: 10346" />
+        </label>
+        <button type="button" class="epi-btn" id="epiCfgAddBtn">
+          <i class="fa-solid fa-plus" style="margin-right:4px"></i>Incluir
+        </button>
+      </div>
       <div class="epi-cfg-tabs">
         <button type="button" class="epi-cfg-tab ${_epiConfigCatalogoTab === 'ativos' ? 'is-active' : ''}" data-epi-cfg-tab="ativos">
           Ativos <span class="lp-tab-count">${ativos.length}</span>
@@ -1046,6 +1090,33 @@ function bindEpiPane(pane) {
     if (cfgTab) {
       _epiConfigCatalogoTab = cfgTab.dataset.epiCfgTab === 'inativos' ? 'inativos' : 'ativos';
       renderConfigBody(pane);
+      return;
+    }
+    const addBtn = ev.target.closest('#epiCfgAddBtn');
+    if (addBtn) {
+      const desc = epiVal('#epiCfgNovoDesc', pane)?.value?.trim() || '';
+      const ca = epiVal('#epiCfgNovoCa', pane)?.value?.trim() || '';
+      if (!desc) {
+        alert('Informe o nome do EPI (ex.: Uniforme).');
+        epiVal('#epiCfgNovoDesc', pane)?.focus();
+        return;
+      }
+      try {
+        addBtn.disabled = true;
+        await epiFetchJson('/api/rh/epi/catalogo', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ descricao: desc, ca: ca || null, ativo: true }),
+        });
+        _epiCatalogoUnico = await epiFetchJson('/api/rh/epi/catalogo-unico');
+        _epiConfigCatalogoTab = 'ativos';
+        renderConfigBody(pane);
+        await loadRelacao(pane);
+      } catch (err) {
+        alert('Falha ao incluir EPI: ' + (err.message || err));
+      } finally {
+        addBtn.disabled = false;
+      }
       return;
     }
     const cfgBtn = ev.target.closest('[data-epi-cfg]');
