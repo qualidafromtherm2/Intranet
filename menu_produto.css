@@ -21065,11 +21065,33 @@ html.light-mode #minhasComprasWrapper {
 #etiquetasModal.etiquetas-page .etq-btn-imprimir-unit,
 #etiquetasModal.etiquetas-page .etq-btn-multiplo,
 #etiquetasModal.etiquetas-page .etq-btn-ocultar,
-#etiquetasModal.etiquetas-page .etq-btn-reimprimir {
+#etiquetasModal.etiquetas-page .etq-btn-reimprimir,
+#etiquetasModal.etiquetas-page .etq-btn-excluir-identificacao {
   min-height: 32px;
   padding: 5px 9px !important;
   border-radius: 5px !important;
   white-space: nowrap;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-excluir-identificacao {
+  flex: 1 0 100%;
+  color: #b42318;
+  background: #fff5f4;
+  border: 1px solid #f3aaa4;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-excluir-identificacao:hover {
+  color: #fff;
+  background: #c43228;
+  border-color: #c43228;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-excluir-identificacao:disabled {
+  cursor: wait;
+  opacity: .65;
 }
 
 /* Divisão de volumes: dois caminhos explícitos e prévia antes de imprimir. */
@@ -21586,6 +21608,11 @@ html.light-mode #minhasComprasWrapper {
     width: 42px;
     min-height: 42px;
     padding: 0 !important;
+  }
+
+  #etiquetasModal.etiquetas-page .etq-btn-excluir-identificacao {
+    min-height: 42px;
+    font-size: 12px;
   }
 }
 

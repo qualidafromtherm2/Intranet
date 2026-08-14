@@ -674,6 +674,20 @@ function resolverIdentificadoresAuditoria(req) {
   return Array.from(new Set(candidatos));
 }
 
+function usuarioPodeExcluirIdentificacaoRecebimento(req) {
+  return resolverIdentificadoresAuditoria(req).includes('jair.r');
+}
+
+function exigirJairExclusaoIdentificacao(req, res, next) {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ error: 'Não autenticado.' });
+  }
+  if (!usuarioPodeExcluirIdentificacaoRecebimento(req)) {
+    return res.status(403).json({ error: 'Somente o usuário Jair.R pode excluir identificações.' });
+  }
+  return next();
+}
+
 const RH_SETOR_ID_CALENDARIO = 7;
 
 async function usuarioEhSetorRhCalendario(req) {
@@ -15045,6 +15059,67 @@ app.patch('/api/etiquetas/recebimento/:id/oculto', async (req, res) => {
   } catch (err) {
     console.error('[etiquetas/oculto]', err);
     res.status(500).json({ error: err?.message || 'Falha ao atualizar.' });
+  }
+});
+
+// DELETE /api/etiquetas/recebimento/:id/identificacao
+// Exclusão lógica e auditável da fila de Identificação do produto.
+// Não desfaz entrada de estoque/Omie e não remove o cadastro do produto.
+app.delete('/api/etiquetas/recebimento/:id/identificacao', exigirJairExclusaoIdentificacao, async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'ID inválido.' });
+
+    const result = await pool.query(
+      `WITH alvo AS (
+         SELECT id, qtd AS qtd_original
+           FROM etiqueta."ETQ_recebimento"
+          WHERE id = $1
+            AND COALESCE(qtd, 0) > 0
+          FOR UPDATE
+       )
+       UPDATE etiqueta."ETQ_recebimento" er
+          SET qtd = 0,
+              oculto = true,
+              impressa = true,
+              status = 'excluida_identificacao'
+         FROM alvo
+        WHERE er.id = alvo.id
+        RETURNING er.id, er.codigo_produto, er.descricao_produto, er.numero_nfe,
+                  er.numero_pedido, er.lote, er.unidade, alvo.qtd_original`,
+      [id]
+    );
+    if (result.rowCount === 0) {
+      const existe = await pool.query(
+        `SELECT id, COALESCE(qtd, 0) AS qtd
+           FROM etiqueta."ETQ_recebimento"
+          WHERE id = $1`,
+        [id]
+      );
+      if (existe.rowCount === 0) return res.status(404).json({ error: 'Identificação não encontrada.' });
+      return res.status(409).json({ error: 'Esta identificação já foi removida ou não possui saldo pendente.' });
+    }
+
+    const removida = result.rows[0];
+    void monEventoReq(req, {
+      categoria: 'ETIQUETAS',
+      acao: 'identificacao_excluida',
+      codigo_produto: removida.codigo_produto || null,
+      sucesso: true,
+      detalhe: {
+        id: removida.id,
+        numero_nfe: removida.numero_nfe || null,
+        numero_pedido: removida.numero_pedido || null,
+        lote: removida.lote || null,
+        quantidade_original: removida.qtd_original ?? null,
+        unidade: removida.unidade || null,
+        motivo: 'Removida manualmente da fila de Identificação do produto por Jair.R'
+      }
+    });
+    return res.json({ ok: true, identificacao: removida });
+  } catch (err) {
+    console.error('[etiquetas/excluir-identificacao]', err);
+    return res.status(500).json({ error: err?.message || 'Falha ao excluir identificação.' });
   }
 });
 
