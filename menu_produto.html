@@ -13836,6 +13836,21 @@
         </button>
       </div>
     </div>
+    <div class="etq-store-destination" aria-label="Armazém de destino dos materiais">
+      <div class="etq-store-destination__identity">
+        <span class="etq-store-destination__icon"><i class="fa-solid fa-warehouse"></i></span>
+        <span>
+          <small>ARMAZÉM DE DESTINO</small>
+          <strong>Para onde os materiais serão enviados</strong>
+        </span>
+      </div>
+      <label class="etq-store-destination__control" for="etqArmazemDestinoSelect">
+        <span>Trocar armazém de destino</span>
+        <select id="etqArmazemDestinoSelect" aria-label="Escolher armazém de destino">
+          <option value="10717096386">#ALMOX — Porta Pallet (Almoxarifado)</option>
+        </select>
+      </label>
+    </div>
     <div id="etqImpressoModalStatus" class="etiquetas-modal-status"></div>
     <div id="etqImpressoModalGrid" class="etiquetas-grid">
       <div class="etiquetas-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando...</div>
@@ -13929,6 +13944,15 @@
         <span id="etqArmazenarTitle" style="font-weight:700;color:#f1f5f9;font-size:1rem;">Leia o QR Code do produto</span>
       </div>
       <button id="etqArmazenarFechar" class="etiquetas-modal-close" title="Fechar">&times;</button>
+    </div>
+    <div class="etq-scan-destination">
+      <span class="etq-scan-destination__icon"><i class="fa-solid fa-warehouse"></i></span>
+      <label for="etqArmazenarDestinoSelect">
+        <small>DESTINO DESTA OPERAÇÃO</small>
+        <select id="etqArmazenarDestinoSelect" aria-label="Armazém de destino desta operação">
+          <option value="10717096386">#ALMOX — Porta Pallet (Almoxarifado)</option>
+        </select>
+      </label>
     </div>
     <!-- Viewport da câmera -->
     <div class="etq-scan-camera" style="position:relative;background:#000;width:100%;aspect-ratio:4/3;overflow:hidden;">

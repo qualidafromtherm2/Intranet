@@ -50,6 +50,8 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
 // local padrão para a UI (pode setar ALMOX_LOCAL_PADRAO no Render)
 const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
+const ETQ_ARMAZENAR_LOCAL_PADRAO = process.env.ETQ_ARMAZENAR_LOCAL_PADRAO || '10717096386';
+const ETQ_ARMAZENAR_LOCAL_ORIGEM = '10408201806';
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
 // outros requires de rotas...
 
@@ -15576,6 +15578,11 @@ app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, ex
   try {
     const codigo = String(req.params.codigo || '').trim();
     const origem = String(req.body?.origem || '').trim();
+    const quantidadeRaw = req.body?.quantidade;
+    const quantidadeFoiInformada = quantidadeRaw !== undefined && quantidadeRaw !== null && String(quantidadeRaw).trim() !== '';
+    const quantidadeInformada = !quantidadeFoiInformada
+      ? null
+      : _omieNormalizaNumeroSeparacao(quantidadeRaw);
     let destino;
     try {
       destino = assertEnderecoEtq(req.body?.destino);
@@ -15604,6 +15611,20 @@ app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, ex
       await client.query('ROLLBACK');
       return res.status(409).json({ ok: false, error: 'Este endereço não possui saldo para transferir.', saldo });
     }
+    if (quantidadeFoiInformada && (!Number.isFinite(quantidadeInformada) || quantidadeInformada <= 0)) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ ok: false, error: 'Informe uma quantidade maior que zero.' });
+    }
+    const quantidade = quantidadeInformada === null ? saldo : quantidadeInformada;
+    if (quantidade > saldo + 0.000001) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        error: `A quantidade solicitada (${quantidade}) ultrapassa o saldo disponível (${saldo}).`,
+        saldo,
+        quantidade
+      });
+    }
     const { rows: produtos } = await client.query(
       `SELECT codigo, descricao FROM produto.produtos_omie
         WHERE codigo = $1 OR codigo_produto::text = $1 OR codigo_produto::text = $2 LIMIT 1`,
@@ -15615,7 +15636,7 @@ app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, ex
     const sanitize = (valor, max = 999) => String(valor || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const resultado = await _processarMovimentacaoEtqInterna(client, {
       codigo: String(codigoOmie).trim(), codigoTexto: codigo,
-      descricao: produto.descricao, qtd: saldo, tipoMov: 'TRF',
+      descricao: produto.descricao, qtd: quantidade, tipoMov: 'TRF',
       enderecoOrigem: origem, enderecoDestino: destino,
       complemento: `Troca de endereço ${origem} → ${destino}`,
       usuario: resolverUsuarioAuditoria(req), dataEmissao,
@@ -15625,9 +15646,16 @@ app.patch('/api/logistica/produtos/:codigo/enderecos', exigirGestaoEnderecos, ex
     void monEventoReq(req, {
       categoria: 'API', acao: 'produto_endereco_transferido', codigo_produto: codigo,
       codigo_produto_omie: codigoOmie, sucesso: true,
-      detalhe: { origem, destino, saldo, omie: 'nao', registros: resultado.registros }
+      detalhe: {
+        origem, destino, saldo_antes: saldo, quantidade_movida: quantidade,
+        saldo_restante: Math.max(0, saldo - quantidade), omie: 'nao', registros: resultado.registros
+      }
     });
-    return res.json({ ok: true, origem, destino, saldo_movido: saldo, ...resultado });
+    return res.json({
+      ok: true, origem, destino, saldo_movido: quantidade,
+      saldo_origem_antes: saldo, saldo_origem_restante: Math.max(0, saldo - quantidade),
+      ...resultado
+    });
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     console.error('[produtos/enderecos] transferir', err);
@@ -16084,7 +16112,27 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     }
     const complemento = String(req.body?.complemento || '').trim();
     if (!id) return res.status(400).json({ error: 'id e endereco são obrigatórios.' });
+    const localDestinoSolicitado = String(req.body?.local_destino_codigo || ETQ_ARMAZENAR_LOCAL_PADRAO).trim();
 
+    if (!localDestinoSolicitado || localDestinoSolicitado === ETQ_ARMAZENAR_LOCAL_ORIGEM) {
+      return res.status(400).json({ error: 'Selecione um armazem de destino diferente do Recebimento de Produtos.' });
+    }
+
+    const { rows: localDestinoRows } = await pool.query(
+      `SELECT local_codigo, COALESCE(NULLIF(TRIM(nome), ''), local_codigo) AS nome
+         FROM omie.omie_locais_estoque
+        WHERE local_codigo = $1
+          AND COALESCE(ativo, TRUE) = TRUE
+        LIMIT 1`,
+      [localDestinoSolicitado]
+    );
+    const localDestino = localDestinoRows[0]
+      || (localDestinoSolicitado === ETQ_ARMAZENAR_LOCAL_PADRAO
+        ? { local_codigo: ETQ_ARMAZENAR_LOCAL_PADRAO, nome: 'Porta Pallet (Almoxarifado)' }
+        : null);
+    if (!localDestino) {
+      return res.status(400).json({ error: 'O armazem de destino selecionado nao existe ou esta inativo.' });
+    }
     // 1. Lê o impresso (sem gravar endereço ainda — Omie precisa ter sucesso primeiro)
     const { rows: impressoRows } = await pool.query(
       `SELECT i.id, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto,
@@ -16108,8 +16156,8 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     //    Obrigatório ter sucesso antes de marcar o material como guardado.
     if (recRows.length) {
       const { codigo_produto, numero_nfe, lote } = recRows[0];
-      const COD_ORIGEM  = '10408201806'; // Recebimento de Produtos
-      const COD_DESTINO = '10717096386'; // Porta Pallet (Almoxarifado)
+      const COD_ORIGEM  = ETQ_ARMAZENAR_LOCAL_ORIGEM;
+      const COD_DESTINO = String(localDestino.local_codigo);
       if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
         return res.status(500).json({
           error: 'Credenciais da Omie ausentes. Endereço não foi salvo.',
@@ -16142,7 +16190,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       const qtdNum  = parseFloat(qtd) || 1;
       const hoje    = new Date();
       const dataOmie = `${String(hoje.getDate()).padStart(2,'0')}/${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`;
-      const obs     = anexarHoraObs(`Armazenar. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`);
+      const obs     = anexarHoraObs(`Armazenar em ${localDestino.nome}. NF: ${numero_nfe || '-'} | Lote: ${lote || '-'} | End: ${endereco}`);
 
       const omiePayload = {
         call: 'IncluirAjusteEstoque',
@@ -16170,7 +16218,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
         const fault = omieErr?.faultstring || omieErr?.message || String(omieErr);
         console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${fault}\n└${_sep}`);
         return res.status(502).json({
-          error: `Omie recusou a transferência (Recebimento → Almoxarifado): ${fault}. Endereço não foi salvo.`,
+          error: `Omie recusou a transferência (Recebimento → ${localDestino.nome}): ${fault}. Endereço não foi salvo.`,
         });
       }
       if (omieResp?.faultstring) {
@@ -16214,7 +16262,9 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       ok: true,
       id: result.rows[0].id,
       id_rotulo: result.rows[0].id_rotulo || null,
-      endereco: result.rows[0].endereco
+      endereco: result.rows[0].endereco,
+      local_destino_codigo: String(localDestino.local_codigo),
+      local_destino_nome: localDestino.nome
     });
   } catch (err) {
     console.error('[etiquetas/rec-impresso/endereco]', err);
