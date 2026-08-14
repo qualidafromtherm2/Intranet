@@ -6647,7 +6647,13 @@
                 </button>
               </div>
 
-              <div id="vendRelGerStatus" style="display:none;margin-top:14px;font-size:13px;color:#94a3b8;">Carregando...</div>
+              <div id="vendRelGerStatus" class="at-rel-ger-loading" style="display:none;" role="status" aria-live="polite">
+                <div class="at-rel-ger-loading-inner">
+                  <i class="fa-solid fa-spinner fa-spin" aria-hidden="true"></i>
+                  <span>Atualizando relatório...</span>
+                  <small>Os filtros foram aplicados; aguarde os novos dados.</small>
+                </div>
+              </div>
               <div id="vendRelGerErro" style="display:none;margin-top:14px;font-size:13px;color:#f87171;"></div>
 
               <div id="vendRelGerConteudo" style="display:none;margin-top:16px;">

@@ -628,11 +628,22 @@
     const erroEl = document.getElementById('vendRelGerErro');
     const conteudoEl = document.getElementById('vendRelGerConteudo');
     const aplicarBtn = document.getElementById('vendRelGerAplicarBtn');
+    const jaTemConteudo = !!(conteudoEl && conteudoEl.style.display !== 'none' && _data);
 
     if (_carregarAbort) _carregarAbort.abort();
     _carregarAbort = new AbortController();
 
-    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando relatório...'; }
+    // Mantém o relatório visível enquanto o filtro atualiza; só usa o painel
+    // de loading "cheio" na primeira carga (quando ainda não há conteúdo).
+    if (statusEl) {
+      statusEl.style.display = jaTemConteudo ? 'none' : 'block';
+      const span = statusEl.querySelector('.at-rel-ger-loading-inner span');
+      if (span) span.textContent = jaTemConteudo ? 'Atualizando relatório...' : 'Gerando relatório...';
+    }
+    if (conteudoEl && jaTemConteudo) {
+      conteudoEl.style.opacity = '0.55';
+      conteudoEl.style.pointerEvents = 'none';
+    }
     if (erroEl) erroEl.style.display = 'none';
     if (aplicarBtn) aplicarBtn.disabled = true;
 
@@ -655,10 +666,21 @@
       _renderChartsSecao(_secao, data);
 
       if (statusEl) statusEl.style.display = 'none';
-      if (conteudoEl) conteudoEl.style.display = 'block';
+      if (conteudoEl) {
+        conteudoEl.style.display = 'block';
+        conteudoEl.style.opacity = '';
+        conteudoEl.style.pointerEvents = '';
+      }
     } catch (err) {
-      if (err?.name === 'AbortError') return;
+      if (err?.name === 'AbortError') {
+        // Nova carga em andamento — ela cuida do visual.
+        return;
+      }
       if (statusEl) statusEl.style.display = 'none';
+      if (conteudoEl) {
+        conteudoEl.style.opacity = '';
+        conteudoEl.style.pointerEvents = '';
+      }
       if (erroEl) { erroEl.style.display = 'block'; erroEl.textContent = err.message || 'Erro.'; }
     } finally {
       if (aplicarBtn) aplicarBtn.disabled = false;
@@ -1229,9 +1251,15 @@
   function _filtrarRegistrosVisiveis() {
     const q = (document.getElementById('vendRelGerRegistrosBusca')?.value || '').trim().toLowerCase();
     if (!q) return _registrosRows;
+    const qDigits = q.replace(/\D/g, '');
     return _registrosRows.filter((r) => {
-      const blob = `${r.numero_pedido || ''} ${r.cliente || ''} ${r.vendedor || ''} ${r.nf || ''} ${r.qtd ?? ''}`.toLowerCase();
-      return blob.includes(q);
+      const nf = String(r.nf || '');
+      const nfDigits = nf.replace(/\D/g, '');
+      const blob = `${r.numero_pedido || ''} ${r.cliente || ''} ${r.vendedor || ''} ${nf} ${r.qtd ?? ''}`.toLowerCase();
+      if (blob.includes(q)) return true;
+      // Aceita busca sem zeros à esquerda (ex.: 15224 encontra 00015224)
+      if (qDigits && nfDigits && (nfDigits === qDigits || nfDigits.endsWith(qDigits))) return true;
+      return false;
     });
   }
 
@@ -1478,10 +1506,11 @@
     if (titulo) titulo.textContent = isFat ? 'Faturamento' : 'Pedidos';
     if (sub) sub.textContent = _data?.periodo ? `Período: ${_data.periodo}` : 'Carregando...';
     if (busca) busca.value = '';
-    _registrosRows = [];
-    _renderTabelaRegistros();
+    // Não limpa a tabela enquanto carrega — evita sumir o relatório no filtro
     modal.style.display = 'flex';
-    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando registros...'; }
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Atualizando registros...'; }
+    const bodyEl = document.getElementById('vendRelGerRegistrosBody');
+    if (bodyEl && _registrosRows.length) bodyEl.style.opacity = '0.55';
 
     if (_registrosAbort) _registrosAbort.abort();
     _registrosAbort = new AbortController();
@@ -1499,9 +1528,11 @@
         sub.textContent = `${data.periodo || _data?.periodo || '—'} · ${data.total_pedidos || 0} pedido(s) · ${MOEDA.format(data.valor_total || 0)}${extra}`;
       }
       _renderTabelaRegistros();
+      if (bodyEl) bodyEl.style.opacity = '';
       if (statusEl) statusEl.style.display = 'none';
     } catch (err) {
       if (err?.name === 'AbortError') return;
+      if (bodyEl) bodyEl.style.opacity = '';
       if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = err.message || 'Erro.'; }
     }
   }

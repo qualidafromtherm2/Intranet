@@ -235,6 +235,8 @@ const VENDAS_CTES = `
         )
         OR NOT EXISTS (SELECT 1 FROM vendas.relatorio_gerencial_status LIMIT 1)
       )
+      -- Inclui se tiver ao menos um CFOP marcado como incluído (ou CFOP vazio).
+      -- NF mista (ex.: 6102 venda + 6910 bonificação) NÃO é excluída só por ter um CFOP fora.
       AND (
         TRIM(COALESCE(nf.cfop, '')) = ''
         OR EXISTS (
@@ -244,13 +246,6 @@ const VENDAS_CTES = `
               ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
              AND c.incluido IS TRUE
         )
-      )
-      AND NOT EXISTS (
-        SELECT 1
-          FROM unnest(string_to_array(COALESCE(nf.cfop, ''), ',')) AS raw(cf)
-          JOIN vendas.relatorio_gerencial_cfop c
-            ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
-           AND c.incluido IS FALSE
       )
   )
 `;

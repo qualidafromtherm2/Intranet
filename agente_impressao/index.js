@@ -17,7 +17,7 @@ const fs     = require('fs');
 const os     = require('os');
 const path   = require('path');
 
-const AGENT_VERSION = '3.3';
+const AGENT_VERSION = '3.4';
 const PORT       = 9200;
 const TASK_NAME  = 'AgenteImpressaoSGF';
 const EXE_NAME   = 'agente-impressao.exe';
@@ -364,19 +364,30 @@ function apiRequest(method, urlPath, body, token, cb, extraHeaders = {}) {
       ...extraHeaders,
       ...(bodyStr ? { 'Content-Length': Buffer.byteLength(bodyStr) } : {}),
     },
-    timeout: 15000,
+    timeout: 12000,
+  };
+
+  // Garante 1 único callback (pkg/Windows às vezes não emite 'error' após destroy no timeout)
+  let done = false;
+  const finish = (err, status, bodyJ) => {
+    if (done) return;
+    done = true;
+    try { cb(err, status, bodyJ); } catch (_) {}
   };
 
   const req = lib.request(opts, (r) => {
     let data = '';
     r.on('data', c => (data += c));
     r.on('end', () => {
-      try { cb(null, r.statusCode, JSON.parse(data)); }
-      catch { cb(null, r.statusCode, { raw: data }); }
+      try { finish(null, r.statusCode, JSON.parse(data)); }
+      catch { finish(null, r.statusCode, { raw: data }); }
     });
   });
-  req.on('error', cb);
-  req.on('timeout', () => { req.destroy(new Error('timeout')); });
+  req.on('error', (e) => finish(e || new Error('request error')));
+  req.on('timeout', () => {
+    try { req.destroy(); } catch (_) {}
+    finish(new Error('timeout'));
+  });
   if (bodyStr) req.write(bodyStr);
   req.end();
 }
@@ -667,7 +678,7 @@ function buildConfigHtml(cfg, printers, status) {
     <!-- Log -->
     <div class="card">
       <h2>📋 Log recente</h2>
-      <div class="log-box" id="logBox">${status.recentLog || 'Nenhum log ainda.'}</div>
+      <div class="log-box" id="logBox">${String(status.recentLog || 'Nenhum log ainda.').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}</div>
       <div class="btn-row" style="margin-top:10px">
         <button class="btn btn-secondary" style="font-size:.78rem" onclick="reloadLog()">🔄 Recarregar log</button>
       </div>
@@ -944,13 +955,21 @@ document.getElementById('histSearch')?.addEventListener('input', () => {
 });
 
 async function refreshHistory() {
+  const box   = document.getElementById('historyBox');
+  const count = document.getElementById('histCount');
+  const hint  = document.getElementById('histStatusHint');
   try {
     const q = (document.getElementById('histSearch')?.value || '').trim();
-    const r = await fetch('/api/history?q=' + encodeURIComponent(q) + '&limit=80');
+    const ctrl = new AbortController();
+    const abortTimer = setTimeout(() => ctrl.abort(), 14000);
+    let r;
+    try {
+      r = await fetch('/api/history?q=' + encodeURIComponent(q) + '&limit=80', { signal: ctrl.signal });
+    } finally {
+      clearTimeout(abortTimer);
+    }
+    if (!r.ok) throw new Error('HTTP ' + r.status);
     const j = await r.json();
-    const box   = document.getElementById('historyBox');
-    const count = document.getElementById('histCount');
-    const hint  = document.getElementById('histStatusHint');
     const prints = j.prints || [];
     if (count) {
       count.textContent = q
@@ -958,9 +977,15 @@ async function refreshHistory() {
         : (prints.length + ' no histórico' + (j.source === 'sql' ? ' (SQL)' : ' (local)'));
     }
     if (hint) {
-      if (prints[0]) hint.textContent = (prints[0].titulo || 'Etiqueta') + ' · ' + (prints[0].date || '') + ' ' + (prints[0].time || '');
-      else hint.textContent = q ? 'nenhum resultado' : 'vazio';
+      if (j.warning && !prints[0]) {
+        hint.textContent = 'fallback local' + (j.warning ? (' · ' + String(j.warning).slice(0, 40)) : '');
+      } else if (prints[0]) {
+        hint.textContent = (prints[0].titulo || 'Etiqueta') + ' · ' + (prints[0].date || '') + ' ' + (prints[0].time || '');
+      } else {
+        hint.textContent = q ? 'nenhum resultado' : (j.source === 'sql' ? 'vazio' : 'vazio (local)');
+      }
     }
+    if (!box) return;
     if (!prints.length) {
       box.innerHTML = '<div style="color:var(--muted);font-size:.82rem;padding:6px 0">' +
         (q ? ('Nenhuma etiqueta com "' + q.replace(/</g,'&lt;') + '".') : 'Nenhuma etiqueta no histórico ainda.') +
@@ -994,8 +1019,9 @@ async function refreshHistory() {
       '</div>';
     }).join('');
   } catch (e) {
-    const box = document.getElementById('historyBox');
+    if (hint) hint.textContent = 'indisponível';
     if (box) box.innerHTML = '<div style="color:var(--red);font-size:.82rem">Falha ao carregar histórico.</div>';
+    if (count) count.textContent = '';
   }
 }
 
@@ -1396,18 +1422,8 @@ function runService() {
       const q = urlObj.searchParams.get('q') || '';
       const limit = urlObj.searchParams.get('limit') || '80';
       const pathQ = `/api/etiquetas/historico?q=${encodeURIComponent(q)}&limit=${encodeURIComponent(limit)}`;
-      apiRequest('GET', pathQ, null, cfg.agentToken, (err, status, bodyJ) => {
-        if (!err && status === 200 && Array.isArray(bodyJ?.prints)) {
-          return respJson(res, 200, {
-            ok: true,
-            source: 'sql',
-            q,
-            prints: bodyJ.prints,
-            todayPrints: state.todayPrints,
-            date: state.todayDate,
-          });
-        }
-        // Fallback local se SQL indisponível
+
+      const localPrints = (() => {
         let prints = historyForApi();
         if (q) {
           const qq = q.toLowerCase();
@@ -1418,11 +1434,46 @@ function runService() {
             String(p.printer || '').toLowerCase().includes(qq)
           );
         }
-        return respJson(res, 200, {
+        return prints;
+      })();
+
+      let responded = false;
+      const finish = (payload) => {
+        if (responded || res.writableEnded) return;
+        responded = true;
+        clearTimeout(safetyTimer);
+        respJson(res, 200, payload);
+      };
+      // Se o SQL travar, a UI não fica eternamente em "carregando…"
+      const safetyTimer = setTimeout(() => {
+        finish({
           ok: true,
           source: 'local',
           q,
-          prints,
+          prints: localPrints,
+          max: HISTORY_MAX,
+          todayPrints: state.todayPrints,
+          date: state.todayDate,
+          warning: 'timeout SQL',
+        });
+      }, 10000);
+
+      apiRequest('GET', pathQ, null, cfg.agentToken, (err, status, bodyJ) => {
+        if (!err && status === 200 && Array.isArray(bodyJ?.prints)) {
+          return finish({
+            ok: true,
+            source: 'sql',
+            q,
+            prints: bodyJ.prints,
+            todayPrints: state.todayPrints,
+            date: state.todayDate,
+          });
+        }
+        return finish({
+          ok: true,
+          source: 'local',
+          q,
+          prints: localPrints,
           max: HISTORY_MAX,
           todayPrints: state.todayPrints,
           date: state.todayDate,
