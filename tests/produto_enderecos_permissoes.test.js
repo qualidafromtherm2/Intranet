@@ -69,10 +69,24 @@ test('guardar materiais permite escolher armazem ativo e preserva Almoxarifado c
   assert.match(route, /omie\.omie_locais_estoque/);
   assert.match(route, /COALESCE\(ativo, TRUE\) = TRUE/);
   assert.match(route, /codigo_local_estoque_destino:\s+COD_DESTINO/);
+  assert.match(route, /local_estoque_codigo = \$4/);
+  assert.match(route, /local_estoque_nome = \$5/);
   assert.match(frontend, /\/api\/armazem\/locais\?fonte=db/);
   assert.match(frontend, /local_destino_codigo: _armDestinoCodigo/);
   assert.match(html, /id="etqArmazemDestinoSelect"/);
   assert.match(html, /id="etqArmazenarDestinoSelect"/);
+});
+
+test('auditoria compara o ALMOX somente com enderecos vinculados ao proprio armazem', () => {
+  const backend = fs.readFileSync(path.resolve(__dirname, '..', 'server.js'), 'utf8');
+  const produtos = fs.readFileSync(path.resolve(__dirname, '..', 'routes', 'produtos.js'), 'utf8');
+  const frontend = fs.readFileSync(path.resolve(__dirname, '..', 'menu_produto.js'), 'utf8');
+
+  assert.match(backend, /local_estoque_codigo TEXT DEFAULT/);
+  assert.match(backend, /TRIM\(endereco\) LIKE '23-%'/);
+  assert.match(backend, /COALESCE\(NULLIF\(TRIM\(local_estoque_codigo\), ''\), \$3\) = \$3/);
+  assert.match(produtos, /COALESCE\(NULLIF\(TRIM\(local_estoque_codigo\), ''\), '[^']+'\) = '[^']+'/);
+  assert.match(frontend, /End\. ALMOX/);
 });
 
 test('criacao de ajustes e transferencias comuns exige supervisor operacional', () => {

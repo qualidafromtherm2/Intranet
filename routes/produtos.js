@@ -24,6 +24,7 @@ const OMIE_PROD_URL      = 'https://app.omie.com.br/api/v1/geral/produtos/';
 const INTERNAL_TOKEN = String(process.env.INTERNAL_TOKEN || '').trim();
 const INTERNAL_BASE = `http://localhost:${process.env.PORT || 5001}`;
 const CODIGO_LOCAL_EXPEDICAO = '10440426539';
+const CODIGO_LOCAL_ALMOXARIFADO = process.env.ETQ_ARMAZENAR_LOCAL_PADRAO || '10717096386';
 
 // Utilzinho pra ocultar chaves em logs
 const mask = s => (s ? String(s).slice(0, 4) + '…' : '');
@@ -463,6 +464,7 @@ router.get('/lista', async (req, res) => {
           WHERE endereco IS NOT NULL
             AND TRIM(endereco) <> ''
             AND TRIM(COALESCE(codigo_produto, '')) <> ''
+            AND COALESCE(NULLIF(TRIM(local_estoque_codigo), ''), '${CODIGO_LOCAL_ALMOXARIFADO}') = '${CODIGO_LOCAL_ALMOXARIFADO}'
           GROUP BY TRIM(codigo_produto)
         ) i
           ON i.produto_ref = p.codigo_produto::text

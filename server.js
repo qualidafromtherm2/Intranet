@@ -52,6 +52,7 @@ const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, n
 const ALMOX_LOCAL_PADRAO     = process.env.ALMOX_LOCAL_PADRAO     || '10408201806';
 const ETQ_ARMAZENAR_LOCAL_PADRAO = process.env.ETQ_ARMAZENAR_LOCAL_PADRAO || '10717096386';
 const ETQ_ARMAZENAR_LOCAL_ORIGEM = '10408201806';
+const ETQ_ARMAZENAR_LOCAL_SAC = process.env.ETQ_ARMAZENAR_LOCAL_SAC || '10445659161';
 const PRODUCAO_LOCAL_PADRAO  = process.env.PRODUCAO_LOCAL_PADRAO  || '10564345392';
 // outros requires de rotas...
 
@@ -12089,6 +12090,26 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS codigo_produto TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS descricao_produto TEXT`);
     await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS local_estoque_codigo TEXT DEFAULT '${ETQ_ARMAZENAR_LOCAL_PADRAO}'`);
+    await pool.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS local_estoque_nome TEXT`);
+    // Registros anteriores à escolha de armazém não carregavam o destino. O corredor 23
+    // pertence ao SAC; os demais endereços legados foram criados no fluxo exclusivo do ALMOX.
+    await pool.query(
+      `UPDATE etiqueta."ETQ_rec_impresso"
+          SET local_estoque_codigo = CASE
+                WHEN TRIM(endereco) LIKE '23-%' THEN $1
+                ELSE $2
+              END,
+              local_estoque_nome = CASE
+                WHEN TRIM(endereco) LIKE '23-%' THEN '10. SAC ASSISTENCIA E GARANTIAS'
+                ELSE '2. PORTA PALLET (ALMOXARIFADO)'
+              END
+        WHERE endereco IS NOT NULL
+          AND TRIM(endereco) <> ''
+          AND (NULLIF(TRIM(local_estoque_codigo), '') IS NULL
+               OR NULLIF(TRIM(local_estoque_nome), '') IS NULL)`,
+      [ETQ_ARMAZENAR_LOCAL_SAC, ETQ_ARMAZENAR_LOCAL_PADRAO]
+    );
 
     // Corrige endereços digitados fora do formato XX-XX-XX-XXX (ex.: 01-02-19-B5 → 01-02-19-001 + complemento B5)
     try {
@@ -13867,6 +13888,21 @@ async function _etqEnsureRecImpressoCols(db = pool) {
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS fonte TEXT DEFAULT 'recebimento'`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS endereco TEXT`);
   await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS complemento TEXT`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS local_estoque_codigo TEXT DEFAULT '${ETQ_ARMAZENAR_LOCAL_PADRAO}'`);
+  await db.query(`ALTER TABLE etiqueta."ETQ_rec_impresso" ADD COLUMN IF NOT EXISTS local_estoque_nome TEXT`);
+  await db.query(
+    `UPDATE etiqueta."ETQ_rec_impresso"
+        SET local_estoque_codigo = CASE WHEN TRIM(endereco) LIKE '23-%' THEN $1 ELSE $2 END,
+            local_estoque_nome = CASE
+              WHEN TRIM(endereco) LIKE '23-%' THEN '10. SAC ASSISTENCIA E GARANTIAS'
+              ELSE '2. PORTA PALLET (ALMOXARIFADO)'
+            END
+      WHERE endereco IS NOT NULL
+        AND TRIM(endereco) <> ''
+        AND (NULLIF(TRIM(local_estoque_codigo), '') IS NULL
+             OR NULLIF(TRIM(local_estoque_nome), '') IS NULL)`,
+    [ETQ_ARMAZENAR_LOCAL_SAC, ETQ_ARMAZENAR_LOCAL_PADRAO]
+  );
   _etqRecImpressoColsReady = true;
 }
 
@@ -15470,8 +15506,9 @@ async function _carregarAuditoriaSaldoEndereco(client, codigo, { bloquear = fals
        FROM etiqueta."ETQ_rec_impresso"
       WHERE TRIM(COALESCE(codigo_produto, '')) = ANY($1::text[])
         AND endereco IS NOT NULL AND TRIM(endereco) <> ''
+        AND COALESCE(NULLIF(TRIM(local_estoque_codigo), ''), $3) = $3
       ORDER BY TRIM(endereco), id${lockSql}`,
-    [idsBusca, produto.unidade || 'UN']
+    [idsBusca, produto.unidade || 'UN', ETQ_ARMAZENAR_LOCAL_PADRAO]
   );
   const porEndereco = new Map();
   for (const linha of linhas) {
@@ -16315,6 +16352,8 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       `UPDATE etiqueta."ETQ_rec_impresso" i
           SET endereco = $1,
               complemento = $2,
+              local_estoque_codigo = $4,
+              local_estoque_nome = $5,
               codigo_produto = COALESCE(
                 NULLIF(TRIM(i.codigo_produto), ''),
                 (SELECT p.codigo_produto::text
@@ -16330,7 +16369,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
         WHERE i.id = $3
         RETURNING i.id, i.endereco, i.complemento, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto,
                   NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo`,
-      [endereco, complemento || null, id]
+      [endereco, complemento || null, id, String(localDestino.local_codigo), localDestino.nome]
     );
     if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
 
