@@ -6,6 +6,7 @@
   let _carregarAbort = null;
   let _registrosAbort = null;
   let _registrosRows = [];
+  let _itensAbort = null;
   let _familiasSelecionadas = new Set();
   let _familiasOpcoes = [];
   let _secao = 'executivo';
@@ -720,6 +721,17 @@
       .at-rel-ger-kpi.is-clickable:hover { box-shadow: 0 4px 14px rgba(30,58,95,.18); transform: translateY(-1px); }
       #vendRelGerRegistrosModal .r { text-align: right; font-variant-numeric: tabular-nums; }
       #vendRelGerRegistrosModal tfoot td { font-weight: 800; background: #f1f5f9; }
+      #vendRelGerRegistrosModal tr.is-clickable { cursor: pointer; }
+      #vendRelGerRegistrosModal tr.is-clickable:hover td { background: #eff6ff; }
+      #vendRelGerRegistrosModal .vend-rel-export-btns { display: flex; gap: 6px; flex-shrink: 0; }
+      #vendRelGerRegistrosModal .vend-rel-export-btns button {
+        padding: 6px 10px; border-radius: 8px; border: 1px solid #cbd5e1; background: #fff;
+        color: #334155; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+      }
+      #vendRelGerRegistrosModal .vend-rel-export-btns button:hover { background: #f1f5f9; border-color: #94a3b8; }
+      #vendRelGerRegistrosModal .vend-rel-export-btns button:disabled { opacity: .6; cursor: wait; }
+      #vendRelGerItensModal { z-index: 10080; }
+      #vendRelGerItensModal .at-rel-ger-lote-modal-card { max-width: 860px; }
       .vend-rel-ms { position: relative; min-width: 180px; max-width: 260px; }
       .vend-rel-ms-btn {
         width: 100%; padding: 5px 28px 5px 8px; border-radius: 8px; border: 1px solid #374151;
@@ -998,7 +1010,10 @@
   }
 
   function _injetarModalRegistros() {
-    if (document.getElementById('vendRelGerRegistrosModal')) return;
+    if (document.getElementById('vendRelGerRegistrosModal')) {
+      _garantirCabecalhoRegistros();
+      return;
+    }
     const wrap = document.createElement('div');
     wrap.innerHTML = `
       <div id="vendRelGerRegistrosModal" class="at-rel-ger-lote-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="vendRelGerRegistrosTitulo">
@@ -1015,7 +1030,15 @@
           </div>
           <div id="vendRelGerRegistrosStatus" class="at-rel-ger-lote-modal-status">Carregando...</div>
           <div class="at-rel-ger-lote-modal-toolbar">
-            <input id="vendRelGerRegistrosBusca" type="search" placeholder="Pesquisar pedido, cliente, estado ou vendedor..." autocomplete="off">
+            <input id="vendRelGerRegistrosBusca" type="search" placeholder="Pesquisar pedido, cliente, vendedor ou NF..." autocomplete="off">
+            <div class="vend-rel-export-btns">
+              <button type="button" id="vendRelGerRegistrosPdfBtn" title="Gerar PDF da lista">
+                <i class="fa-solid fa-file-pdf"></i> PDF
+              </button>
+              <button type="button" id="vendRelGerRegistrosExcelBtn" title="Gerar Excel (.xlsx)">
+                <i class="fa-solid fa-file-excel"></i> Excel
+              </button>
+            </div>
             <span id="vendRelGerRegistrosQtd" class="at-rel-ger-lote-modal-qtd"></span>
           </div>
           <div class="at-rel-ger-lote-modal-body">
@@ -1024,10 +1047,10 @@
                 <tr>
                   <th>Pedido</th>
                   <th>Cliente</th>
-                  <th>Estado</th>
                   <th>Data</th>
+                  <th class="r">Qtd</th>
                   <th>Vendedor</th>
-                  <th>Etapa</th>
+                  <th>NF</th>
                   <th class="r">Valor</th>
                 </tr>
               </thead>
@@ -1036,8 +1059,108 @@
             </table>
           </div>
         </div>
+      </div>
+      <div id="vendRelGerItensModal" class="at-rel-ger-lote-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="vendRelGerItensTitulo">
+        <div class="at-rel-ger-lote-modal-card">
+          <div class="at-rel-ger-lote-modal-head">
+            <div>
+              <div class="at-rel-ger-lote-modal-kicker" style="color:#0284c7;">Produtos do pedido</div>
+              <h3 id="vendRelGerItensTitulo">Pedido</h3>
+              <div id="vendRelGerItensSub" class="at-rel-ger-lote-modal-sub"></div>
+            </div>
+            <button type="button" id="vendRelGerItensFechar" class="at-rel-ger-lote-modal-close" title="Fechar" aria-label="Fechar">
+              <i class="fa-solid fa-xmark"></i>
+            </button>
+          </div>
+          <div id="vendRelGerItensStatus" class="at-rel-ger-lote-modal-status">Carregando...</div>
+          <div class="at-rel-ger-lote-modal-body">
+            <table class="at-rel-ger-lote-modal-tbl">
+              <thead>
+                <tr>
+                  <th>Código</th>
+                  <th>Descrição</th>
+                  <th class="r">Qtd</th>
+                  <th class="r">Valor</th>
+                </tr>
+              </thead>
+              <tbody id="vendRelGerItensBody"></tbody>
+              <tfoot id="vendRelGerItensFoot"></tfoot>
+            </table>
+          </div>
+        </div>
       </div>`;
-    document.body.appendChild(wrap.firstElementChild);
+    while (wrap.firstElementChild) document.body.appendChild(wrap.firstElementChild);
+  }
+
+  function _garantirCabecalhoRegistros() {
+    const thead = document.querySelector('#vendRelGerRegistrosModal thead tr');
+    if (thead && !thead.textContent.includes('NF')) {
+      thead.innerHTML = `
+        <th>Pedido</th>
+        <th>Cliente</th>
+        <th>Data</th>
+        <th class="r">Qtd</th>
+        <th>Vendedor</th>
+        <th>NF</th>
+        <th class="r">Valor</th>`;
+    }
+    const busca = document.getElementById('vendRelGerRegistrosBusca');
+    if (busca) busca.placeholder = 'Pesquisar pedido, cliente, vendedor ou NF...';
+    const toolbar = document.querySelector('#vendRelGerRegistrosModal .at-rel-ger-lote-modal-toolbar');
+    if (toolbar && !document.getElementById('vendRelGerRegistrosPdfBtn')) {
+      const qtd = document.getElementById('vendRelGerRegistrosQtd');
+      const btns = document.createElement('div');
+      btns.className = 'vend-rel-export-btns';
+      btns.innerHTML = `
+        <button type="button" id="vendRelGerRegistrosPdfBtn" title="Gerar PDF da lista">
+          <i class="fa-solid fa-file-pdf"></i> PDF
+        </button>
+        <button type="button" id="vendRelGerRegistrosExcelBtn" title="Gerar Excel (.xlsx)">
+          <i class="fa-solid fa-file-excel"></i> Excel
+        </button>`;
+      if (qtd) toolbar.insertBefore(btns, qtd);
+      else toolbar.appendChild(btns);
+      document.getElementById('vendRelGerRegistrosPdfBtn')?.addEventListener('click', _exportarRegistrosPdf);
+      document.getElementById('vendRelGerRegistrosExcelBtn')?.addEventListener('click', _exportarRegistrosExcel);
+    }
+    if (!document.getElementById('vendRelGerItensModal')) {
+      const wrap = document.createElement('div');
+      wrap.innerHTML = `
+        <div id="vendRelGerItensModal" class="at-rel-ger-lote-modal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="vendRelGerItensTitulo">
+          <div class="at-rel-ger-lote-modal-card">
+            <div class="at-rel-ger-lote-modal-head">
+              <div>
+                <div class="at-rel-ger-lote-modal-kicker" style="color:#0284c7;">Produtos do pedido</div>
+                <h3 id="vendRelGerItensTitulo">Pedido</h3>
+                <div id="vendRelGerItensSub" class="at-rel-ger-lote-modal-sub"></div>
+              </div>
+              <button type="button" id="vendRelGerItensFechar" class="at-rel-ger-lote-modal-close" title="Fechar" aria-label="Fechar">
+                <i class="fa-solid fa-xmark"></i>
+              </button>
+            </div>
+            <div id="vendRelGerItensStatus" class="at-rel-ger-lote-modal-status">Carregando...</div>
+            <div class="at-rel-ger-lote-modal-body">
+              <table class="at-rel-ger-lote-modal-tbl">
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Descrição</th>
+                    <th class="r">Qtd</th>
+                    <th class="r">Valor</th>
+                  </tr>
+                </thead>
+                <tbody id="vendRelGerItensBody"></tbody>
+                <tfoot id="vendRelGerItensFoot"></tfoot>
+              </table>
+            </div>
+          </div>
+        </div>`;
+      document.body.appendChild(wrap.firstElementChild);
+      document.getElementById('vendRelGerItensFechar')?.addEventListener('click', _fecharModalItens);
+      document.getElementById('vendRelGerItensModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerItensModal') _fecharModalItens();
+      });
+    }
   }
 
   function _modoAtual() {
@@ -1107,9 +1230,15 @@
     const q = (document.getElementById('vendRelGerRegistrosBusca')?.value || '').trim().toLowerCase();
     if (!q) return _registrosRows;
     return _registrosRows.filter((r) => {
-      const blob = `${r.numero_pedido || ''} ${r.cliente || ''} ${r.estado || ''} ${r.vendedor || ''} ${r.etapa || ''}`.toLowerCase();
+      const blob = `${r.numero_pedido || ''} ${r.cliente || ''} ${r.vendedor || ''} ${r.nf || ''} ${r.qtd ?? ''}`.toLowerCase();
       return blob.includes(q);
     });
+  }
+
+  function _fmtQtd(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '—';
+    return QTD.format(v);
   }
 
   function _renderTabelaRegistros() {
@@ -1125,18 +1254,24 @@
       return;
     }
     body.innerHTML = rows.map((r) => `
-      <tr>
+      <tr class="is-clickable"
+          data-codigo-pedido="${_esc(r.codigo_pedido ?? '')}"
+          data-nf-id="${_esc(r.nf_id ?? '')}"
+          data-numero-pedido="${_esc(r.numero_pedido || '')}"
+          data-cliente="${_esc(r.cliente || '')}"
+          title="Clique para ver os produtos">
         <td class="os-id">${_esc(r.numero_pedido || r.codigo_pedido || '—')}</td>
         <td>${_esc(r.cliente || '—')}</td>
-        <td>${_esc(r.estado || '—')}</td>
         <td>${_esc(_fmtData(r.data))}</td>
+        <td class="r">${_esc(_fmtQtd(r.qtd))}</td>
         <td>${_esc(r.vendedor || '—')}</td>
-        <td>${_esc(r.etapa || '—')}</td>
+        <td>${_esc(r.nf || '—')}</td>
         <td class="r">${MOEDA.format(r.valor_total || 0)}</td>
       </tr>`).join('');
     const soma = rows.reduce((s, r) => s + (Number(r.valor_total) || 0), 0);
+    const somaQtd = rows.reduce((s, r) => s + (Number(r.qtd) || 0), 0);
     if (foot) {
-      foot.innerHTML = `<tr><td colspan="6">Total (${rows.length})</td><td class="r">${MOEDA.format(soma)}</td></tr>`;
+      foot.innerHTML = `<tr><td colspan="3">Total (${rows.length})</td><td class="r">${_esc(_fmtQtd(somaQtd))}</td><td colspan="2"></td><td class="r">${MOEDA.format(soma)}</td></tr>`;
     }
     if (qtdEl) {
       qtdEl.textContent = rows.length === _registrosRows.length
@@ -1149,6 +1284,186 @@
     const modal = document.getElementById('vendRelGerRegistrosModal');
     if (modal) modal.style.display = 'none';
     if (_registrosAbort) _registrosAbort.abort();
+    _fecharModalItens();
+  }
+
+  function _fecharModalItens() {
+    const modal = document.getElementById('vendRelGerItensModal');
+    if (modal) modal.style.display = 'none';
+    if (_itensAbort) _itensAbort.abort();
+  }
+
+  async function _abrirModalItensPedido(tr) {
+    if (!tr) return;
+    _injetarModalRegistros();
+    const codigo = tr.getAttribute('data-codigo-pedido') || '';
+    const nfId = tr.getAttribute('data-nf-id') || '';
+    const numero = tr.getAttribute('data-numero-pedido') || codigo || '—';
+    const cliente = tr.getAttribute('data-cliente') || '';
+    const modal = document.getElementById('vendRelGerItensModal');
+    const titulo = document.getElementById('vendRelGerItensTitulo');
+    const sub = document.getElementById('vendRelGerItensSub');
+    const statusEl = document.getElementById('vendRelGerItensStatus');
+    const body = document.getElementById('vendRelGerItensBody');
+    const foot = document.getElementById('vendRelGerItensFoot');
+    if (!modal || !body) return;
+    if (titulo) titulo.textContent = `Pedido ${numero}`;
+    if (sub) sub.textContent = cliente ? `Cliente: ${cliente}` : 'Carregando produtos...';
+    body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Carregando...</td></tr>';
+    if (foot) foot.innerHTML = '';
+    modal.style.display = 'flex';
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Carregando produtos...'; }
+
+    if (_itensAbort) _itensAbort.abort();
+    _itensAbort = new AbortController();
+    try {
+      const qs = new URLSearchParams();
+      if (nfId) qs.set('nf_id', nfId);
+      const resp = await fetch(
+        `/api/sac/vendas/relatorio-gerencial/pedido-itens/${encodeURIComponent(codigo || '0')}?${qs}`,
+        { credentials: 'include', signal: _itensAbort.signal }
+      );
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar produtos.');
+      const rows = Array.isArray(data.rows) ? data.rows : [];
+      if (sub) {
+        const nfTxt = data.nf ? ` · NF ${data.nf}` : '';
+        sub.textContent = `${cliente || '—'}${nfTxt} · ${rows.length} produto(s)`;
+      }
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhum produto encontrado neste pedido.</td></tr>';
+      } else {
+        body.innerHTML = rows.map((it) => `
+          <tr>
+            <td class="os-id">${_esc(it.codigo || '—')}</td>
+            <td>${_esc(it.descricao || '—')}</td>
+            <td class="r">${_esc(_fmtQtd(it.quantidade))}</td>
+            <td class="r">${MOEDA.format(it.valor_total || 0)}</td>
+          </tr>`).join('');
+        const somaQtd = rows.reduce((s, it) => s + (Number(it.quantidade) || 0), 0);
+        const somaVal = rows.reduce((s, it) => s + (Number(it.valor_total) || 0), 0);
+        if (foot) {
+          foot.innerHTML = `<tr><td colspan="2">Total (${rows.length})</td><td class="r">${_esc(_fmtQtd(somaQtd))}</td><td class="r">${MOEDA.format(somaVal)}</td></tr>`;
+        }
+      }
+      if (statusEl) statusEl.style.display = 'none';
+    } catch (err) {
+      if (err?.name === 'AbortError') return;
+      if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = err.message || 'Erro.'; }
+      body.innerHTML = `<tr><td colspan="4" style="text-align:center;color:#ef4444;">${_esc(err.message || 'Erro')}</td></tr>`;
+    }
+  }
+
+  function _linhasExportacaoRegistros() {
+    return _filtrarRegistrosVisiveis().map((r) => ({
+      Pedido: r.numero_pedido || r.codigo_pedido || '',
+      Cliente: r.cliente || '',
+      Data: _fmtData(r.data),
+      Qtd: Number(r.qtd) || 0,
+      Vendedor: r.vendedor || '',
+      NF: r.nf || '',
+      Valor: Number(r.valor_total) || 0,
+    }));
+  }
+
+  function _exportarRegistrosPdf() {
+    const rows = _filtrarRegistrosVisiveis();
+    if (!rows.length) {
+      alert('Não há registros para exportar.');
+      return;
+    }
+    const titulo = document.getElementById('vendRelGerRegistrosTitulo')?.textContent || 'Faturamento';
+    const sub = document.getElementById('vendRelGerRegistrosSub')?.textContent || '';
+    const corpo = rows.map((r) => `
+      <tr>
+        <td>${_esc(r.numero_pedido || r.codigo_pedido || '')}</td>
+        <td>${_esc(r.cliente || '')}</td>
+        <td>${_esc(_fmtData(r.data))}</td>
+        <td class="r">${_esc(_fmtQtd(r.qtd))}</td>
+        <td>${_esc(r.vendedor || '')}</td>
+        <td>${_esc(r.nf || '')}</td>
+        <td class="r">${MOEDA.format(r.valor_total || 0)}</td>
+      </tr>`).join('');
+    const soma = rows.reduce((s, r) => s + (Number(r.valor_total) || 0), 0);
+    const somaQtd = rows.reduce((s, r) => s + (Number(r.qtd) || 0), 0);
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8">
+<title>${_esc(titulo)} — ${_esc(sub)}</title>
+<style>
+  body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;margin:24px;}
+  h1{font-size:18px;margin:0 0 4px;}
+  .sub{font-size:12px;color:#64748b;margin-bottom:16px;}
+  table{width:100%;border-collapse:collapse;font-size:11px;}
+  th,td{border:1px solid #cbd5e1;padding:6px 8px;text-align:left;}
+  th{background:#e2e8f0;font-size:10px;text-transform:uppercase;}
+  .r{text-align:right;font-variant-numeric:tabular-nums;}
+  tfoot td{font-weight:700;background:#f8fafc;}
+  @media print{body{margin:12px;}}
+</style></head><body>
+  <h1>Relatório Gerencial — Vendas · ${_esc(titulo)}</h1>
+  <div class="sub">${_esc(sub)} · Gerado em ${_esc(_fmtDataGeracao())}</div>
+  <table>
+    <thead><tr>
+      <th>Pedido</th><th>Cliente</th><th>Data</th><th class="r">Qtd</th>
+      <th>Vendedor</th><th>NF</th><th class="r">Valor</th>
+    </tr></thead>
+    <tbody>${corpo}</tbody>
+    <tfoot><tr>
+      <td colspan="3">Total (${rows.length})</td>
+      <td class="r">${_esc(_fmtQtd(somaQtd))}</td>
+      <td colspan="2"></td>
+      <td class="r">${MOEDA.format(soma)}</td>
+    </tr></tfoot>
+  </table>
+  <script>window.onload=function(){setTimeout(function(){window.print();},300);};</script>
+</body></html>`;
+    const w = window.open('', '_blank');
+    if (!w) {
+      alert('Permita pop-ups para gerar o PDF.');
+      return;
+    }
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  }
+
+  async function _ensureXlsx() {
+    if (window.XLSX) return window.XLSX;
+    await new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = '/vendor/xlsx/xlsx.full.min.js';
+      s.onload = () => resolve();
+      s.onerror = () => reject(new Error('Não foi possível carregar a biblioteca Excel.'));
+      document.head.appendChild(s);
+    });
+    if (!window.XLSX) throw new Error('Biblioteca Excel indisponível.');
+    return window.XLSX;
+  }
+
+  async function _exportarRegistrosExcel() {
+    const linhas = _linhasExportacaoRegistros();
+    if (!linhas.length) {
+      alert('Não há registros para exportar.');
+      return;
+    }
+    const btn = document.getElementById('vendRelGerRegistrosExcelBtn');
+    if (btn) { btn.disabled = true; }
+    try {
+      const XLSX = await _ensureXlsx();
+      const titulo = document.getElementById('vendRelGerRegistrosTitulo')?.textContent || 'Faturamento';
+      const periodo = (_data?.periodo || 'periodo').replace(/[^\w\-]+/g, '_');
+      const ws = XLSX.utils.json_to_sheet(linhas);
+      ws['!cols'] = [
+        { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 8 },
+        { wch: 28 }, { wch: 14 }, { wch: 14 },
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Registros');
+      XLSX.writeFile(wb, `vendas_${titulo.toLowerCase()}_${periodo}.xlsx`);
+    } catch (err) {
+      alert(err.message || 'Erro ao gerar Excel.');
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
   async function _abrirModalRegistros(tipo) {
@@ -1670,8 +1985,23 @@
         if (e.target?.id === 'vendRelGerRegistrosModal') _fecharModalRegistros();
       });
       document.getElementById('vendRelGerRegistrosBusca')?.addEventListener('input', _renderTabelaRegistros);
+      document.getElementById('vendRelGerRegistrosPdfBtn')?.addEventListener('click', _exportarRegistrosPdf);
+      document.getElementById('vendRelGerRegistrosExcelBtn')?.addEventListener('click', _exportarRegistrosExcel);
+      document.getElementById('vendRelGerRegistrosBody')?.addEventListener('click', (e) => {
+        const tr = e.target?.closest?.('tr.is-clickable');
+        if (tr) _abrirModalItensPedido(tr);
+      });
+      document.getElementById('vendRelGerItensFechar')?.addEventListener('click', _fecharModalItens);
+      document.getElementById('vendRelGerItensModal')?.addEventListener('click', (e) => {
+        if (e.target?.id === 'vendRelGerItensModal') _fecharModalItens();
+      });
       document.addEventListener('keydown', (e) => {
-        if (e.key === 'Escape' && document.getElementById('vendRelGerRegistrosModal')?.style.display === 'flex') {
+        if (e.key !== 'Escape') return;
+        if (document.getElementById('vendRelGerItensModal')?.style.display === 'flex') {
+          _fecharModalItens();
+          return;
+        }
+        if (document.getElementById('vendRelGerRegistrosModal')?.style.display === 'flex') {
           _fecharModalRegistros();
         }
       });

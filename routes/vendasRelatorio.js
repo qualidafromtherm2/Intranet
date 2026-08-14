@@ -291,7 +291,9 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
           '(sem cliente)'
         ) AS cliente,
         nf.data_emissao_dt,
-        nf.data_emissao_dt AS data_ref
+        nf.data_emissao_dt AS data_ref,
+        NULLIF(TRIM(nf.numero_nota), '') AS numero_nf,
+        nf.id AS nf_id
       FROM nf_emitidas nf
       LEFT JOIN vendas.pedidos_venda p
         ON p.codigo_pedido = nf.id_pedido_omie
@@ -538,15 +540,40 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
         b.codigo_pedido,
         b.numero_pedido,
         b.cliente,
-        b.estado,
         b.data_ref AS data,
         b.valor_total_pedido::float AS valor_total,
-        b.etapa_descricao,
+        b.numero_nf,
+        b.nf_id,
         COALESCE(
           NULLIF(TRIM(v.nome), ''),
           NULLIF(TRIM(b.codigo_vendedor), ''),
           '—'
-        ) AS vendedor
+        ) AS vendedor,
+        COALESCE(
+          (
+            SELECT SUM(COALESCE(i.quantidade, 0))::float
+              FROM vendas.pedidos_venda_itens i
+             WHERE i.codigo_pedido = b.codigo_pedido
+               AND b.codigo_pedido > 0
+          ),
+          (
+            SELECT COALESCE(SUM(
+              NULLIF(
+                REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'),
+                ''
+              )::numeric
+            ), 0)::float
+              FROM vendas.notas_fiscais_omie nf
+              CROSS JOIN LATERAL jsonb_array_elements(
+                CASE
+                  WHEN jsonb_typeof(nf.payload_ultimo->'det') = 'array' THEN nf.payload_ultimo->'det'
+                  ELSE '[]'::jsonb
+                END
+              ) AS d
+             WHERE nf.id = b.nf_id
+          ),
+          0
+        ) AS qtd
       FROM base b
       LEFT JOIN vendas.vendedores_omie v
         ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
@@ -558,11 +585,12 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
       codigo_pedido: r.codigo_pedido,
       numero_pedido: r.numero_pedido,
       cliente: r.cliente,
-      estado: r.estado,
       data: r.data,
-      valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
-      etapa: r.etapa_descricao,
+      qtd: Math.round(Number(r.qtd || 0) * 100) / 100,
       vendedor: r.vendedor,
+      nf: r.numero_nf || '',
+      nf_id: r.nf_id || null,
+      valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
     }));
     const valor_total = Math.round(
       registros.reduce((s, r) => s + (Number(r.valor_total) || 0), 0) * 100
@@ -578,6 +606,110 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
     });
   } catch (err) {
     console.error('[VENDAS] erro registros relatorio-gerencial:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+function mapItensPedidoRows(rows) {
+  return (rows || []).map((r) => ({
+    codigo: r.codigo || '',
+    descricao: r.descricao || '-',
+    quantidade: Math.round(Number(r.quantidade || 0) * 100) / 100,
+    valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
+  }));
+}
+
+function itensFromNfPayload(payload) {
+  const det = Array.isArray(payload?.det) ? payload.det : [];
+  return det.map((d) => {
+    const prod = d?.prod || {};
+    const qRaw = String(prod.qCom ?? prod.nQtde ?? '0').replace(',', '.');
+    const vRaw = String(prod.vProd ?? prod.vTotalItem ?? '0').replace(',', '.');
+    return {
+      codigo: String(prod.cProd || prod.codigo || '').trim(),
+      descricao: String(prod.xProd || prod.descricao || '-').trim() || '-',
+      quantidade: Math.round((Number.parseFloat(qRaw) || 0) * 100) / 100,
+      valor_total: Math.round((Number.parseFloat(vRaw) || 0) * 100) / 100,
+    };
+  });
+}
+
+// GET /vendas/relatorio-gerencial/pedido-itens/:codigoPedido — produtos do pedido/NF
+router.get('/vendas/relatorio-gerencial/pedido-itens/:codigoPedido', async (req, res) => {
+  const codigoPedido = String(req.params.codigoPedido || '').trim();
+  const nfIdRaw = String(req.query.nf_id || '').trim();
+  if (!codigoPedido && !nfIdRaw) {
+    return res.status(400).json({ ok: false, error: 'codigoPedido ou nf_id é obrigatório.' });
+  }
+  try {
+    const codigoNum = Number(codigoPedido);
+    if (Number.isFinite(codigoNum) && codigoNum > 0) {
+      const { rows } = await pool.query(`
+        SELECT
+          i.codigo,
+          COALESCE(po.descricao, i.descricao, '-') AS descricao,
+          i.quantidade,
+          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
+        FROM vendas.pedidos_venda_itens i
+        LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+        WHERE i.codigo_pedido = $1
+        ORDER BY i.descricao NULLS LAST, i.codigo
+      `, [codigoPedido]);
+      if (rows.length) {
+        return res.json({ ok: true, origem: 'pedido', rows: mapItensPedidoRows(rows) });
+      }
+    }
+
+    let nfId = Number.parseInt(nfIdRaw, 10);
+    if (!Number.isFinite(nfId) || nfId <= 0) {
+      // codigo_pedido negativo = -nf.id (quando NF sem pedido sincronizado)
+      if (Number.isFinite(codigoNum) && codigoNum < 0) nfId = Math.abs(codigoNum);
+    }
+    if (!Number.isFinite(nfId) || nfId <= 0) {
+      return res.json({ ok: true, origem: 'vazio', rows: [] });
+    }
+
+    const { rows: nfRows } = await pool.query(`
+      SELECT payload_ultimo, numero_nota, numero_pedido, id_pedido_omie
+        FROM vendas.notas_fiscais_omie
+       WHERE id = $1
+       LIMIT 1
+    `, [nfId]);
+    const nf = nfRows[0];
+    if (!nf) return res.json({ ok: true, origem: 'vazio', rows: [] });
+
+    if (nf.id_pedido_omie) {
+      const { rows } = await pool.query(`
+        SELECT
+          i.codigo,
+          COALESCE(po.descricao, i.descricao, '-') AS descricao,
+          i.quantidade,
+          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
+        FROM vendas.pedidos_venda_itens i
+        LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+        WHERE i.codigo_pedido = $1
+        ORDER BY i.descricao NULLS LAST, i.codigo
+      `, [nf.id_pedido_omie]);
+      if (rows.length) {
+        return res.json({
+          ok: true,
+          origem: 'pedido',
+          nf: nf.numero_nota || '',
+          numero_pedido: nf.numero_pedido || '',
+          rows: mapItensPedidoRows(rows),
+        });
+      }
+    }
+
+    return res.json({
+      ok: true,
+      origem: 'nf',
+      nf: nf.numero_nota || '',
+      numero_pedido: nf.numero_pedido || '',
+      rows: itensFromNfPayload(nf.payload_ultimo || {}),
+    });
+  } catch (err) {
+    console.error('[VENDAS] erro pedido-itens relatorio-gerencial:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });
