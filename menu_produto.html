@@ -21,6 +21,7 @@
   <!-- Seu CSS principal -->
   <link rel="stylesheet" href="menu_produto.css?v=20260811-gemba"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
+  <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -649,6 +650,19 @@
        data-nav-selector="#menu-identificacao-produto">
       <i class="fa-solid fa-print" style="margin-right:8px;"></i>
       Identificação do produto
+    </a>
+
+    <a href="#"
+       id="menu-bipagem-contagem"
+       class="menu-link"
+       data-nav-key="side:log:bipagem-contagem"
+       data-nav-parent="side:log"
+       data-nav-pos="side"
+       data-nav-label="Bipagem / contagem"
+       data-mobile-ready="true"
+       data-nav-selector="#menu-bipagem-contagem">
+      <i class="fa-solid fa-barcode" style="margin-right:8px;"></i>
+      Bipagem / contagem
     </a>
 
     <a href="#"
@@ -13644,6 +13658,98 @@
           </div>
         </div>
 
+        <div id="bipagemContagemPane" class="tab-pane bipagem-page" style="display:none;">
+          <header class="bipagem-hero">
+            <div class="bipagem-hero-title">
+              <span class="bipagem-hero-icon"><i class="fa-solid fa-barcode"></i></span>
+              <div>
+                <h2>Bipagem / contagem</h2>
+                <p>Conte máquinas em massa com leitor físico ou câmera, sem duplicar códigos.</p>
+              </div>
+            </div>
+            <div class="bipagem-hero-actions">
+              <button id="bipSoundToggle" type="button" class="bip-btn bip-btn--dark" title="Ativar ou silenciar avisos sonoros">
+                <i class="fa-solid fa-volume-high"></i><span>Som ativo</span>
+              </button>
+              <button id="bipRefresh" type="button" class="bip-btn bip-btn--dark" title="Atualizar contagem">
+                <i class="fa-solid fa-rotate"></i><span>Atualizar</span>
+              </button>
+            </div>
+          </header>
+
+          <main class="bipagem-shell">
+            <div class="bipagem-grid">
+              <section class="bip-card" aria-label="Contagem ativa">
+                <div id="bipSessionEmpty" class="bip-session-empty">
+                  <i class="fa-solid fa-clipboard-check"></i>
+                  <h3>Inicie uma contagem</h3>
+                  <p>Dê um nome à conferência para poder retomá-la e auditá-la depois.</p>
+                  <div class="bip-start-row">
+                    <input id="bipSessionNewName" class="bip-input" type="text" maxlength="120" placeholder="Ex.: Contagem máquinas — corredor 1" autocomplete="off">
+                    <button id="bipSessionStart" class="bip-btn bip-btn--primary" type="button"><i class="fa-solid fa-play"></i> Iniciar</button>
+                  </div>
+                </div>
+
+                <div id="bipSessionActive" class="bip-card-body" hidden>
+                  <div class="bip-session-bar">
+                    <div class="bip-session-name"><span id="bipSessionStatus">Contagem em andamento</span><strong id="bipSessionName">—</strong></div>
+                    <div class="bip-session-actions">
+                      <button id="bipCameraToggle" type="button" class="bip-btn bip-btn--primary"><i class="fa-solid fa-camera"></i><span>Usar câmera</span></button>
+                      <button id="bipSessionFinish" type="button" class="bip-btn"><i class="fa-solid fa-flag-checkered"></i> Finalizar</button>
+                      <button id="bipNewSession" type="button" class="bip-btn"><i class="fa-solid fa-plus"></i> Nova</button>
+                    </div>
+                  </div>
+
+                  <div class="bip-scan-zone">
+                    <label class="bip-scan-label" for="bipScanInput">
+                      <span><i class="fa-solid fa-crosshairs"></i> Campo de leitura</span>
+                      <small>O Netum pode enviar Enter ou Tab</small>
+                    </label>
+                    <div class="bip-scan-row">
+                      <input id="bipScanInput" class="bip-input bip-scan-input" type="text" inputmode="text" autocomplete="off" autocapitalize="characters" placeholder="Bipe agora…">
+                      <button id="bipScanSubmit" class="bip-btn bip-btn--primary" type="button"><i class="fa-solid fa-check"></i> Confirmar</button>
+                    </div>
+                    <div class="bip-scan-hint">Aceita a OP antiga, MODELO-OP-DATA, QR code e códigos de barras.</div>
+                  </div>
+
+                  <div id="bipFeedback" class="bip-feedback" role="status" aria-live="assertive">
+                    <i id="bipFeedbackIcon" class="bip-feedback-icon fa-solid fa-barcode"></i>
+                    <div><strong id="bipFeedbackTitle">Pronto para bipar</strong><span id="bipFeedbackDetail">O total só aumenta depois que o servidor confirma a leitura.</span></div>
+                  </div>
+
+                  <div class="bip-total-wrap">
+                    <div class="bip-total"><span>Total confirmado</span><strong id="bipTotal">0</strong></div>
+                    <div id="bipPendingBox" class="bip-total bip-total--pending" hidden><span>Aguardando conexão</span><strong id="bipPending">0</strong></div>
+                  </div>
+
+                  <div id="bipCamera" class="bip-camera" hidden>
+                    <div class="bip-camera-stage">
+                      <video id="bipCameraVideo" playsinline muted></video>
+                      <div class="bip-camera-guide"></div>
+                    </div>
+                    <div class="bip-camera-actions">
+                      <span><i class="fa-solid fa-bolt"></i> Leitura contínua: aproxime, confirme pelo som e passe para a próxima.</span>
+                      <button id="bipCameraClose" type="button" class="bip-btn bip-btn--dark"><i class="fa-solid fa-xmark"></i> Fechar</button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              <aside class="bip-side">
+                <section class="bip-card">
+                  <div class="bip-card-head"><h3><i class="fa-solid fa-list-check"></i> Leituras recentes</h3></div>
+                  <div class="bip-card-body"><div id="bipReadings" class="bip-list"><div class="bip-empty-list">Nenhuma leitura confirmada ainda.</div></div></div>
+                </section>
+                <section class="bip-card">
+                  <div class="bip-card-head"><h3><i class="fa-solid fa-clock-rotate-left"></i> Contagens</h3></div>
+                  <div class="bip-card-body"><div id="bipHistory" class="bip-history"><div class="bip-empty-list">Carregando…</div></div></div>
+                </section>
+              </aside>
+            </div>
+          </main>
+          <div id="bipToast" class="bip-toast" role="status"></div>
+        </div>
+
       </div> <!-- /.main-container -->
 
 
@@ -14045,6 +14151,8 @@
   <script src="/public/js/producao-testes-relatorio.js?v=20260804b" defer></script>
   <script src="/public/js/producao-gemba.js?v=20260811a" defer></script>
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
+  <script src="/public/js/bipagem-contagem.js?v=20260814b" defer></script>
   <script type="module" src="menu_produto.js?v=20260812-ocorrencias-anexos"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260811a"></script>
