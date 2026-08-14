@@ -511,6 +511,12 @@ function ensureEpiPane(root) {
           <label class="epi-field" id="epiReceberVarWrap" style="margin-top:10px;display:none">Variação
             <select id="epiReceberVar"></select>
           </label>
+          <label class="epi-field" style="margin-top:10px">CMC / custo unitário (R$)
+            <input id="epiReceberCmc" type="number" min="0.0001" step="0.01" placeholder="Ex.: 2,09" />
+            <span class="epi-hint" id="epiReceberCmcHint" style="display:block;margin-top:4px;font-size:11px;opacity:.85">
+              Usado na Omie quando o produto ainda não tem CMC. Se já existir, pode deixar preenchido ou em branco.
+            </span>
+          </label>
           <label class="epi-field" style="margin-top:10px">Observação (opcional)
             <input id="epiReceberObs" type="text" placeholder="Ex.: NF 12345" />
           </label>
@@ -771,6 +777,23 @@ function openReceberModal(pane, card) {
   if (qtd) qtd.value = '1';
   const obs = epiVal('#epiReceberObs', pane);
   if (obs) obs.value = '';
+
+  const cmcInput = epiVal('#epiReceberCmc', pane);
+  const cmcHint = epiVal('#epiReceberCmcHint', pane);
+  const cmcSaldo = Number(_epiSaldoRhMap[codigo]?.cmc);
+  if (cmcInput) {
+    if (Number.isFinite(cmcSaldo) && cmcSaldo > 0) {
+      cmcInput.value = String(cmcSaldo);
+      if (cmcHint) {
+        cmcHint.textContent = `CMC encontrado: R$ ${cmcSaldo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })}. Pode confirmar ou ajustar.`;
+      }
+    } else {
+      cmcInput.value = '';
+      if (cmcHint) {
+        cmcHint.textContent = 'Se o produto não tiver CMC na Omie, informe o custo unitário aqui (ex.: preço da última compra).';
+      }
+    }
+  }
 
   const wrap = epiVal('#epiReceberVarWrap', pane);
   const sel = epiVal('#epiReceberVar', pane);
@@ -1351,6 +1374,12 @@ function bindEpiPane(pane) {
       alert('Selecione a variação para entrar no estoque.');
       return;
     }
+    const cmcRaw = String(epiVal('#epiReceberCmc', pane)?.value || '').trim().replace(',', '.');
+    const cmcNum = cmcRaw === '' ? null : Number(cmcRaw);
+    if (cmcNum != null && (!Number.isFinite(cmcNum) || cmcNum <= 0)) {
+      alert('CMC inválido. Informe um valor maior que zero.');
+      return;
+    }
     const btn = epiVal('#epiReceberOk', pane);
     if (btn) btn.disabled = true;
     try {
@@ -1362,6 +1391,7 @@ function bindEpiPane(pane) {
           quantidade,
           produto_variacao_id: varId || null,
           observacao: epiVal('#epiReceberObs', pane)?.value?.trim() || null,
+          cmc: cmcNum != null && cmcNum > 0 ? cmcNum : undefined,
         }),
       });
       closeReceberModal(pane);

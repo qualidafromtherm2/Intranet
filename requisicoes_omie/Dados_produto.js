@@ -269,7 +269,9 @@ export async function loadDadosProduto(codigo) {
     'info.uAlt','info.dAlt','info.hAlt',
     'info.uInc','info.dInc','info.hInc',
     'codigo_produto','codigo_familia',
-    'codInt_familia','quantidade_estoque'
+    'codInt_familia','quantidade_estoque',
+    // CMC e última compra vêm do estoque Omie — não existem em produto_servico_cadastro
+    'nCMC', 'nPrecoUltComp'
   ]);
 
   // 3.1) Título e categorias

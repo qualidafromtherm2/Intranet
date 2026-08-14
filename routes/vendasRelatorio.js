@@ -584,7 +584,7 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
       LIMIT ${LIMITE}
     `;
     const { rows } = await pool.query(sql, rangeParams);
-    const registros = (rows || []).map((r) => ({
+    let registros = (rows || []).map((r) => ({
       codigo_pedido: r.codigo_pedido,
       numero_pedido: r.numero_pedido,
       cliente: r.cliente,
@@ -595,6 +595,13 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
       nf_id: r.nf_id || null,
       valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
     }));
+
+    // Excel / export detalhado: anexa produtos em 1–2 queries (não 1 por pedido).
+    const comItens = String(req.query.com_itens || '').trim() === '1';
+    if (comItens && registros.length) {
+      registros = await anexarItensNosRegistros(registros);
+    }
+
     const valor_total = Math.round(
       registros.reduce((s, r) => s + (Number(r.valor_total) || 0), 0) * 100
     ) / 100;
@@ -605,6 +612,7 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
       total_pedidos: registros.length,
       valor_total,
       truncated: registros.length >= LIMITE,
+      com_itens: comItens,
       registros,
     });
   } catch (err) {
@@ -613,6 +621,69 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
   }
 });
 
+/** Carrega itens de vários pedidos/NFs de uma vez (para Excel). */
+async function anexarItensNosRegistros(registros) {
+  const byPedido = new Map();
+  const codigos = [...new Set(
+    registros
+      .map((r) => Number(r.codigo_pedido))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  )];
+
+  if (codigos.length) {
+    const { rows } = await pool.query(`
+      SELECT
+        i.codigo_pedido,
+        i.codigo,
+        COALESCE(po.descricao, i.descricao, '-') AS descricao,
+        i.quantidade,
+        COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
+      FROM vendas.pedidos_venda_itens i
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      WHERE i.codigo_pedido = ANY($1::bigint[])
+      ORDER BY i.codigo_pedido, i.descricao NULLS LAST, i.codigo
+    `, [codigos]);
+    for (const row of rows || []) {
+      const key = String(row.codigo_pedido);
+      if (!byPedido.has(key)) byPedido.set(key, []);
+      byPedido.get(key).push({
+        codigo: row.codigo || '',
+        descricao: row.descricao || '-',
+        quantidade: Math.round(Number(row.quantidade || 0) * 100) / 100,
+        valor_total: Math.round(Number(row.valor_total || 0) * 100) / 100,
+      });
+    }
+  }
+
+  const semItensComNf = registros.filter((r) => {
+    const key = String(r.codigo_pedido || '');
+    const tem = byPedido.get(key);
+    return (!tem || !tem.length) && r.nf_id;
+  });
+  const nfIds = [...new Set(
+    semItensComNf.map((r) => Number(r.nf_id)).filter((n) => Number.isFinite(n) && n > 0)
+  )];
+  const byNf = new Map();
+  if (nfIds.length) {
+    const { rows: nfRows } = await pool.query(`
+      SELECT id, payload_ultimo
+        FROM vendas.notas_fiscais_omie
+       WHERE id = ANY($1::bigint[])
+    `, [nfIds]);
+    for (const nf of nfRows || []) {
+      byNf.set(String(nf.id), itensFromNfPayload(nf.payload_ultimo || {}));
+    }
+  }
+
+  return registros.map((r) => {
+    const key = String(r.codigo_pedido || '');
+    let itens = byPedido.get(key) || [];
+    if (!itens.length && r.nf_id) {
+      itens = byNf.get(String(r.nf_id)) || [];
+    }
+    return { ...r, itens };
+  });
+}
 function mapItensPedidoRows(rows) {
   return (rows || []).map((r) => ({
     codigo: r.codigo || '',

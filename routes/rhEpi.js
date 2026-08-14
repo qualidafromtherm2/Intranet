@@ -1064,9 +1064,17 @@ router.post('/epi/estoque/entrada', async (req, res) => {
     const quantidade = Number(req.body?.quantidade);
     const produto_variacao_id = Number(req.body?.produto_variacao_id) || null;
     const observacao = String(req.body?.observacao || '').trim() || null;
+    const cmcRaw = req.body?.cmc ?? req.body?.valor_cmc ?? req.body?.custo;
+    const cmcNum =
+      cmcRaw === null || cmcRaw === undefined || cmcRaw === ''
+        ? null
+        : Number(String(cmcRaw).replace(',', '.'));
     if (!codigo) return res.status(400).json({ error: 'Código obrigatório' });
     if (!Number.isFinite(quantidade) || quantidade <= 0) {
       return res.status(400).json({ error: 'Quantidade inválida' });
+    }
+    if (cmcNum != null && (!Number.isFinite(cmcNum) || cmcNum <= 0)) {
+      return res.status(400).json({ error: 'CMC inválido. Informe um valor maior que zero.' });
     }
 
     if (produto_variacao_id) {
@@ -1089,6 +1097,7 @@ router.post('/epi/estoque/entrada', async (req, res) => {
       codigo,
       qtd: quantidade,
       usuario: sessionUserName(req) || 'rh',
+      cmc: cmcNum != null && cmcNum > 0 ? cmcNum : undefined,
       obs:
         observacao ||
         `EPI entrada ##RH — ${codigo} x${quantidade}${produto_variacao_id ? ` (var #${produto_variacao_id})` : ''}`,

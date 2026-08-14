@@ -1394,6 +1394,45 @@
     }));
   }
 
+  /** Monta linhas do Excel: pedido + produtos logo abaixo (quando vierem em r.itens). */
+  function _linhasExportacaoRegistrosComItens(registros) {
+    const out = [];
+    for (const r of registros || []) {
+      out.push({
+        Tipo: 'Pedido',
+        Pedido: r.numero_pedido || r.codigo_pedido || '',
+        Cliente: r.cliente || '',
+        Data: _fmtData(r.data),
+        Qtd: Number(r.qtd) || 0,
+        Vendedor: r.vendedor || '',
+        NF: r.nf || '',
+        Valor: Number(r.valor_total) || 0,
+        'Cód. produto': '',
+        Produto: '',
+        'Qtd produto': '',
+        'Valor produto': '',
+      });
+      const itens = Array.isArray(r.itens) ? r.itens : [];
+      for (const it of itens) {
+        out.push({
+          Tipo: 'Produto',
+          Pedido: r.numero_pedido || r.codigo_pedido || '',
+          Cliente: '',
+          Data: '',
+          Qtd: '',
+          Vendedor: '',
+          NF: r.nf || '',
+          Valor: '',
+          'Cód. produto': it.codigo || '',
+          Produto: it.descricao || '',
+          'Qtd produto': Number(it.quantidade) || 0,
+          'Valor produto': Number(it.valor_total) || 0,
+        });
+      }
+    }
+    return out;
+  }
+
   function _exportarRegistrosPdf() {
     const rows = _filtrarRegistrosVisiveis();
     if (!rows.length) {
@@ -1468,21 +1507,45 @@
   }
 
   async function _exportarRegistrosExcel() {
-    const linhas = _linhasExportacaoRegistros();
-    if (!linhas.length) {
+    const visiveis = _filtrarRegistrosVisiveis();
+    if (!visiveis.length) {
       alert('Não há registros para exportar.');
       return;
     }
     const btn = document.getElementById('vendRelGerRegistrosExcelBtn');
+    const statusEl = document.getElementById('vendRelGerRegistrosStatus');
     if (btn) { btn.disabled = true; }
+    if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Montando Excel com produtos...'; }
     try {
+      // Uma única chamada com todos os itens (leve). Depois filtra o que está na tela/busca.
+      const qs = _filtrosQueryParams();
+      qs.set('com_itens', '1');
+      const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
+        credentials: 'include',
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao buscar produtos para o Excel.');
+
+      const byKey = new Map();
+      for (const r of data.registros || []) {
+        const key = `${r.codigo_pedido || ''}|${r.nf_id || ''}|${r.numero_pedido || ''}|${r.nf || ''}`;
+        byKey.set(key, r);
+      }
+      const comItens = visiveis.map((r) => {
+        const key = `${r.codigo_pedido || ''}|${r.nf_id || ''}|${r.numero_pedido || ''}|${r.nf || ''}`;
+        const full = byKey.get(key);
+        return full ? { ...r, itens: full.itens || [] } : { ...r, itens: [] };
+      });
+
+      const linhas = _linhasExportacaoRegistrosComItens(comItens);
       const XLSX = await _ensureXlsx();
       const titulo = document.getElementById('vendRelGerRegistrosTitulo')?.textContent || 'Faturamento';
       const periodo = (_data?.periodo || 'periodo').replace(/[^\w\-]+/g, '_');
       const ws = XLSX.utils.json_to_sheet(linhas);
       ws['!cols'] = [
-        { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 8 },
+        { wch: 9 }, { wch: 12 }, { wch: 36 }, { wch: 12 }, { wch: 8 },
         { wch: 28 }, { wch: 14 }, { wch: 14 },
+        { wch: 14 }, { wch: 42 }, { wch: 10 }, { wch: 14 },
       ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, 'Registros');
@@ -1491,6 +1554,7 @@
       alert(err.message || 'Erro ao gerar Excel.');
     } finally {
       if (btn) btn.disabled = false;
+      if (statusEl) statusEl.style.display = 'none';
     }
   }
 

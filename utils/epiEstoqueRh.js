@@ -203,6 +203,7 @@ async function resolverCodigoProduto(dbQuery, { codigo, codigo_produto } = {}) {
  * @param {string} [opts.obs]
  * @param {string} [opts.usuario]
  * @param {string} [opts.motivo] - padrão INV
+ * @param {number} [opts.cmc] - custo unitário informado (sobrescreve busca local/Omie)
  */
 async function incluirAjusteEpiRh(opts = {}) {
   const {
@@ -213,7 +214,8 @@ async function incluirAjusteEpiRh(opts = {}) {
     qtd,
     obs,
     usuario = 'sistema',
-    motivo = 'INV'
+    motivo = 'INV',
+    cmc: cmcInformado
   } = opts;
 
   if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
@@ -250,10 +252,14 @@ async function incluirAjusteEpiRh(opts = {}) {
     throw err;
   }
 
-  const valorCmc = await buscarCmc(dbQuery, { codigo: codigoStr, codigo_produto: idProduto });
+  const cmcOverride = normalizaNumero(cmcInformado);
+  let valorCmc =
+    cmcOverride != null && cmcOverride > 0
+      ? cmcOverride
+      : await buscarCmc(dbQuery, { codigo: codigoStr, codigo_produto: idProduto });
   if (!valorCmc || valorCmc <= 0) {
     const err = new Error(
-      `CMC ausente ou inválido para o produto ${codigoStr}. Cadastre custo/CMC antes de movimentar o ##RH.`
+      `CMC ausente ou inválido para o produto ${codigoStr}. Informe o custo/CMC na entrada do ##RH.`
     );
     err.status = 400;
     throw err;
