@@ -20870,6 +20870,40 @@ html.light-mode #minhasComprasWrapper {
   border-color: #aebdcd !important;
 }
 
+#etiquetasModal.etiquetas-page .etq-search-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px 14px;
+  color: #5b38b5;
+  background: #fff;
+  border: 1px solid #8b6fda;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-refresh:hover {
+  background: #f5f1ff;
+}
+
+#etiquetasModal.etiquetas-page .etq-btn-refresh:disabled {
+  opacity: .65;
+  cursor: wait;
+}
+
 #etiquetasModal.etiquetas-page .etiquetas-search-wrap input,
 #etiquetasModal.etiquetas-page .etq-listbox-impressora {
   color: #18212b !important;
@@ -21411,7 +21445,7 @@ html.light-mode #minhasComprasWrapper {
 
   #etiquetasModal.etiquetas-page .etiquetas-modal-search-row {
     display: grid !important;
-    grid-template-columns: minmax(0, 1fr) 42px;
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: stretch !important;
     gap: 8px !important;
     padding-top: 9px !important;
@@ -21428,6 +21462,19 @@ html.light-mode #minhasComprasWrapper {
 
   #etiquetasModal.etiquetas-page .etq-view-toggle {
     width: 42px;
+  }
+
+  #etiquetasModal.etiquetas-page .etq-search-actions {
+    margin-left: 0;
+  }
+
+  #etiquetasModal.etiquetas-page .etq-btn-refresh {
+    min-width: 42px;
+    padding: 8px 10px;
+  }
+
+  #etiquetasModal.etiquetas-page .etq-btn-refresh span {
+    display: none;
   }
 
   #etiquetasModal.etiquetas-page .etiquetas-btn-imprimir-sel {
