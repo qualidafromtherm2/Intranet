@@ -229,6 +229,14 @@ const VENDAS_CTES = `
       AND ${NF_DATA_EMISSAO_SQL} >= $1::date
       AND ${NF_DATA_EMISSAO_SQL} < $2::date
       AND COALESCE(nf.payload_ultimo->'ide'->>'tpNF', '1') <> '0'
+      -- Inutilizada / cancelada / denegada NÃO entram no faturamento
+      -- (ex.: 00015224 ficou "Autorizada" no webhook, mas Omie preencheu ide.dInut).
+      AND NULLIF(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'dInut', '')), '') IS NULL
+      AND NULLIF(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'dCan', '')), '') IS NULL
+      AND UPPER(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'cDeneg', 'N'))) NOT IN ('S', '1', 'Y')
+      AND UPPER(TRIM(COALESCE(nf.status_ultimo, ''))) NOT IN (
+        'CANCELADA', 'DENEGADA', 'INUTILIZADA', 'INUTILIZACAO', 'INUTILIZAÇÃO'
+      )
       AND (
         nf.status_ultimo IN (
           SELECT s.status FROM vendas.relatorio_gerencial_status s WHERE s.incluido IS TRUE

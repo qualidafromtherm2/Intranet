@@ -46,7 +46,65 @@ function isErroOmieRetryable({ httpStatus, texto }) {
 }
 
 /**
- * Busca CMC para o produto (preferência ##RH, depois qualquer local, depois produtos_omie).
+ * CMC ao vivo na Omie (mesma fonte da aba Compras: ObterEstoqueProduto → nCMC).
+ */
+async function buscarCmcOmie(codigo) {
+  const codigoStr = String(codigo || '').trim();
+  if (!codigoStr || !OMIE_APP_KEY || !OMIE_APP_SECRET) return null;
+
+  try {
+    const resp = await fetch('https://app.omie.com.br/api/v1/estoque/resumo/', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        call: 'ObterEstoqueProduto',
+        app_key: OMIE_APP_KEY,
+        app_secret: OMIE_APP_SECRET,
+        param: [{ cCodigo: codigoStr, dDia: formatarDataBR(new Date()) }]
+      })
+    });
+    const texto = await resp.text();
+    let json = {};
+    try {
+      json = texto ? JSON.parse(texto) : {};
+    } catch (_) {
+      return null;
+    }
+    if (!resp.ok) {
+      console.warn('[epi-estoque-rh] ObterEstoqueProduto falhou', {
+        codigo: codigoStr,
+        status: resp.status,
+        fault: json?.faultstring || json?.error
+      });
+      return null;
+    }
+
+    const lista = Array.isArray(json)
+      ? json
+      : Array.isArray(json.resumo)
+        ? json.resumo
+        : Array.isArray(json.listaEstoque)
+          ? json.listaEstoque
+          : [];
+    const item = lista[0] || {};
+    for (const campo of ['nCMC', 'nPrecoUltComp']) {
+      const v = normalizaNumero(item[campo]);
+      if (v != null && v > 0) {
+        console.info('[epi-estoque-rh] CMC via Omie', { codigo: codigoStr, campo, cmc: v });
+        return v;
+      }
+    }
+  } catch (err) {
+    console.warn('[epi-estoque-rh] Falha ao buscar CMC na Omie', {
+      codigo: codigoStr,
+      erro: err?.message || String(err)
+    });
+  }
+  return null;
+}
+
+/**
+ * Busca CMC: ##RH local → qualquer local → produtos_omie → Omie (nCMC / última compra).
  */
 async function buscarCmc(dbQuery, { codigo, codigo_produto, localCodigo = EPI_RH_LOCAL_CODIGO } = {}) {
   const codigoStr = String(codigo || '').trim();
@@ -105,6 +163,11 @@ async function buscarCmc(dbQuery, { codigo, codigo_produto, localCodigo = EPI_RH
     );
     const v = Number(r.rows[0]?.cmc);
     if (Number.isFinite(v) && v > 0) return v;
+  }
+
+  if (codigoStr) {
+    const cmcOmie = await buscarCmcOmie(codigoStr);
+    if (cmcOmie != null && cmcOmie > 0) return cmcOmie;
   }
 
   return null;
@@ -322,6 +385,7 @@ module.exports = {
   EPI_RH_LOCAL_CODIGO,
   EPI_RH_LOCAL_NOME,
   buscarCmc,
+  buscarCmcOmie,
   incluirAjusteEpiRh,
   resolverCodigoProduto
 };
