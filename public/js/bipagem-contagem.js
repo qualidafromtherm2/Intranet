@@ -449,20 +449,9 @@
     document.addEventListener('visibilitychange', () => { if (document.hidden) pararCamera(); });
   }
 
-  function aplicarPermissaoMenu() {
-    if (!el.menu) return;
-    const logado = Boolean(window.__sessionUser);
-    const permissoes = window.__navPermissionsByKey || {};
-    const temPermissaoPropria = Object.prototype.hasOwnProperty.call(permissoes, 'side:log:bipagem-contagem');
-    const permitido = logado && (temPermissaoPropria
-      ? permissoes['side:log:bipagem-contagem'] === true
-      : (permissoes['side:log:identificacao-produto'] === true || permissoes['side:log:guardar-materiais'] === true));
-    el.menu.classList.toggle('perm-hidden', !permitido);
-  }
-
   async function init() {
     Object.assign(el, {
-      pane: $('bipagemContagemPane'), menu: $('menu-bipagem-contagem'), empty: $('bipSessionEmpty'), active: $('bipSessionActive'),
+      pane: $('bipagemContagemPane'), menu: $('bipagem-contagem-atalho'), empty: $('bipSessionEmpty'), active: $('bipSessionActive'),
       newName: $('bipSessionNewName'), start: $('bipSessionStart'), sessionName: $('bipSessionName'), sessionStatus: $('bipSessionStatus'),
       finalizar: $('bipSessionFinish'), newSession: $('bipNewSession'), scanInput: $('bipScanInput'), scanButton: $('bipScanSubmit'),
       cameraButton: $('bipCameraToggle'), camera: $('bipCamera'), cameraVideo: $('bipCameraVideo'), cameraClose: $('bipCameraClose'),
@@ -471,10 +460,7 @@
       pendingBox: $('bipPendingBox'), leituras: $('bipReadings'), history: $('bipHistory'), toast: $('bipToast'),
     });
     if (!el.pane || !el.menu) return;
-    bind(); renderSessao(); carregarSessoes(); aplicarPermissaoMenu();
-    document.addEventListener('permissions:system-actions-changed', aplicarPermissaoMenu);
-    window.addEventListener('auth:changed', () => setTimeout(aplicarPermissaoMenu, 0));
-    setTimeout(aplicarPermissaoMenu, 1200);
+    bind(); renderSessao(); carregarSessoes();
     const ativa = localStorage.getItem(ACTIVE_KEY);
     if (ativa) abrirSessao(ativa, false).catch(() => localStorage.removeItem(ACTIVE_KEY));
     if (window.location.hash === '#bipagem-contagem') el.menu.click();

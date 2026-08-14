@@ -6,6 +6,58 @@ const { interpretarLeitura } = require('../utils/bipagemContagem');
 
 const router = express.Router();
 let estruturaPromise = null;
+let navegacaoPromise = null;
+const NAV_KEY = 'side:log:bipagem-contagem';
+const NAV_SIBLING_KEY = 'side:log:identificacao-produto';
+
+async function garantirNavegacao() {
+  if (navegacaoPromise) return navegacaoPromise;
+  navegacaoPromise = (async () => {
+    await dbQuery(`
+      INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+      SELECT $1, 'Bipagem / contagem', 'side', p.id, 96, TRUE, '#bipagem-contagem-atalho'
+        FROM public.nav_node p
+       WHERE p.key = 'side:log'
+      ON CONFLICT (key) DO UPDATE SET
+        label = EXCLUDED.label,
+        position = EXCLUDED.position,
+        parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+        sort = EXCLUDED.sort,
+        active = TRUE,
+        selector = EXCLUDED.selector
+    `, [NAV_KEY]);
+    await dbQuery(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT arp.role, n.id, arp.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_role_permission arp ON arp.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO NOTHING
+    `, [NAV_KEY, NAV_SIBLING_KEY]);
+    await dbQuery(`
+      INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+      SELECT aup.user_id, n.id, aup.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_user_permission aup ON aup.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (user_id, node_id) DO NOTHING
+    `, [NAV_KEY, NAV_SIBLING_KEY]);
+    await dbQuery(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT 'admin', n.id, TRUE FROM public.nav_node n WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO UPDATE SET allow = TRUE
+    `, [NAV_KEY]);
+  })().catch((err) => {
+    navegacaoPromise = null;
+    console.error('[bipagem-contagem] falha ao garantir navegação:', err.message);
+    throw err;
+  });
+  return navegacaoPromise;
+}
+
+garantirNavegacao().catch(() => {});
 
 function usuarioSessao(req) {
   const user = req.session?.user || {};

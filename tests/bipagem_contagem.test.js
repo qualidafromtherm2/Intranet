@@ -48,6 +48,9 @@ test('backend garante unicidade por sessão e trilha de auditoria', () => {
   assert.match(rota, /lido_por_id/);
   assert.match(rota, /router\.post\('\/sessoes\/:id\/leituras'/);
   assert.match(rota, /router\.delete\('\/sessoes\/:sessaoId\/leituras\/:leituraId'/);
+  assert.match(rota, /side:log:bipagem-contagem/);
+  assert.match(rota, /side:log:identificacao-produto/);
+  assert.match(rota, /auth_role_permission/);
 });
 
 test('interface aceita Enter e Tab, câmera contínua e fila de rede', () => {
@@ -59,12 +62,12 @@ test('interface aceita Enter e Tab, câmera contínua e fila de rede', () => {
   assert.match(frontend, /window\.jsQR/);
   assert.match(frontend, /if \(!state\.cameraStream \|\| !state\.cameraMode\) return;/);
   assert.doesNotMatch(frontend, /if \(!state\.cameraStream \|\| !state\.detector\) return;/);
+  assert.match(ler('menu_produto.js'), /source\.id === 'bipagem-contagem-atalho'/);
   assert.match(frontend, /qr_code/);
   assert.match(frontend, /code_128/);
   assert.match(frontend, /localStorage\.setItem\(QUEUE_KEY/);
   assert.match(frontend, /requestAnimationFrame\(detectarCamera\)/);
-  assert.match(frontend, /side:log:identificacao-produto/);
-  assert.match(html, /id="menu-bipagem-contagem"/);
+  assert.match(html, /id="bipagem-contagem-atalho"/);
   assert.match(html, /id="bipagemContagemPane"/);
   assert.match(css, /@media \(max-width: 640px\)/);
 });
