@@ -11117,25 +11117,26 @@
     <div class="content-section">
       <div class="content-section-title">Variação</div>
       <p style="font-size:13px;color:var(--inactive-color);margin:0 0 14px;">
-        Cadastre tipos (ex.: tamanho) e os valores (ex.: 41, 42). Depois eles aparecem na solicitação de EPI.
+        Crie um <strong>grupo</strong> (ex.: tamanho) e adicione <strong>um valor por vez</strong> dentro dele.
+        Os valores ficam agrupados e aparecem na solicitação de EPI.
       </p>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;margin-bottom:12px;">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:12px;align-items:end;">
         <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
-          Tipo de variação
+          Grupo existente
           <select id="variacaoTipoSelect" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);"></select>
         </label>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
-          Ou novo tipo
+          Ou criar novo grupo
           <input id="variacaoTipoNovo" type="text" placeholder="Ex.: tamanho" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);" />
         </label>
         <label style="display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--inactive-color);">
-          Variações (separe por vírgula)
-          <input id="variacaoValoresInput" type="text" placeholder="Ex.: 41, 42, 43" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);" />
+          Valor (um por vez)
+          <input id="variacaoValoresInput" type="text" placeholder="Ex.: G (TAM 42)" style="padding:8px 10px;border-radius:8px;border:1px solid var(--border-color);background:var(--content-bg);color:var(--content-title-color);" />
         </label>
+        <button type="button" id="variacaoSalvarBtn" class="btn" style="padding:9px 16px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:none;color:#fff;font-weight:600;height:38px;">
+          <i class="fa-solid fa-plus"></i> Adicionar ao grupo
+        </button>
       </div>
-      <button type="button" id="variacaoSalvarBtn" class="btn" style="padding:9px 16px;border-radius:8px;background:linear-gradient(135deg,#3b82f6,#2563eb);border:none;color:#fff;font-weight:600;">
-        <i class="fa-solid fa-plus"></i> Incluir variação
-      </button>
       <div id="variacaoLista" style="margin-top:16px;"></div>
     </div>
   </div>

@@ -179,12 +179,31 @@ function ensureEpiPane(root) {
     #rhEpi .epi-prod-card-cod{font-weight:700;font-size:13px;color:#edf4fc}
     #rhEpi .epi-prod-card-desc{font-size:12px;color:#9eb0c5;line-height:1.35;min-height:32px}
     #rhEpi .epi-prod-card-tipo{font-size:11px;color:#93c5fd}
-    #rhEpi .epi-prod-card-estoque{margin:2px 0 4px;min-height:36px;padding:6px 8px;border-radius:6px;background:rgba(15,23,42,.55);border:1px solid rgba(255,255,255,.08);color:#dbeafe;font-size:12px;line-height:1.35}
+    #rhEpi .epi-prod-card-estoque{margin:2px 0 4px;min-height:0;padding:0;border-radius:8px;background:rgba(15,23,42,.55);border:1px solid rgba(255,255,255,.08);color:#dbeafe;font-size:12px;line-height:1.35;overflow:hidden}
     #rhEpi .epi-prod-card-estoque .epi-rh-saldo{font-weight:700;color:#86efac}
     #rhEpi .epi-prod-card-estoque .epi-rh-zero{color:#fca5a5}
+    #rhEpi .epi-rh-toggle{display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;padding:8px 10px;border:none;background:transparent;color:inherit;cursor:pointer;text-align:left;font:inherit}
+    #rhEpi .epi-rh-toggle:hover{background:rgba(255,255,255,.04)}
+    #rhEpi .epi-rh-toggle .epi-rh-chevron{font-size:10px;opacity:.75;transition:transform .15s ease;flex-shrink:0}
+    #rhEpi .epi-prod-card-estoque.is-open .epi-rh-toggle .epi-rh-chevron{transform:rotate(180deg)}
+    #rhEpi .epi-rh-detail{display:none;padding:0 10px 10px;border-top:1px solid rgba(255,255,255,.08)}
+    #rhEpi .epi-prod-card-estoque.is-open .epi-rh-detail{display:block}
+    #rhEpi .epi-rh-grupo{margin-top:8px}
+    #rhEpi .epi-rh-grupo-title{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:#93c5fd;margin:0 0 4px}
+    #rhEpi .epi-rh-rows{display:flex;flex-direction:column;gap:2px}
+    #rhEpi .epi-rh-row{display:flex;justify-content:space-between;gap:8px;padding:3px 0;font-size:12px;color:#dbeafe;border-bottom:1px dashed rgba(255,255,255,.06)}
+    #rhEpi .epi-rh-row:last-child{border-bottom:none}
+    #rhEpi .epi-rh-row .epi-rh-val{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    #rhEpi .epi-rh-row .epi-rh-qtd{font-weight:700;flex-shrink:0;font-variant-numeric:tabular-nums}
+    #rhEpi .epi-rh-empty{margin:8px 0 0;font-size:11px;color:#9ca3af}
     .light-mode #rhEpi .epi-prod-card-estoque{background:#f9fafb;border:1px solid rgba(0,0,0,.06);color:#1f2937}
     .light-mode #rhEpi .epi-prod-card-estoque .epi-rh-saldo{color:#15803d}
     .light-mode #rhEpi .epi-prod-card-estoque .epi-rh-zero{color:#b91c1c}
+    .light-mode #rhEpi .epi-rh-toggle:hover{background:rgba(0,0,0,.03)}
+    .light-mode #rhEpi .epi-rh-detail{border-top-color:#e5e7eb}
+    .light-mode #rhEpi .epi-rh-grupo-title{color:#2563eb}
+    .light-mode #rhEpi .epi-rh-row{color:#1f2937;border-bottom-color:#e5e7eb}
+    .light-mode #rhEpi .epi-rh-empty{color:#6b7280}
     #rhEpi .epi-prod-card-footer{margin-top:auto;display:flex;flex-direction:column;gap:8px;padding-top:4px}
     #rhEpi .epi-prod-card-vars{display:flex;flex-direction:column;gap:6px;width:100%;min-height:28px}
     #rhEpi .epi-prod-card-vars select{width:100%;padding:6px 8px !important;font-size:12px}
@@ -596,18 +615,59 @@ function renderVariacaoSelects(codigo) {
   `).join('');
 }
 
-function renderSaldoRhCard(codigo) {
-  const info = _epiSaldoRhMap[codigo] || { saldo_rh: 0 };
+function agruparVariacoesPorTipo(vars) {
+  const grupos = [];
+  for (const v of vars || []) {
+    const tipoId = v.tipo_id != null ? Number(v.tipo_id) : 0;
+    const tipoNome = String(v.tipo_nome || 'Variação').trim() || 'Variação';
+    let g = grupos.find((x) => x.tipo_id === tipoId && x.tipo_nome === tipoNome);
+    if (!g) {
+      g = { tipo_id: tipoId, tipo_nome: tipoNome, valores: [] };
+      grupos.push(g);
+    }
+    g.valores.push({
+      id: v.id,
+      valor: v.valor,
+      estoque_qtd: Number(v.estoque_qtd) || 0,
+    });
+  }
+  return grupos;
+}
+
+function renderSaldoRhCard(codigo, { aberto = false } = {}) {
+  const info = _epiSaldoRhMap[codigo] || { saldo_rh: 0, variacoes: [] };
   const saldo = Number(info.saldo_rh) || 0;
   const cls = saldo > 0 ? 'epi-rh-saldo' : 'epi-rh-zero';
   const vars = Array.isArray(info.variacoes) ? info.variacoes : [];
-  const varTxt = vars.length
-    ? `<div style="font-size:11px;opacity:.9;margin-top:2px">${vars
-        .slice(0, 6)
-        .map((v) => `${epiEscape(v.valor)}: ${Number(v.estoque_qtd) || 0}`)
-        .join(' · ')}${vars.length > 6 ? '…' : ''}</div>`
-    : '';
-  return `<div><span class="${cls}">##RH: ${saldo.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>${varTxt}</div>`;
+  const grupos = agruparVariacoesPorTipo(vars);
+  const openCls = aberto ? ' is-open' : '';
+  const ariaExp = aberto ? 'true' : 'false';
+  let detailHtml = '';
+  if (!grupos.length) {
+    detailHtml = '<p class="epi-rh-empty">Sem variação cadastrada</p>';
+  } else {
+    detailHtml = grupos.map((g) => `
+      <div class="epi-rh-grupo">
+        <div class="epi-rh-grupo-title">${epiEscape(g.tipo_nome)}</div>
+        <div class="epi-rh-rows">
+          ${(g.valores || []).map((v) => `
+            <div class="epi-rh-row">
+              <span class="epi-rh-val" title="${epiEscape(v.valor)}">${epiEscape(v.valor)}</span>
+              <span class="epi-rh-qtd">${Number(v.estoque_qtd) || 0}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `).join('');
+  }
+  return `
+    <div class="epi-prod-card-estoque-inner${openCls}" data-codigo="${epiEscape(codigo)}">
+      <button type="button" class="epi-rh-toggle" aria-expanded="${ariaExp}" title="Ver estoque por variação">
+        <span class="${cls}">##RH: ${saldo.toLocaleString('pt-BR', { maximumFractionDigits: 2 })}</span>
+        <i class="fa-solid fa-chevron-down epi-rh-chevron" aria-hidden="true"></i>
+      </button>
+      <div class="epi-rh-detail">${detailHtml}</div>
+    </div>`;
 }
 
 function aplicarSaldoRhNosCards(pane, codigos = null) {
@@ -617,7 +677,11 @@ function aplicarSaldoRhNosCards(pane, codigos = null) {
   root.querySelectorAll('.epi-prod-card-estoque[data-codigo]').forEach((el) => {
     const cod = el.dataset.codigo;
     if (!cod || (filtro && !filtro.has(cod))) return;
-    el.innerHTML = renderSaldoRhCard(cod);
+    const estavaAberto = el.classList.contains('is-open')
+      || !!el.querySelector('.epi-prod-card-estoque-inner.is-open');
+    el.innerHTML = renderSaldoRhCard(cod, { aberto: estavaAberto });
+    if (estavaAberto) el.classList.add('is-open');
+    else el.classList.remove('is-open');
   });
 }
 
@@ -1505,6 +1569,17 @@ function bindEpiPane(pane) {
   });
 
   epiVal('#epiCheckList', pane)?.addEventListener('click', (ev) => {
+    const btnRh = ev.target.closest('.epi-rh-toggle');
+    if (btnRh) {
+      const wrap = btnRh.closest('.epi-prod-card-estoque');
+      if (!wrap) return;
+      const aberto = wrap.classList.toggle('is-open');
+      btnRh.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+      const inner = wrap.querySelector('.epi-prod-card-estoque-inner');
+      if (inner) inner.classList.toggle('is-open', aberto);
+      return;
+    }
+
     const btnInfo = ev.target.closest('.epi-btn-info');
     if (btnInfo) {
       const card = btnInfo.closest('.epi-prod-card');
