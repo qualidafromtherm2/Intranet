@@ -212,6 +212,32 @@ const NF_DATA_EMISSAO_SQL = `CASE
 END`;
 
 /** Faturamento = notas fiscais de saída no período (não depende do pedido ter sido sincronizado). */
+/** Valor líquido do item no payload Omie: vProd − vDesc. */
+const NF_ITEM_LIQUIDO_SQL = `(
+  COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'vProd', '')), ',', '.', 'g'), '')::numeric, 0)
+  - COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'vDesc', '')), ',', '.', 'g'), '')::numeric, 0)
+)`;
+
+const NF_ITEM_CFOP_DIGITS_SQL = `REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'CFOP', '')), '\\D', '', 'g')`;
+
+/** Item conta no faturamento se CFOP vazio ou marcado como incluído na config. */
+const NF_ITEM_CFOP_INCLUIDO_SQL = `(
+  ${NF_ITEM_CFOP_DIGITS_SQL} = ''
+  OR EXISTS (
+    SELECT 1
+      FROM vendas.relatorio_gerencial_cfop c
+     WHERE c.cfop = ${NF_ITEM_CFOP_DIGITS_SQL}
+       AND c.incluido IS TRUE
+  )
+)`;
+
+const NF_DET_LATERAL_SQL = `jsonb_array_elements(
+  CASE
+    WHEN jsonb_typeof(nf.payload_ultimo->'det') = 'array' THEN nf.payload_ultimo->'det'
+    ELSE '[]'::jsonb
+  END
+) AS d`;
+
 const VENDAS_CTES = `
   nf_emitidas AS (
     SELECT
@@ -223,14 +249,28 @@ const VENDAS_CTES = `
       nf.cfop,
       nf.status_ultimo,
       nf.payload_ultimo,
-      ${NF_DATA_EMISSAO_SQL} AS data_emissao_dt
+      ${NF_DATA_EMISSAO_SQL} AS data_emissao_dt,
+      EXISTS (
+        SELECT 1 FROM ${NF_DET_LATERAL_SQL}
+      ) AS tem_itens_payload,
+      (
+        SELECT COALESCE(SUM(GREATEST(0::numeric, ${NF_ITEM_LIQUIDO_SQL})), 0)
+          FROM ${NF_DET_LATERAL_SQL}
+         WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
+      )::numeric(14,2) AS valor_itens_incluidos,
+      (
+        SELECT COALESCE(SUM(
+          COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'), '')::numeric, 0)
+        ), 0)
+          FROM ${NF_DET_LATERAL_SQL}
+         WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
+      )::numeric(14,2) AS qtd_itens_incluidos
     FROM vendas.notas_fiscais_omie nf
     WHERE nf.ativa IS DISTINCT FROM FALSE
       AND ${NF_DATA_EMISSAO_SQL} >= $1::date
       AND ${NF_DATA_EMISSAO_SQL} < $2::date
       AND COALESCE(nf.payload_ultimo->'ide'->>'tpNF', '1') <> '0'
       -- Inutilizada / cancelada / denegada NÃO entram no faturamento
-      -- (ex.: 00015224 ficou "Autorizada" no webhook, mas Omie preencheu ide.dInut).
       AND NULLIF(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'dInut', '')), '') IS NULL
       AND NULLIF(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'dCan', '')), '') IS NULL
       AND UPPER(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'cDeneg', 'N'))) NOT IN ('S', '1', 'Y')
@@ -243,16 +283,26 @@ const VENDAS_CTES = `
         )
         OR NOT EXISTS (SELECT 1 FROM vendas.relatorio_gerencial_status LIMIT 1)
       )
-      -- Inclui se tiver ao menos um CFOP marcado como incluído (ou CFOP vazio).
-      -- NF mista (ex.: 6102 venda + 6910 bonificação) NÃO é excluída só por ter um CFOP fora.
       AND (
-        TRIM(COALESCE(nf.cfop, '')) = ''
-        OR EXISTS (
-          SELECT 1
-            FROM unnest(string_to_array(nf.cfop, ',')) AS raw(cf)
-            JOIN vendas.relatorio_gerencial_cfop c
-              ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
-             AND c.incluido IS TRUE
+        -- Regra correta: CFOP do ITEM (não do cabeçalho).
+        -- Ex.: NF 15142 com 6102 (cobra) + 6910 (cortesia) → entra só se houver item incluído.
+        EXISTS (
+          SELECT 1 FROM ${NF_DET_LATERAL_SQL}
+           WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
+        )
+        OR (
+          -- Legado: payload sem itens → usa CFOP do cabeçalho
+          NOT EXISTS (SELECT 1 FROM ${NF_DET_LATERAL_SQL})
+          AND (
+            TRIM(COALESCE(nf.cfop, '')) = ''
+            OR EXISTS (
+              SELECT 1
+                FROM unnest(string_to_array(nf.cfop, ',')) AS raw(cf)
+                JOIN vendas.relatorio_gerencial_cfop c
+                  ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
+                 AND c.incluido IS TRUE
+            )
+          )
         )
       )
   )
@@ -281,11 +331,16 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
           WHEN TRIM(COALESCE(p.etapa::text, '')) = '80' THEN 'Concluído'
           ELSE 'Outras'
         END AS etapa_descricao,
-        COALESCE(
-          NULLIF(nf.valor_total, 0),
-          NULLIF(p.valor_total_pedido, 0),
-          0
-        )::numeric(14,2) AS valor_total_pedido,
+        CASE
+          WHEN nf.tem_itens_payload THEN nf.valor_itens_incluidos
+          ELSE COALESCE(
+            NULLIF(nf.valor_total, 0),
+            NULLIF(p.valor_total_pedido, 0),
+            0
+          )
+        END::numeric(14,2) AS valor_total_pedido,
+        nf.qtd_itens_incluidos,
+        nf.tem_itens_payload,
         COALESCE(NULLIF(TRIM(f.estado), ''), 'N/D') AS estado,
         COALESCE(
           NULLIF(TRIM(f.nome_fantasia), ''),
@@ -313,21 +368,73 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
 }
 
 const ITENS_CTE = `
-  itens_base AS (
+  itens_de_nf AS (
     SELECT
-      i.codigo_pedido,
+      b.codigo_pedido,
+      b.estado,
+      b.cliente,
+      b.data_emissao_dt,
+      COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
+      COALESCE(
+        NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'), '')::numeric,
+        0
+      )::numeric(14,2) AS quantidade,
+      GREATEST(0::numeric, ${NF_ITEM_LIQUIDO_SQL})::numeric(14,2) AS valor_total
+    FROM base b
+    JOIN vendas.notas_fiscais_omie nf ON nf.id = b.nf_id
+    CROSS JOIN LATERAL ${NF_DET_LATERAL_SQL}
+    LEFT JOIN produto.produtos_omie po
+      ON TRIM(po.codigo) = TRIM(COALESCE(d->'prod'->>'cProd', ''))
+    WHERE b.tem_itens_payload IS TRUE
+      AND ${NF_ITEM_CFOP_INCLUIDO_SQL}
+  ),
+  itens_de_pedido AS (
+    SELECT
+      b.codigo_pedido,
+      b.estado,
+      b.cliente,
+      b.data_emissao_dt,
       COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') AS familia,
       COALESCE(i.quantidade, 0)::numeric(14,2) AS quantidade,
       COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-    FROM vendas.pedidos_venda_itens i
+    FROM base b
+    JOIN vendas.pedidos_venda_itens i
+      ON i.codigo_pedido = b.codigo_pedido
+     AND b.codigo_pedido > 0
     LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
-    WHERE (
-      REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = ''
-      OR REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
-        SELECT c.cfop FROM vendas.relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
+    WHERE b.tem_itens_payload IS NOT TRUE
+      AND (
+        REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') = ''
+        OR REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') IN (
+          SELECT c.cfop FROM vendas.relatorio_gerencial_cfop c WHERE c.incluido IS TRUE
+        )
       )
-    )
-    __ITEM_SQL__
+      __ITEM_SQL__
+  ),
+  itens_fallback AS (
+    SELECT
+      b.codigo_pedido,
+      b.estado,
+      b.cliente,
+      b.data_emissao_dt,
+      '(sem família)'::text AS familia,
+      0::numeric(14,2) AS quantidade,
+      b.valor_total_pedido AS valor_total
+    FROM base b
+    WHERE b.tem_itens_payload IS NOT TRUE
+      AND NOT EXISTS (
+        SELECT 1
+          FROM vendas.pedidos_venda_itens i
+         WHERE i.codigo_pedido = b.codigo_pedido
+           AND b.codigo_pedido > 0
+      )
+  ),
+  itens AS (
+    SELECT * FROM itens_de_nf
+    UNION ALL
+    SELECT * FROM itens_de_pedido
+    UNION ALL
+    SELECT * FROM itens_fallback
   )
 `;
 
@@ -335,19 +442,7 @@ function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
   const itensBlock = ITENS_CTE.replace('__ITEM_SQL__', itemSql || '');
   return `
     ${buildBaseCte(etapaSql, pedidoSql).replace(/\s+$/, '')},
-    ${itensBlock},
-    itens AS (
-      SELECT
-        b.codigo_pedido,
-        b.estado,
-        b.cliente,
-        b.data_emissao_dt,
-        COALESCE(ib.familia, '(sem família)') AS familia,
-        COALESCE(ib.quantidade, 0)::numeric(14,2) AS quantidade,
-        COALESCE(ib.valor_total, b.valor_total_pedido) AS valor_total
-      FROM base b
-      LEFT JOIN itens_base ib ON ib.codigo_pedido = b.codigo_pedido
-    )
+    ${itensBlock}
   `;
 }
 
@@ -552,31 +647,18 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
           NULLIF(TRIM(b.codigo_vendedor), ''),
           '—'
         ) AS vendedor,
-        COALESCE(
-          (
-            SELECT SUM(COALESCE(i.quantidade, 0))::float
-              FROM vendas.pedidos_venda_itens i
-             WHERE i.codigo_pedido = b.codigo_pedido
-               AND b.codigo_pedido > 0
-          ),
-          (
-            SELECT COALESCE(SUM(
-              NULLIF(
-                REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'),
-                ''
-              )::numeric
-            ), 0)::float
-              FROM vendas.notas_fiscais_omie nf
-              CROSS JOIN LATERAL jsonb_array_elements(
-                CASE
-                  WHEN jsonb_typeof(nf.payload_ultimo->'det') = 'array' THEN nf.payload_ultimo->'det'
-                  ELSE '[]'::jsonb
-                END
-              ) AS d
-             WHERE nf.id = b.nf_id
-          ),
-          0
-        ) AS qtd
+        CASE
+          WHEN b.tem_itens_payload THEN b.qtd_itens_incluidos::float
+          ELSE COALESCE(
+            (
+              SELECT SUM(COALESCE(i.quantidade, 0))::float
+                FROM vendas.pedidos_venda_itens i
+               WHERE i.codigo_pedido = b.codigo_pedido
+                 AND b.codigo_pedido > 0
+            ),
+            0
+          )
+        END AS qtd
       FROM base b
       LEFT JOIN vendas.vendedores_omie v
         ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
@@ -623,45 +705,13 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
 
 /** Carrega itens de vários pedidos/NFs de uma vez (para Excel). */
 async function anexarItensNosRegistros(registros) {
-  const byPedido = new Map();
-  const codigos = [...new Set(
-    registros
-      .map((r) => Number(r.codigo_pedido))
-      .filter((n) => Number.isFinite(n) && n > 0)
-  )];
+  const { rows: cfopRows } = await pool.query(`
+    SELECT cfop FROM vendas.relatorio_gerencial_cfop WHERE incluido IS TRUE
+  `);
+  const cfopsIncluidos = new Set((cfopRows || []).map((r) => String(r.cfop || '')));
 
-  if (codigos.length) {
-    const { rows } = await pool.query(`
-      SELECT
-        i.codigo_pedido,
-        i.codigo,
-        COALESCE(po.descricao, i.descricao, '-') AS descricao,
-        i.quantidade,
-        COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-      FROM vendas.pedidos_venda_itens i
-      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
-      WHERE i.codigo_pedido = ANY($1::bigint[])
-      ORDER BY i.codigo_pedido, i.descricao NULLS LAST, i.codigo
-    `, [codigos]);
-    for (const row of rows || []) {
-      const key = String(row.codigo_pedido);
-      if (!byPedido.has(key)) byPedido.set(key, []);
-      byPedido.get(key).push({
-        codigo: row.codigo || '',
-        descricao: row.descricao || '-',
-        quantidade: Math.round(Number(row.quantidade || 0) * 100) / 100,
-        valor_total: Math.round(Number(row.valor_total || 0) * 100) / 100,
-      });
-    }
-  }
-
-  const semItensComNf = registros.filter((r) => {
-    const key = String(r.codigo_pedido || '');
-    const tem = byPedido.get(key);
-    return (!tem || !tem.length) && r.nf_id;
-  });
   const nfIds = [...new Set(
-    semItensComNf.map((r) => Number(r.nf_id)).filter((n) => Number.isFinite(n) && n > 0)
+    registros.map((r) => Number(r.nf_id)).filter((n) => Number.isFinite(n) && n > 0)
   )];
   const byNf = new Map();
   if (nfIds.length) {
@@ -671,41 +721,102 @@ async function anexarItensNosRegistros(registros) {
        WHERE id = ANY($1::bigint[])
     `, [nfIds]);
     for (const nf of nfRows || []) {
-      byNf.set(String(nf.id), itensFromNfPayload(nf.payload_ultimo || {}));
+      byNf.set(
+        String(nf.id),
+        itensFromNfPayload(nf.payload_ultimo || {}, { cfopsIncluidos, somenteIncluidos: true })
+      );
+    }
+  }
+
+  const byPedido = new Map();
+  const semNf = registros.filter((r) => !r.nf_id || !byNf.has(String(r.nf_id)));
+  const codigos = [...new Set(
+    semNf
+      .map((r) => Number(r.codigo_pedido))
+      .filter((n) => Number.isFinite(n) && n > 0)
+  )];
+  if (codigos.length) {
+    const { rows } = await pool.query(`
+      SELECT
+        i.codigo_pedido,
+        i.codigo,
+        COALESCE(po.descricao, i.descricao, '-') AS descricao,
+        i.quantidade,
+        COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total,
+        REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop_digits
+      FROM vendas.pedidos_venda_itens i
+      LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+      WHERE i.codigo_pedido = ANY($1::bigint[])
+      ORDER BY i.codigo_pedido, i.descricao NULLS LAST, i.codigo
+    `, [codigos]);
+    for (const row of rows || []) {
+      const cfopDigits = String(row.cfop_digits || '');
+      if (cfopDigits && !cfopsIncluidos.has(cfopDigits)) continue;
+      const key = String(row.codigo_pedido);
+      if (!byPedido.has(key)) byPedido.set(key, []);
+      byPedido.get(key).push({
+        codigo: row.codigo || '',
+        descricao: row.descricao || '-',
+        quantidade: Math.round(Number(row.quantidade || 0) * 100) / 100,
+        valor_total: Math.round(Number(row.valor_total || 0) * 100) / 100,
+        cfop: cfopDigits,
+      });
     }
   }
 
   return registros.map((r) => {
-    const key = String(r.codigo_pedido || '');
-    let itens = byPedido.get(key) || [];
-    if (!itens.length && r.nf_id) {
+    let itens = [];
+    if (r.nf_id && byNf.has(String(r.nf_id))) {
       itens = byNf.get(String(r.nf_id)) || [];
+    } else {
+      itens = byPedido.get(String(r.codigo_pedido || '')) || [];
     }
     return { ...r, itens };
   });
 }
+
 function mapItensPedidoRows(rows) {
   return (rows || []).map((r) => ({
     codigo: r.codigo || '',
     descricao: r.descricao || '-',
     quantidade: Math.round(Number(r.quantidade || 0) * 100) / 100,
     valor_total: Math.round(Number(r.valor_total || 0) * 100) / 100,
+    cfop: r.cfop || '',
   }));
 }
 
-function itensFromNfPayload(payload) {
+function valorLiquidoItemProd(prod = {}) {
+  const bruto = Number.parseFloat(String(prod.vProd ?? '0').replace(',', '.')) || 0;
+  const desc = Number.parseFloat(String(prod.vDesc ?? '0').replace(',', '.')) || 0;
+  return Math.round(Math.max(0, bruto - desc) * 100) / 100;
+}
+
+/**
+ * Itens do payload da NF.
+ * Valor sempre líquido (vProd − vDesc).
+ * somenteIncluidos=true → só CFOPs marcados na config (CFOP vazio entra).
+ */
+function itensFromNfPayload(payload, opts = {}) {
   const det = Array.isArray(payload?.det) ? payload.det : [];
-  return det.map((d) => {
+  const somenteIncluidos = opts.somenteIncluidos === true;
+  const cfopsIncluidos = opts.cfopsIncluidos instanceof Set ? opts.cfopsIncluidos : null;
+  const out = [];
+  for (const d of det) {
     const prod = d?.prod || {};
+    const cfopDigits = String(prod.CFOP || '').replace(/\D/g, '');
+    if (somenteIncluidos && cfopsIncluidos) {
+      if (cfopDigits && !cfopsIncluidos.has(cfopDigits)) continue;
+    }
     const qRaw = String(prod.qCom ?? prod.nQtde ?? '0').replace(',', '.');
-    const vRaw = String(prod.vProd ?? prod.vTotalItem ?? '0').replace(',', '.');
-    return {
+    out.push({
       codigo: String(prod.cProd || prod.codigo || '').trim(),
       descricao: String(prod.xProd || prod.descricao || '-').trim() || '-',
       quantidade: Math.round((Number.parseFloat(qRaw) || 0) * 100) / 100,
-      valor_total: Math.round((Number.parseFloat(vRaw) || 0) * 100) / 100,
-    };
-  });
+      valor_total: valorLiquidoItemProd(prod),
+      cfop: cfopDigits,
+    });
+  }
+  return out;
 }
 
 // GET /vendas/relatorio-gerencial/pedido-itens/:codigoPedido — produtos do pedido/NF
@@ -717,13 +828,65 @@ router.get('/vendas/relatorio-gerencial/pedido-itens/:codigoPedido', async (req,
   }
   try {
     const codigoNum = Number(codigoPedido);
+    let nfId = Number.parseInt(nfIdRaw, 10);
+    if (!Number.isFinite(nfId) || nfId <= 0) {
+      if (Number.isFinite(codigoNum) && codigoNum < 0) nfId = Math.abs(codigoNum);
+    }
+
+    // Prefere itens da NF (valor líquido vProd−vDesc) quando houver nf_id.
+    if (Number.isFinite(nfId) && nfId > 0) {
+      const { rows: nfRows } = await pool.query(`
+        SELECT payload_ultimo, numero_nota, numero_pedido, id_pedido_omie
+          FROM vendas.notas_fiscais_omie
+         WHERE id = $1
+         LIMIT 1
+      `, [nfId]);
+      const nf = nfRows[0];
+      if (nf) {
+        const rowsNf = itensFromNfPayload(nf.payload_ultimo || {});
+        if (rowsNf.length) {
+          return res.json({
+            ok: true,
+            origem: 'nf',
+            nf: nf.numero_nota || '',
+            numero_pedido: nf.numero_pedido || '',
+            rows: rowsNf,
+          });
+        }
+        if (nf.id_pedido_omie) {
+          const { rows } = await pool.query(`
+            SELECT
+              i.codigo,
+              COALESCE(po.descricao, i.descricao, '-') AS descricao,
+              i.quantidade,
+              COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total,
+              REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop
+            FROM vendas.pedidos_venda_itens i
+            LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
+            WHERE i.codigo_pedido = $1
+            ORDER BY i.descricao NULLS LAST, i.codigo
+          `, [nf.id_pedido_omie]);
+          if (rows.length) {
+            return res.json({
+              ok: true,
+              origem: 'pedido',
+              nf: nf.numero_nota || '',
+              numero_pedido: nf.numero_pedido || '',
+              rows: mapItensPedidoRows(rows),
+            });
+          }
+        }
+      }
+    }
+
     if (Number.isFinite(codigoNum) && codigoNum > 0) {
       const { rows } = await pool.query(`
         SELECT
           i.codigo,
           COALESCE(po.descricao, i.descricao, '-') AS descricao,
           i.quantidade,
-          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
+          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total,
+          REGEXP_REPLACE(TRIM(COALESCE(i.cfop, '')), '\\D', '', 'g') AS cfop
         FROM vendas.pedidos_venda_itens i
         LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
         WHERE i.codigo_pedido = $1
@@ -734,54 +897,7 @@ router.get('/vendas/relatorio-gerencial/pedido-itens/:codigoPedido', async (req,
       }
     }
 
-    let nfId = Number.parseInt(nfIdRaw, 10);
-    if (!Number.isFinite(nfId) || nfId <= 0) {
-      // codigo_pedido negativo = -nf.id (quando NF sem pedido sincronizado)
-      if (Number.isFinite(codigoNum) && codigoNum < 0) nfId = Math.abs(codigoNum);
-    }
-    if (!Number.isFinite(nfId) || nfId <= 0) {
-      return res.json({ ok: true, origem: 'vazio', rows: [] });
-    }
-
-    const { rows: nfRows } = await pool.query(`
-      SELECT payload_ultimo, numero_nota, numero_pedido, id_pedido_omie
-        FROM vendas.notas_fiscais_omie
-       WHERE id = $1
-       LIMIT 1
-    `, [nfId]);
-    const nf = nfRows[0];
-    if (!nf) return res.json({ ok: true, origem: 'vazio', rows: [] });
-
-    if (nf.id_pedido_omie) {
-      const { rows } = await pool.query(`
-        SELECT
-          i.codigo,
-          COALESCE(po.descricao, i.descricao, '-') AS descricao,
-          i.quantidade,
-          COALESCE(i.valor_total, 0)::numeric(14,2) AS valor_total
-        FROM vendas.pedidos_venda_itens i
-        LEFT JOIN produto.produtos_omie po ON TRIM(po.codigo) = TRIM(i.codigo)
-        WHERE i.codigo_pedido = $1
-        ORDER BY i.descricao NULLS LAST, i.codigo
-      `, [nf.id_pedido_omie]);
-      if (rows.length) {
-        return res.json({
-          ok: true,
-          origem: 'pedido',
-          nf: nf.numero_nota || '',
-          numero_pedido: nf.numero_pedido || '',
-          rows: mapItensPedidoRows(rows),
-        });
-      }
-    }
-
-    return res.json({
-      ok: true,
-      origem: 'nf',
-      nf: nf.numero_nota || '',
-      numero_pedido: nf.numero_pedido || '',
-      rows: itensFromNfPayload(nf.payload_ultimo || {}),
-    });
+    return res.json({ ok: true, origem: 'vazio', rows: [] });
   } catch (err) {
     console.error('[VENDAS] erro pedido-itens relatorio-gerencial:', err);
     return res.status(500).json({ ok: false, error: err.message });
