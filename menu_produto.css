@@ -19409,8 +19409,7 @@ body.mobile-modal-open {
   #producaoKanban #kanbanSolicitado,
   #producaoKanban #kanbanProduzindo,
   #producaoKanban #kanbanAguardando,
-  #producaoKanban #kanbanInspecaoFinal,
-  #producaoKanban #kanbanEmbalagem {
+  #producaoKanban #kanbanInspecaoFinal {
     max-height: 420px !important;
     min-height: 0 !important;
     overflow-y: auto !important;
@@ -26043,4 +26042,14 @@ html.light-mode #producaoGembaPane .gemba-guia.is-active {
   #producaoGembaPane .gemba-card-body {
     grid-template-columns: 1fr;
   }
+}
+
+/* Kanban Embalagem descontinuado — OP fica em Inspeção final até a RI */
+#producaoKanban > div:has(#kanbanEmbalagem),
+#montaKanban > div:has(#montaCol_embalagem),
+#riRegistroKanban > div:has(#riRegistroCol_embalagem) {
+  display: none !important;
+}
+#producaoGerarOpPostosSelect option[value="Embalagem"] {
+  display: none !important;
 }

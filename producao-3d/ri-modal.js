@@ -29,7 +29,6 @@ export function postoToKanbanLocal(posto, status) {
     eletrica: 'Montagem eletrica',
     teste: 'Teste',
     inspecao: 'Inspeção final',
-    embalagem: 'Embalagem',
     espera: 'Inspeção final',
     programado: 'Programado',
   };
@@ -38,12 +37,13 @@ export function postoToKanbanLocal(posto, status) {
 
 function isPostoRiAvancar(kanbanLocal) {
   const s = normStKanban(kanbanLocal);
-  if (!s || s === 'programado' || s === 'pedidos' || s === 'embalagem') return false;
+  if (!s || s === 'programado' || s === 'pedidos') return false;
   return (
     s.includes('hermetic') ||
     s.includes('eletric') ||
     s === 'teste' ||
     s === 'teste final' ||
+    s === 'embalagem' ||
     s.includes('inspec')
   );
 }
@@ -513,7 +513,9 @@ export function openProducao3dRiModal(op, opts = {}) {
         renderInfo(dataLib.check);
         renderLista(dataLib.verificacoes);
         const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
-        statusEl.textContent = `RI registrado no posto ${postoRegistrado}.`;
+        statusEl.textContent = dataLib.estoque_maq
+          ? 'RI concluída. Produto lançado no armazém 4. ESTOQUE MAQUINAS (Omie).'
+          : `RI registrado no posto ${postoRegistrado}.`;
         statusEl.className = 'p3d-ri-status ok';
         if (typeof opts.onRegistered === 'function') opts.onRegistered();
         close();

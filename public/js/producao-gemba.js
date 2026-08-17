@@ -373,3 +373,54 @@
     },
   };
 })();
+
+/* Patch: kanban Embalagem saiu da linha. menu_produto.js estava travado por outro chat. */
+(function patchProducaoSemEmbalagem() {
+  const SEM_EMB = (cols) => (cols || []).filter((c) => c && c.key !== 'embalagem');
+  let aplicado = false;
+
+  function wrap() {
+    if (aplicado) return true;
+    if (typeof window._producaoGetColunasPosProgramado !== 'function') return false;
+
+    const origGet = window._producaoGetColunasPosProgramado;
+    window._producaoGetColunasPosProgramado = function () {
+      return SEM_EMB(origGet());
+    };
+    if (typeof window._producaoKanbanColunas === 'function') {
+      const origCols = window._producaoKanbanColunas;
+      window._producaoKanbanColunas = function () {
+        return SEM_EMB(origCols());
+      };
+    }
+    const origProx = window._producaoProximoKanbanPorKey;
+    window._producaoProximoKanbanPorKey = function (colKey) {
+      if (colKey === 'inspecao_final') {
+        return { key: 'inspecao_final', nome: 'Inspeção final' };
+      }
+      const next = origProx ? origProx(colKey) : null;
+      if (next && next.key === 'embalagem') {
+        return { key: 'inspecao_final', nome: 'Inspeção final' };
+      }
+      return next || { key: 'finalizado', nome: 'Finalizado' };
+    };
+    if (typeof window._producaoColunasRetrocederOp === 'function') {
+      const origRet = window._producaoColunasRetrocederOp;
+      window._producaoColunasRetrocederOp = function () {
+        return (origRet() || []).filter((k) => k !== 'embalagem');
+      };
+    }
+
+    const colEmb = document.getElementById('kanbanEmbalagem');
+    if (colEmb && colEmb.parentElement) colEmb.parentElement.style.display = 'none';
+
+    aplicado = true;
+    return true;
+  }
+
+  if (wrap()) return;
+  const t = setInterval(() => {
+    if (wrap()) clearInterval(t);
+  }, 80);
+  setTimeout(() => clearInterval(t), 20000);
+})();

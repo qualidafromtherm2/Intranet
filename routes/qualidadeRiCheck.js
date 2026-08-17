@@ -16,6 +16,9 @@ const mime = require('mime-types');
 const { v4: uuidv4 } = require('uuid');
 const { dbQuery } = require('../src/db');
 const { uploadPublicFile, removePublicFiles } = require('../utils/storage');
+const omieCall = require('../utils/omieCall');
+const { OMIE_APP_KEY, OMIE_APP_SECRET } = require('../config.server');
+const { anexarHoraObs } = require('../utils/anexarHoraObs');
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -275,6 +278,13 @@ async function garantirSchemaKanbanProgramacao() {
       ON producao."Kanban_programacao" (ri)
       WHERE ri = TRUE
   `);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS estoque_maq_entrada_em TIMESTAMPTZ`);
+  await dbQuery(
+    `UPDATE producao."Kanban_programacao"
+        SET status = 'Inspeção final',
+            ri = TRUE
+      WHERE LOWER(TRIM(COALESCE(status, ''))) = 'embalagem'`
+  );
   kanbanProgSchemaOk = true;
 }
 
@@ -527,21 +537,193 @@ function isKanbanEmbalagem(s) {
   return normKanbanStatusLabel(s) === 'embalagem';
 }
 
+const COD_ESTOQUE_MAQUINAS = '10408747829';
+const NOME_ESTOQUE_MAQUINAS = '4. ESTOQUE MAQUINAS';
+
+function formatarDataBROmie(data = new Date()) {
+  const d = data instanceof Date ? data : new Date(data);
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = String(d.getMonth() + 1).padStart(2, '0');
+  return `${dia}/${mes}/${d.getFullYear()}`;
+}
+
+function deveEntrarEstoqueMaquinas(statusRi) {
+  return isKanbanInspecaoFinal(statusRi) || isKanbanEmbalagem(statusRi);
+}
+
+async function incluirEntradaEstoqueMaquinasOmie({
+  opRefId,
+  numeroOp,
+  usuario,
+  check,
+  kanbanProgId,
+}) {
+  const { rows: kpRows } = kanbanProgId
+    ? await dbQuery(
+        `SELECT id, estoque_maq_entrada_em, quantidade, codigo, codigo_produto, descricao
+           FROM producao."Kanban_programacao"
+          WHERE id = $1
+          LIMIT 1`,
+        [kanbanProgId]
+      )
+    : { rows: [] };
+  if (kpRows[0]?.estoque_maq_entrada_em) {
+    return { skipped: true, ja_lancado: true };
+  }
+
+  const { rows: opRows } = await dbQuery(
+    `SELECT id, n_op, codigo, codigo_produto
+       FROM producao."OP_producao"
+      WHERE id = $1
+      LIMIT 1`,
+    [opRefId]
+  );
+  const op = opRows[0] || {};
+  const codigo = String(check?.codigo || op.codigo || kpRows[0]?.codigo || '').trim();
+  const idProd = Number(check?.codigo_produto || op.codigo_produto || kpRows[0]?.codigo_produto) || 0;
+  const qtdKp = Number(kpRows[0]?.quantidade);
+  const qtd = (Number.isFinite(qtdKp) && qtdKp > 0) ? qtdKp : 1;
+
+  if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+    const err = new Error('Credenciais da Omie ausentes. Não foi possível lançar o estoque de máquinas.');
+    err.status = 500;
+    throw err;
+  }
+  if (!idProd && !codigo) {
+    const err = new Error('Produto da OP sem código Omie. Não foi possível lançar no armazém 4. ESTOQUE MAQUINAS.');
+    err.status = 400;
+    throw err;
+  }
+
+  const { rows: prodRows } = await dbQuery(
+    `SELECT p.codigo_produto AS id_prod,
+            p.codigo,
+            COALESCE(p.descricao, '') AS descricao,
+            COALESCE(
+              NULLIF(e.cmc, 0),
+              NULLIF(e.preco_unitario, 0),
+              NULLIF(p.valor_unitario, 0),
+              0.01
+            ) AS valor_unit
+       FROM produto.produtos_omie p
+       LEFT JOIN logistica.estoque_atual e
+         ON TRIM(e.codigo) = TRIM(p.codigo) AND e.local_codigo = $2
+      WHERE ($1::bigint > 0 AND p.codigo_produto = $1)
+         OR ($3 <> '' AND TRIM(p.codigo) = TRIM($3))
+      LIMIT 1`,
+    [idProd || 0, COD_ESTOQUE_MAQUINAS, codigo]
+  );
+  const idOmie = Number(prodRows[0]?.id_prod || idProd) || 0;
+  const codigoProd = String(prodRows[0]?.codigo || codigo).trim();
+  const descricao = String(prodRows[0]?.descricao || check?.descricao || kpRows[0]?.descricao || '').trim();
+  const valorUnit = parseFloat(prodRows[0]?.valor_unit) || 0.01;
+  if (!idOmie) {
+    const err = new Error(`Produto ${codigoProd || codigo || opRefId} não encontrado no cadastro Omie.`);
+    err.status = 400;
+    throw err;
+  }
+
+  const nOp = String(numeroOp || op.n_op || '').trim();
+  const obsOmie = anexarHoraObs(
+    `Entrada produção (RI Inspeção final). OP ${nOp || opRefId}`
+      + (usuario ? ` | Por: ${usuario}` : '')
+  );
+  const payload = {
+    call: 'IncluirAjusteEstoque',
+    app_key: OMIE_APP_KEY,
+    app_secret: OMIE_APP_SECRET,
+    param: [{
+      codigo_local_estoque: Number(COD_ESTOQUE_MAQUINAS) || COD_ESTOQUE_MAQUINAS,
+      id_prod: idOmie,
+      data: formatarDataBROmie(new Date()),
+      tipo: 'ENT',
+      quan: String(qtd),
+      valor: valorUnit,
+      obs: obsOmie,
+      origem: 'AJU',
+      motivo: 'INV',
+    }],
+  };
+
+  let omieResp;
+  try {
+    omieResp = await omieCall('https://app.omie.com.br/api/v1/estoque/ajuste/', payload);
+  } catch (omieErr) {
+    const fault = omieErr?.faultstring || omieErr?.message || String(omieErr);
+    const err = new Error(`Omie recusou a entrada no armazém 4. ESTOQUE MAQUINAS: ${fault}`);
+    err.status = 502;
+    throw err;
+  }
+  if (omieResp?.faultstring) {
+    const err = new Error(`Omie recusou a entrada: ${omieResp.faultstring}`);
+    err.status = 502;
+    throw err;
+  }
+  if (omieResp?.codigo_status != null && String(omieResp.codigo_status) !== '0') {
+    const err = new Error(String(omieResp.descricao_status || 'Omie rejeitou a entrada de estoque.'));
+    err.status = 502;
+    throw err;
+  }
+
+  const omieCodigo = String(
+    omieResp?.codigo_lancamento_omie
+    || omieResp?.nCodAjuste
+    || omieResp?.codigo_ajuste
+    || omieResp?.id_ajuste
+    || ''
+  ).trim() || null;
+
+  try {
+    await dbQuery(
+      `INSERT INTO logistica.estoque_atual
+         (local_codigo, local_nome, omie_prod_id, codigo, descricao, saldo, fisico, origem, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $6, 'ri-inspecao-final', NOW())
+       ON CONFLICT ON CONSTRAINT uq_estoque_atual_prod_local
+       DO UPDATE SET
+         saldo = COALESCE(logistica.estoque_atual.saldo, 0) + EXCLUDED.saldo,
+         fisico = COALESCE(logistica.estoque_atual.fisico, 0) + EXCLUDED.fisico,
+         omie_prod_id = COALESCE(EXCLUDED.omie_prod_id, logistica.estoque_atual.omie_prod_id),
+         descricao = COALESCE(NULLIF(EXCLUDED.descricao, ''), logistica.estoque_atual.descricao),
+         origem = EXCLUDED.origem,
+         updated_at = NOW()`,
+      [COD_ESTOQUE_MAQUINAS, NOME_ESTOQUE_MAQUINAS, idOmie, codigoProd, descricao || null, qtd]
+    );
+  } catch (estErr) {
+    console.warn('[qualidade/ri-check] estoque_atual local não atualizado:', estErr.message);
+  }
+
+  if (kanbanProgId) {
+    await dbQuery(
+      `UPDATE producao."Kanban_programacao"
+          SET estoque_maq_entrada_em = COALESCE(estoque_maq_entrada_em, NOW())
+        WHERE id = $1`,
+      [kanbanProgId]
+    );
+  }
+
+  return {
+    skipped: false,
+    qtd,
+    codigo: codigoProd,
+    codigo_produto: idOmie,
+    omie_codigo: omieCodigo,
+    local: { codigo: COD_ESTOQUE_MAQUINAS, nome: `##MAQ ${COD_ESTOQUE_MAQUINAS} — ${NOME_ESTOQUE_MAQUINAS}` },
+  };
+}
+
 function colKeyFromPostoKanban(posto) {
   const n = normKanbanStatusLabel(posto);
   if (n === 'montagem hermetica') return 'solicitado';
   if (n === 'montagem eletrica') return 'produzindo';
   if (n === 'teste') return 'teste';
-  if (n === 'inspecao final' || n === 'teste ok' || n === 'teste final') return 'inspecao_final';
-  if (n === 'embalagem') return 'embalagem';
+  if (n === 'inspecao final' || n === 'teste ok' || n === 'teste final' || n === 'embalagem') return 'inspecao_final';
   return '';
 }
 
 function postoAtualKanbanFromStatuses(statuses) {
   const norms = (statuses || []).map(s => normKanbanStatusLabel(s)).filter(Boolean);
   if (norms.includes('finalizado')) return null;
-  if (norms.includes('embalagem')) return 'Embalagem';
-  if (norms.includes('inspecao final') || norms.includes('teste ok') || norms.includes('teste final')) {
+  if (norms.includes('inspecao final') || norms.includes('teste ok') || norms.includes('teste final') || norms.includes('embalagem')) {
     return 'Inspeção final';
   }
   if (norms.includes('teste')) return 'Teste';
@@ -1163,7 +1345,6 @@ router.get('/kanbans', requireAuth, (_req, res) => {
       'Montagem eletrica',
       'Teste',
       'Inspeção final',
-      'Embalagem',
     ],
   });
 });
@@ -2086,6 +2267,27 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
       return res.status(400).json({ ok: false, error: 'Posto/kanban atual da OP não identificado.' });
     }
 
+    const kanbanProgId = Number(check.id_kanban_programacao) || null;
+    const avancarParaEstoqueMaq = deveEntrarEstoqueMaquinas(statusRi);
+    let estoqueMaq = null;
+    if (avancarParaEstoqueMaq) {
+      try {
+        estoqueMaq = await incluirEntradaEstoqueMaquinasOmie({
+          opRefId,
+          numeroOp,
+          usuario,
+          check,
+          kanbanProgId,
+        });
+      } catch (omieErr) {
+        console.error('[qualidade/ri-check/liberar] entrada estoque MAQ:', omieErr.message);
+        return res.status(omieErr.status || 502).json({
+          ok: false,
+          error: omieErr.message || 'Falha ao lançar o produto no armazém 4. ESTOQUE MAQUINAS.',
+        });
+      }
+    }
+
     await dbQuery(
       `UPDATE qualidade."RI_Check"
           SET status = $2, updated_at = NOW()
@@ -2094,18 +2296,19 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
     );
     dispararNotificacaoRiCheck(checkId);
 
-    // Desativa checkbox RI em todos os registros do kanban desta OP
-    const kanbanProgId = Number(check.id_kanban_programacao) || null;
-    const avancarParaEmbalagem = isKanbanInspecaoFinal(statusRi);
     await dbQuery(
       `UPDATE producao."Kanban_programacao"
           SET ri = FALSE,
-              status = CASE WHEN $4::boolean THEN 'Embalagem' ELSE status END
+              status = CASE WHEN $4::boolean THEN 'Finalizado' ELSE status END,
+              estoque_maq_entrada_em = CASE
+                WHEN $4::boolean THEN COALESCE(estoque_maq_entrada_em, NOW())
+                ELSE estoque_maq_entrada_em
+              END
         WHERE ($1::bigint IS NOT NULL AND id = $1)
            OR op_producao_id = $2
            OR op_iapp_id = $2
            OR ($3 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))`,
-      [kanbanProgId, opRefId, numeroOp || '', avancarParaEmbalagem]
+      [kanbanProgId, opRefId, numeroOp || '', avancarParaEstoqueMaq]
     );
 
     try {
@@ -2129,11 +2332,12 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
     return res.json({
       ok: true,
       ...atualizado,
-      kanban_status: avancarParaEmbalagem ? 'Embalagem' : statusRi,
+      kanban_status: avancarParaEstoqueMaq ? 'Finalizado' : statusRi,
       ri_ativo: false,
       somente_ri: true,
       numero_op: numeroOp || null,
       op_producao_id: opProducaoId || opRefId,
+      estoque_maq: estoqueMaq,
     });
   } catch (err) {
     console.error('[qualidade/ri-check/liberar]', err);

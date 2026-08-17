@@ -68,18 +68,6 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     canais: ['whatsapp'],
   },
   {
-    id: 'nfe_devolucao',
-    rotulo: 'NF-e de devolução / retorno',
-    grupo: 'Assistência técnica',
-    canais: ['whatsapp'],
-  },
-  {
-    id: 'at_devolucao',
-    rotulo: 'Devolução de OS (e-mail com PDF)',
-    grupo: 'Assistência técnica',
-    canais: ['email'],
-  },
-  {
     id: 'compras_requisicao',
     rotulo: 'Nova requisição de compras',
     grupo: 'Compras',
@@ -212,6 +200,46 @@ async function filtrarUsuarios(userIdsOuObjs, tipo, canal) {
   return out;
 }
 
+/**
+ * Usuários ativos com a preferência ligada.
+ * Destinatários de devolução NÃO usam isto — eles vêm de auth_user.email_devolucao.
+ */
+async function listarUsuariosHabilitados(tipo, canal, { exigirTelefone = false, exigirEmail = false } = {}) {
+  const t = normalizarTipo(tipo);
+  const c = normalizarCanal(canal);
+  if (!tipoValido(t, c)) return [];
+
+  await ensureSchema();
+  const cond = [
+    'p.habilitado = true',
+    'p.tipo = $1',
+    'p.canal = $2',
+    'u.is_active IS DISTINCT FROM false',
+  ];
+  if (exigirTelefone) {
+    cond.push(`u.telefone_contato IS NOT NULL AND TRIM(u.telefone_contato) <> ''`);
+  }
+  if (exigirEmail) {
+    cond.push(`u.email IS NOT NULL AND TRIM(u.email) <> ''`);
+  }
+
+  const { rows } = await dbQuery(
+    `SELECT u.id, u.username, u.nome_completo, u.email, u.telefone_contato
+       FROM usuario.notificacao_preferencias p
+       JOIN public.auth_user u ON u.id = p.user_id
+      WHERE ${cond.join(' AND ')}`,
+    [t, c]
+  );
+  return rows.map((r) => ({
+    id: Number(r.id),
+    user_id: Number(r.id),
+    username: r.username,
+    nome_completo: r.nome_completo,
+    email: r.email,
+    telefone_contato: r.telefone_contato,
+  }));
+}
+
 async function getPreferencias(userId) {
   const uid = Number(userId);
   if (!Number.isFinite(uid) || uid <= 0) {
@@ -281,6 +309,7 @@ module.exports = {
   ensureSchema,
   usuarioAceita,
   filtrarUsuarios,
+  listarUsuariosHabilitados,
   getPreferencias,
   setPreferencias,
 };

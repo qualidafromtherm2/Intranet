@@ -158,8 +158,8 @@ function iappPut(path, body = {}) {
 let kanbanProgSchemaOk = false;
 
 async function garantirSchemaKanbanProgramacao() {
-  if (kanbanProgSchemaOk) return;
-  await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
+  if (!kanbanProgSchemaOk) {
+    await dbQuery(`CREATE SCHEMA IF NOT EXISTS producao`);
   await dbQuery(`
     CREATE TABLE IF NOT EXISTS producao."Kanban_programacao" (
       id              BIGSERIAL PRIMARY KEY,
@@ -192,7 +192,38 @@ async function garantirSchemaKanbanProgramacao() {
       ON producao."Kanban_programacao" (ri)
       WHERE ri = TRUE;
   `);
-  kanbanProgSchemaOk = true;
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS estoque_maq_entrada_em TIMESTAMPTZ`);
+    kanbanProgSchemaOk = true;
+  }
+  await devolverOPsEmbalagemParaInspecaoFinal();
+}
+
+let embalagemDevolvidaOk = false;
+async function devolverOPsEmbalagemParaInspecaoFinal() {
+  if (embalagemDevolvidaOk) return;
+  const { rowCount } = await dbQuery(
+    `UPDATE producao."Kanban_programacao"
+        SET status = 'Inspeção final',
+            ri = TRUE
+      WHERE LOWER(TRIM(COALESCE(status, ''))) = 'embalagem'`
+  );
+  embalagemDevolvidaOk = true;
+  if (rowCount) {
+    console.log(`[producao] ${rowCount} OP(s) de Embalagem devolvidas para Inspeção final.`);
+  }
+}
+
+function normPostoKanban(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function isPostoInspecaoFinal(s) {
+  const n = normPostoKanban(s);
+  return n === 'inspecao final' || n === 'teste ok' || n === 'teste final';
 }
 
 function normCodigoSql(expr) {
@@ -2112,7 +2143,14 @@ router.get('/postos-preparacao', async (req, res) => {
         id: r.id,
         nome: String(r.nome || '').trim(),
         created_at: r.created_at || null,
-      })).filter((p) => p.nome),
+      })).filter((p) => {
+        const n = String(p.nome || '')
+          .trim()
+          .toLowerCase()
+          .normalize('NFD')
+          .replace(/\p{M}/gu, '');
+        return p.nome && n !== 'embalagem';
+      }),
     });
   } catch (err) {
     console.error('[producao] Erro ao listar postos preparação:', err.message);
@@ -2131,6 +2169,9 @@ router.post('/postos-preparacao', express.json(), async (req, res) => {
     const nome = normalizarNomePostoPreparacao(req.body?.nome);
     if (!nome) {
       return res.status(400).json({ success: false, error: 'Informe o nome do posto de preparação.' });
+    }
+    if (normPostoKanban(nome) === 'embalagem') {
+      return res.status(400).json({ success: false, error: 'O posto Embalagem não é mais usado. A OP permanece em Inspeção final até a RI.' });
     }
     if (nome.length > 80) {
       return res.status(400).json({ success: false, error: 'Nome do posto muito longo (máx. 80 caracteres).' });
@@ -2774,18 +2815,21 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
     }
 
+    const proximoNorm = normPostoKanban(proximoStatus);
+    const permanecerInspecaoFinal = isPostoInspecaoFinal(postoAtual)
+      && (proximoNorm === 'embalagem' || proximoNorm === 'finalizado' || isPostoInspecaoFinal(proximoStatus) || !proximoNorm);
+    const statusGravar = permanecerInspecaoFinal ? 'Inspeção final' : proximoStatus;
+
     if (kanbanProgramacaoId) {
-      const postoNorm = String(proximoStatus || '')
-        .trim()
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/\p{M}/gu, '');
-      const ativarRi = postoNorm
+      const postoNorm = normPostoKanban(statusGravar);
+      const ativarRi = permanecerInspecaoFinal || (
+        postoNorm
         && postoNorm !== 'finalizado'
         && postoNorm !== 'programado'
         && postoNorm !== 'pedidos'
-        && postoNorm !== 'embalagem';
-      const forcarRiOff = postoNorm === 'embalagem' || postoNorm === 'finalizado';
+        && postoNorm !== 'embalagem'
+      );
+      const forcarRiOff = !permanecerInspecaoFinal && (postoNorm === 'embalagem' || postoNorm === 'finalizado');
       await dbQuery(
         `UPDATE producao."Kanban_programacao"
             SET status = $1,
@@ -2795,29 +2839,31 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
                   ELSE ri
                 END
           WHERE id = $2`,
-        [proximoStatus, kanbanProgramacaoId, ativarRi, forcarRiOff]
+        [statusGravar, kanbanProgramacaoId, ativarRi, forcarRiOff]
       );
     }
 
-    try {
-      await iniciarCicloPosto({
-        kanbanProgramacaoId,
-        opProducaoId,
-        numeroOp,
-        postoOrigem: proximoStatus,
-        operacao: `Entrada em ${proximoStatus}`,
-        usuario,
-        skipNotificacao: true,
-      });
-    } catch (tempoErr) {
-      console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
+    if (!permanecerInspecaoFinal) {
+      try {
+        await iniciarCicloPosto({
+          kanbanProgramacaoId,
+          opProducaoId,
+          numeroOp,
+          postoOrigem: statusGravar,
+          operacao: `Entrada em ${statusGravar}`,
+          usuario,
+          skipNotificacao: true,
+        });
+      } catch (tempoErr) {
+        console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
+      }
     }
 
-    if (postoFechado && postoAtual && proximoStatus && postoAtual !== proximoStatus) {
+    if (!permanecerInspecaoFinal && postoFechado && postoAtual && statusGravar && postoAtual !== statusGravar) {
       dispararNotificacaoTransicaoPosto({
         numeroOp: postoFechado.numero_op || numeroOp,
         postoDe: postoAtual,
-        postoPara: proximoStatus,
+        postoPara: statusGravar,
         inicio: postoFechado.inicio,
         fim: postoFechado.fim,
         usuarioFim: postoFechado.usuario_fim || usuario,
@@ -2831,9 +2877,15 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       opProducaoId,
       numeroOp,
       usuario,
-      operacao,
+      operacao: permanecerInspecaoFinal ? 'Inspeção final — aguardando RI' : operacao,
     });
-    return res.json({ success: true, registro: row, kanban_programacao_id: kanbanProgramacaoId, status: proximoStatus });
+    return res.json({
+      success: true,
+      registro: row,
+      kanban_programacao_id: kanbanProgramacaoId,
+      status: statusGravar,
+      permanece_inspecao_final: permanecerInspecaoFinal,
+    });
   } catch (err) {
     console.error('[producao] Erro ao finalizar operação:', err.message);
     return res.status(500).json({ success: false, error: err.message });
@@ -2862,11 +2914,6 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
     posto_desfeito: 'Teste',
     operacoes_desfeitas: ['Inspeção final', 'Teste OK', 'Teste final'],
   },
-  embalagem: {
-    status_destino: 'Inspeção final',
-    posto_desfeito: 'Inspeção final',
-    operacoes_desfeitas: ['Embalagem', 'Inspeção final', 'Teste OK', 'Teste final'],
-  },
 };
 
 /* ---------------------------------------------------------------
@@ -2889,7 +2936,7 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
     if (!cfg) {
       return res.status(400).json({
         success: false,
-        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste, Inspeção final ou Embalagem.',
+        error: 'Retroceder OP só está disponível em Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
       });
     }
 

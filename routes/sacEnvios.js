@@ -19,7 +19,6 @@ const {
 const { syncCustoPecasEnvio } = require('../utils/enviosCustoPecas');
 const { smtpConfigurado, parseListaEmails, enviarEmail } = require('../utils/mailer');
 const { entregarMensagemWhatsapp } = require('../utils/whatsappJanelaEnvio');
-const { filtrarUsuarios } = require('../utils/notificacaoPreferencias');
 
 const router = express.Router();
 
@@ -10600,7 +10599,7 @@ router.get('/at/devolucao-destinatarios', async (req, res) => {
   try {
     await ensureSchema();
     const { rows } = await pool.query(
-      `SELECT id, username, nome_completo, email, email_devolucao, is_active
+      `SELECT id, username, nome_completo, email, telefone_contato, email_devolucao, is_active
          FROM public.auth_user
         WHERE email_devolucao IS NOT NULL
         ORDER BY
@@ -10614,6 +10613,7 @@ router.get('/at/devolucao-destinatarios', async (req, res) => {
         username: r.username,
         nome: r.nome_completo || r.username,
         email: r.email || null,
+        telefone: r.telefone_contato || null,
         ativo: r.email_devolucao === true,
         pendente: r.email_devolucao === false,
         is_active: r.is_active !== false,
@@ -10682,18 +10682,19 @@ router.post('/at/devolucao-destinatarios', async (req, res) => {
   try {
     await ensureSchema();
     const { rows: cur } = await pool.query(
-      `SELECT id, username, nome_completo, email, email_devolucao
+      `SELECT id, username, nome_completo, email, telefone_contato, email_devolucao
          FROM public.auth_user WHERE id = $1 LIMIT 1`,
       [userId]
     );
     if (!cur[0]) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
 
     let email = _emailValidoDevolucao(cur[0].email) || emailBody;
-    if (!email) {
+    const temTel = String(cur[0].telefone_contato || '').trim();
+    if (!email && !temTel) {
       return res.status(400).json({
         ok: false,
         code: 'EMAIL_REQUIRED',
-        error: 'Este usuário não tem e-mail cadastrado. Informe o e-mail para continuar.',
+        error: 'Este usuário não tem e-mail nem telefone cadastrados. Informe o e-mail ou cadastre o telefone no perfil.',
         usuario: {
           id: Number(cur[0].id),
           username: cur[0].username,
@@ -10728,7 +10729,7 @@ router.post('/at/devolucao-destinatarios', async (req, res) => {
               email_devolucao = false,
               updated_at = NOW()
         WHERE id = $2`,
-      [emailBody || email, userId]
+      [emailBody || email || null, userId]
     );
 
     return res.json({
@@ -10853,8 +10854,9 @@ router.delete('/at/devolucao-destinatarios/:id', async (req, res) => {
  * POST /at/devolucao/:id
  * Envia e-mail de devolução com dados da OS + PDF anexado (base64).
  * Body: { pdf_base64: string, pdf_filename?: string, emails?: string[] }
- * Destinatários: emails do body (selecionados no modal) OU usuários com
- *   preferência at_devolucao / email (+ fallback AT_DEVOLUCAO_EMAILS)
+ * Destinatários: emails do body (selecionados no modal) OU usuários ativos
+ *   em Destinatários de devolução (email_devolucao = true), sem depender
+ *   das preferências pessoais. Fallback: AT_DEVOLUCAO_EMAILS.
  * Remetente: SMTP_FROM (Hostinger / leandro.santos) — mesmo processo das reservas
  * Reply-To: e-mail do usuário logado (quando cadastrado)
  */
@@ -10910,10 +10912,10 @@ router.post('/at/devolucao/:id', async (req, res) => {
         `SELECT id, email
            FROM public.auth_user
           WHERE COALESCE(is_active, true) = true
+            AND email_devolucao = true
             AND email IS NOT NULL
             AND TRIM(email) <> ''`
       );
-      const comEmail = [];
       const vistosEmail = new Set();
       for (const r of destRows) {
         const em = _emailValidoDevolucao(r.email);
@@ -10921,18 +10923,15 @@ router.post('/at/devolucao/:id', async (req, res) => {
         const key = em.toLowerCase();
         if (vistosEmail.has(key)) continue;
         vistosEmail.add(key);
-        comEmail.push({ id: r.id, email: em });
+        destinatarios.push(em);
       }
-      const aceitos = await filtrarUsuarios(comEmail, 'at_devolucao', 'email');
-      destinatarios = aceitos.map((d) => d.email);
-      // Fallback opcional do .env enquanto a preferência ainda não foi configurada
       if (!destinatarios.length) {
         destinatarios = parseListaEmails(process.env.AT_DEVOLUCAO_EMAILS || '');
       }
       if (!destinatarios.length) {
         return res.status(400).json({
           ok: false,
-          error: 'Nenhum destinatário com preferência de e-mail de devolução. Ative em Minha conta → Notificações, ou marque destinatários no modal.',
+          error: 'Nenhum destinatário ativo em Destinatários de devolução com e-mail. Marque alguém na lista ou no modal de envio.',
         });
       }
     }

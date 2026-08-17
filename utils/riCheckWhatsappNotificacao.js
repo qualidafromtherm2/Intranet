@@ -7,7 +7,7 @@ const {
   whatsappConfigurado,
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
-const { filtrarUsuarios } = require('./notificacaoPreferencias');
+const { listarUsuariosHabilitados } = require('./notificacaoPreferencias');
 
 const TAG = '[WhatsApp Notif]';
 
@@ -161,11 +161,8 @@ async function listarDestinatariosPorPermissao(campoPermissao) {
   return rows;
 }
 
-async function enviarParaDestinatarios(destinatarios, mensagem, tipoPreferencia) {
-  let lista = Array.isArray(destinatarios) ? destinatarios : [];
-  if (tipoPreferencia) {
-    lista = await filtrarUsuarios(lista, tipoPreferencia, 'whatsapp');
-  }
+async function enviarParaDestinatarios(destinatarios, mensagem) {
+  const lista = Array.isArray(destinatarios) ? destinatarios : [];
   if (!lista.length) return;
 
   const phoneNumberId = await getWhatsappPhoneNumberId();
@@ -217,8 +214,8 @@ async function notificarRiCheckWhatsappPorId(checkId) {
   );
   if (!checks.length) return;
 
-  const destinatarios = await listarDestinatariosPorPermissao('permissao_ri');
-  await enviarParaDestinatarios(destinatarios, montarMensagemRiCheck(checks[0]), 'ri_check');
+  const destinatarios = await listarUsuariosHabilitados('ri_check', 'whatsapp', { exigirTelefone: true });
+  await enviarParaDestinatarios(destinatarios, montarMensagemRiCheck(checks[0]));
 }
 
 async function notificarRegistroTempoWhatsappPorId(registroId) {
@@ -236,8 +233,8 @@ async function notificarRegistroTempoWhatsappPorId(registroId) {
   );
   if (!rows.length) return;
 
-  const destinatarios = await listarDestinatariosPorPermissao('permissao_op');
-  await enviarParaDestinatarios(destinatarios, montarMensagemRegistroTempo(rows[0]), 'op_tempo_posto');
+  const destinatarios = await listarUsuariosHabilitados('op_tempo_posto', 'whatsapp', { exigirTelefone: true });
+  await enviarParaDestinatarios(destinatarios, montarMensagemRegistroTempo(rows[0]));
 }
 
 async function notificarTransicaoPostoWhatsapp({
@@ -251,7 +248,7 @@ async function notificarTransicaoPostoWhatsapp({
   if (!whatsappConfigurado()) return;
 
   await garantirSchemaWhatsConfig();
-  const destinatarios = await listarDestinatariosPorPermissao('permissao_op');
+  const destinatarios = await listarUsuariosHabilitados('op_transicao_posto', 'whatsapp', { exigirTelefone: true });
   const mensagem = montarMensagemTransicaoPosto({
     numeroOp,
     postoDe,
@@ -260,7 +257,7 @@ async function notificarTransicaoPostoWhatsapp({
     fim,
     usuarioFim,
   });
-  await enviarParaDestinatarios(destinatarios, mensagem, 'op_transicao_posto');
+  await enviarParaDestinatarios(destinatarios, mensagem);
 }
 
 async function notificarOcorrenciaWhatsapp({
@@ -295,7 +292,8 @@ async function notificarOcorrenciaWhatsapp({
     } catch (_) { /* silencioso */ }
   }
 
-  const destinatarios = await listarDestinatariosOpOuRi();
+  const tipoPref = tipo === 'corrigida' ? 'ocorrencia_corrigida' : 'ocorrencia_nova';
+  const destinatarios = await listarUsuariosHabilitados(tipoPref, 'whatsapp', { exigirTelefone: true });
   const mensagem = montarMensagemOcorrencia({
     tipo,
     numeroOp: numeroFinal || numeroOp,
@@ -304,8 +302,7 @@ async function notificarOcorrenciaWhatsapp({
     usuario,
     dataHora: dataHora || new Date(),
   });
-  const tipoPref = tipo === 'corrigida' ? 'ocorrencia_corrigida' : 'ocorrencia_nova';
-  await enviarParaDestinatarios(destinatarios, mensagem, tipoPref);
+  await enviarParaDestinatarios(destinatarios, mensagem);
 }
 
 function dispararNotificacaoOcorrencia(dados) {

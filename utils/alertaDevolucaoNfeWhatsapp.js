@@ -1,9 +1,10 @@
 'use strict';
 
 /**
- * Alerta WhatsApp quando chega NF-e de devolução/retorno (emitida contra a Fromtherm).
- * Destinatários: usuários com public.auth_user_profile.funcao_id = 5 (Assistência técnica)
- * que tenham telefone_contato preenchido.
+ * Alerta quando chega NF-e de devolução/retorno (emitida contra a Fromtherm).
+ * Destinatários: usuários ATIVOS em Destinatários de devolução
+ * (auth_user.email_devolucao = true) — independente das preferências pessoais.
+ * Envia WhatsApp (se houver telefone) e e-mail (se houver e-mail).
  *
  * Disparo: webhook Omie recebimentos-nfe (após gravar na tabela), não por cron.
  */
@@ -15,7 +16,7 @@ const {
   whatsappConfigurado,
   enviarWhatsappNotificacao,
 } = require('./whatsappEnvio');
-const { filtrarUsuarios } = require('./notificacaoPreferencias');
+const { smtpConfigurado, enviarEmail } = require('./mailer');
 
 const TAG = '[AlertaDevolucaoNFe]';
 const FUNCAO_ID_DESTINO = Number(process.env.ALERTA_DEVOLUCAO_FUNCAO_ID || 5) || 5;
@@ -111,18 +112,19 @@ async function garantirSchemaAlertaDevolucao() {
   schemaOk = true;
 }
 
-async function listarDestinatariosAssistenciaTecnica() {
+async function listarDestinatariosDevolucaoAtivos() {
   const { rows } = await dbQuery(
-    `SELECT u.id, u.username, u.nome_completo, u.telefone_contato
+    `SELECT u.id, u.username, u.nome_completo, u.email, u.telefone_contato
        FROM public.auth_user u
-       JOIN public.auth_user_profile up ON up.user_id = u.id
-      WHERE up.funcao_id = $1
-        AND u.is_active IS DISTINCT FROM false
-        AND u.telefone_contato IS NOT NULL
-        AND TRIM(u.telefone_contato) <> ''`,
-    [FUNCAO_ID_DESTINO]
+      WHERE u.email_devolucao = true
+        AND u.is_active IS DISTINCT FROM false`
   );
   return rows;
+}
+
+function emailValidoDevolucao(raw) {
+  const e = String(raw || '').trim().toLowerCase();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e) ? e : '';
 }
 
 function formatarMoedaBr(valor) {
@@ -138,6 +140,32 @@ function formatarDataBr(val) {
   } catch {
     return String(val);
   }
+}
+
+function montarHtmlEmailAlerta(nota) {
+  const cfops = (nota.cfops || []).filter(Boolean);
+  const cfopTxt = cfops.length ? [...new Set(cfops.map(normalizarCfop).filter(Boolean))].join(', ') : '—';
+  const linha = (lbl, val) => {
+    const v = String(val ?? '').trim() || '—';
+    return `<tr><td style="padding:4px 8px;font-weight:700;color:#334155;white-space:nowrap;">${lbl}</td><td style="padding:4px 8px;color:#0f172a;">${String(v).replace(/</g, '&lt;')}</td></tr>`;
+  };
+  return `
+    <div style="font-family:Arial,sans-serif;font-size:14px;color:#0f172a;">
+      <h2 style="margin:0 0 8px;color:#dc2626;">NF-e de DEVOLUÇÃO contra a Fromtherm</h2>
+      <p style="margin:0 0 14px;color:#475569;">Recebemos registro de nota de devolução/retorno. Conferir e, se necessário, recusar/protestar <strong>antes</strong> do recebimento físico.</p>
+      <table style="border-collapse:collapse;width:100%;max-width:720px;border:1px solid #e2e8f0;">
+        ${linha('Emitente', nota.fornecedor)}
+        ${linha('CNPJ', nota.cnpj)}
+        ${linha('NF-e', nota.numero)}
+        ${linha('Série', nota.serie)}
+        ${linha('Emissão', formatarDataBr(nota.emissao))}
+        ${linha('Valor', formatarMoedaBr(nota.valor))}
+        ${linha('Natureza', nota.natureza)}
+        ${linha('CFOP', cfopTxt)}
+        ${linha('Chave', nota.chave)}
+      </table>
+      <p style="margin:14px 0 0;color:#64748b;font-size:12px;">Aviso automático da Intranet — Destinatários de devolução.</p>
+    </div>`;
 }
 
 function montarMensagemAlerta(nota) {
@@ -254,18 +282,14 @@ function cfopsDoRecebimentoApi(recebimento) {
 }
 
 /**
- * Avalia a NF-e recém gravada pelo webhook e, se for devolução, envia WhatsApp.
+ * Avalia a NF-e recém gravada pelo webhook e, se for devolução,
+ * avisa os Destinatários de devolução (WhatsApp e e-mail).
  */
 async function avaliarENotificarDevolucaoPorRecebimento({
   nIdReceb = null,
   cChaveNfe = null,
   recebimentoApi = null,
 } = {}) {
-  if (!whatsappConfigurado()) {
-    console.log(TAG, 'WhatsApp não configurado — alerta ignorado.');
-    return { ok: false, reason: 'whatsapp_nao_configurado' };
-  }
-
   const row = await carregarNotaDoBanco({ nIdReceb, cChaveNfe });
   if (!row) {
     console.log(TAG, 'Nota não encontrada no banco após webhook.', { nIdReceb, cChaveNfe });
@@ -302,19 +326,13 @@ async function avaliarENotificarDevolucaoPorRecebimento({
     return { ok: true, skipped: true, reason: 'ja_enviado' };
   }
 
-  const destinatariosCargo = await listarDestinatariosAssistenciaTecnica();
-  if (!destinatariosCargo.length) {
-    console.warn(TAG, `Nenhum telefone para funcao_id=${FUNCAO_ID_DESTINO}`);
+  const destinatarios = await listarDestinatariosDevolucaoAtivos();
+  if (!destinatarios.length) {
+    console.warn(TAG, 'Nenhum destinatário ativo em Destinatários de devolução.');
     return { ok: false, reason: 'sem_destinatarios' };
   }
 
-  const destinatarios = await filtrarUsuarios(destinatariosCargo, 'nfe_devolucao', 'whatsapp');
-  if (!destinatarios.length) {
-    console.log(TAG, 'Nenhum destinatário com preferência nfe_devolucao / whatsapp.');
-    return { ok: false, reason: 'sem_preferencia' };
-  }
-
-  const mensagem = montarMensagemAlerta({
+  const dadosNota = {
     fornecedor: row.c_nome_fornecedor,
     cnpj: row.c_cnpj_cpf_fornecedor,
     numero: row.c_numero_nfe,
@@ -324,32 +342,64 @@ async function avaliarENotificarDevolucaoPorRecebimento({
     natureza,
     chave: row.c_chave_nfe,
     cfops,
-  });
+  };
+  const mensagem = montarMensagemAlerta(dadosNota);
+  const enviados = [];
 
-  const phoneNumberId = await getWhatsappPhoneNumberId();
-  if (!phoneNumberId) {
-    console.warn(TAG, 'Phone Number ID não encontrado.');
-    return { ok: false, reason: 'sem_phone_number_id' };
+  if (whatsappConfigurado()) {
+    const phoneNumberId = await getWhatsappPhoneNumberId();
+    if (!phoneNumberId) {
+      console.warn(TAG, 'Phone Number ID não encontrado — pulando WhatsApp.');
+    } else {
+      const vistos = new Set();
+      for (const dest of destinatarios) {
+        try {
+          const phone = toWhatsappPhone(dest.telefone_contato);
+          if (!phone || vistos.has(phone)) continue;
+          vistos.add(phone);
+          const result = await enviarWhatsappNotificacao(dest.telefone_contato, mensagem, phoneNumberId);
+          enviados.push(`wa:${dest.username || dest.id}:${result?.wa_id || phone}`);
+          console.log(
+            TAG,
+            `WhatsApp enviado (${result?.modo || 'texto'}) para ${dest.username || dest.id}`
+            + ` — ${result?.wa_id || phone}`
+          );
+        } catch (err) {
+          console.error(TAG, `Falha WhatsApp para ${dest.username || dest.id}:`, err?.message || err);
+        }
+      }
+    }
+  } else {
+    console.log(TAG, 'WhatsApp não configurado — pulando canal WhatsApp.');
   }
 
-  const enviados = [];
-  const vistos = new Set();
-  for (const dest of destinatarios) {
-    try {
-      const phone = toWhatsappPhone(dest.telefone_contato);
-      if (!phone || vistos.has(phone)) continue;
-      vistos.add(phone);
-
-      const result = await enviarWhatsappNotificacao(dest.telefone_contato, mensagem, phoneNumberId);
-      enviados.push(`${dest.username || dest.id}:${result?.wa_id || phone}`);
-      console.log(
-        TAG,
-        `WhatsApp enviado (${result?.modo || 'texto'}) para ${dest.username || dest.id}`
-        + ` — ${result?.wa_id || phone}`
-      );
-    } catch (err) {
-      console.error(TAG, `Falha envio para ${dest.username || dest.id}:`, err?.message || err);
+  if (smtpConfigurado()) {
+    const emails = [];
+    const vistosEmail = new Set();
+    for (const dest of destinatarios) {
+      const em = emailValidoDevolucao(dest.email);
+      if (!em || vistosEmail.has(em)) continue;
+      vistosEmail.add(em);
+      emails.push(em);
     }
+    if (emails.length) {
+      try {
+        const result = await enviarEmail({
+          to: emails,
+          subject: `NF-e de devolução — ${dadosNota.numero || ''} — ${dadosNota.fornecedor || 'Fromtherm'}`.trim(),
+          text: mensagem.replace(/\*/g, ''),
+          html: montarHtmlEmailAlerta(dadosNota),
+        });
+        enviados.push(`email:${(result.to || emails).join('|')}`);
+        console.log(TAG, `E-mail enviado para ${emails.join(', ')}`);
+      } catch (err) {
+        console.error(TAG, 'Falha e-mail:', err?.message || err);
+      }
+    } else {
+      console.log(TAG, 'Destinatários ativos sem e-mail válido — pulando canal e-mail.');
+    }
+  } else {
+    console.log(TAG, 'SMTP não configurado — pulando canal e-mail.');
   }
 
   await marcarEnviados(
@@ -367,5 +417,6 @@ module.exports = {
   naturezaIndicaDevolucao,
   cfopIndicaDevolucao,
   avaliarENotificarDevolucaoPorRecebimento,
+  listarDestinatariosDevolucaoAtivos,
   montarMensagemAlerta,
 };
