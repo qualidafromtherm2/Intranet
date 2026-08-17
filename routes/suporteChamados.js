@@ -126,7 +126,9 @@ async function ensureSchema() {
       ADD COLUMN IF NOT EXISTS pedido_mais_info_em TIMESTAMPTZ,
       ADD COLUMN IF NOT EXISTS pedido_mais_info_por TEXT,
       ADD COLUMN IF NOT EXISTS pedido_mais_info_por_nome TEXT,
-      ADD COLUMN IF NOT EXISTS comentarios JSONB NOT NULL DEFAULT '[]'::jsonb
+      ADD COLUMN IF NOT EXISTS comentarios JSONB NOT NULL DEFAULT '[]'::jsonb,
+      ADD COLUMN IF NOT EXISTS nav_key TEXT,
+      ADD COLUMN IF NOT EXISTS nav_label TEXT
   `);
   // Corrige status legado com espaço ("em andamento" → "em_andamento")
   await dbQuery(`
@@ -148,7 +150,7 @@ const CHAMADO_COLS = `
   reprovado_em, reprovado_por, reprovado_por_nome,
   pedido_mais_info, pedido_mais_info_em,
   pedido_mais_info_por, pedido_mais_info_por_nome,
-  comentarios
+  comentarios, nav_key, nav_label
 `;
 
 function parseJsonArray(value) {
@@ -324,6 +326,8 @@ router.post(
 
       const descricao = textoUtf8(req.body?.descricao);
       let criticidade = String(req.body?.criticidade || 'normal').trim().toLowerCase();
+      const navKey = textoUtf8(req.body?.nav_key);
+      const navLabel = textoUtf8(req.body?.nav_label);
       if (!CRITICIDADES.has(criticidade)) criticidade = 'normal';
 
       if (!descricao) {
@@ -351,8 +355,8 @@ router.post(
 
       const { rows } = await dbQuery(
         `INSERT INTO suporte."Chamado"
-           (descricao, criticidade, status, anexos, criado_por, criado_por_nome)
-         VALUES ($1, $2, 'aberto', $3::jsonb, $4, $5)
+           (descricao, criticidade, status, anexos, criado_por, criado_por_nome, nav_key, nav_label)
+         VALUES ($1, $2, 'aberto', $3::jsonb, $4, $5, $6, $7)
          RETURNING ${CHAMADO_COLS}`,
         [
           descricao,
@@ -360,8 +364,24 @@ router.post(
           JSON.stringify(anexos),
           getUsuario(req),
           getNomeUsuario(req),
+          navKey || null,
+          navLabel || null,
         ]
       );
+
+      if (navKey) {
+        try {
+          const { registrarHistoricoNav } = require('./navAdmin');
+          await registrarHistoricoNav({
+            navKey,
+            navLabel: navLabel || navKey,
+            tipo: 'chamado',
+            descricao: `Chamado #${rows[0].id} aberto`,
+            referenciaId: rows[0].id,
+            req,
+          });
+        } catch (_) { /* silencioso */ }
+      }
 
       res.json({ ok: true, chamado: rows[0] });
     } catch (err) {

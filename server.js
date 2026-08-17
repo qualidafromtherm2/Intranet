@@ -435,6 +435,7 @@ if (REQUIRE_API_AUTH) {
 }
 
 app.use('/api/nav', require('./routes/nav'));
+app.use('/api/nav/admin', require('./routes/navAdmin'));
 app.use('/api/colaboradores', require('./routes/colaboradores'));
 app.use('/api/rh', require('./routes/rhCargos'));
 app.use('/api/rh', require('./routes/rhEpi'));
