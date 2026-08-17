@@ -116,28 +116,6 @@ async function listarSolicitacaoEnvio() {
       WHERE TRIM(COALESCE(e.local_codigo, '')) = $1
       GROUP BY UPPER(TRIM(COALESCE(e.codigo, '')))
     ),
-    ops_ativas_linha AS (
-      SELECT
-        UPPER(TRIM(COALESCE(op.codigo, ''))) AS codigo_norm,
-        COUNT(*)::numeric AS quantidade
-      FROM producao."OP_producao" op
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM producao."Kanban_programacao" kp
-        WHERE kp.op_producao_id = op.id
-          AND LOWER(TRIM(COALESCE(kp.status, ''))) = 'finalizado'
-      )
-      GROUP BY UPPER(TRIM(COALESCE(op.codigo, '')))
-    ),
-    cobertura AS (
-      SELECT codigo_norm, SUM(quantidade) AS quantidade
-      FROM (
-        SELECT codigo_norm, quantidade FROM estoque_maquinas
-        UNION ALL
-        SELECT codigo_norm, quantidade FROM ops_ativas_linha
-      ) fontes
-      GROUP BY codigo_norm
-    ),
     itens_base AS (
       SELECT
         p.codigo_pedido,
@@ -184,7 +162,7 @@ async function listarSolicitacaoEnvio() {
           GREATEST(COALESCE(c.quantidade, 0) - io.demanda_anterior, 0)
         ) AS quantidade_envio
       FROM itens_ordenados io
-      LEFT JOIN cobertura c ON c.codigo_norm = io.codigo_norm
+      LEFT JOIN estoque_maquinas c ON c.codigo_norm = io.codigo_norm
     )
     SELECT
       TRIM(id.codigo) AS codigo,
