@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260811-gemba"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
@@ -518,162 +518,202 @@
        data-nav-label="Logística">Logística</div>
 
   <div class="side-menu">
-    <a href="#"
-       id="menu-armazens"
-       class="menu-link"
-       data-nav-key="side:log:armazens"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Armazéns"
-       data-nav-selector="#menu-armazens">
-      <i class="fa-solid fa-warehouse" style="margin-right:8px;"></i>
-      Armazéns
-    </a>
+    <div class="side-subgroup" data-side-group="side:log:geral">
+      <div class="side-subtitle">Geral</div>
+      <div class="side-submenu">
+        <a href="#"
+           id="menu-armazens"
+           class="menu-link"
+           data-nav-key="side:log:armazens"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Armazéns"
+           data-nav-selector="#menu-armazens">
+          <i class="fa-solid fa-warehouse" style="margin-right:8px;"></i>
+          Armazéns
+        </a>
 
-    <a href="#"
-       id="menu-solicitacao-transferencia"
-       class="menu-link"
-       data-nav-key="side:log:solicitacao-transferencia"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Solicitação de transferência"
-       data-nav-selector="#menu-solicitacao-transferencia">
-      <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:8px;"></i>
-      Solicitação de transferência
-    </a>
+        <a href="#"
+           id="menu-solicitacao-transferencia"
+           class="menu-link"
+           data-nav-key="side:log:solicitacao-transferencia"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Solicitação de transferência"
+           data-nav-selector="#menu-solicitacao-transferencia">
+          <i class="fa-solid fa-arrow-right-arrow-left" style="margin-right:8px;"></i>
+          Solicitação de transferência
+        </a>
 
-    <a href="#"
-       id="menu-solicitacao-ajuste"
-       class="menu-link"
-       data-nav-key="side:log:solicitacao-ajuste"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Solicitação de ajuste"
-       data-nav-selector="#menu-solicitacao-ajuste">
-      <i class="fa-solid fa-pen-to-square" style="margin-right:8px;"></i>
-      Solicitação de ajuste
-    </a>
+        <a href="#"
+           id="menu-solicitacao-ajuste"
+           class="menu-link"
+           data-nav-key="side:log:solicitacao-ajuste"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Solicitação de ajuste"
+           data-nav-selector="#menu-solicitacao-ajuste">
+          <i class="fa-solid fa-pen-to-square" style="margin-right:8px;"></i>
+          Solicitação de ajuste
+        </a>
 
-    <a href="#"
-       id="menu-recebimento"
-       class="menu-link"
-       data-nav-key="side:log:recebimento"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Recebimento"
-       data-nav-selector="#menu-recebimento">
-      <i class="fa-solid fa-truck-ramp-box" style="margin-right:8px;"></i>
-      Recebimento
-    </a>
+        <a href="#"
+           id="menu-simulador-frete"
+           class="menu-link"
+           data-nav-key="side:log:simulador-frete"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Simulador de frete"
+           data-nav-selector="#menu-simulador-frete">
+          <i class="fa-solid fa-calculator" style="margin-right:8px;"></i>
+          Simulador de frete
+        </a>
 
-    <a href="#"
-       id="menu-produto-recebido"
-       class="menu-link"
-       data-nav-key="side:log:produto-recebido"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Produtos recebidos"
-       data-nav-selector="#menu-produto-recebido">
-      <i class="fa-solid fa-pallet" style="margin-right:8px;"></i>
-      Produtos recebidos
-    </a>
+        <a href="#"
+           id="menu-estoque-minimo"
+           class="menu-link"
+           data-nav-key="side:log:estoque-minimo"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Estoque mínimo"
+           data-nav-selector="#menu-estoque-minimo">
+          <i class="fa-solid fa-boxes-stacked" style="margin-right:8px;"></i>
+          Estoque mínimo
+          <span id="sideMinimoBadge" class="side-minimo-badge" hidden>0</span>
+        </a>
 
-    <a href="#"
-       id="menu-envio-mercadoria"
-       class="menu-link"
-       data-nav-key="side:log:envio-mercadoria"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Envio de mercadoria"
-       data-nav-selector="#menu-envio-mercadoria">
-      <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
-      Envio de mercadoria
-    </a>
+        <a href="#"
+           id="menu-log-relatorio"
+           class="menu-link"
+           data-nav-key="side:log:relatorio"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Relatório Logística"
+           data-nav-selector="#menu-log-relatorio">
+          <i class="fa-solid fa-file-lines" style="margin-right:8px;"></i>
+          Relatório Logística
+        </a>
 
-    <a href="#"
-       id="menu-simulador-frete"
-       class="menu-link"
-       data-nav-key="side:log:simulador-frete"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Simulador de frete"
-       data-nav-selector="#menu-simulador-frete">
-      <i class="fa-solid fa-calculator" style="margin-right:8px;"></i>
-      Simulador de frete
-    </a>
+        <button type="button"
+           id="bipagem-contagem-atalho"
+           class="bipagem-menu-source"
+           style="display:none"
+           data-nav-label="Bipagem / contagem"
+           data-mobile-ready="true"
+           aria-label="Bipagem / contagem">
+          <i class="fa-solid fa-barcode" style="margin-right:8px;"></i>
+          Bipagem / contagem
+        </button>
+      </div>
+    </div>
 
-    <a href="#"
-       id="menu-estoque-minimo"
-       class="menu-link"
-       data-nav-key="side:log:estoque-minimo"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Estoque mínimo"
-       data-nav-selector="#menu-estoque-minimo">
-      <i class="fa-solid fa-boxes-stacked" style="margin-right:8px;"></i>
-      Estoque mínimo
-      <span id="sideMinimoBadge" class="side-minimo-badge" hidden>0</span>
-    </a>
+    <div class="side-subgroup" data-side-group="side:log:recebimento">
+      <div class="side-subtitle">Recebimento</div>
+      <div class="side-submenu">
+        <a href="#"
+           id="menu-recebimento"
+           class="menu-link"
+           data-nav-key="side:log:recebimento"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Recebimento"
+           data-nav-selector="#menu-recebimento">
+          <i class="fa-solid fa-truck-ramp-box" style="margin-right:8px;"></i>
+          Recebimento
+        </a>
 
-    <a href="#"
-       id="menu-estoque-maquinas"
-       class="menu-link"
-       data-nav-key="side:log:estoque-maquinas"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="estoque de maquinas"
-       data-nav-selector="#menu-estoque-maquinas">
-      <i class="fa-solid fa-gears" style="margin-right:8px;"></i>
-      estoque de maquinas
-    </a>
+        <a href="#"
+           id="menu-produto-recebido"
+           class="menu-link"
+           data-nav-key="side:log:produto-recebido"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Produtos recebidos"
+           data-nav-selector="#menu-produto-recebido">
+          <i class="fa-solid fa-pallet" style="margin-right:8px;"></i>
+          Produtos recebidos
+        </a>
 
-    <a href="#"
-       id="menu-guardar-materiais"
-       class="menu-link"
-       data-nav-key="side:log:guardar-materiais"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Guardar materiais"
-       data-nav-selector="#menu-guardar-materiais">
-      <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
-      Guardar materiais
-    </a>
+        <a href="#"
+           id="menu-guardar-materiais"
+           class="menu-link"
+           data-nav-key="side:log:guardar-materiais"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Guardar materiais"
+           data-nav-selector="#menu-guardar-materiais">
+          <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
+          Guardar materiais
+        </a>
 
-    <a href="#"
-       id="menu-identificacao-produto"
-       class="menu-link"
-       data-nav-key="side:log:identificacao-produto"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Identificação do produto"
-       data-mobile-ready="true"
-       data-nav-selector="#menu-identificacao-produto">
-      <i class="fa-solid fa-print" style="margin-right:8px;"></i>
-      Identificação do produto
-    </a>
+        <a href="#"
+           id="menu-identificacao-produto"
+           class="menu-link"
+           data-nav-key="side:log:identificacao-produto"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Identificação do produto"
+           data-mobile-ready="true"
+           data-nav-selector="#menu-identificacao-produto">
+          <i class="fa-solid fa-print" style="margin-right:8px;"></i>
+          Identificação do produto
+        </a>
+      </div>
+    </div>
 
-    <button type="button"
-       id="bipagem-contagem-atalho"
-       class="bipagem-menu-source"
-       style="display:none"
-       data-nav-label="Bipagem / contagem"
-       data-mobile-ready="true"
-       aria-label="Bipagem / contagem">
-      <i class="fa-solid fa-barcode" style="margin-right:8px;"></i>
-      Bipagem / contagem
-    </button>
+    <div class="side-subgroup" data-side-group="side:log:expedicao">
+      <div class="side-subtitle">Expedição</div>
+      <div class="side-submenu">
+        <a href="#"
+           id="menu-envio-mercadoria"
+           class="menu-link"
+           data-nav-key="side:log:envio-mercadoria"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Envio de mercadoria"
+           data-nav-selector="#menu-envio-mercadoria">
+          <i class="fa-solid fa-truck-fast" style="margin-right:8px;"></i>
+          Envio de mercadoria
+        </a>
 
-    <a href="#"
-       id="menu-log-relatorio"
-       class="menu-link"
-       data-nav-key="side:log:relatorio"
-       data-nav-parent="side:log"
-       data-nav-pos="side"
-       data-nav-label="Relatório Logística"
-       data-nav-selector="#menu-log-relatorio">
-      <i class="fa-solid fa-file-lines" style="margin-right:8px;"></i>
-      Relatório Logística
-    </a>
+        <a href="#"
+           id="menu-estoque-maquinas"
+           class="menu-link"
+           data-nav-key="side:log:estoque-maquinas"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="estoque de maquinas"
+           data-nav-selector="#menu-estoque-maquinas">
+          <i class="fa-solid fa-gears" style="margin-right:8px;"></i>
+          estoque de maquinas
+        </a>
+
+        <a href="#"
+           id="menu-guardar-materiais-expedicao"
+           class="menu-link"
+           data-nav-key="side:log:guardar-materiais-expedicao"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Guardar materiais (Expedição)"
+           data-nav-selector="#menu-guardar-materiais-expedicao">
+          <i class="fa-solid fa-dolly" style="margin-right:8px;"></i>
+          Guardar materiais
+        </a>
+
+        <a href="#"
+           id="menu-identificacao-produto-expedicao"
+           class="menu-link"
+           data-nav-key="side:log:identificacao-produto-expedicao"
+           data-nav-parent="side:log"
+           data-nav-pos="side"
+           data-nav-label="Identificação do produto (Expedição)"
+           data-mobile-ready="true"
+           data-nav-selector="#menu-identificacao-produto-expedicao">
+          <i class="fa-solid fa-print" style="margin-right:8px;"></i>
+          Identificação do produto
+        </a>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -7359,7 +7399,7 @@
                   <i class="fa-solid fa-gears" style="color:#38bdf8;"></i>
                   <span>Estoque de máquinas</span>
                 </h3>
-                <div class="content-text">Kanban de embalagem, estoque #MAQ e solicitações de envio.</div>
+                <div class="content-text">Estoque #MAQ e solicitações de envio.</div>
               </div>
               <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
                 <button id="maqEstoqueRecarregarBtn" type="button"
@@ -7387,17 +7427,6 @@
             </div>
 
             <div id="maqEstoqueKanban" style="display:flex;gap:16px;align-items:flex-start;overflow-x:auto;padding:4px 0 16px 0;">
-              <div style="flex:0 0 340px;min-width:300px;">
-                <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#064e3b;border-radius:10px 10px 0 0;border:1px solid #059669;border-bottom:none;">
-                  <span style="width:10px;height:10px;border-radius:50%;background:#34d399;display:inline-block;flex-shrink:0;"></span>
-                  <span style="font-size:12px;font-weight:700;color:#6ee7b7;text-transform:uppercase;letter-spacing:.5px;">Aguardando embalagem</span>
-                  <span id="maqKanbanEmbalagemCount" style="margin-left:auto;font-size:11px;background:#065f46;color:#a7f3d0;padding:2px 9px;border-radius:10px;font-weight:600;">0</span>
-                </div>
-                <div id="maqKanbanEmbalagem" style="min-height:220px;background:rgba(52,211,153,.04);border:1px solid #059669;border-top:none;border-radius:0 0 10px 10px;padding:10px;display:flex;flex-direction:column;gap:10px;">
-                  <div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">Clique em Atualizar para carregar.</div>
-                </div>
-              </div>
-
               <div style="flex:0 0 340px;min-width:300px;">
                 <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#172554;border-radius:10px 10px 0 0;border:1px solid #1d4ed8;border-bottom:none;">
                   <span style="width:10px;height:10px;border-radius:50%;background:#3b82f6;display:inline-block;flex-shrink:0;"></span>
@@ -13645,8 +13674,8 @@
       <div style="display:flex;align-items:center;gap:10px;">
         <i class="fa-solid fa-print" style="font-size:1.2rem;color:#a78bfa;"></i>
         <div>
-          <span class="etq-flow-step etq-flow-step--identify">ETAPA 1 · IDENTIFICAR</span>
-          <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Identificação do produto</h3>
+          <span id="etqIdentificacaoEtapa" class="etq-flow-step etq-flow-step--identify">ETAPA 1 · IDENTIFICAR</span>
+          <h3 id="etqIdentificacaoTitulo" style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Identificação do produto</h3>
         </div>
       </div>
       <button id="etqAtalhoGuardarMateriais" class="etq-page-shortcut" type="button" title="Ir para Guardar materiais">
@@ -13808,8 +13837,8 @@
       <div style="display:flex;align-items:center;gap:10px;">
         <i class="fa-solid fa-warehouse" style="font-size:1.2rem;color:#34d399;"></i>
         <div>
-          <span class="etq-flow-step etq-flow-step--store">ETAPA 2 · ARMAZENAR</span>
-          <h3 style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Guardar materiais</h3>
+          <span id="etqImpressoEtapa" class="etq-flow-step etq-flow-step--store">ETAPA 2 · ARMAZENAR</span>
+          <h3 id="etqImpressoTitulo" style="margin:0;font-size:1.1rem;font-weight:700;color:#f1f5f9;">Guardar materiais</h3>
         </div>
       </div>
       <button id="etqAtalhoIdentificacaoProduto" class="etq-page-shortcut etq-page-shortcut--secondary" type="button" title="Voltar para Identificação do produto">
@@ -14032,9 +14061,9 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260814-auditoria-almox-a"></script>
+  <script type="module" src="menu_produto.js?v=20260817-menu-grupos"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
-  <script defer src="/public/js/estoque-maquinas.js?v=20260811a"></script>
+  <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260812-qr-contem"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260812-qr-contem"></script>

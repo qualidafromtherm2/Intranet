@@ -14731,12 +14731,99 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
 });
 
 // ── Etiquetas pendentes de impressão via modal ────────────────────────────────
-// GET /api/etiquetas/recebimento/pendentes?q=texto&mostrar_ocultos=1
+// GET /api/etiquetas/recebimento/pendentes?q=texto&mostrar_ocultos=1&fluxo=recebimento|expedicao
+// fluxo=expedicao → só Tipo item 00. fluxo=recebimento → exclui Tipo item 00.
+function etqFiltroTipoItemSql(codigoExpr, fluxo) {
+  const fluxoNorm = String(fluxo || '').trim().toLowerCase();
+  const matchProduto = `(
+    TRIM(COALESCE(po.codigo, '')) = TRIM(COALESCE(${codigoExpr}, ''))
+    OR TRIM(COALESCE(po.codigo_produto::text, '')) = TRIM(COALESCE(${codigoExpr}, ''))
+  )`;
+  const tipo00 = `LPAD(REGEXP_REPLACE(COALESCE(po.tipoitem, ''), '\\D', '', 'g'), 2, '0') = '00'`;
+  if (fluxoNorm === 'expedicao') {
+    return `EXISTS (SELECT 1 FROM produto.produtos_omie po WHERE ${matchProduto} AND ${tipo00})`;
+  }
+  if (fluxoNorm === 'recebimento') {
+    return `NOT EXISTS (SELECT 1 FROM produto.produtos_omie po WHERE ${matchProduto} AND ${tipo00})`;
+  }
+  return 'TRUE';
+}
+
+let _etqExpedicaoNavPromise = null;
+async function ensureNavEtqExpedicao() {
+  if (_etqExpedicaoNavPromise) return _etqExpedicaoNavPromise;
+  _etqExpedicaoNavPromise = (async () => {
+    const itens = [
+      {
+        key: 'side:log:guardar-materiais-expedicao',
+        label: 'Guardar materiais (Expedição)',
+        selector: '#menu-guardar-materiais-expedicao',
+        sibling: 'side:log:guardar-materiais',
+        sort: 96
+      },
+      {
+        key: 'side:log:identificacao-produto-expedicao',
+        label: 'Identificação do produto (Expedição)',
+        selector: '#menu-identificacao-produto-expedicao',
+        sibling: 'side:log:identificacao-produto',
+        sort: 97
+      }
+    ];
+    for (const item of itens) {
+      await pool.query(`
+        INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+        SELECT $1, $2, 'side', p.id, $3, TRUE, $4
+          FROM public.nav_node p
+         WHERE p.key = 'side:log'
+        ON CONFLICT (key) DO UPDATE SET
+          label = EXCLUDED.label,
+          position = EXCLUDED.position,
+          parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+          sort = EXCLUDED.sort,
+          active = TRUE,
+          selector = EXCLUDED.selector
+      `, [item.key, item.label, item.sort, item.selector]);
+      await pool.query(`
+        INSERT INTO public.auth_role_permission (role, node_id, allow)
+        SELECT arp.role, n.id, arp.allow
+          FROM public.nav_node n
+          JOIN public.nav_node s ON s.key = $2
+          JOIN public.auth_role_permission arp ON arp.node_id = s.id
+         WHERE n.key = $1
+        ON CONFLICT (role, node_id) DO NOTHING
+      `, [item.key, item.sibling]);
+      await pool.query(`
+        INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+        SELECT aup.user_id, n.id, aup.allow
+          FROM public.nav_node n
+          JOIN public.nav_node s ON s.key = $2
+          JOIN public.auth_user_permission aup ON aup.node_id = s.id
+         WHERE n.key = $1
+        ON CONFLICT (user_id, node_id) DO NOTHING
+      `, [item.key, item.sibling]);
+      await pool.query(`
+        INSERT INTO public.auth_role_permission (role, node_id, allow)
+        SELECT 'admin', n.id, TRUE
+          FROM public.nav_node n
+         WHERE n.key = $1
+        ON CONFLICT (role, node_id) DO UPDATE SET allow = TRUE
+      `, [item.key]);
+    }
+  })().catch((err) => {
+    _etqExpedicaoNavPromise = null;
+    console.error('[etiquetas/expedicao] falha ao garantir nav:', err.message);
+    throw err;
+  });
+  return _etqExpedicaoNavPromise;
+}
+ensureNavEtqExpedicao().catch(() => {});
+
 // Normal: retorna todos os registros não-ocultos (impressa=false e impressa=true).
 // mostrar_ocultos=1: retorna apenas os ocultos.
 // Inclui id_impresso (último ETQ_rec_impresso para o item, quando impressa=true).
 app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
   try {
+    await ensureNavEtqExpedicao().catch(() => {});
     const q = String(req.query.q || '').trim();
     const mostrarOcultos = req.query.mostrar_ocultos === '1';
     // ETQ_auto_oculto: regra de auto-ocultamento por codigo_produto.
@@ -14761,6 +14848,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
     // Padrão: todos (MP e fora de MP). sem_mp=1 → só fora de MP. so_mp=1 → só MP.
     let familiaMpCond = 'TRUE';
     let filtroFamilia = 'todos';
+    const tipoItemCond = etqFiltroTipoItemSql('er.codigo_produto', req.query.fluxo);
     if (semMp) {
       filtroFamilia = 'sem_mp';
       familiaMpCond = `NOT EXISTS (
@@ -14799,6 +14887,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
             AND ${pirCond}
             AND ${saldoCond}
             AND (${familiaMpCond})
+            AND (${tipoItemCond})
             AND (er.lote ILIKE $1 OR er.codigo_produto ILIKE $1 OR er.descricao_produto ILIKE $1)
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`,
@@ -14815,6 +14904,7 @@ app.get('/api/etiquetas/recebimento/pendentes', async (req, res) => {
             AND ${pirCond}
             AND ${saldoCond}
             AND (${familiaMpCond})
+            AND (${tipoItemCond})
           ORDER BY er.impressa DESC, er.criado_em DESC
           LIMIT 200`
       );
@@ -15991,12 +16081,14 @@ app.get('/api/etiquetas/rec-impresso/ids-fifo-batch', async (req, res) => {
   }
 });
 
-// GET /api/etiquetas/rec-impresso?q=texto
+// GET /api/etiquetas/rec-impresso?q=texto&fluxo=recebimento|expedicao
 // Retorna registros já impressos de ETQ_rec_impresso, com filtro opcional
 app.get('/api/etiquetas/rec-impresso', async (req, res) => {
   try {
     await _ensureEtqDevolucaoColumns(pool);
+    await ensureNavEtqExpedicao().catch(() => {});
     const q = String(req.query.q || '').trim();
+    const tipoItemCond = etqFiltroTipoItemSql('r.codigo_produto', req.query.fluxo);
     let rows;
     const baseSql = `
       SELECT i.id,
@@ -16013,6 +16105,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
            AND COALESCE(i.qtd, 0) > 0
+           AND (${tipoItemCond})
            AND (
              r.lote ILIKE $1
              OR r.codigo_produto ILIKE $1
@@ -16030,6 +16123,7 @@ app.get('/api/etiquetas/rec-impresso', async (req, res) => {
         `${baseSql}
          WHERE (i.endereco IS NULL OR i.endereco = '')
            AND COALESCE(i.qtd, 0) > 0
+           AND (${tipoItemCond})
          ORDER BY i.impresso_em DESC, i.id ASC
          LIMIT 200`
       );

@@ -3,7 +3,7 @@
   'use strict';
 
   let _carregado = false;
-  let _dados = { embalagem: [], estoque: [], pedidos: [] };
+  let _dados = { estoque: [], pedidos: [] };
   let _filtro = '';
   let _gruposAbertos = new Set();
 
@@ -68,61 +68,6 @@
       colEl.innerHTML = `<div style="text-align:center;padding:24px 0;color:var(--inactive-color);font-size:12px;">${esc(msg)}</div>`;
     }
     if (cntEl) cntEl.textContent = '0';
-  }
-
-  function renderEmbalagem() {
-    const colEl = $('maqKanbanEmbalagem');
-    const cntEl = $('maqKanbanEmbalagemCount');
-    const itens = (_dados.embalagem || []).filter((op) =>
-      matchFiltro(op.codigo, op.descricao, op.identificacao, op.numero_pedido)
-    );
-
-    if (!itens.length) {
-      renderColunaVazia(colEl, cntEl, _filtro
-        ? `Nenhuma OP encontrada para "${_filtro}".`
-        : 'Nenhuma OP em Embalagem.');
-      return;
-    }
-
-    const grupos = {};
-    for (const op of itens) {
-      const key = op.codigo || String(op.id);
-      if (!grupos[key]) grupos[key] = [];
-      grupos[key].push(op);
-    }
-
-    colEl.innerHTML = Object.entries(grupos).map(([codigo, ops]) => {
-      const qtde = ops.length;
-      const desc = ops[0].descricao || '—';
-      const opsHtml = ops.map((op) => `
-        <div class="kanban-op-card" style="background:rgba(15,23,42,.35);border:1px solid rgba(52,211,153,.18);border-radius:8px;padding:8px 10px;">
-          <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
-            <span style="font-size:10px;color:#475569;font-weight:600;">#${esc(op.id)}</span>
-            <span style="font-size:13px;font-weight:700;color:#e2e8f0;">OP ${esc(op.identificacao || '—')}</span>
-            ${op.numero_pedido
-              ? `<span class="kanban-op-pedido-numero"><i class="fa-solid fa-link" style="font-size:9px;"></i>Ped. ${esc(op.numero_pedido)}</span>`
-              : ''}
-          </div>
-          ${op.created_at ? `<div style="font-size:10px;color:#64748b;margin-top:4px;">Abertura: <b style="color:#94a3b8;">${esc(fmtData(op.created_at))}</b></div>` : ''}
-        </div>
-      `).join('');
-
-      return `
-        <div class="kanban-prod-grupo" style="background:var(--content-bg,#1e2233);border:1px solid rgba(255,255,255,.1);border-radius:10px;padding:12px;">
-          <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px;">
-            <div style="flex:1;min-width:0;">
-              <div style="font-size:13px;font-weight:700;color:#f59e0b;letter-spacing:.3px;">${esc(codigo)}</div>
-              <div style="font-size:12px;color:#e2e8f0;margin-top:2px;line-height:1.4;">${esc(desc)}</div>
-              <div style="font-size:10px;color:#818cf8;font-weight:600;margin-top:4px;">${qtde} OP${qtde === 1 ? '' : 's'}</div>
-            </div>
-            <span style="flex-shrink:0;font-size:12px;font-weight:700;background:#065f46;color:#a7f3d0;padding:3px 10px;border-radius:12px;">QTD ${fmtQtde(qtde)}</span>
-          </div>
-          <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">${opsHtml}</div>
-        </div>
-      `;
-    }).join('');
-
-    if (cntEl) cntEl.textContent = String(itens.length);
   }
 
   function renderEstoque() {
@@ -208,7 +153,6 @@
   }
 
   function renderKanban() {
-    renderEmbalagem();
     renderEstoque();
     renderPedidos();
   }
@@ -224,7 +168,6 @@
         throw new Error(data.error || `HTTP ${resp.status}`);
       }
       _dados = {
-        embalagem: Array.isArray(data.embalagem) ? data.embalagem : [],
         estoque: Array.isArray(data.estoque) ? data.estoque : [],
         pedidos: Array.isArray(data.pedidos) ? data.pedidos : [],
       };
@@ -232,7 +175,6 @@
       renderKanban();
     } catch (err) {
       setStatus('Erro: ' + (err.message || 'Falha ao carregar estoque de máquinas.'), true);
-      renderColunaVazia($('maqKanbanEmbalagem'), $('maqKanbanEmbalagemCount'), 'Erro ao carregar.');
       renderColunaVazia($('maqKanbanEstoque'), $('maqKanbanEstoqueCount'), 'Erro ao carregar.');
       renderColunaVazia($('maqKanbanEnvio'), $('maqKanbanEnvioCount'), 'Erro ao carregar.');
     } finally {

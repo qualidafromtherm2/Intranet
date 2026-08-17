@@ -3,6 +3,8 @@
  *
  * Tabela: usuario.usuario_preferencias (login, chave, valor, atualizado_em)
  *
+ * Chaves usadas: impressora_envio, impressora_etiquetas, menu_grupos_recolhidos
+ *
  * GET  /api/usuario/preferencias/:chave  → { valor } ou { valor: null }
  * POST /api/usuario/preferencias         → { chave, valor } upsert → { ok: true }
  * GET  /api/usuario/notificacao-preferencias → catálogo + preferências do usuário

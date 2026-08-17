@@ -79,69 +79,6 @@ function etapaDescricaoSql() {
   `;
 }
 
-async function listarEmbalagem() {
-  const { rows } = await pool.query(`
-    SELECT
-      op.id,
-      op.n_op AS identificacao,
-      COALESCE(op.codigo, '') AS codigo,
-      op.codigo_produto,
-      COALESCE(po.descricao, '') AS descricao,
-      op.created_at,
-      kp.numero_pedido,
-      kp.status AS kanban_status
-    FROM producao."OP_producao" op
-    LEFT JOIN produto.produtos_omie po
-      ON po.codigo_produto = op.codigo_produto
-    LEFT JOIN LATERAL (
-      SELECT k.numero_pedido, k.status
-        FROM producao."Kanban_programacao" k
-       WHERE k.op_producao_id = op.id
-          OR (
-            NULLIF(TRIM(COALESCE(k.numero_op, '')), '') IS NOT NULL
-            AND TRIM(k.numero_op) = TRIM(op.n_op)
-          )
-       ORDER BY k.id DESC
-       LIMIT 1
-    ) kp ON true
-    WHERE EXISTS (
-      SELECT 1
-        FROM producao."Kanban_programacao" k
-       WHERE (
-            k.op_producao_id = op.id
-            OR (
-              NULLIF(TRIM(COALESCE(k.numero_op, '')), '') IS NOT NULL
-              AND TRIM(k.numero_op) = TRIM(op.n_op)
-            )
-          )
-         AND LOWER(TRIM(k.status)) = 'embalagem'
-    )
-      AND NOT EXISTS (
-        SELECT 1
-          FROM producao."Kanban_programacao" k
-         WHERE (
-              k.op_producao_id = op.id
-              OR (
-                NULLIF(TRIM(COALESCE(k.numero_op, '')), '') IS NOT NULL
-                AND TRIM(k.numero_op) = TRIM(op.n_op)
-              )
-            )
-           AND LOWER(TRIM(k.status)) = 'finalizado'
-      )
-    ORDER BY COALESCE(po.descricao, op.codigo, ''), op.created_at DESC, op.id DESC
-  `);
-
-  return rows.map((r) => ({
-    id: Number(r.id) || 0,
-    identificacao: r.identificacao || '',
-    codigo: r.codigo || '',
-    descricao: r.descricao || '',
-    numero_pedido: r.numero_pedido || '',
-    kanban_status: r.kanban_status || 'Embalagem',
-    created_at: r.created_at || null,
-  }));
-}
-
 async function listarEstoqueMaquinas() {
   const { rows } = await pool.query(`
     SELECT
@@ -212,13 +149,11 @@ router.get('/estoque-maquinas', async (_req, res) => {
   try {
     await ensureNavEstoqueMaquinas().catch(() => {});
     const settled = await Promise.allSettled([
-      listarEmbalagem(),
       listarEstoqueMaquinas(),
       listarSolicitacaoEnvio(),
     ]);
-    const [embalagemS, estoqueS, pedidosS] = settled;
+    const [estoqueS, pedidosS] = settled;
     const erros = [];
-    if (embalagemS.status === 'rejected') erros.push('embalagem: ' + (embalagemS.reason?.message || embalagemS.reason));
     if (estoqueS.status === 'rejected') erros.push('estoque: ' + (estoqueS.reason?.message || estoqueS.reason));
     if (pedidosS.status === 'rejected') erros.push('pedidos: ' + (pedidosS.reason?.message || pedidosS.reason));
     if (erros.length) console.error('[logistica/estoque-maquinas] parciais:', erros.join(' | '));
@@ -229,7 +164,6 @@ router.get('/estoque-maquinas', async (_req, res) => {
         codigo: COD_ESTOQUE_MAQUINAS,
         nome: '##MAQ 10408747829 — 4. ESTOQUE MAQUINAS',
       },
-      embalagem: embalagemS.status === 'fulfilled' ? embalagemS.value : [],
       estoque: estoqueS.status === 'fulfilled' ? estoqueS.value : [],
       pedidos: pedidosS.status === 'fulfilled' ? pedidosS.value : [],
       avisos: erros,

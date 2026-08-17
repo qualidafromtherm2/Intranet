@@ -3280,6 +3280,68 @@ max-width: 480px;          /* 260 ? 480 px; ajuste se quiser */
   margin-bottom: 14px;
 }
 
+.side-title.side-group-toggle,
+.side-subtitle.side-group-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+}
+.side-title.side-group-toggle {
+  margin: 4px 0 8px;
+  padding: 4px 6px;
+}
+.side-title.side-group-toggle:hover,
+.side-subtitle.side-group-toggle:hover {
+  background: var(--hover-menu-bg);
+  color: var(--theme-color);
+}
+.side-group-chevron {
+  flex-shrink: 0;
+  margin: 0 !important;
+  font-size: 10px !important;
+  opacity: .7;
+  color: inherit !important;
+  transition: transform .15s ease;
+}
+.side-wrapper.is-collapsed > .side-title .side-group-chevron,
+.side-subgroup.is-collapsed > .side-subtitle .side-group-chevron {
+  transform: rotate(-90deg);
+}
+.side-wrapper.is-collapsed > .side-menu,
+.side-subgroup.is-collapsed > .side-submenu {
+  display: none;
+}
+.side-wrapper.is-collapsed > .side-title {
+  margin-bottom: 4px;
+}
+.side-subtitle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--inactive-color);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  margin: 8px 0 4px;
+  padding: 4px 8px;
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+}
+.side-submenu {
+  display: flex;
+  flex-direction: column;
+}
+.side-submenu .menu-link {
+  padding-left: 18px;
+}
+
 .side-menu {
   display: flex;
   flex-direction: column;
@@ -23882,6 +23944,7 @@ html.light-mode #minhasComprasWrapper {
 .side-wrapper + .side-wrapper { margin-top: 14px; }
 .side-title { margin: 4px 6px 8px; font-size: 12px; }
 .side-menu a { min-height: 40px; padding: 8px; }
+.side-submenu .menu-link { padding-left: 18px; }
 
 /* O piloto remove a moldura externa sem tocar nos componentes internos da lista. */
 #listaProdutos > .content-wrapper {
@@ -24124,7 +24187,7 @@ html.light-mode #minhasComprasWrapper {
     overflow-x: hidden;
   }
 
-  .sidebar-content:not(.collapsed) .side-title { display: block; }
+  .sidebar-content:not(.collapsed) .side-title { display: flex; }
   .sidebar-content:not(.collapsed) .side-menu a,
   .sidebar-content:not(.collapsed) .side-menu .shell-nav-button {
     width: 100%;
@@ -26051,5 +26114,8 @@ html.light-mode #producaoGembaPane .gemba-guia.is-active {
   display: none !important;
 }
 #producaoGerarOpPostosSelect option[value="Embalagem"] {
+  display: none !important;
+}
+#maqEstoqueKanban > div:has(#maqKanbanEmbalagem) {
   display: none !important;
 }
