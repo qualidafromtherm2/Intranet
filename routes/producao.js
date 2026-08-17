@@ -1895,22 +1895,46 @@ router.get('/iapp/qualidade/inspecoes/lista', async (req, res) => {
 
 /* ---------------------------------------------------------------
  * GET /api/producao/pedidos-kanban
- * Pedidos de venda (etapa 80) com saldo não programado — somente itens 04 (PA).
+ * Pedidos de venda (etapa 80) ainda descobertos por estoque/linha — somente itens 04 (PA).
  * --------------------------------------------------------------- */
 router.get('/pedidos-kanban', async (req, res) => {
   try {
     await garantirSchemaKanbanProgramacao();
 
     const { rows } = await dbQuery(`
-      WITH movimentado AS (
+      WITH estoque_maquinas AS (
         SELECT
-          codigo_pedido,
-          ${normCodigoSql('codigo')} AS codigo_norm,
-          SUM(quantidade) AS qtd_mov
-        FROM producao."Kanban_programacao"
-        GROUP BY codigo_pedido, ${normCodigoSql('codigo')}
+          ${normCodigoSql('e.codigo')} AS codigo_norm,
+          SUM(GREATEST(COALESCE(e.saldo, 0), 0)) AS quantidade
+        FROM logistica.estoque_atual e
+        WHERE TRIM(COALESCE(e.local_codigo, '')) = '10408747829'
+        GROUP BY ${normCodigoSql('e.codigo')}
       ),
-      itens_saldo AS (
+      ops_ativas_linha AS (
+        SELECT
+          ${normCodigoSql('op.codigo')} AS codigo_norm,
+          COUNT(*)::numeric AS quantidade
+        FROM producao."OP_producao" op
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM producao."Kanban_programacao" kp
+          WHERE kp.op_producao_id = op.id
+            AND LOWER(TRIM(COALESCE(kp.status, ''))) = 'finalizado'
+        )
+        GROUP BY ${normCodigoSql('op.codigo')}
+      ),
+      cobertura AS (
+        SELECT
+          codigo_norm,
+          SUM(quantidade) AS quantidade
+        FROM (
+          SELECT codigo_norm, quantidade FROM estoque_maquinas
+          UNION ALL
+          SELECT codigo_norm, quantidade FROM ops_ativas_linha
+        ) fontes
+        GROUP BY codigo_norm
+      ),
+      itens_base AS (
         SELECT
           p.codigo_pedido,
           p.numero_pedido,
@@ -1920,19 +1944,50 @@ router.get('/pedidos-kanban', async (req, res) => {
           i.codigo_produto,
           i.codigo,
           i.descricao,
-          GREATEST(COALESCE(i.quantidade, 0) - COALESCE(m.qtd_mov, 0), 0) AS saldo
+          ${normCodigoSql('i.codigo')} AS codigo_norm,
+          GREATEST(COALESCE(i.quantidade, 0), 0) AS quantidade
         FROM vendas.pedidos_venda p
         JOIN vendas.pedidos_venda_itens i
           ON i.codigo_pedido = p.codigo_pedido
         JOIN produto.produtos_omie po
           ON ${normCodigoSql('po.codigo')} = ${normCodigoSql('i.codigo')}
-        LEFT JOIN movimentado m
-          ON m.codigo_pedido = p.codigo_pedido
-         AND m.codigo_norm = ${normCodigoSql('i.codigo')}
         WHERE TRIM(COALESCE(p.etapa::text, '')) = '80'
           AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
           AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
           AND TRIM(COALESCE(po.tipoitem, '')) IN ('04', '4')
+      ),
+      itens_ordenados AS (
+        SELECT
+          ib.*,
+          COALESCE(
+            SUM(ib.quantidade) OVER (
+              PARTITION BY ib.codigo_norm
+              ORDER BY ib.numero_pedido ASC NULLS LAST, ib.codigo_pedido ASC, ib.seq ASC NULLS LAST
+              ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+            ),
+            0
+          ) AS demanda_anterior
+        FROM itens_base ib
+      ),
+      itens_saldo AS (
+        SELECT
+          io.codigo_pedido,
+          io.numero_pedido,
+          io.obs_venda,
+          io.updated_at,
+          io.seq,
+          io.codigo_produto,
+          io.codigo,
+          io.descricao,
+          GREATEST(
+            io.quantidade - LEAST(
+              io.quantidade,
+              GREATEST(COALESCE(c.quantidade, 0) - io.demanda_anterior, 0)
+            ),
+            0
+          ) AS saldo
+        FROM itens_ordenados io
+        LEFT JOIN cobertura c ON c.codigo_norm = io.codigo_norm
       )
       SELECT
         codigo_pedido,
