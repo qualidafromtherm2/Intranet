@@ -4,7 +4,6 @@ const { pool } = require('../src/db');
 const router = express.Router();
 
 const COD_ESTOQUE_MAQUINAS = '10408747829';
-const ETAPAS_EXCLUIDAS = ['00', '70'];
 const NAV_KEY = 'side:log:estoque-maquinas';
 const NAV_SIBLING_KEY = 'side:log:estoque-minimo';
 
@@ -64,9 +63,9 @@ async function ensureNavEstoqueMaquinas() {
 
 ensureNavEstoqueMaquinas().catch(() => {});
 
-function etapaDescricaoSql() {
+function etapaDescricaoSql(expr = 'p.etapa') {
   return `
-    CASE COALESCE(NULLIF(TRIM(p.etapa::text), ''), '')
+    CASE COALESCE(NULLIF(TRIM(${expr}::text), ''), '')
       WHEN '00' THEN 'Aberto'
       WHEN '10' THEN 'Em análise'
       WHEN '20' THEN 'Aprovado'
@@ -74,7 +73,7 @@ function etapaDescricaoSql() {
       WHEN '60' THEN 'Em separação'
       WHEN '70' THEN 'Faturado/Entregue'
       WHEN '80' THEN 'Concluído'
-      ELSE 'Etapa ' || COALESCE(NULLIF(TRIM(p.etapa::text), ''), '?')
+      ELSE 'Etapa ' || COALESCE(NULLIF(TRIM(${expr}::text), ''), '?')
     END
   `;
 }
@@ -109,32 +108,103 @@ async function listarEstoqueMaquinas() {
 
 async function listarSolicitacaoEnvio() {
   const { rows } = await pool.query(`
+    WITH estoque_maquinas AS (
+      SELECT
+        UPPER(TRIM(COALESCE(e.codigo, ''))) AS codigo_norm,
+        SUM(GREATEST(COALESCE(e.saldo, 0), 0)) AS quantidade
+      FROM logistica.estoque_atual e
+      WHERE TRIM(COALESCE(e.local_codigo, '')) = $1
+      GROUP BY UPPER(TRIM(COALESCE(e.codigo, '')))
+    ),
+    ops_ativas_linha AS (
+      SELECT
+        UPPER(TRIM(COALESCE(op.codigo, ''))) AS codigo_norm,
+        COUNT(*)::numeric AS quantidade
+      FROM producao."OP_producao" op
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM producao."Kanban_programacao" kp
+        WHERE kp.op_producao_id = op.id
+          AND LOWER(TRIM(COALESCE(kp.status, ''))) = 'finalizado'
+      )
+      GROUP BY UPPER(TRIM(COALESCE(op.codigo, '')))
+    ),
+    cobertura AS (
+      SELECT codigo_norm, SUM(quantidade) AS quantidade
+      FROM (
+        SELECT codigo_norm, quantidade FROM estoque_maquinas
+        UNION ALL
+        SELECT codigo_norm, quantidade FROM ops_ativas_linha
+      ) fontes
+      GROUP BY codigo_norm
+    ),
+    itens_base AS (
+      SELECT
+        p.codigo_pedido,
+        p.numero_pedido,
+        p.etapa,
+        p.data_previsao,
+        i.seq,
+        i.codigo,
+        COALESCE(po.descricao, i.descricao, i.codigo, '-') AS descricao,
+        COALESCE(NULLIF(TRIM(f.nome_fantasia), ''), NULLIF(TRIM(f.razao_social), ''), 'N/D') AS cliente_nome,
+        UPPER(TRIM(COALESCE(i.codigo, ''))) AS codigo_norm,
+        GREATEST(COALESCE(i.quantidade, 0), 0) AS quantidade
+      FROM vendas.pedidos_venda p
+      JOIN vendas.pedidos_venda_itens i
+        ON i.codigo_pedido = p.codigo_pedido
+      JOIN produto.produtos_omie po
+        ON UPPER(TRIM(COALESCE(po.codigo, ''))) = UPPER(TRIM(COALESCE(i.codigo, '')))
+      LEFT JOIN omie.fornecedores f
+        ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
+      WHERE TRIM(COALESCE(p.etapa::text, '')) = '80'
+        AND TRIM(COALESCE(p.bloqueado, '')) = 'N'
+        AND TRIM(COALESCE(p.encerrado, '')) IN ('', 'N')
+        AND TRIM(COALESCE(po.tipoitem, '')) IN ('04', '4')
+        AND NULLIF(TRIM(i.codigo), '') IS NOT NULL
+    ),
+    itens_ordenados AS (
+      SELECT
+        ib.*,
+        COALESCE(
+          SUM(ib.quantidade) OVER (
+            PARTITION BY ib.codigo_norm
+            ORDER BY ib.numero_pedido ASC NULLS LAST, ib.codigo_pedido ASC, ib.seq ASC NULLS LAST
+            ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING
+          ),
+          0
+        ) AS demanda_anterior
+      FROM itens_base ib
+    ),
+    itens_disponiveis AS (
+      SELECT
+        io.*,
+        LEAST(
+          io.quantidade,
+          GREATEST(COALESCE(c.quantidade, 0) - io.demanda_anterior, 0)
+        ) AS quantidade_envio
+      FROM itens_ordenados io
+      LEFT JOIN cobertura c ON c.codigo_norm = io.codigo_norm
+    )
     SELECT
-      TRIM(i.codigo) AS codigo,
-      COALESCE(po.descricao, i.descricao, i.codigo, '-') AS descricao,
-      SUM(COALESCE(i.quantidade, 0))::numeric AS quantidade,
-      COUNT(DISTINCT p.codigo_pedido)::int AS pedidos,
+      TRIM(id.codigo) AS codigo,
+      id.descricao,
+      SUM(id.quantidade_envio)::numeric AS quantidade,
+      COUNT(DISTINCT id.codigo_pedido)::int AS pedidos,
       json_agg(json_build_object(
-        'codigo_pedido', p.codigo_pedido,
-        'numero_pedido', p.numero_pedido,
-        'cliente_nome', COALESCE(NULLIF(TRIM(f.nome_fantasia), ''), NULLIF(TRIM(f.razao_social), ''), 'N/D'),
-        'etapa', COALESCE(NULLIF(TRIM(p.etapa::text), ''), ''),
-        'etapa_descricao', ${etapaDescricaoSql()},
-        'quantidade', COALESCE(i.quantidade, 0),
-        'data_previsao', p.data_previsao
-      ) ORDER BY p.numero_pedido DESC NULLS LAST) AS pedidos_itens
-    FROM vendas.pedidos_venda p
-    JOIN vendas.pedidos_venda_itens i
-      ON i.codigo_pedido = p.codigo_pedido
-    LEFT JOIN omie.fornecedores f
-      ON TRIM(COALESCE(f.codigo_cliente_omie::text, '')) = TRIM(COALESCE(p.codigo_cliente::text, ''))
-    LEFT JOIN produto.produtos_omie po
-      ON TRIM(po.codigo) = TRIM(i.codigo)
-    WHERE COALESCE(NULLIF(TRIM(p.etapa::text), ''), '') NOT IN (${ETAPAS_EXCLUIDAS.map((_, idx) => `$${idx + 1}`).join(', ')})
-      AND NULLIF(TRIM(i.codigo), '') IS NOT NULL
-    GROUP BY TRIM(i.codigo), COALESCE(po.descricao, i.descricao, i.codigo, '-')
+        'codigo_pedido', id.codigo_pedido,
+        'numero_pedido', id.numero_pedido,
+        'cliente_nome', id.cliente_nome,
+        'etapa', COALESCE(NULLIF(TRIM(id.etapa::text), ''), ''),
+        'etapa_descricao', ${etapaDescricaoSql('id.etapa')},
+        'quantidade', id.quantidade_envio,
+        'data_previsao', id.data_previsao
+      ) ORDER BY id.numero_pedido ASC NULLS LAST) AS pedidos_itens
+    FROM itens_disponiveis id
+    WHERE id.quantidade_envio > 0
+    GROUP BY TRIM(id.codigo), id.descricao
     ORDER BY quantidade DESC, codigo
-  `, ETAPAS_EXCLUIDAS);
+  `, [COD_ESTOQUE_MAQUINAS]);
 
   return rows.map((r) => ({
     codigo: r.codigo || '',
