@@ -41193,13 +41193,25 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
     const pedidosVinculados = extrairPedidosVinculadosDoRecebimento(recebimento);
     const categoriaInfo = await obterInfoCategoriaRecebimentoOmie(recebimento);
 
+    const nomeFornecedor = String(
+      recebimento?.cabec?.cRazaoSocial
+      || recebimento?.cabec?.cNome
+      || ''
+    ).trim();
+    const fluxoEspecialZinca = nomeFornecedor
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase()
+      .includes('ZINCA RAPIDO');
+
     return res.json({
       ok: true,
       recebimento: {
         n_id_receb: recebimento?.cabec?.nIdReceb || null,
         c_numero_nfe: recebimento?.cabec?.cNumeroNFe || null,
         c_chave_nfe: recebimento?.cabec?.cChaveNfe || null,
-        c_nome_fornecedor: recebimento?.cabec?.cRazaoSocial || recebimento?.cabec?.cNome || null,
+        c_nome_fornecedor: nomeFornecedor || null,
+        fluxo_especial_zinca: fluxoEspecialZinca,
         itens_total: Array.isArray(recebimento?.itensRecebimento) ? recebimento.itensRecebimento.length : 0,
         pedidos_vinculados: pedidosVinculados,
         categoria: categoriaInfo
@@ -41208,6 +41220,215 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', express.json
   } catch (err) {
     console.error('[Compras/NFeAssociarPedido/Consultar] Erro:', err);
     return res.status(500).json({ ok: false, error: err?.message || 'Erro ao consultar NF-e na Omie' });
+  }
+});
+
+function recebimentoPertenceZincaRapido(recebimento) {
+  const nome = String(
+    recebimento?.cabec?.cRazaoSocial
+    || recebimento?.cabec?.cNome
+    || ''
+  )
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+  return nome.includes('ZINCA RAPIDO');
+}
+
+function montarPreviewAssociacaoDiretaZinca(recebimento) {
+  const itens = Array.isArray(recebimento?.itensRecebimento)
+    ? recebimento.itensRecebimento
+    : [];
+
+  return itens.map((item, idx) => {
+    const cab = item?.itensCabec || {};
+    const info = item?.itensInfoAdic || {};
+    const nIdProduto = Number(cab?.nIdProduto || 0);
+    const codigo = String(cab?.cCodigoProduto || cab?.cCodProduto || info?.cCodIntProd || '').trim();
+    const descricao = String(cab?.cDescricaoProduto || cab?.cDescricao || info?.cDescricaoProduto || '').trim();
+    const cfop = String(cab?.cCFOP || cab?.cCfop || info?.cCFOP || info?.cCfop || '').trim();
+
+    return {
+      n_sequencia: Number(cab?.nSequencia || idx + 1),
+      nf_codigo_produto: codigo || null,
+      nf_descricao_produto: descricao || null,
+      nf_qtde: cab?.nQtdeNFe ?? null,
+      nf_unidade: String(cab?.cUnidadeNfe || '').trim() || null,
+      nf_valor_total: cab?.vTotalItem ?? item?.nValTot ?? null,
+      nf_cfop: cfop || null,
+      item_servico: true,
+      associacao_direta_zinca: true,
+      pedido_item_encontrado: Number.isFinite(nIdProduto) && nIdProduto > 0,
+      criterio_match: Number.isFinite(nIdProduto) && nIdProduto > 0
+        ? 'produto_atual_nfe'
+        : 'selecao_direta_pendente',
+      servico_produto_codigo_produto: Number.isFinite(nIdProduto) && nIdProduto > 0 ? nIdProduto : null,
+      servico_produto_codigo: codigo || null,
+      servico_produto_descricao: descricao || null,
+      pedido_sugestoes: []
+    };
+  });
+}
+
+app.post('/api/compras/pedidos-omie/nfe-associar-produtos-zinca/preview', express.json(), async (req, res) => {
+  try {
+    const numeroNfe = String(req.body?.numero_nfe || '').trim();
+    const chaveNfe = String(req.body?.chave_nfe || '').trim();
+    if (!numeroNfe && !chaveNfe) {
+      return res.status(400).json({ ok: false, error: 'Informe o número ou a chave da NF-e.' });
+    }
+
+    const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
+    if (!recebimento?.cabec?.nIdReceb) {
+      return res.status(404).json({ ok: false, error: 'NF-e não encontrada na API de recebimentos da Omie.' });
+    }
+    if (!recebimentoPertenceZincaRapido(recebimento)) {
+      return res.status(422).json({ ok: false, error: 'A associação direta sem pedido é exclusiva para notas da Zinca Rápido.' });
+    }
+
+    const itens = montarPreviewAssociacaoDiretaZinca(recebimento);
+    const categoria = await obterInfoCategoriaRecebimentoOmie(recebimento);
+    if (!itens.length) {
+      return res.status(422).json({ ok: false, error: 'A NF-e não possui itens disponíveis para associação.' });
+    }
+
+    return res.json({
+      ok: true,
+      preview: {
+        modo_associacao_direta_zinca: true,
+        numero_nfe: recebimento?.cabec?.cNumeroNFe || numeroNfe,
+        n_id_receb: recebimento?.cabec?.nIdReceb,
+        fornecedor_nome: recebimento?.cabec?.cRazaoSocial || recebimento?.cabec?.cNome || 'Zinca Rápido',
+        categoria,
+        itens_nf_total: itens.length,
+        itens_match_total: itens.filter((item) => item.pedido_item_encontrado).length,
+        itens_sem_match_total: itens.filter((item) => !item.pedido_item_encontrado).length,
+        itens,
+        itens_preview: itens,
+        itens_pedido_informativos: []
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/NFeZinca/Preview] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao preparar associação direta da NF-e.' });
+  }
+});
+
+app.post('/api/compras/pedidos-omie/nfe-associar-produtos-zinca', express.json(), async (req, res) => {
+  try {
+    const numeroNfe = String(req.body?.numero_nfe || '').trim();
+    const chaveNfe = String(req.body?.chave_nfe || '').trim();
+    const novaCategoriaCompra = String(req.body?.nova_categoria_compra || '').trim();
+    const overrides = Array.isArray(req.body?.itens_override) ? req.body.itens_override : [];
+    const porSequencia = new Map(overrides.map((item) => [Number(item?.n_sequencia || 0), item]));
+
+    if (!numeroNfe && !chaveNfe) {
+      return res.status(400).json({ ok: false, error: 'Informe o número ou a chave da NF-e.' });
+    }
+
+    const recebimento = await localizarRecebimentoOmiePorNumeroNfe(numeroNfe, chaveNfe);
+    if (!recebimento?.cabec?.nIdReceb) {
+      return res.status(404).json({ ok: false, error: 'NF-e não encontrada na API de recebimentos da Omie.' });
+    }
+    if (!recebimentoPertenceZincaRapido(recebimento)) {
+      return res.status(422).json({ ok: false, error: 'A associação direta sem pedido é exclusiva para notas da Zinca Rápido.' });
+    }
+
+    const categoriaAtual = await obterInfoCategoriaRecebimentoOmie(recebimento);
+    let categoriaParaEnviar = '';
+    if (categoriaAtual?.inativa && !novaCategoriaCompra) {
+      return res.status(422).json({
+        ok: false,
+        error_type: 'categoria_inativa',
+        categoria_atual: categoriaAtual,
+        error: `Categoria de compra inativa: ${categoriaAtual.codigo} - ${categoriaAtual.descricao}. Selecione uma categoria ativa antes de confirmar.`
+      });
+    }
+    if (novaCategoriaCompra) {
+      const codigoSemPontuacao = novaCategoriaCompra.replace(/\./g, '');
+      const categoriaNovaDb = await pool.query(
+        `SELECT codigo, descricao, conta_inativa
+           FROM configuracoes."ListarCategorias"
+          WHERE codigo = $1
+             OR REPLACE(COALESCE(codigo, ''), '.', '') = $2
+          ORDER BY CASE WHEN codigo = $1 THEN 0 ELSE 1 END
+          LIMIT 1`,
+        [novaCategoriaCompra, codigoSemPontuacao]
+      ).catch(() => ({ rows: [] }));
+      const categoriaNova = categoriaNovaDb.rows[0] || null;
+      if (!categoriaNova || categoriaNova.conta_inativa === 'S') {
+        return res.status(422).json({
+          ok: false,
+          error_type: 'categoria_substituta_invalida',
+          error: 'A categoria substituta selecionada é inválida ou está inativa.'
+        });
+      }
+      categoriaParaEnviar = String(categoriaNova.codigo || novaCategoriaCompra).trim();
+    }
+
+    const preview = montarPreviewAssociacaoDiretaZinca(recebimento);
+    const itensRecebimentoEditar = preview.map((item) => {
+      const override = porSequencia.get(Number(item.n_sequencia || 0));
+      const nIdProduto = Number(
+        override?.nIdProdutoServico
+        || item?.servico_produto_codigo_produto
+        || 0
+      );
+      return {
+        item,
+        nIdProduto,
+        payload: {
+          itensIde: {
+            nSequencia: Number(item.n_sequencia),
+            cAcao: 'ASSOCIAR-PRODUTO',
+            nIdProdutoExistente: nIdProduto
+          }
+        }
+      };
+    });
+
+    const pendentes = itensRecebimentoEditar.filter(({ nIdProduto }) => !Number.isFinite(nIdProduto) || nIdProduto <= 0);
+    if (pendentes.length) {
+      return res.status(422).json({
+        ok: false,
+        error: `Selecione o produto de ${pendentes.length} item(ns) antes de confirmar.`,
+        itens_sem_produto: pendentes.map(({ item }) => ({
+          n_sequencia: item.n_sequencia,
+          descricao: item.nf_descricao_produto
+        }))
+      });
+    }
+
+    await chamarApiRecebimentoNfeOmieComRetryRedundant('AlterarRecebimento', {
+      ide: { nIdReceb: Number(recebimento.cabec.nIdReceb) },
+      itensRecebimentoEditar: itensRecebimentoEditar.map(({ payload }) => payload),
+      ...(categoriaParaEnviar ? { infoAdicionais: { cCategCompra: categoriaParaEnviar } } : {})
+    }, { tentativasMaximas: 2 });
+
+    let conclusao = null;
+    try {
+      conclusao = await chamarApiRecebimentoNfeOmieComRetryRedundant('ConcluirRecebimento', {
+        nIdReceb: Number(recebimento.cabec.nIdReceb),
+        cEtapa: '60'
+      }, { tentativasMaximas: 2 });
+    } catch (erroConclusao) {
+      throw new Error(`Os produtos foram associados, mas a Omie não permitiu concluir o recebimento: ${erroConclusao?.message || erroConclusao}`);
+    }
+
+    return res.json({
+      ok: true,
+      message: `NF-e ${recebimento?.cabec?.cNumeroNFe || numeroNfe} recebida sem pedido, com ${itensRecebimentoEditar.length} item(ns) associado(s) diretamente.`,
+      dados: {
+        n_id_receb: recebimento.cabec.nIdReceb,
+        c_numero_nfe: recebimento?.cabec?.cNumeroNFe || numeroNfe,
+        modo_associacao_direta_zinca: true,
+        retorno_etapa_omie: conclusao,
+        fornecedor_nome: recebimento?.cabec?.cRazaoSocial || recebimento?.cabec?.cNome || 'Zinca Rápido'
+      }
+    });
+  } catch (err) {
+    console.error('[Compras/NFeZinca/Associar] Erro:', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Erro ao associar diretamente os itens da NF-e da Zinca.' });
   }
 });
 

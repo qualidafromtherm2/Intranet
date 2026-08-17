@@ -20207,6 +20207,11 @@ function attachDropZone(ul) {
 
       const jaVinculado  = itens.some(i => i.n_id_pedido && Number(i.n_id_pedido) > 0);
       const somenteConsulta = nfeJaRecebidaOuConcluida(nfe);
+      const fornecedorNormalizado = String(nfe.c_nome_fornecedor || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toUpperCase();
+      const fluxoEspecialZinca = fornecedorNormalizado.includes('ZINCA RAPIDO');
       const totalItens   = itens.reduce((acc, i) => acc + (Number(i.vlr_item) || 0), 0);
       const statusHtml   = renderEtapaBadge(nfe.c_etapa, nfe.c_recebido, nfe.c_cancelada);
 
@@ -20226,6 +20231,18 @@ function attachDropZone(ul) {
         ${itens.length ? `<div style="margin-top:10px;"><div style="font-size:12px;font-weight:700;color:#c4b5fd;margin-bottom:6px;">Itens da NF-e (${itens.length})</div><div style="overflow:auto;"><table style="width:100%;border-collapse:collapse;font-size:11px;min-width:480px;"><thead><tr style="background:#111827;"><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Código</th><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Descrição</th><th style="padding:6px 8px;text-align:right;color:#94a3b8;font-weight:600;">Qtd</th><th style="padding:6px 8px;text-align:left;color:#94a3b8;font-weight:600;">Un</th><th style="padding:6px 8px;text-align:right;color:#94a3b8;font-weight:600;">Vlr Item</th><th style="padding:6px 8px;text-align:center;color:#94a3b8;font-weight:600;">Pedido</th></tr></thead><tbody>${itens.map(i=>`<tr style="border-bottom:1px solid #1e293b;"><td style="padding:5px 8px;color:#e2e8f0;font-family:monospace;">${esc(i.codigo||'-')}</td><td style="padding:5px 8px;color:#e2e8f0;">${esc(i.descricao||'-')}</td><td style="padding:5px 8px;text-align:right;color:#e2e8f0;">${esc(fmtQtd(i.qtd))}</td><td style="padding:5px 8px;color:#e2e8f0;">${esc(i.unidade||'-')}</td><td style="padding:5px 8px;text-align:right;color:#e2e8f0;">${esc(fmtMoeda(i.vlr_item))}</td><td style="padding:5px 8px;text-align:center;">${i.n_id_pedido&&Number(i.n_id_pedido)>0?'<span style="background:#f0fdf4;color:#15803d;border:1px solid #86efac;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;">Vinculado</span>':'<span style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;border-radius:4px;padding:1px 6px;font-size:10px;">Sem vínculo</span>'}</td></tr>`).join('')}<tr style="background:#0b1220;"><td colspan="4" style="padding:7px 8px;text-align:right;font-weight:700;color:#93c5fd;border-top:2px solid #334155;font-size:11px;">Total</td><td style="padding:7px 8px;text-align:right;font-weight:700;color:#f8fafc;border-top:2px solid #334155;">${esc(fmtMoeda(totalItens))}</td><td style="border-top:2px solid #334155;"></td></tr></tbody></table></div></div>`
           : `<div style="margin-top:10px;background:#1e1b4b;border:1px solid #4338ca;border-radius:7px;padding:9px 13px;font-size:12px;color:#a5b4fc;display:flex;align-items:center;gap:7px;">⚠️ <span>NF-e sem itens cadastrados no sistema — sugestões baseadas apenas no <strong>valor total da NF-e</strong>.</span></div>`}
       </div>`;
+
+      const fluxoZincaHtml = fluxoEspecialZinca && !somenteConsulta
+        ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#f5f3ff;border:1px solid #c4b5fd;border-radius:10px;">
+            <div style="min-width:220px;flex:1;">
+              <div style="font-size:13px;font-weight:800;color:#5b21b6;margin-bottom:3px;"><i class="fa-solid fa-wand-magic-sparkles" style="margin-right:6px;"></i>Fluxo especial da Zinca Rápido</div>
+              <div style="font-size:12px;line-height:1.4;color:#475569;">Receba sem vincular a um pedido e associe cada linha da nota diretamente ao produto correto.</div>
+            </div>
+            <button id="locNfeBtnReceberZinca" type="button" style="border:0;border-radius:8px;padding:9px 15px;background:linear-gradient(135deg,#7c3aed,#5b21b6);color:#fff;font-size:12px;font-weight:800;cursor:pointer;white-space:nowrap;box-shadow:0 4px 12px rgba(91,33,182,.2);">
+              <i class="fa-solid fa-box-open" style="margin-right:6px;"></i>Receber sem pedido
+            </button>
+          </div>`
+        : '';
 
       let pedidosHtml = '';
       if (somenteConsulta) {
@@ -20260,8 +20277,20 @@ function attachDropZone(ul) {
         pedidosHtml = '<div style="padding:10px;background:#f8fafc;border:1px solid #e2e8f0;color:#64748b;border-radius:8px;font-size:13px;"><i class="fa-solid fa-info-circle" style="margin-right:6px;"></i>Nenhum pedido de compra correspondente localizado.</div>';
       }
 
-      conteudo.innerHTML = (somenteConsulta ? renderAvisoNfeSomenteConsulta(nfe) : '') + cabecHtml + pedidosHtml;
+      conteudo.innerHTML = (somenteConsulta ? renderAvisoNfeSomenteConsulta(nfe) : '') + cabecHtml + fluxoZincaHtml + pedidosHtml;
       attachCardListeners();
+
+      const btnReceberZinca = document.getElementById('locNfeBtnReceberZinca');
+      if (btnReceberZinca) {
+        btnReceberZinca.addEventListener('click', async () => {
+          if (!window.abrirModalAssociarPedidoNfeComContexto) return;
+          await window.abrirModalAssociarPedidoNfeComContexto({
+            numero_nfe: nfe.c_numero_nfe || num,
+            chave_nfe: nfe.c_chave_nfe || '',
+            itens
+          });
+        });
+      }
 
       const btnRanquear = document.getElementById('locNfeBtnRanquear');
       if (btnRanquear && pedidos.length > 0) {
