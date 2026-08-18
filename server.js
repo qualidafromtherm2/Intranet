@@ -21123,29 +21123,38 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
     const rawLocal = req.query.local ?? req.body?.local;
     const local = String(rawLocal ?? '').trim() || ALMOX_LOCAL_PADRAO;
 
-    // Usa apenas a tabela principal de posições do Omie, filtrando pelo local informado.
+    await ensureEstoqueAtualTable();
+
+    // Estoque ao vivo (webhooks/sync). omie_estoque_posicao é histórico e não cobre armazéns novos.
     const { rows } = await pool.query(`
-      SELECT DISTINCT ON (COALESCE(p.omie_prod_id::text, p.codigo))
-        p.codigo,
-        p.descricao,
-        p.estoque_minimo,
-        p.fisico,
-        p.reservado,
-        p.saldo,
-        p.cmc,
-        p.omie_prod_id,
-        p.cod_int,
-        p.data_posicao,
-        p.ingested_at,
+      SELECT
+        e.codigo,
+        COALESCE(NULLIF(BTRIM(e.descricao), ''), po.descricao) AS descricao,
+        e.estoque_minimo,
+        e.fisico,
+        e.reservado,
+        e.saldo,
+        e.cmc,
+        e.omie_prod_id,
+        e.cod_int,
+        e.updated_at,
         po.codigo_familia,
         po.descricao_familia,
         po.preco_definido
-      FROM omie.omie_estoque_posicao p
-      LEFT JOIN produto.produtos_omie po
-        ON po.codigo_produto = p.omie_prod_id
-      WHERE p.local_codigo = $1
-        AND COALESCE(p.saldo, 0) != 0
-      ORDER BY COALESCE(p.omie_prod_id::text, p.codigo), p.data_posicao DESC, p.ingested_at DESC, p.id DESC
+      FROM logistica.estoque_atual e
+      LEFT JOIN LATERAL (
+        SELECT po.descricao, po.codigo_familia, po.descricao_familia, po.preco_definido
+        FROM produto.produtos_omie po
+        WHERE po.codigo = e.codigo
+           OR (e.omie_prod_id IS NOT NULL AND po.codigo_produto = e.omie_prod_id)
+        ORDER BY
+          CASE WHEN po.codigo = e.codigo THEN 0 ELSE 1 END,
+          po.codigo_produto
+        LIMIT 1
+      ) po ON TRUE
+      WHERE e.local_codigo = $1
+        AND COALESCE(e.saldo, 0) != 0
+      ORDER BY e.codigo
     `, [local]);
 
     const dados = rows.map(r => ({
@@ -21158,8 +21167,8 @@ app.post('/api/armazem/almoxarifado', express.json(), async (req, res) => {
       cmc      : Number(r.cmc)           || 0,
       codOmie  : r.omie_prod_id != null ? String(r.omie_prod_id) : (r.cod_int || ''),
       origem   : local,
-      dataPosicao: r.data_posicao,
-      atualizadoEm: r.ingested_at,
+      dataPosicao: r.updated_at,
+      atualizadoEm: r.updated_at,
       familiaCodigo: r.codigo_familia != null ? String(r.codigo_familia) : '',
       familiaNome: r.descricao_familia || '',
       preco_definido: r.preco_definido != null ? Number(r.preco_definido) : null,
