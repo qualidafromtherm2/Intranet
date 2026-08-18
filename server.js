@@ -4850,7 +4850,6 @@ app.post('/api/rh/reservas', async (req, res) => {
     }
 
     const destinosEmail = avisosResolvidos.filter((item) => item.avisoEmail).map((item) => item.username);
-    const destinosWhats = avisosResolvidos.filter((item) => item.avisoWhatsapp).map((item) => item.username);
 
     let emailAviso = null;
     if (avisoEmail && destinosEmail.length) {
@@ -4876,7 +4875,7 @@ app.post('/api/rh/reservas', async (req, res) => {
     }
 
     let whatsappAviso = null;
-    if (avisoWhatsapp && destinosWhats.length) {
+    if (participantes.length) {
       try {
         const { notificarNovaReservaWhatsapp } = require('./utils/reservasWhatsapp');
         whatsappAviso = await notificarNovaReservaWhatsapp({
@@ -4887,7 +4886,7 @@ app.post('/api/rh/reservas', async (req, res) => {
           inicio: horaInicio,
           fim: horaFim,
           criadoPor: userLogado,
-          participantes: destinosWhats
+          participantes
         });
       } catch (errWa) {
         console.error('[API] /api/rh/reservas POST WhatsApp aviso falhou:', errWa?.message || errWa);
