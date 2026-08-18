@@ -294,7 +294,14 @@ router.get('/visao-cliente/:userId', async (req, res) => {
   try {
     const uid = String(req.params.userId || '').trim();
     const { rows: uRows } = await pool.query(
-      `SELECT id FROM public.auth_user WHERE id::text = $1 OR username = $1 LIMIT 1`,
+      `SELECT u.id, u.username, u.nome_completo, u.roles, u.email,
+              s.name AS setor, up.sector_id, f.name AS funcao
+         FROM public.auth_user u
+         LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
+         LEFT JOIN public.auth_sector s ON s.id = up.sector_id
+         LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+        WHERE u.id::text = $1 OR u.username = $1
+        LIMIT 1`,
       [uid]
     );
     if (!uRows.length) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
@@ -307,7 +314,34 @@ router.get('/visao-cliente/:userId', async (req, res) => {
         ORDER BY t.pos, t.parent_id NULLS FIRST, t.sort, t.id`,
       [userId]
     );
-    res.json({ ok: true, userId: String(userId), nodes: rows });
+    const nome = String(uRows[0].nome_completo || '').trim() || uRows[0].username || null;
+    const roles = uRows[0].roles || [];
+    const setor = uRows[0].setor || null;
+    const funcao = uRows[0].funcao || null;
+    res.json({
+      ok: true,
+      userId: String(userId),
+      username: uRows[0].username || null,
+      nome,
+      roles,
+      setor,
+      sector_id: uRows[0].sector_id != null ? Number(uRows[0].sector_id) : null,
+      funcao,
+      user: {
+        id: String(userId),
+        username: uRows[0].username || null,
+        nome,
+        nome_completo: uRows[0].nome_completo || null,
+        email: uRows[0].email || null,
+        roles,
+        setor,
+        sector: setor,
+        sector_id: uRows[0].sector_id != null ? Number(uRows[0].sector_id) : null,
+        funcao,
+        funcao_nome: funcao,
+      },
+      nodes: rows,
+    });
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }

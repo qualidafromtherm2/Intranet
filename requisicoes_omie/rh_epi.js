@@ -27,23 +27,54 @@ let _epiProdBuscaOffset = 0;
 let _epiProdBuscaHasMore = false;
 let _epiProdBuscaLoading = false;
 
-function epiRoles() {
-  const raw = window.userRoles ?? window.__sessionUser?.roles ?? [];
+function epiNormTexto(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function epiListaRoles(raw) {
   if (Array.isArray(raw)) return raw;
   return String(raw || '').split(',').map((s) => s.trim()).filter(Boolean);
 }
 
-/** RH ou admin: configuração, controle de entregues e botões Informações/Editar */
-function epiPodeGerenciar() {
-  if (epiRoles().some((r) => String(r || '').trim().toLowerCase() === 'admin')) return true;
-  const setor = String(window.__sessionUser?.setor || window.__sessionUser?.sector || '').trim().toLowerCase();
-  if (setor === 'rh' || setor.includes('recursos humanos') || /(^|[^a-z])rh([^a-z]|$)/i.test(setor)) return true;
-  const funcao = String(window.__sessionUser?.funcao_nome || window.__sessionUser?.funcao || '').trim().toLowerCase();
-  if (funcao.includes('recursos humanos') || /(^|[^a-z])rh([^a-z]|$)/i.test(funcao)) return true;
-  return false;
+function epiRoles() {
+  return epiListaRoles(window.userRoles ?? window.__sessionUser?.roles ?? []);
 }
 
-function applyEpiPermissions(pane) {
+function epiTextoEhRh(value) {
+  const t = epiNormTexto(value);
+  if (!t) return false;
+  return t === 'rh' || t.includes('recursos humanos') || /(^|[^a-z])rh([^a-z]|$)/.test(t);
+}
+
+/** Quem vale para permissão: usuário da visão cliente, se ativa; senão o logado. */
+function epiUsuarioPermissao() {
+  const visao = window.__visaoCliente;
+  if (visao?.ativa) {
+    return {
+      roles: epiListaRoles(visao.roles),
+      setor: visao.setor || '',
+      funcao: visao.funcao || visao.funcao_nome || '',
+    };
+  }
+  return {
+    roles: epiRoles(),
+    setor: window.__sessionUser?.setor || window.__sessionUser?.sector || '',
+    funcao: window.__sessionUser?.funcao_nome || window.__sessionUser?.funcao || '',
+  };
+}
+
+/** RH ou admin: configuração, controle de entregues e botões Informações/Editar/Receber */
+function epiPodeGerenciar() {
+  const u = epiUsuarioPermissao();
+  if (u.roles.some((r) => String(r || '').trim().toLowerCase() === 'admin')) return true;
+  return epiTextoEhRh(u.setor) || epiTextoEhRh(u.funcao);
+}
+
+function applyEpiPermissions(pane, opts = {}) {
   if (!pane) return;
   const pode = epiPodeGerenciar();
   pane.classList.toggle('epi-somente-solicitacao', !pode);
@@ -57,6 +88,7 @@ function applyEpiPermissions(pane) {
     epiVal('#epiTabSolicitacao', pane)?.classList.add('is-active');
     epiVal('#epiTabEntregas', pane)?.classList.remove('is-active');
   }
+  if (opts.rerenderCards && _epiProdutosDisp.length) renderProdutosCards(pane);
 }
 
 function epiVal(sel, root = document) {
@@ -212,7 +244,7 @@ function ensureEpiPane(root) {
     #rhEpi .epi-prod-card-actions input[type=number]{width:56px;padding:6px !important;flex-shrink:0}
     #rhEpi .epi-prod-card-btns{display:flex;flex-direction:column;gap:6px;width:100%}
     #rhEpi .epi-prod-card-btns .epi-btn{width:100%;text-align:center;padding:8px 10px;font-size:12px}
-    #rhEpi .epi-cart{margin-top:14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;background:rgba(255,255,255,.03)}
+    #rhEpi .epi-cart{margin:12px 0 14px;border:1px solid rgba(255,255,255,.1);border-radius:12px;padding:12px;background:rgba(17,20,28,.92);position:sticky;top:0;z-index:3}
     #rhEpi .epi-cart-cod{color:#e8ecff;font-weight:700}
     #rhEpi .epi-cart-desc{color:#9ca3af}
     #rhEpi .epi-cart-meta{color:#93c5fd}
@@ -290,8 +322,11 @@ function ensureEpiPane(root) {
     #rhEpi .epi-cfg-tab.is-active{background:rgba(58,109,240,.28);border-color:rgba(95,142,255,.55);color:#dbeafe}
     #rhEpi .epi-prod-ca-box{display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap}
     #rhEpi .epi-prod-ca-box .epi-field{flex:1;min-width:140px}
+    #rhEpi.epi-somente-solicitacao [data-epi-tab="entregas"],
+    #rhEpi.epi-somente-solicitacao #epiTabEntregas{display:none !important}
     #rhEpi.epi-somente-solicitacao .epi-btn-info,
-    #rhEpi.epi-somente-solicitacao .epi-btn-editar{display:none !important}
+    #rhEpi.epi-somente-solicitacao .epi-btn-editar,
+    #rhEpi.epi-somente-solicitacao .epi-btn-receber{display:none !important}
     #rhEpi .epi-prod-modal{width:min(640px,100%);max-height:min(90vh,860px)}
     #rhEpi .epi-prod-search{width:100%;margin-bottom:10px}
     #rhEpi .epi-prod-results,#rhEpi .epi-prod-linked{display:flex;flex-direction:column;gap:6px;max-height:240px;overflow:auto}
@@ -367,10 +402,6 @@ function ensureEpiPane(root) {
             <input id="epiProdFiltro" type="search" placeholder="Filtrar por código ou descrição…" />
           </label>
         </div>
-        <div style="margin-top:12px">
-          <strong style="font-size:13px;color:#cfe0ff">EPIs sugeridos / catálogo</strong>
-          <div id="epiCheckList" class="epi-prod-grid"><div class="epi-empty">Carregando…</div></div>
-        </div>
         <div class="epi-cart" id="epiCartBox">
           <div class="epi-cart-head">
             <strong style="color:#e8ecff"><i class="fa-solid fa-cart-shopping" style="margin-right:6px"></i>Carrinho <span id="epiCartCount" class="lp-tab-count">0</span></strong>
@@ -380,6 +411,10 @@ function ensureEpiPane(root) {
           <div class="epi-actions">
             <button type="button" class="epi-btn" id="epiBtnCriarSol">Criar solicitação</button>
           </div>
+        </div>
+        <div style="margin-top:12px">
+          <strong style="font-size:13px;color:#cfe0ff">EPIs sugeridos / catálogo</strong>
+          <div id="epiCheckList" class="epi-prod-grid"><div class="epi-empty">Carregando…</div></div>
         </div>
       </div>
 
@@ -744,13 +779,13 @@ function renderProdutosCards(pane) {
             <div class="epi-prod-card-vars">${renderVariacaoSelects(cod)}</div>
           </div>
           <div class="epi-prod-card-btns">
+            ${podeReceber ? `
             <button type="button" class="epi-btn epi-btn-ghost epi-btn-info">
               <i class="fa-solid fa-circle-info" style="margin-right:4px"></i>Informações
             </button>
             <button type="button" class="epi-btn epi-btn-ghost epi-btn-editar">
               <i class="fa-solid fa-pen-to-square" style="margin-right:4px"></i>Editar produto
             </button>
-            ${podeReceber ? `
             <button type="button" class="epi-btn epi-btn-ghost epi-btn-receber">
               <i class="fa-solid fa-box-open" style="margin-right:4px"></i>Receber
             </button>` : ''}
@@ -1291,9 +1326,10 @@ async function loadEntregas(pane) {
 function bindEpiPane(pane) {
   epiValAll('[data-epi-tab]', pane).forEach((btn) => {
     btn.addEventListener('click', () => {
+      const tab = btn.dataset.epiTab;
+      if (tab === 'entregas' && !epiPodeGerenciar()) return;
       epiValAll('[data-epi-tab]', pane).forEach((b) => b.classList.remove('lp-tab-active'));
       btn.classList.add('lp-tab-active');
-      const tab = btn.dataset.epiTab;
       epiVal('#epiTabSolicitacao', pane)?.classList.toggle('is-active', tab === 'solicitacao');
       epiVal('#epiTabEntregas', pane)?.classList.toggle('is-active', tab === 'entregas');
       if (tab === 'entregas') loadEntregas(pane).catch(() => {});
@@ -1582,6 +1618,7 @@ function bindEpiPane(pane) {
 
     const btnInfo = ev.target.closest('.epi-btn-info');
     if (btnInfo) {
+      if (!epiPodeGerenciar()) return;
       const card = btnInfo.closest('.epi-prod-card');
       if (!card) return;
       const codigo = card.dataset.codigo || '';
@@ -1595,6 +1632,7 @@ function bindEpiPane(pane) {
 
     const btnEditar = ev.target.closest('.epi-btn-editar');
     if (btnEditar) {
+      if (!epiPodeGerenciar()) return;
       const card = btnEditar.closest('.epi-prod-card');
       if (!card) return;
       const codigo = card.dataset.codigo || '';
@@ -1611,6 +1649,7 @@ function bindEpiPane(pane) {
 
     const btnReceber = ev.target.closest('.epi-btn-receber');
     if (btnReceber) {
+      if (!epiPodeGerenciar()) return;
       const card = btnReceber.closest('.epi-prod-card');
       if (card) openReceberModal(pane, card);
       return;
@@ -1740,6 +1779,7 @@ function bindEpiPane(pane) {
         ).join('\n');
         alert(`Solicitação #${det.id}\n${det.colaborador}\nStatus: ${det.status}\n\n${linhas}`);
       } else if (btn.classList.contains('epi-sol-atender')) {
+        if (!epiPodeGerenciar()) return;
         const det = await epiFetchJson(`/api/rh/epi/solicitacoes/${id}`);
         epiValAll('[data-epi-tab]', pane).forEach((b) => b.classList.toggle('lp-tab-active', b.dataset.epiTab === 'entregas'));
         epiVal('#epiTabSolicitacao', pane)?.classList.remove('is-active');
@@ -1877,7 +1917,7 @@ async function carregarPainelEpi() {
       loadUsuarios(pane),
       loadRelacao(pane),
       loadSolicitacoes(pane),
-      loadEntregas(pane),
+      epiPodeGerenciar() ? loadEntregas(pane) : Promise.resolve(),
     ]);
   } catch (err) {
     console.error('[rh_epi] carregarPainelEpi', err);
@@ -1931,6 +1971,10 @@ export function initRhEpiUI() {
       }
     });
   };
+
+  window.addEventListener('intranet:visao-cliente', () => {
+    if (_epiPane) applyEpiPermissions(_epiPane, { rerenderCards: true });
+  });
 
   const btn = document.querySelector('#btn-rh-epi');
   if (!btn) return;

@@ -297,6 +297,12 @@ function podeGerirEpiEstoque(req) {
   return sessionEhAdmin(req) || sessionEhRh(req);
 }
 
+function exigirGerirEpi(req, res) {
+  if (podeGerirEpiEstoque(req)) return true;
+  res.status(403).json({ error: 'Somente RH ou admin pode acessar o controle de entregas de EPI' });
+  return false;
+}
+
 function codigoDoItem(item) {
   const direto = String(item?.codigo || '').trim();
   if (direto) return direto;
@@ -1515,6 +1521,7 @@ router.patch('/epi/solicitacoes/:id/status', async (req, res) => {
 /* ---------- Entregas (controle / ficha) ---------- */
 
 router.get('/epi/entregas', async (req, res) => {
+  if (!exigirGerirEpi(req, res)) return;
   try {
     const q = String(req.query.q || '').trim();
     const userId = Number(req.query.user_id) || null;
@@ -1570,6 +1577,7 @@ router.get('/epi/entregas', async (req, res) => {
 });
 
 router.post('/epi/entregas', async (req, res) => {
+  if (!exigirGerirEpi(req, res)) return;
   try {
     const userId = Number(req.body?.user_id);
     if (!Number.isInteger(userId) || userId <= 0) {
@@ -1620,6 +1628,7 @@ router.post('/epi/entregas', async (req, res) => {
 });
 
 router.patch('/epi/entregas/:id', async (req, res) => {
+  if (!exigirGerirEpi(req, res)) return;
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: 'ID inválido' });
@@ -1662,6 +1671,7 @@ router.patch('/epi/entregas/:id', async (req, res) => {
 });
 
 router.delete('/epi/entregas/:id', async (req, res) => {
+  if (!exigirGerirEpi(req, res)) return;
   const id = Number(req.params.id);
   if (!Number.isInteger(id) || id <= 0) {
     return res.status(400).json({ error: 'ID inválido' });

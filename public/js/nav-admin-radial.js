@@ -523,20 +523,114 @@
     });
   }
 
+  function clonarSessaoUser(u) {
+    if (!u) return null;
+    try { return JSON.parse(JSON.stringify(u)); } catch (_) { return { ...u }; }
+  }
+
+  function atualizarNomeHeaderSessao(user) {
+    const el = document.getElementById('userNameDisplay');
+    if (!el) return;
+    if (!user) {
+      el.textContent = '';
+      return;
+    }
+    el.textContent = user.nome || user.username || user.login || '';
+  }
+
+  function montarUserVisaoCliente(d) {
+    const base = d?.user && typeof d.user === 'object' ? d.user : {};
+    const username = d.username || base.username || '';
+    const nome = d.nome || base.nome || base.nome_completo || username;
+    const roles = Array.isArray(d.roles) ? d.roles : (Array.isArray(base.roles) ? base.roles : []);
+    const setor = d.setor || base.setor || null;
+    const funcao = d.funcao || base.funcao || base.funcao_nome || null;
+    return {
+      id: String(d.userId || base.id || ''),
+      username,
+      nome,
+      nome_completo: base.nome_completo || nome,
+      email: base.email || null,
+      roles,
+      setor,
+      sector: setor,
+      sector_id: d.sector_id ?? base.sector_id ?? null,
+      funcao,
+      funcao_nome: funcao,
+    };
+  }
+
+  /** Troca a identidade da tela para o usuário da visão (como se tivesse logado nele). */
+  function aplicarIdentidadeVisaoCliente(user) {
+    if (!window.__sessionUserReal) {
+      window.__sessionUserReal = clonarSessaoUser(window.__sessionUser);
+      window.__userRolesReal = window.userRoles;
+    }
+    window.__sessionUser = user;
+    window.userRoles = user?.roles || [];
+    atualizarNomeHeaderSessao(user);
+  }
+
+  function restaurarIdentidadeReal() {
+    if (window.__sessionUserReal) {
+      window.__sessionUser = window.__sessionUserReal;
+      window.__sessionUserReal = null;
+    }
+    if (Object.prototype.hasOwnProperty.call(window, '__userRolesReal')) {
+      window.userRoles = window.__userRolesReal;
+      delete window.__userRolesReal;
+    }
+    atualizarNomeHeaderSessao(window.__sessionUser);
+  }
+
+  function publicarVisaoCliente(info) {
+    window.__visaoCliente = info && info.ativa
+      ? {
+          ativa: true,
+          userId: info.userId || null,
+          username: info.username || '',
+          roles: Array.isArray(info.roles) ? info.roles : String(info.roles || '').split(',').map((s) => s.trim()).filter(Boolean),
+          setor: info.setor || '',
+          sector_id: info.sector_id ?? null,
+          funcao: info.funcao || '',
+        }
+      : { ativa: false };
+    window.dispatchEvent(new CustomEvent('intranet:visao-cliente', { detail: window.__visaoCliente }));
+  }
+
   async function aplicarVisaoCliente(userId, username) {
     try {
       const r = await fetch(`${API}/visao-cliente/${encodeURIComponent(userId)}`, { credentials: 'include' });
       const d = await r.json();
       if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
 
+      visaoClienteAtiva = true;
+      visaoClienteUserId = String(d.userId || userId);
+      visaoClienteUsername = username || d.username || '';
+      const userVisao = montarUserVisaoCliente(d);
+      aplicarIdentidadeVisaoCliente(userVisao);
+      publicarVisaoCliente({
+        ativa: true,
+        userId: visaoClienteUserId,
+        username: visaoClienteUsername,
+        roles: userVisao.roles,
+        setor: userVisao.setor,
+        sector_id: userVisao.sector_id,
+        funcao: userVisao.funcao,
+      });
       if (typeof window.__applyNavPermissionTree === 'function') {
         window.__applyNavPermissionTree(d);
       }
-      visaoClienteAtiva = true;
-      visaoClienteUserId = String(d.userId || userId);
-      visaoClienteUsername = username || '';
+      if (typeof window.__refreshPermissoesSessao === 'function') {
+        window.__refreshPermissoesSessao();
+      }
       mostrarBarraVisaoCliente(d);
     } catch (err) {
+      restaurarIdentidadeReal();
+      visaoClienteAtiva = false;
+      visaoClienteUserId = null;
+      visaoClienteUsername = '';
+      publicarVisaoCliente({ ativa: false });
       alert('Erro ao aplicar visão: ' + err.message);
     }
   }
@@ -629,9 +723,14 @@
       visaoClienteAtiva = false;
       visaoClienteUserId = null;
       visaoClienteUsername = '';
+      restaurarIdentidadeReal();
+      publicarVisaoCliente({ ativa: false });
       bar.remove();
       if (typeof window.applyCurrentUserPermissionsToUI === 'function') {
         await window.applyCurrentUserPermissionsToUI();
+      }
+      if (typeof window.__refreshPermissoesSessao === 'function') {
+        window.__refreshPermissoesSessao();
       }
     });
   }

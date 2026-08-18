@@ -3778,7 +3778,22 @@ async function ensureSchema() {
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS validado BOOLEAN DEFAULT TRUE;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS comentario_tecnico TEXT;
     ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS fechamento_at TEXT;
+    ALTER TABLE sac.at ADD COLUMN IF NOT EXISTS tipo_assunto TEXT;
     ALTER TABLE sac.at ALTER COLUMN validado SET DEFAULT TRUE;
+
+    CREATE TABLE IF NOT EXISTS sac.tipo_assunto (
+      id         BIGSERIAL PRIMARY KEY,
+      nome       TEXT NOT NULL UNIQUE,
+      criado_em  TIMESTAMP NOT NULL DEFAULT NOW()
+    );
+    INSERT INTO sac.tipo_assunto (nome)
+    SELECT v FROM (VALUES
+      ('Devolução'),
+      ('Envio de peça'),
+      ('Atendimento de técnico'),
+      ('Dúvidas')
+    ) AS t(v)
+    ON CONFLICT (nome) DO NOTHING;
 
     CREATE TABLE IF NOT EXISTS sac.tipo_falha (
       id         BIGSERIAL PRIMARY KEY,
@@ -4279,6 +4294,7 @@ setTimeout(() => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 router.post('/at', async (req, res) => {
+  await ensureSchema();
   const body = req.body || {};
 
   const payload = {
@@ -4302,6 +4318,7 @@ router.post('/at', async (req, res) => {
     tagProblema: String(body.tag_problema || '').trim() || null,
     subtag: String(body.subtag || '').trim() || null,
     plataformaAtendimento: String(body.plataforma_atendimento || '').trim() || null,
+    tipoAssunto: String(body.tipo_assunto || body.novo_tipo || '').trim() || null,
   };
 
   // Atendimento Rápido → sempre fechado automaticamente (ignora acento)
@@ -4340,6 +4357,13 @@ router.post('/at', async (req, res) => {
   try {
     await client.query('BEGIN');
 
+    if (payload.tipoAssunto) {
+      await client.query(
+        `INSERT INTO sac.tipo_assunto (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING`,
+        [payload.tipoAssunto]
+      );
+    }
+
     let atRow;
 
     if (idAtExistente) {
@@ -4367,8 +4391,9 @@ router.post('/at', async (req, res) => {
            tag_problema,
            subtag,
            plataforma_atendimento,
+           tipo_assunto,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -4391,6 +4416,7 @@ router.post('/at', async (req, res) => {
           payload.tagProblema,
           payload.subtag,
           payload.plataformaAtendimento,
+          payload.tipoAssunto,
           statusInicial,
         ]
       );
@@ -4426,8 +4452,9 @@ router.post('/at', async (req, res) => {
            tag_problema,
            subtag,
            plataforma_atendimento,
+           tipo_assunto,
            status
-         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+         ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22)
          RETURNING id, data`,
         [
           payload.tipo,
@@ -4450,6 +4477,7 @@ router.post('/at', async (req, res) => {
           payload.tagProblema,
           payload.subtag,
           payload.plataformaAtendimento,
+          payload.tipoAssunto,
           statusInicial,
         ]
       );
@@ -4539,6 +4567,7 @@ router.get('/at/atendimentos', async (_req, res) => {
            a.subtag,
            a.plataforma_atendimento,
            a.tipo_falha,
+           a.tipo_assunto,
            a.fechamento_at,
            a.editado_por,
            a.editado_em,
@@ -4614,6 +4643,7 @@ router.get('/at/atendimentos', async (_req, res) => {
 });
 
 router.patch('/at/atendimentos/:id', async (req, res) => {
+  await ensureSchema();
   const id = parseInt(req.params.id, 10);
   if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
 
@@ -4634,8 +4664,14 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
     atendimento_inicial:    'atendimento_inicial',
     tipo:                   'tipo',
     tipo_falha:             'tipo_falha',
+    tipo_assunto:           'tipo_assunto',
     fechamento_at:          'fechamento_at',
   };
+
+  if (Object.prototype.hasOwnProperty.call(req.body || {}, 'novo_tipo')) {
+    const novo = String(req.body.novo_tipo || '').trim();
+    if (novo) req.body.tipo_assunto = novo;
+  }
 
   const setClauses = [];
   const colValues  = [];
@@ -4669,6 +4705,14 @@ router.patch('/at/atendimentos/:id', async (req, res) => {
                      || 'desconhecido';
 
   try {
+    const tipoAssuntoNovo = String(req.body?.tipo_assunto || '').trim();
+    if (tipoAssuntoNovo) {
+      await pool.query(
+        `INSERT INTO sac.tipo_assunto (nome) VALUES ($1) ON CONFLICT (nome) DO NOTHING`,
+        [tipoAssuntoNovo]
+      );
+    }
+
     // Atualiza campos do AT principal (se houver)
     if (setClauses.length) {
       setClauses.push(`editado_por = $${setClauses.length + 1}`);
@@ -5935,7 +5979,7 @@ async function enriquecerResultadosSerieComJaExiste(resultados) {
   const dbResult = await pool.query(
     `SELECT DISTINCT ON (s.ordem_producao, s.modelo)
        s.ordem_producao, s.modelo, s.id_at,
-       a.tipo, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
+       a.tipo, a.tipo_assunto, a.nome_revenda_cliente, a.numero_telefone, a.cpf_cnpj,
        a.cep, a.bairro, a.cidade, a.estado, a.numero, a.rua,
        a.agendar_atendimento_com, a.modelo AS at_modelo,
        a.tag_problema, a.plataforma_atendimento
@@ -6448,6 +6492,37 @@ router.delete('/at/tipos-falha/:id', async (req, res) => {
     return res.json({ ok: true });
   } catch (err) {
     console.error('[SAC/AT] excluir tipo-falha:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/at/tipos-assunto', async (req, res) => {
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `SELECT id, nome FROM sac.tipo_assunto ORDER BY nome ASC`
+    );
+    return res.json({ ok: true, tipos: rows });
+  } catch (err) {
+    console.error('[SAC/AT] listar tipos-assunto:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/at/tipos-assunto', async (req, res) => {
+  const nome = String(req.body?.nome || '').trim().slice(0, 120);
+  if (!nome) return res.status(400).json({ ok: false, error: 'Nome obrigatório.' });
+  try {
+    await ensureSchema();
+    const { rows } = await pool.query(
+      `INSERT INTO sac.tipo_assunto (nome) VALUES ($1)
+       ON CONFLICT (nome) DO UPDATE SET nome = EXCLUDED.nome
+       RETURNING id, nome`,
+      [nome]
+    );
+    return res.json({ ok: true, tipo: rows[0] });
+  } catch (err) {
+    console.error('[SAC/AT] criar tipo-assunto:', err);
     return res.status(500).json({ ok: false, error: err.message });
   }
 });

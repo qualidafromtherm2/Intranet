@@ -4347,6 +4347,12 @@
 
               <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
                 <div class="form-field" style="margin:0;flex:0 1 280px;">
+                  <label for="atNovoTipoAssunto">Novo tipo</label>
+                  <input id="atNovoTipoAssunto" type="text" readonly placeholder="Clique para digitar um novo tipo de assunto" maxlength="120" style="width:100%;cursor:text;" />
+                </div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
+                <div class="form-field" style="margin:0;flex:0 1 280px;">
                   <label for="atTipoAtendimento">Tipo de atendimento</label>
                   <select id="atTipoAtendimento" style="width:100%;">
                     <option value="">Selecione</option>
@@ -4354,6 +4360,16 @@
                     <option value="Comercial">Comercial</option>
                     <option value="Extensão de garantia">Extensão de garantia</option>
                     <option value="Atendimento rápido">Atendimento rápido</option>
+                  </select>
+                </div>
+                <div class="form-field" style="margin:0;flex:0 1 280px;">
+                  <label for="atTipoAssunto">Tipo de assunto</label>
+                  <select id="atTipoAssunto" style="width:100%;">
+                    <option value="">Selecione</option>
+                    <option value="Devolução">Devolução</option>
+                    <option value="Envio de peça">Envio de peça</option>
+                    <option value="Atendimento de técnico">Atendimento de técnico</option>
+                    <option value="Dúvidas">Dúvidas</option>
                   </select>
                 </div>
                 <div class="form-field at-campo-fullonly" style="margin:0;flex:1 1 240px;position:relative;">
@@ -5374,7 +5390,11 @@
             <div class="at-em-body" style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;flex:1;min-height:0;">
               <!-- Guia Atendimento -->
               <div id="atEmPaneAtendimento" class="at-em-pane" data-at-em-pane="atendimento">
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div class="at-em-wrap" style="margin-bottom:10px;">
+                  <label class="at-em-lbl">Novo tipo</label>
+                  <input type="text" id="atEmNovoTipoAssunto" class="at-em-input" readonly placeholder="Clique para digitar um novo tipo de assunto" maxlength="120">
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Data</label>
                     <input type="date" id="atEmData" class="at-em-input">
@@ -5390,6 +5410,18 @@
                       <option value="Troca">Troca</option>
                     </select>
                   </div>
+                  <div class="at-em-wrap">
+                    <label class="at-em-lbl">Tipo de assunto</label>
+                    <select id="atEmTipoAssunto" class="at-em-input">
+                      <option value="">Selecione</option>
+                      <option value="Devolução">Devolução</option>
+                      <option value="Envio de peça">Envio de peça</option>
+                      <option value="Atendimento de técnico">Atendimento de técnico</option>
+                      <option value="Dúvidas">Dúvidas</option>
+                    </select>
+                  </div>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Nome Revenda/Cliente</label>
                     <input type="text" id="atEmNome" class="at-em-input" placeholder="Nome">
@@ -14079,7 +14111,7 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260818-op-sem-qtde"></script>
+  <script type="module" src="menu_produto.js?v=20260818-tipo-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260817e">
