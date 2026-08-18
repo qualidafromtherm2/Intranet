@@ -1,8 +1,7 @@
-// Admin — menu radial no menu lateral (long press)
+// Admin — menu radial (botão direito)
 (function () {
   'use strict';
 
-  const LONG_PRESS_MS = 550;
   const API = '/api/nav/admin';
   const NAV_KEYS_OBSOLETOS = ['side:rh:constr18', 'side:produtos:constr3'];
   const NAV_TARGET_SEL = [
@@ -14,9 +13,6 @@
 
   let radialOverlay = null;
   let radialContext = null;
-  let pressTimer = null;
-  let pressTargetEl = null;
-  let suppressClickUntil = 0;
   let reorderState = null;
   let visaoClienteAtiva = false;
   let visaoClienteUserId = null;
@@ -643,7 +639,6 @@
   function iniciarModoReordenar(ctx) {
     if (reorderState) cancelarReordenar();
     fecharRadial();
-    cancelarPress();
     document.body.classList.add('nav-admin-reorder-mode');
     ctx.el.classList.add('nav-admin-target');
     ctx.el.setAttribute('draggable', 'true');
@@ -788,54 +783,9 @@
     } catch (_) {}
   }
 
-  function cancelarPress() {
-    clearTimeout(pressTimer);
-    pressTimer = null;
-  }
-
-  function iniciarPress(e, el) {
-    if (!usuarioLogado() || visaoClienteAtiva) return;
-    if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return;
-    if (radialOverlay?.classList.contains('is-active')) return;
-    if (e.button != null && e.button !== 0) return;
-    cancelarPress();
-    const meta = metaFromEl(el);
-    if (!meta) return;
-
-    pressTargetEl = el;
-    const x = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
-    const y = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
-
-    pressTimer = setTimeout(() => {
-      pressTimer = null;
-      suppressClickUntil = Date.now() + 900;
-      abrirRadial(meta, x, y, 'menu');
-    }, LONG_PRESS_MS);
-  }
-
-  function iniciarPressPagina(e) {
-    if (deveIgnorarPressPagina(e)) return;
-    if (e.button != null && e.button !== 0) return;
-    cancelarPress();
-    pressTargetEl = e.target;
-    const x = e.clientX ?? 0;
-    const y = e.clientY ?? 0;
-
-    pressTimer = setTimeout(() => {
-      pressTimer = null;
-      suppressClickUntil = Date.now() + 900;
-      const ctx = contextoPaginaFromTarget(pressTargetEl);
-      abrirRadial(ctx, x, y, 'pagina');
-    }, LONG_PRESS_MS);
-  }
-
   function bindPressPagina() {
     if (!usuarioLogado() || pageDelegacaoAtiva) return;
     pageDelegacaoAtiva = true;
-
-    document.addEventListener('mousedown', iniciarPressPagina, true);
-    document.addEventListener('mouseup', finalizarPress, true);
-    document.addEventListener('click', bloquearClickPosLongPress, true);
 
     document.addEventListener('contextmenu', (e) => {
       if (!usuarioLogado() || visaoClienteAtiva) return;
@@ -845,55 +795,15 @@
       e.preventDefault();
       e.stopPropagation();
       const ctx = contextoPaginaFromTarget(e.target);
-      suppressClickUntil = Date.now() + 900;
       abrirRadial(ctx, e.clientX, e.clientY, 'pagina');
     }, true);
   }
 
-  function finalizarPress(e) {
-    if (pressTimer) {
-      cancelarPress();
-      pressTargetEl = null;
-      return;
-    }
-    if (Date.now() < suppressClickUntil) {
-      e.preventDefault();
-      e.stopPropagation();
-      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-    }
-    pressTargetEl = null;
-  }
-
-  function bloquearClickPosLongPress(e) {
-    if (Date.now() >= suppressClickUntil) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
-  }
-
-  function bindLongPress() {
+  function bindMenuDireito() {
     if (!usuarioLogado() || delegacaoAtiva) return;
     const root = document.getElementById('sidebarContent') || document.querySelector('.left-side');
     if (!root) return;
     delegacaoAtiva = true;
-
-    root.addEventListener('mousedown', (e) => {
-      const el = alvoMenuFromEvent(e);
-      if (el) iniciarPress(e, el);
-    });
-
-    root.addEventListener('touchstart', (e) => {
-      const el = alvoMenuFromEvent(e);
-      if (el) iniciarPress(e, el);
-    }, { passive: true });
-
-    root.addEventListener('mouseup', finalizarPress, true);
-    root.addEventListener('mouseleave', (e) => {
-      if (pressTargetEl && !pressTargetEl.contains(e.relatedTarget)) cancelarPress();
-    }, true);
-    root.addEventListener('touchend', finalizarPress, true);
-    root.addEventListener('touchcancel', cancelarPress, true);
-    root.addEventListener('click', bloquearClickPosLongPress, true);
 
     root.addEventListener('contextmenu', (e) => {
       if (!usuarioLogado()) return;
@@ -903,17 +813,14 @@
       e.preventDefault();
       e.stopPropagation();
       const meta = metaFromEl(el);
-      if (meta) {
-        suppressClickUntil = Date.now() + 900;
-        abrirRadial(meta, e.clientX, e.clientY, 'menu');
-      }
+      if (meta) abrirRadial(meta, e.clientX, e.clientY, 'menu');
     }, true);
   }
 
   function init() {
     if (!usuarioLogado()) return;
     if (ehAdmin()) removerBotoesObsoletosDom();
-    bindLongPress();
+    bindMenuDireito();
     bindPressPagina();
     if (ehAdmin() && !adminInicializado) {
       adminInicializado = true;

@@ -9,6 +9,10 @@ const {
   calcularTempoUtilMs,
   buscarTurnosNoPeriodo,
   formatarDuracao,
+  aplicarProporcaoMo,
+  lookupMo,
+  buscarMapaMoPeriodo,
+  dateKeyInTz,
 } = require('../utils/tempoProducao');
 
 const router = express.Router();
@@ -116,6 +120,32 @@ function faixaCiclo(h) {
   return '> 2 dias';
 }
 
+function normPostoRel(s) {
+  return String(s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function isPostoFinalProducao(s) {
+  const n = normPostoRel(s);
+  return n === 'inspecao final' || n === 'embalagem' || n === 'teste ok' || n === 'teste final';
+}
+
+function listarDiasYmd(inicio, fimExclusive) {
+  const out = [];
+  let cur = String(inicio || '').slice(0, 10);
+  const end = String(fimExclusive || '').slice(0, 10);
+  while (cur && end && cur < end) {
+    out.push(cur);
+    const [y, m, d] = cur.split('-').map(Number);
+    const dt = new Date(Date.UTC(y, m - 1, d + 1));
+    cur = dt.toISOString().slice(0, 10);
+  }
+  return out;
+}
+
 // GET /producao/relatorio-gerencial
 router.get('/producao/relatorio-gerencial', async (req, res) => {
   try {
@@ -153,14 +183,20 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
     const turnos = regs.length
       ? await buscarTurnosNoPeriodo(mesInicio, fimRefTurnos.toISOString())
       : [];
+    const moMap = await buscarMapaMoPeriodo(mesInicio, fimRefTurnos.toISOString()).catch(() => new Map());
 
     const enriquecidos = regs.map((r) => {
       const fimEff = r.fim || agora.toISOString();
-      const msUtil = calcularTempoUtilMs(r.inicio, fimEff, turnos);
+      const msBrutoUtil = calcularTempoUtilMs(r.inicio, fimEff, turnos);
+      const diaMo = dateKeyInTz(new Date(r.inicio));
+      const qtdMo = lookupMo(moMap, diaMo, r.posto_origem);
+      const msUtil = aplicarProporcaoMo(msBrutoUtil, qtdMo);
       const msBruto = Math.max(0, new Date(fimEff).getTime() - new Date(r.inicio).getTime());
       return {
         ...r,
         aberto: !r.fim,
+        qtd_mo: qtdMo,
+        ms_util_bruto: msBrutoUtil,
         ms_util: msUtil,
         ms_bruto: msBruto,
         h_util: msToHoras(msUtil),
@@ -337,6 +373,53 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
     const mediaTrabMs = media(trabalhos.map((r) => r.ms_util));
     const mediaCicloOpMs = media([...cicloPorOp.values()].map((c) => c.ms_posto));
 
+    let producao_diaria = listarDiasYmd(mesInicio, mesFimExclusive).map((dia) => ({
+      data: dia,
+      total: 0,
+      modelos: [],
+    }));
+    try {
+      const { rows: prodRows } = await pool.query(
+        `SELECT r.fim::text AS fim,
+                r.numero_op,
+                r.op_producao_id,
+                r.posto_origem,
+                COALESCE(NULLIF(TRIM(op.codigo), ''), NULLIF(TRIM(kp.codigo), '')) AS modelo
+           FROM producao."Registro_tempo" r
+           LEFT JOIN producao."OP_producao" op ON op.id = r.op_producao_id
+           LEFT JOIN producao."Kanban_programacao" kp ON kp.id = r.kanban_programacao_id
+          WHERE r.tipo_registro = 'posto'
+            AND r.fim IS NOT NULL
+            AND r.fim >= $1::date
+            AND r.fim < $2::date`,
+        [mesInicio, mesFimExclusive]
+      );
+      const porDia = new Map();
+      for (const row of prodRows) {
+        if (!isPostoFinalProducao(row.posto_origem)) continue;
+        const dia = dateKeyInTz(new Date(row.fim));
+        const opKey = String(row.numero_op || row.op_producao_id || '').trim().toUpperCase();
+        if (!dia || !opKey) continue;
+        if (!porDia.has(dia)) porDia.set(dia, new Map());
+        const modelo = String(row.modelo || '').trim() || 'Sem modelo';
+        porDia.get(dia).set(opKey, modelo);
+      }
+      producao_diaria = listarDiasYmd(mesInicio, mesFimExclusive).map((dia) => {
+        const ops = porDia.get(dia) || new Map();
+        const modelosMap = new Map();
+        for (const modelo of ops.values()) {
+          modelosMap.set(modelo, (modelosMap.get(modelo) || 0) + 1);
+        }
+        const modelos = [...modelosMap.entries()]
+          .map(([modelo, qtd]) => ({ modelo, qtd }))
+          .sort((a, b) => b.qtd - a.qtd || a.modelo.localeCompare(b.modelo));
+        return { data: dia, total: ops.size, modelos };
+      });
+    } catch (errProd) {
+      console.warn('[PRODUCAO] producao diaria:', errProd.message);
+    }
+    const maquinasProduzidas = producao_diaria.reduce((s, d) => s + (d.total || 0), 0);
+
     const kpis = {
       ops_com_tempo: opsSet.size,
       ciclos_posto_fechados: postos.length,
@@ -344,6 +427,7 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       postos_distintos: por_posto.length,
       em_andamento_posto: abertosPosto.length,
       aguardando_ri: abertosRi.length,
+      maquinas_produzidas: maquinasProduzidas,
       media_h_posto: msToHoras(mediaPostoMs),
       media_h_ri: msToHoras(mediaRiMs),
       media_h_trabalho: msToHoras(mediaTrabMs),
@@ -372,6 +456,7 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         usuario_inicio: r.usuario_inicio,
         usuario_fim: r.usuario_fim,
         operacao: r.operacao,
+        qtd_mo: r.qtd_mo || 1,
       }));
 
     const detalhe_ri = ris
@@ -432,6 +517,7 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       detalhe_ri,
       evolucao_semanal,
       evolucao_mensal,
+      producao_diaria,
       textos,
     });
   } catch (err) {

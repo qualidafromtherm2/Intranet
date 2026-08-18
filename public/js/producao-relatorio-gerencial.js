@@ -186,11 +186,18 @@
         <div id="prodRelGerKpis" class="at-rel-ger-kpis"></div>
         <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
           Tempos em <strong>horas úteis</strong> (desconta café/refeição conforme Turno do dia).
+          Se houver MO informada na linha, o tempo do posto é dividido pela quantidade de pessoas.
           Contagem inicia na impressão da etiqueta / entrada no posto e fecha ao finalizar a operação.
         </p>
         <div class="at-rel-ger-grid-2">
           <div class="at-rel-ger-card"><h4>Tempo médio por posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartPostoExec"></canvas></div></div>
           <div class="at-rel-ger-card"><h4>Faixas de tempo no posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartFaixasExec"></canvas></div></div>
+        </div>
+        <div class="at-rel-ger-card" style="margin-top:14px;">
+          <h4>Máquinas produzidas por dia</h4>
+          <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Clique em uma barra para ver os modelos daquele dia.</p>
+          <div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartProdDia"></canvas></div>
+          <div id="prodRelGerProdDiaDetalhe" style="display:none;margin-top:12px;"></div>
         </div>`,
       postos: `
         <div id="prodRelGerPostoKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
@@ -238,8 +245,10 @@
           </table></div>
         </div>`,
       evolucao: `
-        <div class="at-rel-ger-card"><h4 id="prodRelGerEvolTitulo">Ciclos finalizados no período</h4>
+        <div class="at-rel-ger-card"><h4 id="prodRelGerEvolTitulo">Máquinas produzidas por dia</h4>
+          <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Clique em uma barra para ver os modelos produzidos naquele dia (Inspeção final / Embalagem).</p>
           <div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartEvol"></canvas></div>
+          <div id="prodRelGerEvolDetalhe" style="display:none;margin-top:12px;"></div>
         </div>`,
       plano: `
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
@@ -294,6 +303,7 @@
     const wrap = document.getElementById('prodRelGerKpis');
     if (!wrap) return;
     const cards = [
+      { label: 'Máquinas produzidas', value: kpis.maquinas_produzidas ?? 0, cor: '#0ea5e9' },
       { label: 'OPs com tempo', value: kpis.ops_com_tempo ?? 0, cor: ACCENT },
       { label: 'Ciclos de posto', value: kpis.ciclos_posto_fechados ?? 0, cor: ACCENT2 },
       { label: 'Média no posto', value: _fmtDuracaoHoras(kpis.media_h_posto), cor: '#0284c7' },
@@ -304,6 +314,79 @@
       { label: 'Aguardando RI', value: kpis.aguardando_ri ?? 0, cor: '#dc2626' },
     ];
     wrap.innerHTML = cards.map((c) => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+  }
+
+  function _fmtDiaLabel(ymd) {
+    const s = String(ymd || '').slice(0, 10);
+    if (s.length < 10) return s;
+    const [y, m, d] = s.split('-');
+    return `${d}/${m}`;
+  }
+
+  function _fmtDiaCompleto(ymd) {
+    const s = String(ymd || '').slice(0, 10);
+    if (s.length < 10) return s;
+    const [y, m, d] = s.split('-');
+    return `${d}/${m}/${y}`;
+  }
+
+  function _mostrarModelosDia(containerId, dia, modelos) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+    const rows = Array.isArray(modelos) ? modelos : [];
+    if (!rows.length) {
+      el.style.display = 'block';
+      el.innerHTML = `<div style="font-size:13px;color:#64748b;">Nenhum modelo registrado em ${_esc(_fmtDiaCompleto(dia))}.</div>`;
+      return;
+    }
+    const total = rows.reduce((s, r) => s + (Number(r.qtd) || 0), 0);
+    el.style.display = 'block';
+    el.innerHTML = `
+      <h4 style="margin:0 0 8px;font-size:14px;">Modelos em ${_esc(_fmtDiaCompleto(dia))} · ${total} máquina(s)</h4>
+      <div style="overflow:auto;"><table class="at-rel-ger-tbl">
+        <thead><tr><th>Modelo</th><th class="r">Quantidade</th></tr></thead>
+        <tbody>
+          ${rows.map((r) => `<tr><td>${_esc(r.modelo)}</td><td class="r">${r.qtd}</td></tr>`).join('')}
+        </tbody>
+      </table></div>`;
+  }
+
+  function _renderBarProducaoDia(canvasId, chartKey, detalheId, data) {
+    const rows = data.producao_diaria || [];
+    const labels = rows.map((r) => _fmtDiaLabel(r.data));
+    const values = rows.map((r) => r.total || 0);
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return;
+    _destroyChart(chartKey);
+    _charts[chartKey] = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [{
+          data: values,
+          backgroundColor: '#0ea5e9cc',
+          borderColor: '#0ea5e9',
+          borderWidth: 1,
+          borderRadius: 4,
+        }],
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: { y: { beginAtZero: true, ticks: { precision: 0 } } },
+        onHover: (evt, elements) => {
+          if (evt?.native?.target) evt.native.target.style.cursor = elements.length ? 'pointer' : 'default';
+        },
+        onClick: (_evt, elements) => {
+          if (!elements.length) return;
+          const idx = elements[0].index;
+          const row = rows[idx];
+          if (!row) return;
+          _mostrarModelosDia(detalheId, row.data, row.modelos);
+        },
+      },
+    });
   }
 
   function _chartOptsBarH() {
@@ -362,6 +445,7 @@
         faixas.map((r) => r.total),
         '#38bdf8', false
       );
+      _renderBarProducaoDia('prodRelGerChartProdDia', 'prodDia', 'prodRelGerProdDiaDetalhe', data);
     }
 
     if (sec === 'postos') {
@@ -401,12 +485,9 @@
     }
 
     if (sec === 'evolucao') {
-      const multi = data.evolucao_tipo === 'mes';
       const titulo = document.getElementById('prodRelGerEvolTitulo');
-      if (titulo) titulo.textContent = multi ? 'Ciclos de posto finalizados (mensal)' : 'Ciclos de posto finalizados (semanal)';
-      const rows = multi ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
-      const labels = multi ? rows.map((r) => r.label) : rows.map((r) => r.semana);
-      _renderBar('prodRelGerChartEvol', 'evol', labels, rows.map((r) => r.total), ACCENT2, false);
+      if (titulo) titulo.textContent = 'Máquinas produzidas por dia';
+      _renderBarProducaoDia('prodRelGerChartEvol', 'evol', 'prodRelGerEvolDetalhe', data);
     }
 
     _chartsRendered.add(sec);

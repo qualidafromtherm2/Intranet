@@ -69,6 +69,19 @@ async function garantirSchemaTempoProducao() {
       ON producao."Registro_tempo" (kanban_programacao_id, fim);
     CREATE INDEX IF NOT EXISTS idx_reg_tempo_aberto
       ON producao."Registro_tempo" (fim) WHERE fim IS NULL;
+
+    CREATE TABLE IF NOT EXISTS producao.mao_obra_linha (
+      id               BIGSERIAL PRIMARY KEY,
+      data_referencia  DATE NOT NULL,
+      posto_key        TEXT NOT NULL,
+      posto_nome       TEXT NOT NULL,
+      quantidade       INTEGER NOT NULL DEFAULT 1,
+      usuario          TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_mao_obra_linha_dia_posto
+      ON producao.mao_obra_linha (data_referencia, posto_key);
   `);
     if (pool) await ensureSchemasCompatViews(pool);
     schemaCriado = true;
@@ -92,6 +105,22 @@ async function garantirSchemaTempoProducao() {
       ON producao."Turno_dia" (data_referencia, usuario, LOWER(TRIM(nome_turno)));
   `);
   await dbQuery(`DROP INDEX IF EXISTS producao.idx_turno_dia_data_nome`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS producao.mao_obra_linha (
+      id               BIGSERIAL PRIMARY KEY,
+      data_referencia  DATE NOT NULL,
+      posto_key        TEXT NOT NULL,
+      posto_nome       TEXT NOT NULL,
+      quantidade       INTEGER NOT NULL DEFAULT 1,
+      usuario          TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await dbQuery(`
+    CREATE UNIQUE INDEX IF NOT EXISTS uq_mao_obra_linha_dia_posto
+      ON producao.mao_obra_linha (data_referencia, posto_key);
+  `);
     schemaMigrado = true;
   }
 }
@@ -457,6 +486,114 @@ async function buscarRegistrosPostoOp({ opProducaoId = 0, numeroOp = '', kanbanP
   return rows;
 }
 
+function normalizarPostoMo(nome) {
+  return String(nome || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+function quantidadeMoValida(n) {
+  const v = parseInt(n, 10);
+  if (!Number.isFinite(v) || v < 1) return 1;
+  return Math.min(99, v);
+}
+
+/** Tempo controlado: MO=1 não altera; MO=2 divide o tempo útil por 2. */
+function aplicarProporcaoMo(ms, qtdMo) {
+  const n = quantidadeMoValida(qtdMo);
+  if (!Number.isFinite(ms) || ms <= 0) return 0;
+  if (n <= 1) return Math.round(ms);
+  return Math.round(ms / n);
+}
+
+function lookupMo(map, dia, postoNome, postoKey = '') {
+  if (!map) return 1;
+  const dk = String(dia || '').slice(0, 10);
+  const byNome = map.get(`${dk}|nome:${normalizarPostoMo(postoNome)}`);
+  if (byNome) return quantidadeMoValida(byNome);
+  if (postoKey) {
+    const byKey = map.get(`${dk}|key:${String(postoKey)}`);
+    if (byKey) return quantidadeMoValida(byKey);
+  }
+  return 1;
+}
+
+async function buscarMaoObraPorData(dataRef) {
+  await garantirSchemaTempoProducao();
+  const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
+  const { rows } = await dbQuery(
+    `SELECT posto_key, posto_nome, quantidade, usuario,
+            data_referencia::text AS data_referencia
+       FROM producao.mao_obra_linha
+      WHERE data_referencia = $1::date
+      ORDER BY id`,
+    [dk]
+  );
+  return rows.map((r) => ({
+    posto_key: String(r.posto_key || ''),
+    posto_nome: String(r.posto_nome || ''),
+    quantidade: quantidadeMoValida(r.quantidade),
+    usuario: r.usuario || null,
+    data_referencia: String(r.data_referencia || dk).slice(0, 10),
+  }));
+}
+
+async function salvarMaoObraDia(dataRef, itens, usuario) {
+  await garantirSchemaTempoProducao();
+  const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
+  const lista = Array.isArray(itens) ? itens : [];
+  const out = [];
+  for (const item of lista) {
+    const postoKey = String(item.posto_key || item.key || '').trim();
+    const postoNome = String(item.posto_nome || item.nome || postoKey).trim();
+    if (!postoKey || !postoNome) continue;
+    const quantidade = quantidadeMoValida(item.quantidade);
+    const { rows } = await dbQuery(
+      `INSERT INTO producao.mao_obra_linha
+         (data_referencia, posto_key, posto_nome, quantidade, usuario, updated_at)
+       VALUES ($1::date, $2, $3, $4, $5, NOW())
+       ON CONFLICT (data_referencia, posto_key) DO UPDATE SET
+         posto_nome = EXCLUDED.posto_nome,
+         quantidade = EXCLUDED.quantidade,
+         usuario = EXCLUDED.usuario,
+         updated_at = NOW()
+       RETURNING posto_key, posto_nome, quantidade`,
+      [dk, postoKey, postoNome, quantidade, usuario || null]
+    );
+    if (rows[0]) {
+      out.push({
+        posto_key: rows[0].posto_key,
+        posto_nome: rows[0].posto_nome,
+        quantidade: quantidadeMoValida(rows[0].quantidade),
+      });
+    }
+  }
+  return { data_referencia: dk, itens: out };
+}
+
+async function buscarMapaMoPeriodo(inicio, fim) {
+  await garantirSchemaTempoProducao();
+  const dkIni = dateKeyInTz(new Date(inicio || Date.now()));
+  const dkFim = dateKeyInTz(new Date(fim || Date.now()));
+  const { rows } = await dbQuery(
+    `SELECT data_referencia::text AS data_referencia, posto_key, posto_nome, quantidade
+       FROM producao.mao_obra_linha
+      WHERE data_referencia >= $1::date
+        AND data_referencia <= $2::date`,
+    [dkIni, dkFim]
+  );
+  const map = new Map();
+  for (const r of rows) {
+    const dk = String(r.data_referencia || '').slice(0, 10);
+    if (!dk) continue;
+    map.set(`${dk}|nome:${normalizarPostoMo(r.posto_nome)}`, quantidadeMoValida(r.quantidade));
+    map.set(`${dk}|key:${String(r.posto_key || '')}`, quantidadeMoValida(r.quantidade));
+  }
+  return map;
+}
+
 async function calcularTempoTotalOpUtil(opRefs) {
   const regs = await buscarRegistrosPostoOp(opRefs);
   if (!regs.length) return { tempo_ms: 0, tempo_formatado: '—' };
@@ -464,10 +601,13 @@ async function calcularTempoTotalOpUtil(opRefs) {
   const inicioGeral = regs[0].inicio;
   const fimGeral = regs[regs.length - 1].fim || agora.toISOString();
   const turnos = await buscarTurnosNoPeriodo(inicioGeral, fimGeral);
+  const moMap = opRefs?.moMap || await buscarMapaMoPeriodo(inicioGeral, fimGeral);
   let totalMs = 0;
   for (const reg of regs) {
     const fim = reg.fim || agora.toISOString();
-    totalMs += calcularTempoUtilMs(reg.inicio, fim, turnos);
+    const ms = calcularTempoUtilMs(reg.inicio, fim, turnos);
+    const dia = dateKeyInTz(new Date(reg.inicio));
+    totalMs += aplicarProporcaoMo(ms, lookupMo(moMap, dia, reg.posto_origem));
   }
   return { tempo_ms: totalMs, tempo_formatado: formatarDuracao(totalMs) };
 }
@@ -484,11 +624,14 @@ async function calcularTempoPostoUtil(opRefs) {
       tempo_total_formatado: total.tempo_formatado,
       posto_origem: null,
       inicio: null,
+      qtd_mo: 1,
     };
   }
   const fim = new Date();
   const turnos = await buscarTurnosNoPeriodo(reg.inicio, fim);
-  const ms = calcularTempoUtilMs(reg.inicio, fim, turnos);
+  const moMap = opRefs?.moMap || await buscarMapaMoPeriodo(reg.inicio, fim);
+  const qtdMo = lookupMo(moMap, dateKeyInTz(new Date(reg.inicio)), reg.posto_origem);
+  const ms = aplicarProporcaoMo(calcularTempoUtilMs(reg.inicio, fim, turnos), qtdMo);
   return {
     registro: reg,
     tempo_ms: ms,
@@ -497,19 +640,24 @@ async function calcularTempoPostoUtil(opRefs) {
     tempo_total_formatado: total.tempo_formatado,
     posto_origem: reg.posto_origem,
     inicio: reg.inicio,
+    qtd_mo: qtdMo,
   };
 }
 
 async function calcularTemposPostoPorOps(ops) {
   const lista = Array.isArray(ops) ? ops : [];
   const resultado = {};
+  const agora = new Date();
+  const moMap = await buscarMapaMoPeriodo(addDaysToDateKey(dateKeyInTz(agora), -45), agora);
   await Promise.all(lista.map(async (op) => {
     const opProducaoId = Number(op.op_producao_id) || Number(op.id) || 0;
     const numeroOp = String(op.numero_op || op.identificacao || '').trim();
     const kanbanProgramacaoId = Number(op.kanban_programacao_id) || null;
     const key = opProducaoId > 0 ? `id:${opProducaoId}` : (numeroOp ? `op:${numeroOp.toUpperCase()}` : null);
     if (!key) return;
-    const tempo = await calcularTempoPostoUtil({ opProducaoId, numeroOp, kanbanProgramacaoId });
+    const tempo = await calcularTempoPostoUtil({
+      opProducaoId, numeroOp, kanbanProgramacaoId, moMap,
+    });
     resultado[key] = tempo;
   }));
   return resultado;
@@ -717,4 +865,11 @@ module.exports = {
   listarTurnosDia,
   dateKeyInTz,
   normalizarNomeTurno,
+  normalizarPostoMo,
+  quantidadeMoValida,
+  aplicarProporcaoMo,
+  lookupMo,
+  buscarMaoObraPorData,
+  salvarMaoObraDia,
+  buscarMapaMoPeriodo,
 };

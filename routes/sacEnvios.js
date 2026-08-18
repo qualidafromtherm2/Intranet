@@ -425,6 +425,7 @@ async function listarHistoricoWhatsapp(phone, limit = 12) {
     `SELECT profile_name, message_text, direction, received_at
        FROM sac.whatsapp_webhook_messages
       WHERE from_phone_digits = ANY($1::text[])
+        AND COALESCE(direction, '') <> 'status'
       ORDER BY received_at DESC, id DESC
       LIMIT $2`,
     [candidates, Math.max(1, Math.min(Number(limit) || 12, 30))]
@@ -12096,6 +12097,8 @@ router.post('/whatsapp/webhook', express.json({ limit: '2mb' }), async (req, res
             );
           }
 
+          if (status !== 'failed') continue;
+
           try {
             await pool.query(
               `INSERT INTO sac.whatsapp_webhook_messages (
@@ -12199,6 +12202,7 @@ router.get('/whatsapp/conversations', async (req, res) => {
                 received_at
            FROM sac.whatsapp_webhook_messages
           WHERE COALESCE(from_phone_digits, '') <> ''
+            AND COALESCE(direction, '') <> 'status'
        ),
        ranked AS (
          SELECT id,
@@ -12388,6 +12392,7 @@ router.get('/whatsapp/messages', async (req, res) => {
                     message_text, phone_number_id, display_phone_number, payload_json, received_at
                FROM sac.whatsapp_webhook_messages
               WHERE from_phone_digits = ANY($1::text[])
+                AND COALESCE(direction, '') <> 'status'
               ORDER BY received_at DESC, id DESC
               LIMIT 50
            ) latest_messages
@@ -12399,6 +12404,7 @@ router.get('/whatsapp/messages', async (req, res) => {
         `SELECT id, wa_message_id, from_phone, from_phone_digits, profile_name, direction, message_type,
                 message_text, phone_number_id, display_phone_number, payload_json, received_at
            FROM sac.whatsapp_webhook_messages
+          WHERE COALESCE(direction, '') <> 'status'
           ORDER BY received_at DESC, id DESC
           LIMIT 20`
       ));

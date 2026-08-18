@@ -28,6 +28,9 @@ const {
   registrarTurnoDia,
   listarTurnosDia,
   dateKeyInTz,
+  quantidadeMoValida,
+  buscarMaoObraPorData,
+  salvarMaoObraDia,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
 const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
@@ -2745,6 +2748,36 @@ router.post('/turno/dia', express.json(), async (req, res) => {
     return res.json({ success: true, turno });
   } catch (err) {
     console.error('[producao] Erro ao registrar turno do dia:', err.message);
+    return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/mao-obra', async (req, res) => {
+  try {
+    const dataRef = String(req.query?.data || dateKeyInTz(new Date())).slice(0, 10);
+    const itens = await buscarMaoObraPorData(dataRef);
+    return res.json({ success: true, data: dataRef, itens });
+  } catch (err) {
+    console.error('[producao] Erro ao listar MO da linha:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/mao-obra', express.json(), async (req, res) => {
+  try {
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
+    const dataRef = String(req.body?.data_referencia || req.body?.data || dateKeyInTz(new Date())).slice(0, 10);
+    const itensRaw = Array.isArray(req.body?.itens) ? req.body.itens : [];
+    const itens = itensRaw.map((it) => ({
+      posto_key: String(it.posto_key || it.key || '').trim(),
+      posto_nome: String(it.posto_nome || it.nome || '').trim(),
+      quantidade: quantidadeMoValida(it.quantidade),
+    }));
+    const salvo = await salvarMaoObraDia(dataRef, itens, usuario);
+    return res.json({ success: true, ...salvo });
+  } catch (err) {
+    console.error('[producao] Erro ao salvar MO da linha:', err.message);
     return res.status(400).json({ success: false, error: err.message });
   }
 });
