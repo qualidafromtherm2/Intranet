@@ -821,11 +821,12 @@ async function showPermissoes(userId, username) {
     return;
   }
 
-  // 4) Organiza nós por posição
-  const posLabels = { side: 'Menu lateral', top: 'Menu superior' };
+  // 4) Organiza nós na mesma ordem/nome do menu da tela
+  applyLiveSidebarToPermNodes(tree.nodes || []);
+  const posLabels = { side: 'Menu lateral', top: 'Menu superior', other: 'Outros botões' };
   const byPos = {};
   for (const n of (tree.nodes || [])) {
-    const pos = n.pos || 'side';
+    const pos = permMenuGroupOf(n);
     if (!byPos[pos]) byPos[pos] = [];
     byPos[pos].push(n);
   }
@@ -988,7 +989,7 @@ async function showPermissoes(userId, username) {
     }
   }
 
-  const posOrder = ['side', 'top'];
+  const posOrder = ['side', 'top', 'other'];
   for (const pos of posOrder) {
     const nodes = byPos[pos];
     if (!nodes || !nodes.length) continue;
@@ -1352,6 +1353,7 @@ async function showPermissoesPorBotao() {
       if (!nodeAggMap.has(key)) {
         nodeAggMap.set(key, {
           id: Number(n.id),
+          key: String(n.key || ''),
           parent_id: n.parent_id != null ? Number(n.parent_id) : null,
           label: String(n.label || ''),
           pos: String(n.pos || 'side'),
@@ -1370,13 +1372,9 @@ async function showPermissoesPorBotao() {
     return;
   }
 
-  const byPos = {};
-  for (const node of allNodes) {
-    if (!byPos[node.pos]) byPos[node.pos] = [];
-    byPos[node.pos].push(node);
-  }
+  applyLiveSidebarToPermNodes(allNodes);
 
-  const posLabels = { side: 'Menu lateral', top: 'Menu superior' };
+  const posLabels = { side: 'Menu lateral', top: 'Menu superior', other: 'Outros botões' };
 
   function buildTree(arr) {
     const map = new Map();
@@ -1650,9 +1648,13 @@ async function showPermissoesPorBotao() {
     treeEl.innerHTML = '';
     parentNodeMap.clear();
     const grouped = {};
-    allNodes.forEach(n => { if (!grouped[n.pos]) grouped[n.pos]=[]; grouped[n.pos].push(n); });
+    allNodes.forEach(n => {
+      const pos = permMenuGroupOf(n);
+      if (!grouped[pos]) grouped[pos] = [];
+      grouped[pos].push(n);
+    });
 
-    ['side','top'].forEach(pos => {
+    ['side', 'top', 'other'].forEach(pos => {
       const nodes = grouped[pos];
       if (!nodes || !nodes.length) return;
       const grpLbl = document.createElement('span');
