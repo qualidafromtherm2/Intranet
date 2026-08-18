@@ -574,6 +574,24 @@ function normalizarOperadoresMo(lista) {
   return nomes;
 }
 
+const SQL_SETOR_PRODUCAO_NORM =
+  `lower(translate(trim(s.name),
+     'ÁÀÂÃÄáàâãäÉÈÊËéèêëÍÌÎÏíìîïÓÒÔÕÖóòôõöÚÙÛÜúùûüÇç',
+     'AAAAAaaaaaEEEEeeeeIIIIiiiiOOOOOoooooUUUUuuuuCc')) = 'producao'`;
+
+async function listarOperadoresSetorProducao() {
+  const { rows } = await dbQuery(
+    `SELECT u.username
+       FROM public.auth_user u
+       INNER JOIN public.auth_user_profile up ON up.user_id = u.id
+       INNER JOIN public.auth_sector s ON s.id = up.sector_id
+      WHERE COALESCE(u.is_active, TRUE) = TRUE
+        AND ${SQL_SETOR_PRODUCAO_NORM}
+      ORDER BY u.username ASC`
+  );
+  return normalizarOperadoresMo(rows.map((r) => r.username));
+}
+
 function operadoresMoIguais(a, b) {
   const aa = normalizarOperadoresMo(a);
   const bb = normalizarOperadoresMo(b);
@@ -1090,6 +1108,7 @@ module.exports = {
   lookupMo,
   buscarMaoObraPorData,
   salvarMaoObraDia,
+  listarOperadoresSetorProducao,
   buscarMapaMoPeriodo,
   buscarPeriodosMoPeriodo,
   calcularTempoUtilComMo,

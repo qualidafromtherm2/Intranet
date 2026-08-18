@@ -4,7 +4,8 @@
  * Preferências de notificação por usuário (WhatsApp / e-mail).
  *
  * Tabela: usuario.notificacao_preferencias
- * Ausência de linha = desligado (opt-in estrito).
+ * Ausência de linha = desligado (opt-in), exceto e-mail de nova reunião
+ * e lembrete do dia, que começam ligados.
  */
 
 const { dbQuery } = require('../src/db');
@@ -18,6 +19,7 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     rotulo: 'Nova reunião agendada',
     grupo: 'Reuniões',
     canais: ['whatsapp', 'email'],
+    padrao: { email: true },
   },
   {
     id: 'reuniao_cancelada',
@@ -30,6 +32,7 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     rotulo: 'Lembrete de reunião (no dia)',
     grupo: 'Reuniões',
     canais: ['whatsapp', 'email'],
+    padrao: { email: true },
   },
   {
     id: 'pir_novo_item',
@@ -85,6 +88,18 @@ const TIPOS_POR_ID = Object.freeze(
   Object.fromEntries(TIPOS_NOTIFICACAO.map((t) => [t.id, t]))
 );
 
+/** Combinações que nascem ligadas quando ainda não há registro salvo. */
+const PADRAO_LIGADO = Object.freeze({
+  'reuniao_nova::email': true,
+  'reuniao_lembrete::email': true,
+});
+
+const MIGRACAO_EMAIL_REUNIAO = 'reuniao_email_padrao_on_v1';
+
+function preferenciaPadrao(tipo, canal) {
+  return PADRAO_LIGADO[`${tipo}::${canal}`] === true;
+}
+
 let schemaOk = false;
 
 async function ensureSchema() {
@@ -109,7 +124,43 @@ async function ensureSchema() {
       ON usuario.notificacao_preferencias (tipo, canal)
       WHERE habilitado = true
   `);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS usuario.notificacao_migracoes (
+      id          TEXT PRIMARY KEY,
+      applied_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await aplicarPadraoEmailReuniaoUmaVez();
   schemaOk = true;
+}
+
+/**
+ * Uma vez só: liga e-mail de nova reunião e lembrete do dia para todos.
+ * Não mexe em WhatsApp nem em outros tipos. Depois o usuário pode desligar.
+ */
+async function aplicarPadraoEmailReuniaoUmaVez() {
+  const { rows } = await dbQuery(
+    `SELECT 1 FROM usuario.notificacao_migracoes WHERE id = $1 LIMIT 1`,
+    [MIGRACAO_EMAIL_REUNIAO]
+  );
+  if (rows.length) return;
+
+  await dbQuery(`
+    INSERT INTO usuario.notificacao_preferencias (user_id, tipo, canal, habilitado, updated_at)
+    SELECT u.id, t.tipo, 'email', TRUE, NOW()
+      FROM public.auth_user u
+      CROSS JOIN (VALUES ('reuniao_nova'), ('reuniao_lembrete')) AS t(tipo)
+    ON CONFLICT (user_id, tipo, canal) DO UPDATE
+      SET habilitado = TRUE,
+          updated_at = NOW()
+     WHERE usuario.notificacao_preferencias.canal = 'email'
+       AND usuario.notificacao_preferencias.tipo IN ('reuniao_nova', 'reuniao_lembrete')
+  `);
+
+  await dbQuery(
+    `INSERT INTO usuario.notificacao_migracoes (id) VALUES ($1) ON CONFLICT (id) DO NOTHING`,
+    [MIGRACAO_EMAIL_REUNIAO]
+  );
 }
 
 function normalizarTipo(tipo) {
@@ -129,7 +180,8 @@ function tipoValido(tipo, canal) {
 }
 
 /**
- * Opt-in estrito: ausência de linha = desligado.
+ * Sem registro: usa o padrão do catálogo (e-mail de reunião ligado; o resto desligado).
+ * Com registro: respeita o que o usuário salvou.
  */
 async function usuarioAceita(userId, tipo, canal) {
   const uid = Number(userId);
@@ -139,16 +191,16 @@ async function usuarioAceita(userId, tipo, canal) {
 
   await ensureSchema();
   const { rows } = await dbQuery(
-    `SELECT 1
+    `SELECT habilitado
        FROM usuario.notificacao_preferencias
       WHERE user_id = $1
         AND tipo = $2
         AND canal = $3
-        AND habilitado = true
       LIMIT 1`,
     [uid, t, c]
   );
-  return rows.length > 0;
+  if (!rows.length) return preferenciaPadrao(t, c);
+  return rows[0].habilitado === true;
 }
 
 /**
@@ -182,19 +234,20 @@ async function filtrarUsuarios(userIdsOuObjs, tipo, canal) {
 
   await ensureSchema();
   const { rows } = await dbQuery(
-    `SELECT user_id
+    `SELECT user_id, habilitado
        FROM usuario.notificacao_preferencias
       WHERE user_id = ANY($1::bigint[])
         AND tipo = $2
-        AND canal = $3
-        AND habilitado = true`,
+        AND canal = $3`,
     [ids, t, c]
   );
 
-  const aceitos = new Set(rows.map((r) => Number(r.user_id)));
+  const mapaPref = new Map(rows.map((r) => [Number(r.user_id), r.habilitado === true]));
+  const padraoOn = preferenciaPadrao(t, c);
   const out = [];
   for (const id of ids) {
-    if (!aceitos.has(id)) continue;
+    const aceita = mapaPref.has(id) ? mapaPref.get(id) : padraoOn;
+    if (!aceita) continue;
     out.push(...mapa.get(id));
   }
   return out;
@@ -210,11 +263,10 @@ async function listarUsuariosHabilitados(tipo, canal, { exigirTelefone = false, 
   if (!tipoValido(t, c)) return [];
 
   await ensureSchema();
+  const padraoOn = preferenciaPadrao(t, c);
   const cond = [
-    'p.habilitado = true',
-    'p.tipo = $1',
-    'p.canal = $2',
     'u.is_active IS DISTINCT FROM false',
+    '(p.habilitado = true OR (p.user_id IS NULL AND $3::boolean))',
   ];
   if (exigirTelefone) {
     cond.push(`u.telefone_contato IS NOT NULL AND TRIM(u.telefone_contato) <> ''`);
@@ -225,10 +277,11 @@ async function listarUsuariosHabilitados(tipo, canal, { exigirTelefone = false, 
 
   const { rows } = await dbQuery(
     `SELECT u.id, u.username, u.nome_completo, u.email, u.telefone_contato
-       FROM usuario.notificacao_preferencias p
-       JOIN public.auth_user u ON u.id = p.user_id
+       FROM public.auth_user u
+       LEFT JOIN usuario.notificacao_preferencias p
+         ON p.user_id = u.id AND p.tipo = $1 AND p.canal = $2
       WHERE ${cond.join(' AND ')}`,
-    [t, c]
+    [t, c, padraoOn]
   );
   return rows.map((r) => ({
     id: Number(r.id),
@@ -252,13 +305,24 @@ async function getPreferencias(userId) {
       WHERE user_id = $1`,
     [uid]
   );
+  const mapa = new Map();
+  for (const r of rows) {
+    mapa.set(`${r.tipo}::${r.canal}`, r.habilitado === true);
+  }
+  const preferencias = [];
+  for (const tipo of TIPOS_NOTIFICACAO) {
+    for (const canal of tipo.canais) {
+      const key = `${tipo.id}::${canal}`;
+      preferencias.push({
+        tipo: tipo.id,
+        canal,
+        habilitado: mapa.has(key) ? mapa.get(key) : preferenciaPadrao(tipo.id, canal),
+      });
+    }
+  }
   return {
     tipos: TIPOS_NOTIFICACAO,
-    preferencias: rows.map((r) => ({
-      tipo: r.tipo,
-      canal: r.canal,
-      habilitado: r.habilitado === true,
-    })),
+    preferencias,
   };
 }
 

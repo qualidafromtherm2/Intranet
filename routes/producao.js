@@ -31,6 +31,7 @@ const {
   quantidadeMoValida,
   buscarMaoObraPorData,
   salvarMaoObraDia,
+  listarOperadoresSetorProducao,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
 const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
@@ -2768,18 +2769,44 @@ router.get('/mao-obra', async (req, res) => {
   }
 });
 
+router.get('/mao-obra/operadores', async (_req, res) => {
+  try {
+    const users = await listarOperadoresSetorProducao();
+    return res.json({ success: true, users });
+  } catch (err) {
+    console.error('[producao] Erro ao listar operadores do setor produção:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.post('/mao-obra', express.json(), async (req, res) => {
   try {
     const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
     if (!usuario) return res.status(400).json({ success: false, error: 'Usuário não identificado.' });
     const dataRef = String(req.body?.data_referencia || req.body?.data || dateKeyInTz(new Date())).slice(0, 10);
     const itensRaw = Array.isArray(req.body?.itens) ? req.body.itens : [];
-    const itens = itensRaw.map((it) => ({
-      posto_key: String(it.posto_key || it.key || '').trim(),
-      posto_nome: String(it.posto_nome || it.nome || '').trim(),
-      quantidade: quantidadeMoValida(it.quantidade),
-      operadores: Array.isArray(it.operadores) ? it.operadores : [],
-    }));
+    const permitidos = new Set(
+      (await listarOperadoresSetorProducao()).map((n) => String(n).toLowerCase())
+    );
+    const itens = [];
+    for (const it of itensRaw) {
+      const operadores = Array.isArray(it.operadores) ? it.operadores : [];
+      const foraDoSetor = operadores
+        .map((n) => String(n || '').trim())
+        .filter((n) => n && !permitidos.has(n.toLowerCase()));
+      if (foraDoSetor.length) {
+        return res.status(400).json({
+          success: false,
+          error: 'Só colaboradores do setor Produção podem ser informados na linha.',
+        });
+      }
+      itens.push({
+        posto_key: String(it.posto_key || it.key || '').trim(),
+        posto_nome: String(it.posto_nome || it.nome || '').trim(),
+        quantidade: quantidadeMoValida(it.quantidade),
+        operadores,
+      });
+    }
     const salvo = await salvarMaoObraDia(dataRef, itens, usuario);
     return res.json({ success: true, ...salvo });
   } catch (err) {
