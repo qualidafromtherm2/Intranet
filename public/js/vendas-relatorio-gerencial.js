@@ -51,6 +51,15 @@
     return `${nome}/${ano}`;
   }
 
+  function _chaveYm(ano, mes) {
+    return (Number(ano) * 12) + Number(mes);
+  }
+
+  function _ordenarCronologico(a, b) {
+    if (_chaveYm(a.ano, a.mes) <= _chaveYm(b.ano, b.mes)) return [a, b];
+    return [b, a];
+  }
+
   function _opcoesMesHtml(sel) {
     return MESES_NOME.map((nome, i) => {
       const v = String(i + 1);
@@ -248,7 +257,7 @@
       ? `<th>Família</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
       : `<th>Família</th><th class="r">Valor</th><th class="r">%</th><th class="r">% Acum.</th>`;
     const notaCmp = cmp
-      ? `<p class="vend-rel-cmp-nota">Comparando <strong>${l1}</strong> (azul) com <strong>${l2}</strong> (amarelo). A variação é Mês 2 menos Mês 1.</p>`
+      ? `<p class="vend-rel-cmp-nota">Comparando <strong>${l1}</strong> (azul, mais antigo) com <strong>${l2}</strong> (amarelo, mais recente), na ordem do calendário. A variação é o mês novo menos o mês antigo.</p>`
       : '';
 
     pagesWrap.innerHTML = `
@@ -1302,14 +1311,23 @@
     const now = new Date();
     const mesAtual = Number.parseInt(document.getElementById('vendRelGerMes')?.value, 10) || (now.getMonth() + 1);
     const anoAtual = Number.parseInt(document.getElementById('vendRelGerAno')?.value, 10) || now.getFullYear();
-    let mes1 = _comparacao?.mes1 || mesAtual;
-    let ano1 = _comparacao?.ano1 || anoAtual;
+    let mes1 = _comparacao?.mes1;
+    let ano1 = _comparacao?.ano1;
     let mes2 = _comparacao?.mes2;
     let ano2 = _comparacao?.ano2;
-    if (!mes2 || !ano2) {
-      mes2 = mes1 - 1;
-      ano2 = ano1;
-      if (mes2 < 1) { mes2 = 12; ano2 -= 1; }
+    if (!mes1 || !ano1 || !mes2 || !ano2) {
+      mes2 = mesAtual;
+      ano2 = anoAtual;
+      mes1 = mesAtual - 1;
+      ano1 = anoAtual;
+      if (mes1 < 1) { mes1 = 12; ano1 -= 1; }
+    } else {
+      const [antigo, novo] = _ordenarCronologico(
+        { mes: mes1, ano: ano1 },
+        { mes: mes2, ano: ano2 }
+      );
+      mes1 = antigo.mes; ano1 = antigo.ano;
+      mes2 = novo.mes; ano2 = novo.ano;
     }
     const anos = _anosDisponiveis();
     if (!anos.includes(ano1)) anos.push(ano1);
@@ -1355,10 +1373,17 @@
       if (err) err.textContent = 'Escolha dois meses diferentes.';
       return;
     }
+    const [antigo, novo] = _ordenarCronologico(
+      { mes: mes1, ano: ano1 },
+      { mes: mes2, ano: ano2 }
+    );
     _comparacao = {
-      mes1, ano1, mes2, ano2,
-      label1: _labelMesAno(mes1, ano1),
-      label2: _labelMesAno(mes2, ano2),
+      mes1: antigo.mes,
+      ano1: antigo.ano,
+      mes2: novo.mes,
+      ano2: novo.ano,
+      label1: _labelMesAno(antigo.mes, antigo.ano),
+      label2: _labelMesAno(novo.mes, novo.ano),
     };
     _fecharModalComparar();
     _atualizarBotaoComparar();
@@ -1387,7 +1412,7 @@
           </div>
           <div style="padding:16px;">
             <p style="margin:0 0 14px;font-size:13px;color:#94a3b8;line-height:1.45;">
-              Escolha o Mês 1 e o Mês 2. O relatório mostra os dois lados a lado em todas as páginas.
+              Escolha dois meses. Não importa a ordem: o relatório sempre mostra do mais antigo para o mais recente (como no calendário).
             </p>
             <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
               <div class="vend-rel-cmp-field">

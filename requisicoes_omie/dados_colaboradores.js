@@ -1679,16 +1679,43 @@ async function showPermissoesPorBotao() {
 
   function applySearchFilter() {
     const q = (searchInput.value||'').trim().toLowerCase();
-    treeEl.querySelectorAll('.perm-tree-item').forEach(nodeEl => {
-      const match = !q || String(nodeEl.dataset.search||'').includes(q);
-      nodeEl.style.display = match ? '' : 'none';
-    });
-    if (q) {
-      treeEl.querySelectorAll('.perm-tree-children').forEach(childEl => {
-        childEl.classList.add('open');
-        childEl.previousElementSibling?.querySelector('.perm-tree-arrow')?.classList.add('open');
-      });
+    const items = Array.from(treeEl.querySelectorAll('.perm-tree-item'));
+    if (!q) {
+      items.forEach(nodeEl => { nodeEl.style.display = ''; });
+      return;
     }
+    const matchIds = new Set();
+    items.forEach(nodeEl => {
+      if (String(nodeEl.dataset.search || '').includes(q)) matchIds.add(String(nodeEl.dataset.nodeId || ''));
+    });
+    items.forEach(nodeEl => {
+      const id = String(nodeEl.dataset.nodeId || '');
+      let visible = matchIds.has(id);
+      if (!visible) {
+        const next = nodeEl.nextElementSibling;
+        if (next?.classList.contains('perm-tree-children')) {
+          visible = Array.from(next.querySelectorAll('.perm-tree-item')).some(ch => matchIds.has(String(ch.dataset.nodeId || '')));
+        }
+      }
+      if (!visible) {
+        let wrap = nodeEl.parentElement;
+        while (wrap && wrap !== treeEl) {
+          if (wrap.classList.contains('perm-tree-children')) {
+            const parentItem = wrap.previousElementSibling;
+            if (parentItem?.classList.contains('perm-tree-item') && matchIds.has(String(parentItem.dataset.nodeId || ''))) {
+              visible = true;
+              break;
+            }
+          }
+          wrap = wrap.parentElement;
+        }
+      }
+      nodeEl.style.display = visible ? '' : 'none';
+    });
+    treeEl.querySelectorAll('.perm-tree-children').forEach(childEl => {
+      childEl.classList.add('open');
+      childEl.previousElementSibling?.querySelector('.perm-tree-arrow')?.classList.add('open');
+    });
   }
 
   renderLeftTree();
