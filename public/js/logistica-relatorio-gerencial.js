@@ -18,11 +18,12 @@
     { id: 'ajustes', label: 'Ajustes de Estoque', icon: 'fa-pen-to-square', pg: 4 },
     { id: 'recebimentos', label: 'Recebimentos', icon: 'fa-truck-ramp-box', pg: 5 },
     { id: 'envios', label: 'Envio de Mercadoria', icon: 'fa-truck-fast', pg: 6 },
-    { id: 'estoque', label: 'Estoque Mínimo', icon: 'fa-boxes-stacked', pg: 7 },
-    { id: 'etiquetas', label: 'Etiquetas / Endereço', icon: 'fa-print', pg: 8 },
-    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 9 },
-    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 10 },
-    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 11 },
+    { id: 'armazem', label: 'Armazém', icon: 'fa-warehouse', pg: 7 },
+    { id: 'estoque', label: 'Estoque Mínimo', icon: 'fa-boxes-stacked', pg: 8 },
+    { id: 'etiquetas', label: 'Etiquetas / Endereço', icon: 'fa-print', pg: 9 },
+    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 10 },
+    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 11 },
+    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 12 },
   ];
 
   function _esc(s) {
@@ -230,6 +231,11 @@
               <tbody id="logRelGerTempoEnvioBody"></tbody>
             </table>
           </div>`,
+        armazem: `
+          <div id="logRelGerArmazemKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
+          <p style="font-size:13px;color:#64748b;margin:0 0 12px;">Posição atual — valor em reais de cada armazém (quantidade física × custo médio / preço unitário).</p>
+          <div class="at-rel-ger-card"><h4>Valor em estoque por armazém (R$)</h4><div class="at-rel-ger-chart lg" id="logRelGerChartArmazemWrap"><canvas id="logRelGerChartArmazem"></canvas></div></div>
+          <div style="overflow:auto;margin-top:14px;max-height:340px;"><table class="at-rel-ger-tbl"><thead><tr><th>Armazém</th><th class="r">Qtd física</th><th class="r">SKUs</th><th class="r">Valor (R$)</th></tr></thead><tbody id="logRelGerArmazemBody"></tbody></table></div>`,
         estoque: `
           <div id="logRelGerEstoqueKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
           <p style="font-size:13px;color:#64748b;margin:0;">Posição atual — produtos com saldo físico abaixo do estoque mínimo cadastrado.</p>`,
@@ -257,13 +263,13 @@
       const icons = {
         executivo: 'fa-gauge-high', separacao: 'fa-boxes-packing', transferencias: 'fa-arrow-right-arrow-left',
         ajustes: 'fa-pen-to-square', recebimentos: 'fa-truck-ramp-box', envios: 'fa-truck-fast',
-        estoque: 'fa-boxes-stacked', etiquetas: 'fa-print', evolucao: 'fa-chart-column',
+        armazem: 'fa-warehouse', estoque: 'fa-boxes-stacked', etiquetas: 'fa-print', evolucao: 'fa-chart-column',
         plano: 'fa-list-check', conclusao: 'fa-flag-checkered',
       };
       const titles = {
         executivo: 'Dashboard Executivo', separacao: 'Separação / Solicitações', transferencias: 'Transferências',
         ajustes: 'Ajustes de Estoque', recebimentos: 'Recebimentos de Materiais', envios: 'Envio de Mercadoria',
-        estoque: 'Estoque Mínimo', etiquetas: 'Etiquetas e Endereçamento', evolucao: 'Evolução no Período',
+        armazem: 'Armazém', estoque: 'Estoque Mínimo', etiquetas: 'Etiquetas e Endereçamento', evolucao: 'Evolução no Período',
         plano: 'Plano de Ação', conclusao: 'Conclusão Executiva',
       };
       return `
@@ -327,6 +333,44 @@
       type: 'bar',
       data: { labels, datasets: [{ data: values, backgroundColor: `${cor || CORES[0]}cc`, borderColor: cor || CORES[0], borderWidth: 1, borderRadius: 4 }] },
       options: labels.length > 6 ? _chartOptsBarH() : _chartOptsBarV(),
+    });
+  }
+
+  function _fmtEixoMoeda(v) {
+    const n = Number(v) || 0;
+    if (Math.abs(n) >= 1e6) return `R$ ${(n / 1e6).toFixed(1).replace('.', ',')} mi`;
+    if (Math.abs(n) >= 1e3) return `R$ ${(n / 1e3).toFixed(0)} mil`;
+    return MOEDA.format(n);
+  }
+
+  function _renderBarMoeda(canvasId, key, labels, values, cor) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return;
+    _destroyChart(key);
+    const wrap = canvas.closest('.at-rel-ger-chart');
+    if (wrap && labels.length > 8) wrap.style.height = `${Math.min(560, 48 + labels.length * 28)}px`;
+    const horizontal = labels.length > 4;
+    _charts[key] = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: { labels, datasets: [{
+        data: values,
+        backgroundColor: labels.map((_, i) => `${CORES[i % CORES.length]}cc`),
+        borderColor: labels.map((_, i) => CORES[i % CORES.length]),
+        borderWidth: 1,
+        borderRadius: 4,
+      }] },
+      options: {
+        indexAxis: horizontal ? 'y' : 'x',
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: { callbacks: { label: (ctx) => MOEDA.format(horizontal ? ctx.parsed.x : ctx.parsed.y) } },
+        },
+        scales: horizontal
+          ? { x: { beginAtZero: true, ticks: { callback: _fmtEixoMoeda } }, y: { ticks: { font: { size: 11 } } } }
+          : { y: { beginAtZero: true, ticks: { callback: _fmtEixoMoeda } } },
+      },
     });
   }
 
@@ -397,6 +441,18 @@
       _renderBar('logRelGerChartEnvioMetodo', 'envMet', envMet.map(r => r.metodo), envMet.map(r => r.total), '#06b6d4');
       _renderBar('logRelGerChartEnvioExecutor', 'envExecutor', envExecutores.map(r => r.executor), envExecutores.map(r => r.total), '#10b981');
     }
+    if (sec === 'armazem') {
+      const rows = data.por_armazem || [];
+      const wrap = document.getElementById('logRelGerArmazemKpis');
+      if (wrap) {
+        wrap.innerHTML = [
+          { label: 'Valor total em estoque', value: MOEDA.format(k.estoque_valor_total || 0), cor: '#065f46' },
+          { label: 'Armazéns com saldo', value: k.estoque_armazens || rows.length, cor: '#10b981' },
+          { label: 'SKUs com saldo', value: QTD.format(rows.reduce((s, r) => s + (Number(r.skus) || 0), 0)), cor: '#38bdf8' },
+        ].map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      }
+      _renderBarMoeda('logRelGerChartArmazem', 'armazem', rows.map(r => r.armazem), rows.map(r => Number(r.valor_total) || 0), '#10b981');
+    }
     if (sec === 'estoque') {
       const wrap = document.getElementById('logRelGerEstoqueKpis');
       if (wrap) {
@@ -447,6 +503,13 @@
       recebBody.innerHTML = rows.length
         ? rows.map(r => `<tr><td>${_esc(r.etapa)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
         : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Sem recebimentos no período.</td></tr>';
+    }
+    const armazemBody = document.getElementById('logRelGerArmazemBody');
+    if (armazemBody) {
+      const rows = data.por_armazem || [];
+      armazemBody.innerHTML = rows.length
+        ? rows.map(r => `<tr><td>${_esc(r.armazem)}</td><td class="r">${QTD.format(r.qtd_fisico || 0)}</td><td class="r">${QTD.format(r.skus || 0)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
+        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhum armazém com saldo.</td></tr>';
     }
     const tempoBody = document.getElementById('logRelGerTempoEnvioBody');
     if (tempoBody) {

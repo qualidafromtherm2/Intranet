@@ -137,6 +137,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       rTempoFaixas,
       rTempoDetalhe,
       rEnvioExecutor,
+      rArmazem,
     ] = await Promise.all([
       safeQuery(`
         SELECT
@@ -397,6 +398,23 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
          GROUP BY 1
          ORDER BY total DESC, executor
       `, rangeParams),
+      safeQuery(`
+        SELECT
+          e.local_codigo::text AS local_codigo,
+          COALESCE(NULLIF(TRIM(MAX(e.local_nome)), ''), e.local_codigo::text) AS armazem,
+          ROUND(SUM(COALESCE(e.fisico, 0))::numeric, 2)::float AS qtd_fisico,
+          COUNT(DISTINCT e.codigo) FILTER (WHERE COALESCE(e.fisico, 0) > 0)::int AS skus,
+          ROUND(SUM(
+            COALESCE(e.fisico, 0) * COALESCE(NULLIF(e.cmc, 0), NULLIF(e.preco_unitario, 0), 0)
+          )::numeric, 2)::float AS valor_total
+        FROM logistica.estoque_atual e
+        WHERE e.local_codigo IS NOT NULL
+          AND TRIM(e.local_codigo::text) <> ''
+        GROUP BY e.local_codigo
+        HAVING SUM(COALESCE(e.fisico, 0)) <> 0
+            OR SUM(COALESCE(e.fisico, 0) * COALESCE(NULLIF(e.cmc, 0), NULLIF(e.preco_unitario, 0), 0)) <> 0
+        ORDER BY valor_total DESC, armazem
+      `),
     ]);
 
     const kpiSep = rKpiSep.rows[0] || {};
@@ -435,6 +453,10 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       tempo_envio_media_criado_sep_h: tempoRow.media_h_criado_sep != null ? Number(tempoRow.media_h_criado_sep) : null,
       tempo_envio_media_sep_envio_h: tempoRow.media_h_sep_envio != null ? Number(tempoRow.media_h_sep_envio) : null,
       tempo_envio_media_pendente_h: tempoRow.media_h_pendente != null ? Number(tempoRow.media_h_pendente) : null,
+      estoque_valor_total: Math.round(
+        (rArmazem.rows || []).reduce((s, r) => s + (Number(r.valor_total) || 0), 0) * 100
+      ) / 100,
+      estoque_armazens: (rArmazem.rows || []).length,
     };
 
     const tempo_envio = {
@@ -514,6 +536,7 @@ router.get('/logistica/relatorio-gerencial', async (req, res) => {
       por_status_envio: envioRows,
       por_metodo_envio: rEnvioMetodo.rows || [],
       envios_por_executor: rEnvioExecutor.rows || [],
+      por_armazem: rArmazem.rows || [],
       top_produtos_separacao: rTopSep.rows || [],
       tempo_envio,
       evolucao_semanal,
