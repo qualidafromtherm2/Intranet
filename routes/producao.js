@@ -16,7 +16,7 @@ const {
   retomarParada,
   listarParadasAbertasPorOps,
 } = require('../utils/paradasProducao');
-const { reverterRiCheckNoPosto } = require('./qualidadeRiCheck');
+const { reverterRiCheckNoPosto, registrarRiCheckImpressaoOp } = require('./qualidadeRiCheck');
 const {
   iniciarCicloPosto,
   encerrarCicloPosto,
@@ -2802,6 +2802,185 @@ router.post('/tempo/ativos-por-ops', express.json(), async (req, res) => {
 });
 
 /* ---------------------------------------------------------------
+ * POST /api/producao/iniciar-producao
+ * Digita/lê número da OP no Programado e move para Montagem hermetica.
+ * Body: { numero_op, op_producao_id?, kanban_programacao_id?, usuario }
+ * --------------------------------------------------------------- */
+router.post('/iniciar-producao', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    await garantirSchemaOpProducao();
+
+    const opProducaoIdBody = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || req.body?.lote || '').trim();
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+    let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+
+    if (!numeroOp && opProducaoIdBody <= 0) {
+      return res.status(400).json({ success: false, error: 'Informe o número da OP.' });
+    }
+
+    let opProducaoId = opProducaoIdBody;
+    let codigo = '';
+    let codigoProduto = null;
+    let descricao = '';
+    let opIappId = 0;
+    let statusAtual = '';
+
+    if (!kanbanProgramacaoId) {
+      const { rows } = await dbQuery(
+        `SELECT id, status, op_producao_id, op_iapp_id, numero_op, codigo, codigo_produto, descricao
+           FROM producao."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND op_producao_id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      if (rows[0]) {
+        kanbanProgramacaoId = rows[0].id || null;
+        statusAtual = String(rows[0].status || '').trim();
+        opProducaoId = opProducaoId || Number(rows[0].op_producao_id) || 0;
+        opIappId = Number(rows[0].op_iapp_id) || 0;
+        codigo = String(rows[0].codigo || '').trim();
+        codigoProduto = rows[0].codigo_produto != null ? Number(rows[0].codigo_produto) : null;
+        descricao = String(rows[0].descricao || '').trim();
+      }
+    } else {
+      const { rows } = await dbQuery(
+        `SELECT id, status, op_producao_id, op_iapp_id, numero_op, codigo, codigo_produto, descricao
+           FROM producao."Kanban_programacao"
+          WHERE id = $1`,
+        [kanbanProgramacaoId]
+      );
+      if (rows[0]) {
+        statusAtual = String(rows[0].status || '').trim();
+        opProducaoId = opProducaoId || Number(rows[0].op_producao_id) || 0;
+        opIappId = Number(rows[0].op_iapp_id) || 0;
+        codigo = String(rows[0].codigo || '').trim();
+        codigoProduto = rows[0].codigo_produto != null ? Number(rows[0].codigo_produto) : null;
+        descricao = String(rows[0].descricao || '').trim();
+      }
+    }
+
+    if ((!opProducaoId && numeroOp) || (opProducaoId && !codigo)) {
+      const { rows: opRows } = await dbQuery(
+        `SELECT op.id, op.n_op, op.codigo, op.codigo_produto, po.descricao
+           FROM producao."OP_producao" op
+           LEFT JOIN produto.produtos_omie po ON po.codigo_produto = op.codigo_produto
+          WHERE ($1::bigint > 0 AND op.id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(op.n_op, ''))) = UPPER(TRIM($2)))
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      if (opRows[0]) {
+        opProducaoId = Number(opRows[0].id) || 0;
+        codigo = codigo || String(opRows[0].codigo || '').trim();
+        codigoProduto = codigoProduto || (opRows[0].codigo_produto != null ? Number(opRows[0].codigo_produto) : null);
+        descricao = descricao || String(opRows[0].descricao || '').trim();
+      }
+    }
+
+    if (!opProducaoId && !kanbanProgramacaoId) {
+      return res.status(404).json({ success: false, error: `OP "${numeroOp}" não encontrada.` });
+    }
+
+    const statusNorm = normPostoKanban(statusAtual);
+    if (statusNorm && statusNorm !== 'programado') {
+      const jaHermetica = statusNorm === 'montagem hermetica';
+      return res.status(409).json({
+        success: false,
+        error: jaHermetica
+          ? 'Esta OP já está em Montagem hermetica.'
+          : `Esta OP já está em ${statusAtual}.`,
+        status: statusAtual,
+      });
+    }
+
+    const numeroOpFinal = numeroOp || '';
+    const statusDestino = 'Montagem hermetica';
+
+    if (kanbanProgramacaoId) {
+      await dbQuery(
+        `UPDATE producao."Kanban_programacao"
+            SET status = $1,
+                ri = FALSE,
+                numero_op = COALESCE(NULLIF($3, ''), numero_op)
+          WHERE id = $2`,
+        [statusDestino, kanbanProgramacaoId, numeroOpFinal]
+      );
+    } else {
+      const { rows: inserted } = await dbQuery(
+        `INSERT INTO producao."Kanban_programacao"
+           (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
+         VALUES ($1, $2, $3, 0, 1, $4, $5, $6, FALSE)
+         RETURNING id`,
+        [codigoProduto, codigo || null, descricao || null, numeroOpFinal, opProducaoId, statusDestino]
+      );
+      kanbanProgramacaoId = inserted[0]?.id || null;
+    }
+
+    if (opIappId > 0) {
+      await dbQuery(
+        `UPDATE producao.op_iapp_os
+            SET status_producao = 'Solicitado',
+                data_status_producao = NOW()
+          WHERE op_iapp_id = $1
+            AND COALESCE(TRIM(status_producao), '') NOT IN ('Iniciado', 'Produzindo', 'Parado')`,
+        [opIappId]
+      );
+    }
+
+    try {
+      await registrarRiCheckImpressaoOp({
+        opProducaoId,
+        opIappId,
+        numeroOp: numeroOpFinal,
+        codigo,
+        codigoProduto,
+        descricao,
+        statusRi: statusDestino,
+      });
+    } catch (riErr) {
+      console.error('[ri_check] Falha ao registrar RI ao iniciar produção:', riErr.message);
+    }
+
+    try {
+      await iniciarCicloPosto({
+        kanbanProgramacaoId,
+        opProducaoId,
+        numeroOp: numeroOpFinal,
+        postoOrigem: statusDestino,
+        operacao: 'Iniciar produção — Montagem hermetica',
+        usuario,
+      });
+    } catch (tempoErr) {
+      console.error('[tempo_producao] Falha ao iniciar ciclo ao iniciar produção:', tempoErr.message);
+    }
+
+    const row = await registrarControleOperacaoImpressaoOp({
+      kanbanProgramacaoId,
+      opProducaoId,
+      opIappId,
+      numeroOp: numeroOpFinal,
+      usuario,
+      operacao: 'Iniciar produção',
+    });
+
+    return res.json({
+      success: true,
+      registro: row,
+      kanban_programacao_id: kanbanProgramacaoId,
+      status: statusDestino,
+      numero_op: numeroOpFinal,
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao iniciar produção:', err.message);
+    return res.status(500).json({ success: false, error: err.message || 'Erro ao iniciar produção.' });
+  }
+});
+
+/* ---------------------------------------------------------------
  * POST /api/producao/finalizar-operacao — Controle_operacoes + próximo posto
  * --------------------------------------------------------------- */
 router.post('/finalizar-operacao', express.json(), async (req, res) => {
@@ -2952,7 +3131,7 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
   solicitado: {
     status_destino: null,
     posto_desfeito: 'Montagem hermetica',
-    operacoes_desfeitas: ['Montagem hermetica', 'Imprimir OP'],
+    operacoes_desfeitas: ['Montagem hermetica', 'Imprimir OP', 'Iniciar produção'],
   },
   produzindo: {
     status_destino: 'Montagem hermetica',

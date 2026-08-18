@@ -25,8 +25,6 @@ const { exigirAuditoriaProduto } = require('./utils/produtoAuditoriaPermissoes')
 const { anexarHoraObs } = require('./utils/anexarHoraObs');
 const { uploadPublicFile, removePublicFiles } = require('./utils/storage');
 const { registrarControleOperacaoImpressaoOp } = require('./utils/controleOperacoes');
-const { iniciarCicloPosto } = require('./utils/tempoProducao');
-const { registrarRiCheckImpressaoOp } = require('./routes/qualidadeRiCheck');
 const { injectStoragePublicUrls, getStoragePublicBaseUrl, ASSETS, agenteExeUrl } = require('./utils/storageUrls');
 const etqRecImpressoBackfill = require('./utils/etqRecImpressoBackfill');
 const {
@@ -18325,8 +18323,8 @@ app.post('/api/etiquetas/recebimento/imprimir-modal', express.json(), async (req
 
 // POST /api/etiquetas/iapp-op/imprimir
 // Body: { items: [{ os_id?, op_producao_id?, lote, codigo_produto, descricao_produto? }], destino_agente?, impressora?, usuario?, somente_reimpressao? }
-// lote = número da OP. Na 1ª impressão: atualiza kanban para Montagem hermetica e registra RI_Check.
-// somente_reimpressao=true: só gera/enfileira etiqueta (não move OP nem altera RI/tempo).
+// lote = número da OP. Só imprime etiqueta e registra controle — não muda o kanban.
+// Programado → Montagem hermetica: POST /api/producao/iniciar-producao.
 app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => {
   try {
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
@@ -18428,123 +18426,8 @@ app.post('/api/etiquetas/iapp-op/imprimir', express.json(), async (req, res) => 
         console.error('[controle_operacoes] Falha ao registrar impressão OP:', ctrlErr.message);
       }
 
-      if (somenteReimpressao) {
-        if (osId > 0) osAtualizadas.push(osId);
-        else if (opProducaoId > 0) osAtualizadas.push(opProducaoId);
-        continue;
-      }
-
-      if (opProducaoId > 0) {
-        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
-        const numeroOpTxt = loteRaw;
-        const updKanban = await pool.query(
-          `UPDATE producao."Kanban_programacao"
-              SET codigo_produto = COALESCE($2, codigo_produto),
-                  codigo = COALESCE(NULLIF($3, ''), codigo),
-                  descricao = COALESCE(NULLIF($4, ''), descricao),
-                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
-                  status = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
-                    ELSE status
-                  END,
-                  ri = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
-                    ELSE ri
-                  END
-            WHERE op_producao_id = $1`,
-          [opProducaoId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
-        );
-        if (!updKanban.rowCount) {
-          await pool.query(
-            `INSERT INTO producao."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_producao_id, status, ri)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
-            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opProducaoId]
-          );
-        }
-      } else if (opIappId > 0) {
-        await pool.query(
-          `UPDATE producao.op_iapp_os
-              SET status_producao = 'Solicitado',
-                  data_status_producao = NOW()
-            WHERE op_iapp_id = $1
-              AND COALESCE(TRIM(status_producao), '') NOT IN ('Iniciado', 'Produzindo', 'Parado')`,
-          [opIappId]
-        );
-
-        const codigoProdutoNum = idOmie ? Number(idOmie) : null;
-        const numeroOpTxt = loteRaw;
-        const updKanban = await pool.query(
-          `UPDATE producao."Kanban_programacao"
-              SET codigo_produto = COALESCE($2, codigo_produto),
-                  codigo = COALESCE(NULLIF($3, ''), codigo),
-                  descricao = COALESCE(NULLIF($4, ''), descricao),
-                  numero_op = COALESCE(NULLIF($5, ''), numero_op),
-                  status = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN 'Montagem hermetica'
-                    ELSE status
-                  END,
-                  ri = CASE
-                    WHEN COALESCE(TRIM(status), '') IN ('', 'Montagem hermetica') THEN FALSE
-                    ELSE ri
-                  END
-            WHERE op_iapp_id = $1`,
-          [opIappId, codigoProdutoNum, codigo, descricao, numeroOpTxt]
-        );
-        if (!updKanban.rowCount) {
-          await pool.query(
-            `INSERT INTO producao."Kanban_programacao"
-               (codigo_produto, codigo, descricao, codigo_pedido, quantidade, numero_op, op_iapp_id, status, ri)
-             VALUES ($1, $2, $3, 0, 1, $4, $5, 'Montagem hermetica', FALSE)`,
-            [codigoProdutoNum, codigo, descricao, numeroOpTxt, opIappId]
-          );
-        }
-      } else if (osId > 0) {
-        await pool.query(
-          `UPDATE producao.op_iapp_os
-              SET status_producao = 'Solicitado',
-                  data_status_producao = NOW()
-            WHERE os_id = $1`,
-          [osId]
-        );
-      }
-
-      if (opProducaoId > 0 || opIappId > 0) {
-        try {
-          await registrarRiCheckImpressaoOp({
-            opProducaoId,
-            opIappId,
-            numeroOp: loteRaw,
-            codigo,
-            codigoProduto: idOmie ? Number(idOmie) : null,
-            descricao,
-            statusRi: 'Montagem hermetica',
-          });
-        } catch (riErr) {
-          console.error('[ri_check] Falha ao registrar RI Montagem hermetica na impressão OP:', riErr.message);
-        }
-
-        try {
-          const kpRes = await pool.query(
-            `SELECT id FROM producao."Kanban_programacao"
-              WHERE ($1::bigint > 0 AND op_producao_id = $1)
-                 OR ($2::bigint > 0 AND op_iapp_id = $2)
-              ORDER BY id DESC LIMIT 1`,
-            [opProducaoId || 0, opIappId || 0]
-          );
-          await iniciarCicloPosto({
-            kanbanProgramacaoId: kpRes.rows[0]?.id || null,
-            opProducaoId,
-            numeroOp: loteRaw,
-            postoOrigem: 'Montagem hermetica',
-            operacao: 'Imprimir OP — Montagem hermetica',
-            usuario,
-          });
-        } catch (tempoErr) {
-          console.error('[tempo_producao] Falha ao iniciar ciclo na impressão OP:', tempoErr.message);
-        }
-      }
-
+      // Imprimir OP não muda o kanban. Status Programado → Montagem hermetica
+      // fica em POST /api/producao/iniciar-producao.
       if (osId > 0) osAtualizadas.push(osId);
       else if (opProducaoId > 0) osAtualizadas.push(opProducaoId);
     }

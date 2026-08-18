@@ -35,6 +35,7 @@ function montarMensagemReserva(reserva, titulo) {
   ];
   if (reserva.canceladaPor) linhas.push(`Cancelada por: ${reserva.canceladaPor}`);
   if (reserva.criadoPor) linhas.push(`Agendada por: ${reserva.criadoPor}`);
+  if (reserva.linkReuniao) linhas.push(`Link: ${reserva.linkReuniao}`);
   linhas.push('', '— Intranet Fromtherm');
   return linhas.join('\n');
 }
@@ -131,9 +132,9 @@ async function notificarReservaCanceladaWhatsapp(reserva) {
   };
 }
 
-async function notificarNovaReservaWhatsapp(reserva) {
+async function notificarReservaWhatsapp(reserva, { tipo, titulo, logLabel }) {
   if (!whatsappConfigurado()) {
-    console.warn('[ReservasWhatsapp] WhatsApp não configurado — pulando aviso de nova reserva.');
+    console.warn(`[ReservasWhatsapp] WhatsApp não configurado — pulando ${logLabel}.`);
     return { ok: false, skipped: true, reason: 'whatsapp_nao_configurado', enviados: [] };
   }
   const destinatarios = Array.from(new Set(
@@ -150,9 +151,9 @@ async function notificarNovaReservaWhatsapp(reserva) {
     return { ok: false, skipped: true, reason: 'sem_telefones', enviados: [], semTelefone: destinatarios };
   }
 
-  const aceitos = await filtrarUsuarios(comTelefone, 'reuniao_nova', 'whatsapp');
+  const aceitos = await filtrarUsuarios(comTelefone, tipo, 'whatsapp');
   if (!aceitos.length) {
-    console.log('[ReservasWhatsapp] Nenhum destinatário com preferência reuniao_nova / whatsapp.');
+    console.log(`[ReservasWhatsapp] Nenhum destinatário com preferência ${tipo} / whatsapp.`);
     return { ok: false, skipped: true, reason: 'sem_preferencia', enviados: [], semTelefone: destinatarios };
   }
 
@@ -161,7 +162,7 @@ async function notificarNovaReservaWhatsapp(reserva) {
     return { ok: false, skipped: true, reason: 'sem_phone_number_id', enviados: [] };
   }
 
-  const mensagem = montarMensagemReserva(reserva, 'Nova reunião agendada');
+  const mensagem = montarMensagemReserva(reserva, titulo);
   const enviados = [];
   const vistos = new Set();
   for (const dest of aceitos) {
@@ -172,14 +173,31 @@ async function notificarNovaReservaWhatsapp(reserva) {
       const result = await enviarWhatsappNotificacao(dest.telefone, mensagem, phoneNumberId);
       enviados.push(`${dest.username}:${result?.wa_id || phone}`);
     } catch (err) {
-      console.warn('[ReservasWhatsapp] Falha ao enviar nova reserva para', dest.username, err?.message || err);
+      console.warn(`[ReservasWhatsapp] Falha ao enviar ${logLabel} para`, dest.username, err?.message || err);
     }
   }
-  console.log(`[ReservasWhatsapp] Nova reserva #${reserva.id} → ${enviados.length} enviado(s)`);
+  console.log(`[ReservasWhatsapp] ${logLabel} #${reserva.id} → ${enviados.length} enviado(s)`);
   return { ok: enviados.length > 0, enviados };
+}
+
+async function notificarNovaReservaWhatsapp(reserva) {
+  return notificarReservaWhatsapp(reserva, {
+    tipo: 'reuniao_nova',
+    titulo: 'Nova reunião agendada',
+    logLabel: 'Nova reserva',
+  });
+}
+
+async function notificarLembreteReservaWhatsapp(reserva) {
+  return notificarReservaWhatsapp(reserva, {
+    tipo: 'reuniao_lembrete',
+    titulo: 'Lembrete: você tem reunião hoje',
+    logLabel: 'Lembrete',
+  });
 }
 
 module.exports = {
   notificarReservaCanceladaWhatsapp,
   notificarNovaReservaWhatsapp,
+  notificarLembreteReservaWhatsapp,
 };

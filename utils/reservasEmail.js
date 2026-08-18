@@ -1,7 +1,7 @@
 'use strict';
 
 /**
- * E-mails de reservas de sala (nova reunião + lembrete diário 07:30 BRT).
+ * E-mails e WhatsApp de reservas de sala (nova reunião + lembrete diário 07:00 BRT).
  * Usa SMTP já configurado (Hostinger / Brevo).
  */
 
@@ -35,6 +35,39 @@ function siglaDiaSemanaBrasilia(dataIso) {
   const d = new Date(`${raw}T12:00:00Z`);
   if (Number.isNaN(d.getTime())) return null;
   return ['dom', 'seg', 'ter', 'qua', 'qui', 'sex', 'sab'][d.getUTCDay()] || null;
+}
+
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+/** Relógio de Brasília: { dia: YYYY-MM-DD, hm: HH:MM }. */
+function agoraBrasiliaYmdHm() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(new Date());
+  const get = (type) => parts.find((p) => p.type === type)?.value || '';
+  return {
+    dia: `${get('year')}-${pad2(get('month'))}-${pad2(get('day'))}`,
+    hm: `${pad2(get('hour'))}:${pad2(get('minute'))}`,
+  };
+}
+
+/** true se o horário de início da reserva já passou em Brasília. */
+function reservaJaComecou(dataIso, horaInicio) {
+  const dia = String(dataIso || '').slice(0, 10);
+  const hm = String(horaInicio || '').slice(0, 5);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || !/^\d{2}:\d{2}$/.test(hm)) return false;
+  const agora = agoraBrasiliaYmdHm();
+  if (agora.dia > dia) return true;
+  if (agora.dia < dia) return false;
+  return agora.hm >= hm;
 }
 
 async function listarParticipantesComEmail(usernames) {
@@ -155,16 +188,12 @@ async function notificarNovaReserva(reserva) {
 }
 
 /**
- * Lembrete matinal: reservas do dia (únicas + recorrentes que caem hoje),
- * ainda não realizadas na data de hoje (datas_realizadas), com participantes.
- * Espelha a regra de conflito/listagem em server.js (existeConflitoReservaRh).
+ * Lembrete do dia: reservas únicas + recorrentes que caem hoje,
+ * ainda não realizadas (datas_realizadas), com participantes.
+ * Destinatários vêm da preferência do usuário (reuniao_lembrete),
+ * não do checkbox "Avisar por e-mail" da reserva.
  */
 async function enviarLembretesReservasDoDia(dataIso) {
-  if (!smtpConfigurado()) {
-    console.warn('[ReservasEmail] SMTP não configurado — pulando lembrete diário.');
-    return { ok: false, skipped: true, enviados: 0 };
-  }
-
   const dia = String(dataIso || '').slice(0, 10);
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) {
     throw new Error(`Data inválida para lembrete: ${dataIso}`);
@@ -173,6 +202,11 @@ async function enviarLembretesReservasDoDia(dataIso) {
   const siglaDia = siglaDiaSemanaBrasilia(dia);
   if (!siglaDia) {
     throw new Error(`Não foi possível obter o dia da semana para: ${dia}`);
+  }
+
+  const smtpOk = smtpConfigurado();
+  if (!smtpOk) {
+    console.warn('[ReservasEmail] SMTP não configurado — pulando e-mails do lembrete diário.');
   }
 
   const { rows } = await dbQuery(
@@ -189,9 +223,7 @@ async function enviarLembretesReservasDoDia(dataIso) {
             r.criado_por AS "criadoPor",
             r.repetir,
             COALESCE(
-              array_agg(DISTINCT p.username) FILTER (
-                WHERE p.username IS NOT NULL AND COALESCE(p.aviso_email, true) = true
-              ),
+              array_agg(DISTINCT p.username) FILTER (WHERE p.username IS NOT NULL),
               ARRAY[]::text[]
             ) AS participantes
        FROM rh.reservas_ambientes r
@@ -199,7 +231,6 @@ async function enviarLembretesReservasDoDia(dataIso) {
       WHERE NOT ($1::date = ANY(COALESCE(r.datas_realizadas, ARRAY[]::date[])))
         AND COALESCE(r.cancelada, false) = false
         AND NOT ($1::date = ANY(COALESCE(r.datas_canceladas, ARRAY[]::date[])))
-        AND COALESCE(r.aviso_email, false) = true
         AND NOT (
           -- Legado: reserva única marcada realizada antes de datas_realizadas
           r.repetir = false
@@ -240,15 +271,29 @@ async function enviarLembretesReservasDoDia(dataIso) {
     String(a.inicio || '').localeCompare(String(b.inicio || ''))
   );
 
-  let enviados = 0;
+  let enviadosEmail = 0;
+  let enviadosWhats = 0;
   const erros = [];
+
+  let notificarLembreteReservaWhatsapp = null;
+  try {
+    ({ notificarLembreteReservaWhatsapp } = require('./reservasWhatsapp'));
+  } catch (err) {
+    console.warn('[ReservasEmail] Módulo WhatsApp indisponível para lembrete:', err?.message || err);
+  }
+
+  let puladasHorario = 0;
 
   for (const r of reservasDoDia) {
     const participantes = Array.isArray(r.participantes) ? r.participantes : [];
     if (!participantes.length) continue;
-
-    const emails = await emailsComPreferencia(participantes, 'reuniao_lembrete');
-    if (!emails.length) continue;
+    if (reservaJaComecou(dia, r.inicio)) {
+      puladasHorario += 1;
+      console.log(
+        `[ReservasEmail] Lembrete pulado #${r.id}: reunião já começou (${formatarHora(r.inicio)})`
+      );
+      continue;
+    }
 
     const reserva = {
       id: r.id,
@@ -265,27 +310,51 @@ async function enviarLembretesReservasDoDia(dataIso) {
       participantes,
     };
 
-    const titulo = 'Lembrete: você tem reunião hoje';
-    const subject = `[Lembrete] ${reserva.tema || 'Reunião'} hoje às ${formatarHora(reserva.inicio)}`;
-    try {
-      await enviarEmail({
-        to: emails,
-        subject,
-        text: montarTextoReserva(reserva, { titulo }),
-        html: montarHtmlReserva(reserva, { titulo }),
-      });
-      enviados += 1;
-    } catch (err) {
-      erros.push({ id: r.id, message: err?.message || String(err) });
-      console.error(`[ReservasEmail] Falha lembrete reserva #${r.id}:`, err?.message || err);
+    if (smtpOk) {
+      const emails = await emailsComPreferencia(participantes, 'reuniao_lembrete');
+      if (emails.length) {
+        const titulo = 'Lembrete: você tem reunião hoje';
+        const subject = `[Lembrete] ${reserva.tema || 'Reunião'} hoje às ${formatarHora(reserva.inicio)}`;
+        try {
+          await enviarEmail({
+            to: emails,
+            subject,
+            text: montarTextoReserva(reserva, { titulo }),
+            html: montarHtmlReserva(reserva, { titulo }),
+          });
+          enviadosEmail += 1;
+        } catch (err) {
+          erros.push({ id: r.id, canal: 'email', message: err?.message || String(err) });
+          console.error(`[ReservasEmail] Falha lembrete reserva #${r.id}:`, err?.message || err);
+        }
+      }
+    }
+
+    if (typeof notificarLembreteReservaWhatsapp === 'function') {
+      try {
+        const wa = await notificarLembreteReservaWhatsapp(reserva);
+        if (wa?.ok) enviadosWhats += 1;
+      } catch (err) {
+        erros.push({ id: r.id, canal: 'whatsapp', message: err?.message || String(err) });
+        console.error(`[ReservasEmail] Falha WhatsApp lembrete #${r.id}:`, err?.message || err);
+      }
     }
   }
 
   console.log(
-    `[ReservasEmail] Lembrete ${dia} (${siglaDia}): ${enviados} reunião(ões) notificada(s), ` +
-      `${reservasDoDia.length} no dia (bruto=${rows.length}).`
+    `[ReservasEmail] Lembrete ${dia} (${siglaDia}): email=${enviadosEmail} whatsapp=${enviadosWhats}, ` +
+      `${reservasDoDia.length} no dia (bruto=${rows.length}, puladasHorario=${puladasHorario}).`
   );
-  return { ok: true, dia, totalDia: reservasDoDia.length, enviados, erros };
+  return {
+    ok: true,
+    dia,
+    totalDia: reservasDoDia.length,
+    enviados: enviadosEmail,
+    enviadosEmail,
+    enviadosWhats,
+    puladasHorario,
+    erros,
+  };
 }
 
 module.exports = {

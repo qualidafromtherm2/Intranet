@@ -12,10 +12,16 @@
   let _secao = 'executivo';
   const _charts = {};
   const _chartsRendered = new Set();
+  let _dataB = null;
+  let _comparacao = null; // { mes1, ano1, mes2, ano2, label1, label2 }
 
   const CORES = ['#1e3a5f', '#38bdf8', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899'];
+  const COR_MES1 = '#38bdf8';
+  const COR_MES2 = '#f59e0b';
   const MOEDA = new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' });
   const QTD = new Intl.NumberFormat('pt-BR', { maximumFractionDigits: 0 });
+  const MESES_ABREV = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+  const MESES_NOME = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
 
   const SECOES = [
     { id: 'executivo', label: 'Dashboard Executivo', icon: 'fa-gauge-high', pg: 1 },
@@ -33,6 +39,71 @@
 
   function _esc(s) {
     return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  function _emComparacao() {
+    return !!( _comparacao && _dataB );
+  }
+
+  function _labelMesAno(mes, ano) {
+    const m = Number(mes);
+    const nome = MESES_ABREV[m - 1] || String(m).padStart(2, '0');
+    return `${nome}/${ano}`;
+  }
+
+  function _opcoesMesHtml(sel) {
+    return MESES_NOME.map((nome, i) => {
+      const v = String(i + 1);
+      return `<option value="${v}"${String(sel) === v ? ' selected' : ''}>${nome}</option>`;
+    }).join('');
+  }
+
+  function _periodoTitulo(periodo, etapa) {
+    const etapaTxt = etapa ? ` · ${_esc(etapa)}` : '';
+    if (_comparacao) {
+      return `${_esc(_comparacao.label1)}  ×  ${_esc(_comparacao.label2)}${etapaTxt}`;
+    }
+    return `${_esc(periodo || '—')}${etapaTxt}`;
+  }
+
+  function _deltaParts(n1, n2) {
+    const a = Number(n1) || 0;
+    const b = Number(n2) || 0;
+    const diff = b - a;
+    const cls = diff > 0.0001 ? 'up' : (diff < -0.0001 ? 'down' : 'flat');
+    let pct = '0%';
+    if (a === 0 && b === 0) pct = '0%';
+    else if (a === 0) pct = '—';
+    else {
+      const p = Math.round((diff / Math.abs(a)) * 1000) / 10;
+      pct = `${p > 0 ? '+' : ''}${String(p).replace('.', ',')}%`;
+    }
+    return { a, b, diff, cls, pct };
+  }
+
+  function _deltaHtml(n1, n2, money) {
+    const { diff, cls, pct } = _deltaParts(n1, n2);
+    let num = money ? MOEDA.format(diff) : QTD.format(diff);
+    if (!money && diff > 0) num = `+${num}`;
+    if (money && diff > 0) num = `+${num}`;
+    return `<span class="vend-rel-delta ${cls}">${num} (${pct})</span>`;
+  }
+
+  function _mergePorChave(arrA, arrB, chave) {
+    const mapA = new Map((arrA || []).map((r) => [r[chave], r]));
+    const mapB = new Map((arrB || []).map((r) => [r[chave], r]));
+    const keys = [...new Set([...mapA.keys(), ...mapB.keys()])];
+    return keys.map((k) => ({ key: k, a: mapA.get(k) || {}, b: mapB.get(k) || {} }));
+  }
+
+  function _topMerge(arrA, arrB, chave, valorKey, limit) {
+    const merged = _mergePorChave(arrA, arrB, chave);
+    merged.sort((x, y) => {
+      const vx = Math.max(Number(x.a[valorKey]) || 0, Number(x.b[valorKey]) || 0);
+      const vy = Math.max(Number(y.a[valorKey]) || 0, Number(y.b[valorKey]) || 0);
+      return vy - vx;
+    });
+    return merged.slice(0, limit);
   }
 
   function _fmtData(raw) {
@@ -114,7 +185,6 @@
   }
 
   function _headerHtml(periodo, etapa) {
-    const etapaTxt = etapa ? ` · ${_esc(etapa)}` : '';
     return `
       <div class="at-rel-ger-header">
         <div class="at-rel-ger-header-top">
@@ -126,8 +196,8 @@
             </div>
           </div>
           <div class="at-rel-ger-header-title">
-            <div class="at-rel-ger-report-type">Relatório Gerencial de Vendas</div>
-            <div class="at-rel-ger-periodo">${_esc(periodo)}${etapaTxt}</div>
+            <div class="at-rel-ger-report-type">${_comparacao ? 'Comparativo Gerencial de Vendas' : 'Relatório Gerencial de Vendas'}</div>
+            <div class="at-rel-ger-periodo">${_periodoTitulo(periodo, etapa)}</div>
           </div>
           <div class="at-rel-ger-meta">
             <div><span>Departamento:</span> Comercial / Vendas</div>
@@ -162,12 +232,31 @@
     const periodo = _data?.periodo || '—';
     const etapa = _data?.etapa || '';
     const hdr = () => _headerHtml(periodo, etapa);
+    const cmp = _emComparacao();
+    const l1 = cmp ? _esc(_comparacao.label1) : '';
+    const l2 = cmp ? _esc(_comparacao.label2) : '';
+    const thFam = cmp
+      ? `<th>Família</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
+      : `<th>Família</th><th class="r">Qtd</th><th class="r">Valor</th>`;
+    const thCli = cmp
+      ? `<th>Cliente</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
+      : `<th>Cliente</th><th class="r">Pedidos</th><th class="r">Valor</th>`;
+    const thVend = cmp
+      ? `<th>Vendedor</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
+      : `<th>Vendedor</th><th class="r">Pedidos</th><th class="r">Clientes</th><th class="r">Valor</th><th class="r">Ticket</th>`;
+    const thPar = cmp
+      ? `<th>Família</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
+      : `<th>Família</th><th class="r">Valor</th><th class="r">%</th><th class="r">% Acum.</th>`;
+    const notaCmp = cmp
+      ? `<p class="vend-rel-cmp-nota">Comparando <strong>${l1}</strong> (azul) com <strong>${l2}</strong> (amarelo). A variação é Mês 2 menos Mês 1.</p>`
+      : '';
 
     pagesWrap.innerHTML = `
       <div class="at-rel-ger-page${_secao === 'executivo' ? ' is-active' : ''}" data-sec="executivo">
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-gauge-high"></i> Dashboard Executivo</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div id="vendRelGerKpis" class="at-rel-ger-kpis"></div>
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Pedidos por Etapa</h4><div class="at-rel-ger-chart sm"><canvas id="vendRelGerChartEtapa"></canvas></div></div>
@@ -180,9 +269,10 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-map-location-dot"></i> Distribuição Geográfica</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Valor por Estado</h4><div class="at-rel-ger-chart"><canvas id="vendRelGerChartEstado"></canvas></div></div>
-            <div class="at-rel-ger-card"><h4>Participação por Estado (%)</h4><div class="at-rel-ger-chart"><canvas id="vendRelGerChartEstadoDonut"></canvas></div></div>
+            <div class="at-rel-ger-card"><h4 id="vendRelGerGeoDonutTitulo">Participação por Estado (%)</h4><div class="at-rel-ger-chart"><canvas id="vendRelGerChartEstadoDonut"></canvas></div></div>
           </div>
         </div>
         ${_footerHtml(2)}
@@ -191,10 +281,11 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-boxes-stacked"></i> Famílias de Produto</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Faturamento por Família</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartFamilia"></canvas></div></div>
             <div class="at-rel-ger-card"><h4>Tabela — Família × Valor</h4>
-              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr><th>Família</th><th class="r">Qtd</th><th class="r">Valor</th></tr></thead><tbody id="vendRelGerFamiliaBody"></tbody></table></div>
+              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr>${thFam}</tr></thead><tbody id="vendRelGerFamiliaBody"></tbody></table></div>
             </div>
           </div>
         </div>
@@ -204,10 +295,11 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-users"></i> Principais Clientes</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Top Clientes por Valor</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartCliente"></canvas></div></div>
             <div class="at-rel-ger-card"><h4>Tabela — Cliente × Valor</h4>
-              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr><th>Cliente</th><th class="r">Pedidos</th><th class="r">Valor</th></tr></thead><tbody id="vendRelGerClienteBody"></tbody></table></div>
+              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr>${thCli}</tr></thead><tbody id="vendRelGerClienteBody"></tbody></table></div>
             </div>
           </div>
         </div>
@@ -217,11 +309,12 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-handshake"></i> Vendedores</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div id="vendRelGerKpisVendedor" class="at-rel-ger-kpis"></div>
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Ranking por Faturamento</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartVendedor"></canvas></div></div>
             <div class="at-rel-ger-card"><h4>Tabela — Vendedor × Valor</h4>
-              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr><th>Vendedor</th><th class="r">Pedidos</th><th class="r">Clientes</th><th class="r">Valor</th><th class="r">Ticket</th></tr></thead><tbody id="vendRelGerVendedorBody"></tbody></table></div>
+              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr>${thVend}</tr></thead><tbody id="vendRelGerVendedorBody"></tbody></table></div>
             </div>
           </div>
         </div>
@@ -231,6 +324,7 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-column"></i> Evolução no Período</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4 id="vendRelGerEvolTitulo">Evolução</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartEvol"></canvas></div></div>
             <div class="at-rel-ger-card"><h4>Pedidos no Período</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartEvolPedidos"></canvas></div></div>
@@ -242,10 +336,11 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-chart-line"></i> Pareto 80/20 — Famílias</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <div class="at-rel-ger-grid-2">
             <div class="at-rel-ger-card"><h4>Pareto por Faturamento</h4><div class="at-rel-ger-chart lg"><canvas id="vendRelGerChartPareto"></canvas></div></div>
             <div class="at-rel-ger-card"><h4>Tabela Pareto</h4>
-              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr><th>Família</th><th class="r">Valor</th><th class="r">%</th><th class="r">% Acum.</th></tr></thead><tbody id="vendRelGerParetoBody"></tbody></table></div>
+              <div style="overflow:auto;max-height:300px;"><table class="at-rel-ger-tbl"><thead><tr>${thPar}</tr></thead><tbody id="vendRelGerParetoBody"></tbody></table></div>
             </div>
           </div>
         </div>
@@ -255,10 +350,19 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-coins"></i> Análise Financeira</div>
         <div class="at-rel-ger-body">
-          <div class="at-rel-ger-card">
-            <h4>Top Pedidos por Valor</h4>
-            <div style="overflow:auto;max-height:360px;">
-              <table class="at-rel-ger-tbl"><thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Data</th><th class="r">Valor</th></tr></thead><tbody id="vendRelGerFinanceiroBody"></tbody></table>
+          ${notaCmp}
+          <div class="${cmp ? 'at-rel-ger-grid-2' : ''}">
+            <div class="at-rel-ger-card">
+              <h4 id="vendRelGerFinTituloA">Top Pedidos por Valor</h4>
+              <div style="overflow:auto;max-height:360px;">
+                <table class="at-rel-ger-tbl"><thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Data</th><th class="r">Valor</th></tr></thead><tbody id="vendRelGerFinanceiroBody"></tbody></table>
+              </div>
+            </div>
+            <div class="at-rel-ger-card" id="vendRelGerFinCardB" style="${cmp ? '' : 'display:none;'}">
+              <h4 id="vendRelGerFinTituloB">Top Pedidos — Mês 2</h4>
+              <div style="overflow:auto;max-height:360px;">
+                <table class="at-rel-ger-tbl"><thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Data</th><th class="r">Valor</th></tr></thead><tbody id="vendRelGerFinanceiroBodyB"></tbody></table>
+              </div>
             </div>
           </div>
         </div>
@@ -268,6 +372,7 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-layer-group"></i> Análise de Itens</div>
         <div class="at-rel-ger-body">
+          ${notaCmp}
           <p id="vendRelGerItensInfo" style="font-size:12px;color:#64748b;margin:0 0 12px;"></p>
           <div class="at-rel-ger-card">
             <h4 id="vendRelGerItensChartTitle">Itens por mês de NF e família</h4>
@@ -281,6 +386,8 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-list-check"></i> Plano de Ação</div>
         <div class="at-rel-ger-body">
+          <div id="vendRelGerCmpResumoPlano" class="vend-rel-cmp-resumo" style="${cmp ? '' : 'display:none;'}"></div>
+          ${cmp ? `<p class="vend-rel-cmp-nota">O plano de ação fica gravado no Mês 1 (${l1}).</p>` : ''}
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
             <button type="button" id="vendRelGerPlanoAdd" class="at-rel-ger-btn"><i class="fa-solid fa-plus"></i> Adicionar ação</button>
             <button type="button" id="vendRelGerPlanoSalvar" class="at-rel-ger-btn primary"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
@@ -294,6 +401,8 @@
         ${hdr()}
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-flag-checkered"></i> Conclusão Executiva</div>
         <div class="at-rel-ger-body">
+          <div id="vendRelGerCmpResumoConc" class="vend-rel-cmp-resumo" style="${cmp ? '' : 'display:none;'}"></div>
+          ${cmp ? `<p class="vend-rel-cmp-nota">A conclusão fica gravada no Mês 1 (${l1}).</p>` : ''}
           <div style="display:flex;gap:8px;margin-bottom:10px;"><button type="button" id="vendRelGerConcSalvar" class="at-rel-ger-btn primary"><i class="fa-solid fa-floppy-disk"></i> Salvar</button><span id="vendRelGerConcStatus" style="font-size:12px;color:#64748b;align-self:center;"></span></div>
           <label style="font-size:12px;font-weight:700;color:#1e3a5f;">Resumo executivo</label>
           <textarea id="vendRelGerConcResumo" rows="4" style="width:100%;margin:6px 0 12px;padding:10px;border:1px solid #e2e8f0;border-radius:8px;font-size:13px;"></textarea>
@@ -321,22 +430,40 @@
     if (_data && !_chartsRendered.has(sec)) _renderChartsSecao(sec, _data);
   }
 
-  function _renderKpis(kpis) {
+  function _renderKpis(kpis, kpisB) {
     const wrap = document.getElementById('vendRelGerKpis');
     if (!wrap) return;
+    const cmp = !!(kpisB && _comparacao);
+    const l1 = _comparacao?.label1 || 'Mês 1';
+    const l2 = _comparacao?.label2 || 'Mês 2';
     const cards = [
-      { label: 'Pedidos', value: kpis.total_pedidos, cor: '#1e3a5f', kpi: 'pedidos' },
-      { label: 'Faturamento', value: MOEDA.format(kpis.valor_total || 0), cor: '#38bdf8', kpi: 'faturamento' },
-      { label: 'Ticket médio', value: MOEDA.format(kpis.ticket_medio || 0), cor: '#10b981' },
-      { label: 'Clientes', value: kpis.clientes, cor: '#f59e0b' },
-      { label: 'Estados', value: kpis.estados_atendidos, cor: '#8b5cf6' },
-      { label: 'Qtd. itens', value: QTD.format(kpis.quantidade_itens || 0), cor: '#06b6d4' },
+      { label: 'Pedidos', key: 'total_pedidos', money: false, cor: '#1e3a5f', kpi: 'pedidos' },
+      { label: 'Faturamento', key: 'valor_total', money: true, cor: '#38bdf8', kpi: 'faturamento' },
+      { label: 'Ticket médio', key: 'ticket_medio', money: true, cor: '#10b981' },
+      { label: 'Clientes', key: 'clientes', money: false, cor: '#f59e0b' },
+      { label: 'Estados', key: 'estados_atendidos', money: false, cor: '#8b5cf6' },
+      { label: 'Qtd. itens', key: 'quantidade_itens', money: false, cor: '#06b6d4' },
     ];
-    wrap.innerHTML = cards.map(c => {
+    wrap.classList.toggle('vend-rel-kpis-cmp', cmp);
+    wrap.innerHTML = cards.map((c) => {
       const extra = c.kpi
-        ? ` data-kpi="${c.kpi}" class="at-rel-ger-kpi is-clickable" title="Clique para ver a lista"`
-        : ' class="at-rel-ger-kpi"';
-      return `<div${extra} style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`;
+        ? ` data-kpi="${c.kpi}" class="at-rel-ger-kpi is-clickable${cmp ? ' vend-rel-kpi-cmp' : ''}" title="Clique para ver a lista"`
+        : ` class="at-rel-ger-kpi${cmp ? ' vend-rel-kpi-cmp' : ''}"`;
+      const v1 = Number(kpis?.[c.key]) || 0;
+      if (!cmp) {
+        const shown = c.money ? MOEDA.format(v1) : (c.key === 'quantidade_itens' ? QTD.format(v1) : v1);
+        return `<div${extra} style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${shown}</div></div>`;
+      }
+      const v2 = Number(kpisB?.[c.key]) || 0;
+      const fmt = (n) => (c.money ? MOEDA.format(n) : QTD.format(n));
+      return `<div${extra} style="--kpi-cor:${c.cor}">
+        <div class="lbl">${c.label}</div>
+        <div class="vend-rel-kpi-duo">
+          <div><small>${_esc(l1)}</small><div class="val">${fmt(v1)}</div></div>
+          <div><small>${_esc(l2)}</small><div class="val">${fmt(v2)}</div></div>
+        </div>
+        ${_deltaHtml(v1, v2, c.money)}
+      </div>`;
     }).join('');
     wrap.querySelectorAll('[data-kpi]').forEach((el) => {
       el.addEventListener('click', () => _abrirModalRegistros(el.getAttribute('data-kpi')));
@@ -361,6 +488,29 @@
       type: 'bar',
       data: { labels, datasets: [{ data: values, backgroundColor: `${cor || CORES[0]}cc`, borderColor: cor || CORES[0], borderWidth: 1, borderRadius: 4 }] },
       options: labels.length > 6 ? _chartOptsBarH() : _chartOptsBarV(),
+    });
+  }
+
+  function _renderBarCmp(canvasId, key, labels, valuesA, valuesB) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return;
+    _destroyChart(key);
+    const l1 = _comparacao?.label1 || 'Mês 1';
+    const l2 = _comparacao?.label2 || 'Mês 2';
+    const base = labels.length > 6 ? _chartOptsBarH() : _chartOptsBarV();
+    _charts[key] = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels,
+        datasets: [
+          { label: l1, data: valuesA, backgroundColor: `${COR_MES1}cc`, borderColor: COR_MES1, borderWidth: 1, borderRadius: 4 },
+          { label: l2, data: valuesB, backgroundColor: `${COR_MES2}cc`, borderColor: COR_MES2, borderWidth: 1, borderRadius: 4 },
+        ],
+      },
+      options: {
+        ...base,
+        plugins: { ...base.plugins, legend: { display: true, position: 'bottom', labels: { font: { size: 10 } } } },
+      },
     });
   }
 
@@ -412,133 +562,263 @@
 
   function _renderChartsSecao(sec, data) {
     if (_chartsRendered.has(sec)) return;
+    const dataB = _emComparacao() ? _dataB : null;
     const est = (data.por_estado || []).slice(0, 12);
     const fam = (data.por_familia || []).slice(0, 10);
     const cli = (data.por_cliente || []).slice(0, 10);
     const etapas = data.por_etapa || [];
 
     if (sec === 'executivo') {
-      _renderBar('vendRelGerChartEtapa', 'etapa', etapas.map(r => r.etapa_descricao), etapas.map(r => r.total), '#38bdf8');
-      _renderBar('vendRelGerChartValorEstado', 'valorEstado', est.slice(0, 8).map(r => r.estado), est.slice(0, 8).map(r => r.valor_total), '#1e3a5f');
+      if (dataB) {
+        const et = _topMerge(etapas, dataB.por_etapa || [], 'etapa_descricao', 'total', 12);
+        _renderBarCmp('vendRelGerChartEtapa', 'etapa', et.map((r) => r.key), et.map((r) => r.a.total || 0), et.map((r) => r.b.total || 0));
+        const es = _topMerge(data.por_estado || [], dataB.por_estado || [], 'estado', 'valor_total', 8);
+        _renderBarCmp('vendRelGerChartValorEstado', 'valorEstado', es.map((r) => r.key), es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
+      } else {
+        _renderBar('vendRelGerChartEtapa', 'etapa', etapas.map(r => r.etapa_descricao), etapas.map(r => r.total), '#38bdf8');
+        _renderBar('vendRelGerChartValorEstado', 'valorEstado', est.slice(0, 8).map(r => r.estado), est.slice(0, 8).map(r => r.valor_total), '#1e3a5f');
+      }
     }
     if (sec === 'geografico') {
-      _renderBar('vendRelGerChartEstado', 'estado', est.map(r => r.estado), est.map(r => r.valor_total), '#1e3a5f');
-      _renderDonut('vendRelGerChartEstadoDonut', 'estadoDonut', est.map(r => r.estado), est.map(r => r.valor_total));
+      const donutTitulo = document.getElementById('vendRelGerGeoDonutTitulo');
+      if (dataB) {
+        const es = _topMerge(data.por_estado || [], dataB.por_estado || [], 'estado', 'valor_total', 12);
+        const labs = es.map((r) => r.key);
+        _renderBarCmp('vendRelGerChartEstado', 'estado', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartEstadoDonut', 'estadoDonut', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
+        if (donutTitulo) donutTitulo.textContent = 'Comparativo por Estado';
+      } else {
+        _renderBar('vendRelGerChartEstado', 'estado', est.map(r => r.estado), est.map(r => r.valor_total), '#1e3a5f');
+        _renderDonut('vendRelGerChartEstadoDonut', 'estadoDonut', est.map(r => r.estado), est.map(r => r.valor_total));
+        if (donutTitulo) donutTitulo.textContent = 'Participação por Estado (%)';
+      }
     }
     if (sec === 'familias') {
-      _renderBar('vendRelGerChartFamilia', 'familia', fam.map(r => r.familia), fam.map(r => r.valor_total), '#10b981');
+      if (dataB) {
+        const rows = _topMerge(data.por_familia || [], dataB.por_familia || [], 'familia', 'valor_total', 10);
+        _renderBarCmp('vendRelGerChartFamilia', 'familia', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+      } else {
+        _renderBar('vendRelGerChartFamilia', 'familia', fam.map(r => r.familia), fam.map(r => r.valor_total), '#10b981');
+      }
     }
     if (sec === 'clientes') {
-      _renderBar('vendRelGerChartCliente', 'cliente', cli.map(r => r.cliente), cli.map(r => r.valor_total), '#f59e0b');
+      if (dataB) {
+        const rows = _topMerge(data.por_cliente || [], dataB.por_cliente || [], 'cliente', 'valor_total', 10);
+        _renderBarCmp('vendRelGerChartCliente', 'cliente', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+      } else {
+        _renderBar('vendRelGerChartCliente', 'cliente', cli.map(r => r.cliente), cli.map(r => r.valor_total), '#f59e0b');
+      }
     }
     if (sec === 'vendedores') {
-      const vend = (data.por_vendedor || []).slice(0, 12);
-      _renderBar('vendRelGerChartVendedor', 'vendedor', vend.map(r => r.vendedor), vend.map(r => r.valor_total), '#6366f1');
+      if (dataB) {
+        const rows = _topMerge(data.por_vendedor || [], dataB.por_vendedor || [], 'vendedor', 'valor_total', 12);
+        _renderBarCmp('vendRelGerChartVendedor', 'vendedor', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+      } else {
+        const vend = (data.por_vendedor || []).slice(0, 12);
+        _renderBar('vendRelGerChartVendedor', 'vendedor', vend.map(r => r.vendedor), vend.map(r => r.valor_total), '#6366f1');
+      }
     }
     if (sec === 'evolucao') {
-      const multi = data.evolucao_tipo === 'mes';
+      const multi = data.evolucao_tipo === 'mes' || dataB?.evolucao_tipo === 'mes';
       const titulo = document.getElementById('vendRelGerEvolTitulo');
       if (titulo) titulo.textContent = multi ? 'Faturamento mensal' : 'Faturamento semanal';
-      const rows = multi ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
-      const labels = multi ? rows.map(r => r.label) : rows.map(r => r.semana);
-      _renderBar('vendRelGerChartEvol', 'evol', labels, rows.map(r => r.valor_total), '#38bdf8');
-      _renderBar('vendRelGerChartEvolPedidos', 'evolPed', labels, rows.map(r => r.total_pedidos), '#8b5cf6');
+      const rowsA = multi ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
+      if (dataB) {
+        const rowsB = multi ? (dataB.evolucao_mensal || []) : (dataB.evolucao_semanal || []);
+        const chave = multi ? 'label' : 'semana';
+        const merged = _mergePorChave(rowsA, rowsB, chave);
+        merged.sort((x, y) => String(x.key).localeCompare(String(y.key), 'pt-BR', { numeric: true }));
+        const labels = merged.map((r) => r.key);
+        _renderBarCmp('vendRelGerChartEvol', 'evol', labels, merged.map((r) => r.a.valor_total || 0), merged.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartEvolPedidos', 'evolPed', labels, merged.map((r) => r.a.total_pedidos || 0), merged.map((r) => r.b.total_pedidos || 0));
+      } else {
+        const labels = multi ? rowsA.map(r => r.label) : rowsA.map(r => r.semana);
+        _renderBar('vendRelGerChartEvol', 'evol', labels, rowsA.map(r => r.valor_total), '#38bdf8');
+        _renderBar('vendRelGerChartEvolPedidos', 'evolPed', labels, rowsA.map(r => r.total_pedidos), '#8b5cf6');
+      }
     }
     if (sec === 'pareto') {
-      const pareto = data.pareto || [];
       const canvas = document.getElementById('vendRelGerChartPareto');
       if (canvas && typeof Chart !== 'undefined') {
         _destroyChart('pareto');
-        const stacked = _dadosParetoStacked(data);
-        _charts.pareto = new Chart(canvas.getContext('2d'), {
-          type: 'bar',
-          data: { labels: stacked.labels, datasets: stacked.datasets },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
-            scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
-          },
-        });
+        if (dataB) {
+          const rows = _topMerge(data.pareto || [], dataB.pareto || [], 'familia', 'valor_total', 10);
+          _renderBarCmp('vendRelGerChartPareto', 'pareto', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+        } else {
+          const stacked = _dadosParetoStacked(data);
+          _charts.pareto = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: { labels: stacked.labels, datasets: stacked.datasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+              scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
+            },
+          });
+        }
       }
     }
     if (sec === 'itens') {
       const rows = data.analise_itens?.por_mes_familia || [];
-      const stacked = _buildItensStacked(rows);
       const canvas = document.getElementById('vendRelGerChartItens');
-      if (canvas && typeof Chart !== 'undefined') {
-        _destroyChart('itens');
-        _charts.itens = new Chart(canvas.getContext('2d'), {
-          type: 'bar',
-          data: { labels: stacked.labels, datasets: stacked.datasets },
-          options: {
-            responsive: true, maintainAspectRatio: false,
-            plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
-            scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } },
-          },
-        });
-      }
-      const janela = data.analise_itens?.janela || {};
       const info = document.getElementById('vendRelGerItensInfo');
       const resumo = document.getElementById('vendRelGerItensResumo');
-      if (info) info.textContent = `Pedidos no período ${data.periodo || '—'} · ${janela.total_itens || 0} item(ns) com NF no gráfico por mês de emissão`;
-      if (resumo) {
-        const totalQtd = rows.reduce((s, r) => s + (r.quantidade || 0), 0);
-        resumo.innerHTML = `<strong>${totalQtd}</strong> unidade(s) em <strong>${stacked.mesesOrd.length}</strong> mês(es) de NF e <strong>${stacked.topFam.length}</strong> família(s) no gráfico.`;
+      const tituloItens = document.getElementById('vendRelGerItensChartTitle');
+      if (dataB) {
+        const famA = data.por_familia || [];
+        const famB = dataB.por_familia || [];
+        const merged = _topMerge(famA, famB, 'familia', 'quantidade', 10);
+        _renderBarCmp('vendRelGerChartItens', 'itens', merged.map((r) => r.key), merged.map((r) => r.a.quantidade || 0), merged.map((r) => r.b.quantidade || 0));
+        if (tituloItens) tituloItens.textContent = 'Quantidade de itens por família';
+        const q1 = Number(data.kpis?.quantidade_itens) || 0;
+        const q2 = Number(dataB.kpis?.quantidade_itens) || 0;
+        if (info) info.textContent = `${_comparacao.label1}: ${QTD.format(q1)} item(ns)  ·  ${_comparacao.label2}: ${QTD.format(q2)} item(ns)`;
+        if (resumo) resumo.innerHTML = `Variação de itens: ${_deltaHtml(q1, q2, false)}`;
+      } else {
+        const stacked = _buildItensStacked(rows);
+        if (canvas && typeof Chart !== 'undefined') {
+          _destroyChart('itens');
+          _charts.itens = new Chart(canvas.getContext('2d'), {
+            type: 'bar',
+            data: { labels: stacked.labels, datasets: stacked.datasets },
+            options: {
+              responsive: true, maintainAspectRatio: false,
+              plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
+              scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } },
+            },
+          });
+        }
+        if (tituloItens) tituloItens.textContent = 'Itens por mês de NF e família';
+        const janela = data.analise_itens?.janela || {};
+        if (info) info.textContent = `Pedidos no período ${data.periodo || '—'} · ${janela.total_itens || 0} item(ns) com NF no gráfico por mês de emissão`;
+        if (resumo) {
+          const totalQtd = rows.reduce((s, r) => s + (r.quantidade || 0), 0);
+          resumo.innerHTML = `<strong>${totalQtd}</strong> unidade(s) em <strong>${stacked.mesesOrd.length}</strong> mês(es) de NF e <strong>${stacked.topFam.length}</strong> família(s) no gráfico.`;
+        }
       }
     }
     _chartsRendered.add(sec);
   }
 
+  function _linhasFinanceiro(rows) {
+    if (!rows?.length) return '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhum pedido no período.</td></tr>';
+    return rows.map(r => `<tr><td>${_esc(r.numero_pedido || r.codigo_pedido)}</td><td>${_esc(r.cliente)}</td><td>${_esc(r.estado)}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('');
+  }
+
+  function _htmlResumoComparacao() {
+    if (!_emComparacao()) return '';
+    const a = _data?.kpis || {};
+    const b = _dataB?.kpis || {};
+    const l1 = _esc(_comparacao.label1);
+    const l2 = _esc(_comparacao.label2);
+    const linhas = [
+      ['Pedidos', a.total_pedidos, b.total_pedidos, false],
+      ['Faturamento', a.valor_total, b.valor_total, true],
+      ['Ticket médio', a.ticket_medio, b.ticket_medio, true],
+      ['Clientes', a.clientes, b.clientes, false],
+    ];
+    return `<table class="at-rel-ger-tbl"><thead><tr><th>Indicador</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th></tr></thead><tbody>${
+      linhas.map(([lab, v1, v2, money]) => `<tr><td>${lab}</td><td class="r">${money ? MOEDA.format(v1 || 0) : QTD.format(v1 || 0)}</td><td class="r">${money ? MOEDA.format(v2 || 0) : QTD.format(v2 || 0)}</td><td class="r">${_deltaHtml(v1, v2, money)}</td></tr>`).join('')
+    }</tbody></table>`;
+  }
+
   function _renderTabelas(data) {
+    const dataB = _emComparacao() ? _dataB : null;
     const famBody = document.getElementById('vendRelGerFamiliaBody');
     if (famBody) {
-      const rows = data.por_familia || [];
-      famBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.familia)}</td><td class="r">${QTD.format(r.quantidade || 0)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
-        : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhuma família no período.</td></tr>';
+      if (dataB) {
+        const rows = _topMerge(data.por_familia || [], dataB.por_familia || [], 'familia', 'valor_total', 20);
+        famBody.innerHTML = rows.length
+          ? rows.map((r) => `<tr><td>${_esc(r.key)}</td><td class="r">${MOEDA.format(r.a.valor_total || 0)}</td><td class="r">${MOEDA.format(r.b.valor_total || 0)}</td><td class="r">${_deltaHtml(r.a.valor_total, r.b.valor_total, true)}</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhuma família no período.</td></tr>';
+      } else {
+        const rows = data.por_familia || [];
+        famBody.innerHTML = rows.length
+          ? rows.map(r => `<tr><td>${_esc(r.familia)}</td><td class="r">${QTD.format(r.quantidade || 0)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
+          : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhuma família no período.</td></tr>';
+      }
     }
     const cliBody = document.getElementById('vendRelGerClienteBody');
     if (cliBody) {
-      const rows = data.por_cliente || [];
-      cliBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.cliente)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
-        : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhum cliente no período.</td></tr>';
+      if (dataB) {
+        const rows = _topMerge(data.por_cliente || [], dataB.por_cliente || [], 'cliente', 'valor_total', 20);
+        cliBody.innerHTML = rows.length
+          ? rows.map((r) => `<tr><td>${_esc(r.key)}</td><td class="r">${MOEDA.format(r.a.valor_total || 0)}</td><td class="r">${MOEDA.format(r.b.valor_total || 0)}</td><td class="r">${_deltaHtml(r.a.valor_total, r.b.valor_total, true)}</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhum cliente no período.</td></tr>';
+      } else {
+        const rows = data.por_cliente || [];
+        cliBody.innerHTML = rows.length
+          ? rows.map(r => `<tr><td>${_esc(r.cliente)}</td><td class="r">${r.total}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
+          : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhum cliente no período.</td></tr>';
+      }
     }
     const vendBody = document.getElementById('vendRelGerVendedorBody');
     if (vendBody) {
-      const rows = data.por_vendedor || [];
-      vendBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.vendedor)}</td><td class="r">${r.total_pedidos}</td><td class="r">${r.clientes}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${MOEDA.format(r.ticket_medio || 0)}</td></tr>`).join('')
-        : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhum vendedor no período.</td></tr>';
+      if (dataB) {
+        const rows = _topMerge(data.por_vendedor || [], dataB.por_vendedor || [], 'vendedor', 'valor_total', 30);
+        vendBody.innerHTML = rows.length
+          ? rows.map((r) => `<tr><td>${_esc(r.key)}</td><td class="r">${MOEDA.format(r.a.valor_total || 0)}</td><td class="r">${MOEDA.format(r.b.valor_total || 0)}</td><td class="r">${_deltaHtml(r.a.valor_total, r.b.valor_total, true)}</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhum vendedor no período.</td></tr>';
+      } else {
+        const rows = data.por_vendedor || [];
+        vendBody.innerHTML = rows.length
+          ? rows.map(r => `<tr><td>${_esc(r.vendedor)}</td><td class="r">${r.total_pedidos}</td><td class="r">${r.clientes}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${MOEDA.format(r.ticket_medio || 0)}</td></tr>`).join('')
+          : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhum vendedor no período.</td></tr>';
+      }
     }
     const vendKpis = document.getElementById('vendRelGerKpisVendedor');
     if (vendKpis) {
       const rows = data.por_vendedor || [];
+      const rowsB = dataB?.por_vendedor || [];
       const totalV = rows.length;
       const fatV = rows.reduce((s, r) => s + (r.valor_total || 0), 0);
       const top = rows[0];
-      const cards = [
-        { label: 'Vendedores ativos', value: totalV, cor: '#6366f1' },
-        { label: 'Faturamento (vendedores)', value: MOEDA.format(fatV), cor: '#38bdf8' },
-        { label: 'Top vendedor', value: top ? _esc(top.vendedor) : '—', cor: '#10b981' },
-        { label: 'Valor top', value: top ? MOEDA.format(top.valor_total || 0) : '—', cor: '#f59e0b' },
-      ];
-      vendKpis.innerHTML = cards.map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      if (dataB) {
+        const fatB = rowsB.reduce((s, r) => s + (r.valor_total || 0), 0);
+        const l1 = _esc(_comparacao.label1);
+        const l2 = _esc(_comparacao.label2);
+        vendKpis.innerHTML = [
+          { label: 'Vendedores', html: `<div class="vend-rel-kpi-duo"><div><small>${l1}</small><div class="val">${totalV}</div></div><div><small>${l2}</small><div class="val">${rowsB.length}</div></div></div>${_deltaHtml(totalV, rowsB.length, false)}`, cor: '#6366f1' },
+          { label: 'Faturamento', html: `<div class="vend-rel-kpi-duo"><div><small>${l1}</small><div class="val">${MOEDA.format(fatV)}</div></div><div><small>${l2}</small><div class="val">${MOEDA.format(fatB)}</div></div></div>${_deltaHtml(fatV, fatB, true)}`, cor: '#38bdf8' },
+        ].map((c) => `<div class="at-rel-ger-kpi vend-rel-kpi-cmp" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div>${c.html}</div>`).join('');
+      } else {
+        const cards = [
+          { label: 'Vendedores ativos', value: totalV, cor: '#6366f1' },
+          { label: 'Faturamento (vendedores)', value: MOEDA.format(fatV), cor: '#38bdf8' },
+          { label: 'Top vendedor', value: top ? _esc(top.vendedor) : '—', cor: '#10b981' },
+          { label: 'Valor top', value: top ? MOEDA.format(top.valor_total || 0) : '—', cor: '#f59e0b' },
+        ];
+        vendKpis.innerHTML = cards.map(c => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      }
     }
     const parBody = document.getElementById('vendRelGerParetoBody');
     if (parBody) {
-      const rows = data.pareto || [];
-      parBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.familia)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`).join('')
-        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Sem dados.</td></tr>';
+      if (dataB) {
+        const rows = _topMerge(data.pareto || [], dataB.pareto || [], 'familia', 'valor_total', 20);
+        parBody.innerHTML = rows.length
+          ? rows.map((r) => `<tr><td>${_esc(r.key)}</td><td class="r">${MOEDA.format(r.a.valor_total || 0)}</td><td class="r">${MOEDA.format(r.b.valor_total || 0)}</td><td class="r">${_deltaHtml(r.a.valor_total, r.b.valor_total, true)}</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Sem dados.</td></tr>';
+      } else {
+        const rows = data.pareto || [];
+        parBody.innerHTML = rows.length
+          ? rows.map(r => `<tr><td>${_esc(r.familia)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td><td class="r">${r.pct}%</td><td class="r">${r.pct_acum}%</td></tr>`).join('')
+          : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Sem dados.</td></tr>';
+      }
     }
     const finBody = document.getElementById('vendRelGerFinanceiroBody');
-    if (finBody) {
-      const rows = data.financeiro || [];
-      finBody.innerHTML = rows.length
-        ? rows.map(r => `<tr><td>${_esc(r.numero_pedido || r.codigo_pedido)}</td><td>${_esc(r.cliente)}</td><td>${_esc(r.estado)}</td><td>${_fmtData(r.data)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`).join('')
-        : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Nenhum pedido no período.</td></tr>';
-    }
+    if (finBody) finBody.innerHTML = _linhasFinanceiro(data.financeiro || []);
+    const finBodyB = document.getElementById('vendRelGerFinanceiroBodyB');
+    if (finBodyB) finBodyB.innerHTML = _linhasFinanceiro(dataB?.financeiro || []);
+    const titA = document.getElementById('vendRelGerFinTituloA');
+    const titB = document.getElementById('vendRelGerFinTituloB');
+    if (titA) titA.textContent = dataB ? `Top Pedidos — ${_comparacao.label1}` : 'Top Pedidos por Valor';
+    if (titB) titB.textContent = dataB ? `Top Pedidos — ${_comparacao.label2}` : 'Top Pedidos — Mês 2';
+
+    const resumoHtml = _htmlResumoComparacao();
+    ['vendRelGerCmpResumoPlano', 'vendRelGerCmpResumoConc'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.innerHTML = resumoHtml;
+    });
   }
 
   function _renderPlanoTabela() {
@@ -623,6 +903,16 @@
     }
   }
 
+  async function _fetchRelatorio(qs, signal) {
+    const resp = await fetch(`/api/sac/vendas/relatorio-gerencial?${qs}`, {
+      credentials: 'include',
+      signal,
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
+    return data;
+  }
+
   async function _carregar() {
     const statusEl = document.getElementById('vendRelGerStatus');
     const erroEl = document.getElementById('vendRelGerErro');
@@ -648,19 +938,26 @@
     if (aplicarBtn) aplicarBtn.disabled = true;
 
     try {
-      const qs = _filtrosQueryParams();
-      const resp = await fetch(`/api/sac/vendas/relatorio-gerencial?${qs}`, {
-        credentials: 'include',
-        signal: _carregarAbort.signal,
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.ok === false) throw new Error(data.error || 'Erro ao carregar relatório.');
+      const signal = _carregarAbort.signal;
+      let data;
+      if (_comparacao) {
+        const [dataA, dataB] = await Promise.all([
+          _fetchRelatorio(_filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 }), signal),
+          _fetchRelatorio(_filtrosQueryParams({ mes: _comparacao.mes2, ano: _comparacao.ano2 }), signal),
+        ]);
+        data = dataA;
+        _dataB = dataB;
+      } else {
+        data = await _fetchRelatorio(_filtrosQueryParams(), signal);
+        _dataB = null;
+      }
 
       _destroyAllCharts();
       _data = data;
       _textos = _resolverTextos(data);
+      _atualizarBotaoComparar();
       _montarPaginas();
-      _renderKpis(data.kpis || {});
+      _renderKpis(data.kpis || {}, _dataB?.kpis);
       _renderTabelas(data);
       _renderTextos();
       _renderChartsSecao(_secao, data);
@@ -794,6 +1091,30 @@
         width: 14px !important; height: 14px !important; min-width: 14px !important;
         margin-top: 2px !important; flex: 0 0 14px !important; accent-color: #0ea5e9; cursor: pointer;
       }
+      #vendRelGerCompararBtn.is-on {
+        border-color: #f59e0b !important;
+        background: rgba(245,158,11,.28) !important;
+        color: #fde68a !important;
+      }
+      .vend-rel-cmp-nota {
+        font-size: 12px; color: #475569; margin: 0 0 12px; padding: 8px 10px;
+        background: #fff7ed; border: 1px solid #fed7aa; border-radius: 8px;
+      }
+      .vend-rel-delta { font-size: 11px; font-weight: 700; }
+      .vend-rel-delta.up { color: #15803d; }
+      .vend-rel-delta.down { color: #b91c1c; }
+      .vend-rel-delta.flat { color: #64748b; }
+      .vend-rel-kpi-duo { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 4px 0; }
+      .vend-rel-kpi-duo small { display: block; font-size: 9px; color: #64748b; font-weight: 700; text-transform: uppercase; }
+      .at-rel-ger-kpi.vend-rel-kpi-cmp .val { font-size: 14px; }
+      .vend-rel-cmp-resumo { margin-bottom: 12px; }
+      .vend-rel-cmp-field { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 150px; }
+      .vend-rel-cmp-field label { font-size: 11px; font-weight: 700; color: #94a3b8; }
+      .vend-rel-cmp-field select {
+        padding: 8px 10px; border-radius: 8px; border: 1px solid #374151;
+        background: #111827; color: #e5e7eb; font-size: 13px;
+      }
+      #vendRelGerCmpErro { font-size: 12px; color: #f87171; min-height: 16px; margin-top: 8px; }
     `;
     document.head.appendChild(st);
   }
@@ -942,6 +1263,167 @@
     btn.style.cssText = 'padding:6px 14px;border-radius:8px;border:1px solid #64748b;background:rgba(100,116,139,.15);color:#cbd5e1;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;';
     btn.innerHTML = '<i class="fa-solid fa-filter"></i> Filtro';
     cfg.parentElement.insertBefore(btn, cfg);
+  }
+
+  function _injetarBotaoComparar() {
+    if (document.getElementById('vendRelGerCompararBtn')) return;
+    const cfg = document.getElementById('vendRelGerConfigBtn');
+    if (!cfg?.parentElement) return;
+    const btn = document.createElement('button');
+    btn.id = 'vendRelGerCompararBtn';
+    btn.type = 'button';
+    btn.title = 'Comparar dois meses';
+    btn.style.cssText = 'padding:6px 14px;border-radius:8px;border:1px solid #f59e0b;background:rgba(245,158,11,.15);color:#fcd34d;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;';
+    btn.innerHTML = '<i class="fa-solid fa-arrow-right-arrow-left"></i> Comparar';
+    cfg.parentElement.insertBefore(btn, cfg);
+  }
+
+  function _atualizarBotaoComparar() {
+    const btn = document.getElementById('vendRelGerCompararBtn');
+    if (!btn) return;
+    const on = !!_comparacao;
+    btn.classList.toggle('is-on', on);
+    btn.innerHTML = on
+      ? '<i class="fa-solid fa-arrow-right-arrow-left"></i> Comparando'
+      : '<i class="fa-solid fa-arrow-right-arrow-left"></i> Comparar';
+    btn.title = on ? `${_comparacao.label1} × ${_comparacao.label2}` : 'Comparar dois meses';
+  }
+
+  function _anosDisponiveis() {
+    const el = document.getElementById('vendRelGerAno');
+    const yNow = new Date().getFullYear();
+    const fromSel = el ? [...el.options].map((o) => Number(o.value)).filter((n) => n >= 2000) : [];
+    const set = new Set(fromSel.length ? fromSel : [yNow, yNow - 1]);
+    set.add(yNow);
+    return [...set].sort((a, b) => b - a);
+  }
+
+  function _preencherSelectsComparar() {
+    const now = new Date();
+    const mesAtual = Number.parseInt(document.getElementById('vendRelGerMes')?.value, 10) || (now.getMonth() + 1);
+    const anoAtual = Number.parseInt(document.getElementById('vendRelGerAno')?.value, 10) || now.getFullYear();
+    let mes1 = _comparacao?.mes1 || mesAtual;
+    let ano1 = _comparacao?.ano1 || anoAtual;
+    let mes2 = _comparacao?.mes2;
+    let ano2 = _comparacao?.ano2;
+    if (!mes2 || !ano2) {
+      mes2 = mes1 - 1;
+      ano2 = ano1;
+      if (mes2 < 1) { mes2 = 12; ano2 -= 1; }
+    }
+    const anos = _anosDisponiveis();
+    if (!anos.includes(ano1)) anos.push(ano1);
+    if (!anos.includes(ano2)) anos.push(ano2);
+    anos.sort((a, b) => b - a);
+    const anosHtml = anos.map((y) => `<option value="${y}">${y}</option>`).join('');
+    const elM1 = document.getElementById('vendRelGerCmpMes1');
+    const elA1 = document.getElementById('vendRelGerCmpAno1');
+    const elM2 = document.getElementById('vendRelGerCmpMes2');
+    const elA2 = document.getElementById('vendRelGerCmpAno2');
+    if (elM1) elM1.innerHTML = _opcoesMesHtml(mes1);
+    if (elM2) elM2.innerHTML = _opcoesMesHtml(mes2);
+    if (elA1) { elA1.innerHTML = anosHtml; elA1.value = String(ano1); }
+    if (elA2) { elA2.innerHTML = anosHtml; elA2.value = String(ano2); }
+    const sair = document.getElementById('vendRelGerCmpSair');
+    if (sair) sair.style.display = _comparacao ? 'inline-flex' : 'none';
+    const err = document.getElementById('vendRelGerCmpErro');
+    if (err) err.textContent = '';
+  }
+
+  function _abrirModalComparar() {
+    _preencherSelectsComparar();
+    const el = document.getElementById('vendRelGerCmpModal');
+    if (el) el.style.display = 'flex';
+  }
+
+  function _fecharModalComparar() {
+    const el = document.getElementById('vendRelGerCmpModal');
+    if (el) el.style.display = 'none';
+  }
+
+  function _aplicarComparacao() {
+    const mes1 = Number.parseInt(document.getElementById('vendRelGerCmpMes1')?.value, 10);
+    const ano1 = Number.parseInt(document.getElementById('vendRelGerCmpAno1')?.value, 10);
+    const mes2 = Number.parseInt(document.getElementById('vendRelGerCmpMes2')?.value, 10);
+    const ano2 = Number.parseInt(document.getElementById('vendRelGerCmpAno2')?.value, 10);
+    const err = document.getElementById('vendRelGerCmpErro');
+    if (![mes1, ano1, mes2, ano2].every((n) => Number.isFinite(n))) {
+      if (err) err.textContent = 'Escolha os dois meses.';
+      return;
+    }
+    if (mes1 === mes2 && ano1 === ano2) {
+      if (err) err.textContent = 'Escolha dois meses diferentes.';
+      return;
+    }
+    _comparacao = {
+      mes1, ano1, mes2, ano2,
+      label1: _labelMesAno(mes1, ano1),
+      label2: _labelMesAno(mes2, ano2),
+    };
+    _fecharModalComparar();
+    _atualizarBotaoComparar();
+    _carregar();
+  }
+
+  function _sairComparacao() {
+    _comparacao = null;
+    _dataB = null;
+    _fecharModalComparar();
+    _atualizarBotaoComparar();
+    _carregar();
+  }
+
+  function _injetarModalComparar() {
+    if (document.getElementById('vendRelGerCmpModal')) return;
+    const wrap = document.createElement('div');
+    wrap.innerHTML = `
+      <div id="vendRelGerCmpModal" class="modal-overlay" style="display:none;z-index:10070;" role="dialog" aria-modal="true">
+        <div class="modal-content" style="max-width:440px;width:92%;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:0;overflow:hidden;">
+          <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #1e293b;">
+            <div style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+              <i class="fa-solid fa-arrow-right-arrow-left" style="color:#f59e0b;"></i> Comparar meses
+            </div>
+            <button type="button" id="vendRelGerCmpFechar" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;" title="Fechar">&times;</button>
+          </div>
+          <div style="padding:16px;">
+            <p style="margin:0 0 14px;font-size:13px;color:#94a3b8;line-height:1.45;">
+              Escolha o Mês 1 e o Mês 2. O relatório mostra os dois lados a lado em todas as páginas.
+            </p>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+              <div class="vend-rel-cmp-field">
+                <label>Mês 1</label>
+                <select id="vendRelGerCmpMes1"></select>
+                <select id="vendRelGerCmpAno1"></select>
+              </div>
+              <div class="vend-rel-cmp-field">
+                <label>Mês 2</label>
+                <select id="vendRelGerCmpMes2"></select>
+                <select id="vendRelGerCmpAno2"></select>
+              </div>
+            </div>
+            <div id="vendRelGerCmpErro"></div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;justify-content:flex-end;">
+              <button type="button" id="vendRelGerCmpSair" style="display:none;padding:8px 12px;border-radius:8px;border:1px solid #64748b;background:transparent;color:#cbd5e1;cursor:pointer;font-size:13px;font-weight:600;">
+                Sair da comparação
+              </button>
+              <button type="button" id="vendRelGerCmpCancelar" style="padding:8px 12px;border-radius:8px;border:1px solid #334155;background:rgba(255,255,255,.04);color:#cbd5e1;cursor:pointer;font-size:13px;font-weight:600;">
+                Cancelar
+              </button>
+              <button type="button" id="vendRelGerCmpOk" style="padding:8px 14px;border-radius:8px;border:none;background:#f59e0b;color:#1c1917;cursor:pointer;font-size:13px;font-weight:800;">
+                Comparar
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(wrap.firstElementChild);
+    document.getElementById('vendRelGerCmpFechar')?.addEventListener('click', _fecharModalComparar);
+    document.getElementById('vendRelGerCmpCancelar')?.addEventListener('click', _fecharModalComparar);
+    document.getElementById('vendRelGerCmpOk')?.addEventListener('click', _aplicarComparacao);
+    document.getElementById('vendRelGerCmpSair')?.addEventListener('click', _sairComparacao);
+    document.getElementById('vendRelGerCmpModal')?.addEventListener('click', (e) => {
+      if (e.target?.id === 'vendRelGerCmpModal') _fecharModalComparar();
+    });
   }
 
   function _barraFiltrosEl() {
@@ -1518,7 +2000,9 @@
     if (statusEl) { statusEl.style.display = 'block'; statusEl.textContent = 'Montando Excel com produtos...'; }
     try {
       // Uma única chamada com todos os itens (leve). Depois filtra o que está na tela/busca.
-      const qs = _filtrosQueryParams();
+      const qs = _comparacao
+        ? _filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 })
+        : _filtrosQueryParams();
       qs.set('com_itens', '1');
       const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
         credentials: 'include',
@@ -1568,7 +2052,9 @@
     if (!modal) return;
     const isFat = tipo === 'faturamento';
     if (titulo) titulo.textContent = isFat ? 'Faturamento' : 'Pedidos';
-    if (sub) sub.textContent = _data?.periodo ? `Período: ${_data.periodo}` : 'Carregando...';
+    if (sub) sub.textContent = _comparacao
+      ? `Período: ${_comparacao.label1} (Mês 1 da comparação)`
+      : (_data?.periodo ? `Período: ${_data.periodo}` : 'Carregando...');
     if (busca) busca.value = '';
     // Não limpa a tabela enquanto carrega — evita sumir o relatório no filtro
     modal.style.display = 'flex';
@@ -1579,7 +2065,9 @@
     if (_registrosAbort) _registrosAbort.abort();
     _registrosAbort = new AbortController();
     try {
-      const qs = _filtrosQueryParams();
+      const qs = _comparacao
+        ? _filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 })
+        : _filtrosQueryParams();
       const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
         credentials: 'include',
         signal: _registrosAbort.signal,
@@ -1601,26 +2089,31 @@
     }
   }
 
-  function _filtrosQueryParams() {
+  function _filtrosQueryParams(override) {
     const qs = new URLSearchParams();
     qs.set('modo', 'mes');
     qs.set('etapa', 'entregue');
-    const modo = _modoAtual();
-    if (modo === 'periodo') {
-      const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
-      const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
-      if (di) qs.set('data_inicio', di);
-      if (df) qs.set('data_fim', df);
-    } else if (modo === 'trimestre') {
-      const ano = document.getElementById('vendRelGerAno')?.value?.trim();
-      const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim() || String(_trimestreAtual());
-      if (ano) qs.set('ano', ano);
-      if (tri) qs.set('trimestre', tri);
+    if (override?.mes && override?.ano) {
+      qs.set('ano', String(override.ano));
+      qs.set('mes', String(override.mes));
     } else {
-      const ano = document.getElementById('vendRelGerAno')?.value?.trim();
-      const mes = document.getElementById('vendRelGerMes')?.value?.trim();
-      if (ano) qs.set('ano', ano);
-      if (mes) qs.set('mes', mes);
+      const modo = _modoAtual();
+      if (modo === 'periodo') {
+        const di = document.getElementById('vendRelGerDataInicio')?.value?.trim();
+        const df = document.getElementById('vendRelGerDataFim')?.value?.trim();
+        if (di) qs.set('data_inicio', di);
+        if (df) qs.set('data_fim', df);
+      } else if (modo === 'trimestre') {
+        const ano = document.getElementById('vendRelGerAno')?.value?.trim();
+        const tri = document.getElementById('vendRelGerTrimestre')?.value?.trim() || String(_trimestreAtual());
+        if (ano) qs.set('ano', ano);
+        if (tri) qs.set('trimestre', tri);
+      } else {
+        const ano = document.getElementById('vendRelGerAno')?.value?.trim();
+        const mes = document.getElementById('vendRelGerMes')?.value?.trim();
+        if (ano) qs.set('ano', ano);
+        if (mes) qs.set('mes', mes);
+      }
     }
     [
       ['vendRelGerVendedor', 'vendedor'],
@@ -1878,6 +2371,10 @@
   td { padding: 3px 6px; border-bottom: 1px solid #e2e8f0; }
   th.r, td.r { text-align: right; }
   ul { padding-left: 14px; margin: 6px 0; line-height: 1.45; }
+  .vend-rel-delta { font-weight: 700; }
+  .vend-rel-delta.up { color: #15803d; }
+  .vend-rel-delta.down { color: #b91c1c; }
+  .vend-rel-delta.flat { color: #64748b; }
   .pdf-ftr { margin-top: auto; padding-top: 8px; border-top: 2px solid #e2e8f0; display: flex; justify-content: space-between; font-size: 8px; color: #64748b; }
   .pdf-slogan { font-style: italic; color: #1e3a5f; font-weight: 600; }
   .pdf-pg { font-weight: 700; color: #0284c7; }
@@ -1886,11 +2383,11 @@
   }
 
   function _pdfHeader(periodo, etapa) {
-    const etapaTxt = etapa ? ` · ${_esc(etapa)}` : '';
+    const tipo = _comparacao ? 'Comparativo Gerencial de Vendas' : 'Relatório Gerencial de Vendas';
     return `
       <div class="pdf-hdr">
         <div class="pdf-brand"><div class="pdf-logo">FT</div><div><div class="pdf-name">FROMTHERM</div><div class="pdf-sub">BOMBAS DE CALOR</div></div></div>
-        <div class="pdf-title"><div class="pdf-type">Relatório Gerencial de Vendas</div><div class="pdf-per">${_esc(periodo)}${etapaTxt}</div></div>
+        <div class="pdf-title"><div class="pdf-type">${tipo}</div><div class="pdf-per">${_periodoTitulo(periodo, etapa)}</div></div>
         <div class="pdf-meta"><div><b>Departamento:</b> Comercial / Vendas</div><div><b>Data:</b> ${_esc(_fmtDataGeracao())}</div><div><b>Versão:</b> 1.0</div></div>
       </div>
       <div class="pdf-bar"></div>`;
@@ -1919,7 +2416,9 @@
     try {
       const d = _data;
       const kpis = d.kpis || {};
-      const periodo = d.periodo || '—';
+      const periodo = _emComparacao()
+        ? `${_comparacao.label1} × ${_comparacao.label2}`
+        : (d.periodo || '—');
       const etapa = d.etapa || '';
       const hdr = () => _pdfHeader(periodo, etapa);
       const imgs = {};
@@ -1955,14 +2454,16 @@
       _trocarSecao(secaoSalva);
       if (_data && !_chartsRendered.has(secaoSalva)) _renderChartsSecao(secaoSalva, _data);
 
-      const kpiHtml = [
-        ['Pedidos', kpis.total_pedidos],
-        ['Faturamento', MOEDA.format(kpis.valor_total || 0)],
-        ['Ticket médio', MOEDA.format(kpis.ticket_medio || 0)],
-        ['Clientes', kpis.clientes],
-        ['Estados', kpis.estados_atendidos],
-        ['Qtd. itens', QTD.format(kpis.quantidade_itens || 0)],
-      ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
+      const kpiHtml = _emComparacao()
+        ? _htmlResumoComparacao()
+        : [
+          ['Pedidos', kpis.total_pedidos],
+          ['Faturamento', MOEDA.format(kpis.valor_total || 0)],
+          ['Ticket médio', MOEDA.format(kpis.ticket_medio || 0)],
+          ['Clientes', kpis.clientes],
+          ['Estados', kpis.estados_atendidos],
+          ['Qtd. itens', QTD.format(kpis.quantidade_itens || 0)],
+        ].map(([l, v]) => `<div class="kpi"><div class="lbl">${l}</div><div class="val">${v}</div></div>`).join('');
 
       const famTbl = (d.por_familia || []).slice(0, 15).map((r) =>
         `<tr><td>${_esc(r.familia)}</td><td class="r">${QTD.format(r.quantidade || 0)}</td><td class="r">${MOEDA.format(r.valor_total || 0)}</td></tr>`
@@ -1992,7 +2493,8 @@
       const pages = [
         `<div class="pdf-page">${hdr()}
           <div class="sec">Dashboard Executivo</div>
-          <div class="kpis">${kpiHtml}</div>
+          <div class="kpis">${_emComparacao() ? '' : kpiHtml}</div>
+          ${_emComparacao() ? `<div class="box" style="margin-bottom:8px;">${kpiHtml}</div>` : ''}
           <div class="row">${_imgBox('Pedidos por Etapa', imgs.etapa)}${_imgBox('Valor por Estado', imgs.valorEstado)}</div>
           <div class="sec">Distribuição Geográfica</div>
           <div class="row">${_imgBox('Valor por Estado', imgs.estado)}${_imgBox('Participação por Estado', imgs.estadoDonut)}</div>
@@ -2059,11 +2561,14 @@
       _init = true;
       _injetarEstilosFiltro();
       _injetarUiFiltro();
+      _injetarBotaoComparar();
+      _injetarModalComparar();
       _injetarFamiliaMulti();
       _injetarModalRegistros();
       _setModoFiltro('mes_ano');
       _setBarraFiltrosVisivel(false);
       document.getElementById('vendRelGerFiltroBtn')?.addEventListener('click', _toggleBarraFiltros);
+      document.getElementById('vendRelGerCompararBtn')?.addEventListener('click', _abrirModalComparar);
       document.getElementById('vendRelGerModoMesAno')?.addEventListener('click', () => _setModoFiltro('mes_ano'));
       document.getElementById('vendRelGerModoTrimestre')?.addEventListener('click', () => _setModoFiltro('trimestre'));
       document.getElementById('vendRelGerModoPeriodo')?.addEventListener('click', () => _setModoFiltro('periodo'));
@@ -2092,6 +2597,10 @@
       });
       document.addEventListener('keydown', (e) => {
         if (e.key !== 'Escape') return;
+        if (document.getElementById('vendRelGerCmpModal')?.style.display === 'flex') {
+          _fecharModalComparar();
+          return;
+        }
         if (document.getElementById('vendRelGerItensModal')?.style.display === 'flex') {
           _fecharModalItens();
           return;

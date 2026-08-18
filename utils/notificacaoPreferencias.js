@@ -29,7 +29,7 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     id: 'reuniao_lembrete',
     rotulo: 'Lembrete de reunião (no dia)',
     grupo: 'Reuniões',
-    canais: ['email'],
+    canais: ['whatsapp', 'email'],
   },
   {
     id: 'pir_novo_item',

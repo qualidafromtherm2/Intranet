@@ -1,12 +1,13 @@
 /**
- * CRON — Lembrete de reuniões do dia por e-mail às 07:00 (America/Sao_Paulo).
- * Inclui reuniões únicas e recorrentes que caem no dia (utils/reservasEmail.js).
+ * CRON — Lembrete de reuniões do dia (e-mail + WhatsApp) às 07:00 (America/Sao_Paulo).
+ * Se o servidor estiver fora às 07:00, tenta de novo até 19:00 (uma vez por dia),
+ * mas não envia para reunião cujo horário de início já passou.
  */
 const { dbQuery } = require('../src/db');
 const { enviarLembretesReservasDoDia } = require('../utils/reservasEmail');
 
 const TAG = '[ReservasEmailCron]';
-const CHAVE = 'lembrete_reservas_email_ultima_execucao';
+const CHAVE = 'lembrete_reservas_dia_v2_ultima_execucao';
 let _lastRunDate = '';
 let _executando = false;
 
@@ -50,7 +51,9 @@ async function executarLembreteDiario() {
   const resultado = await enviarLembretesReservasDoDia(hoje);
   console.log(
     TAG,
-    `Lembrete ${hoje}: enviados=${resultado.enviados || 0} totalDia=${resultado.totalDia || 0}`
+    `Lembrete ${hoje}: email=${resultado.enviadosEmail || resultado.enviados || 0} ` +
+      `whatsapp=${resultado.enviadosWhats || 0} totalDia=${resultado.totalDia || 0} ` +
+      `puladasHorario=${resultado.puladasHorario || 0}`
   );
   return resultado;
 }
@@ -61,14 +64,12 @@ function verificarHorarioLembreteReservas() {
   const parts = new Intl.DateTimeFormat('en-US', {
     timeZone: 'America/Sao_Paulo',
     hour: 'numeric',
-    minute: 'numeric',
     hour12: false,
   }).formatToParts(now);
   const hora = Number(parts.find((p) => p.type === 'hour')?.value || 0);
-  const minuto = Number(parts.find((p) => p.type === 'minute')?.value || 0);
 
-  // Janela 07:00–07:04 (timer a cada 1 min)
-  if (hora === 7 && minuto >= 0 && minuto < 5 && !_executando && _lastRunDate !== hoje) {
+  // 07:00 BRT; se perdeu a janela (deploy/reinício), reenvia até 19:00 (uma vez ao dia).
+  if (hora >= 7 && hora < 19 && !_executando && _lastRunDate !== hoje) {
     _executando = true;
     jaRodouHoje(hoje)
       .then((jaRodou) => {
@@ -90,7 +91,7 @@ function verificarHorarioLembreteReservas() {
 }
 
 function iniciarCronLembreteReservasEmail() {
-  console.log(TAG, 'Timer iniciado — verifica a cada 1 min (disparo 07:00 BRT).');
+  console.log(TAG, 'Timer iniciado — verifica a cada 1 min (disparo 07:00 BRT, reenvio até 19:00).');
   verificarHorarioLembreteReservas();
   setInterval(verificarHorarioLembreteReservas, 60 * 1000);
 }

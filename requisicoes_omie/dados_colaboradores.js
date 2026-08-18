@@ -15,6 +15,95 @@ function mk(tag, cls, txt){
   return el;
 }
 
+const PERM_LABEL_FALLBACK = {
+  'top-shortcut:chamado': 'Chamado de suporte',
+  'top-shortcut:links-rapidos': 'Links rápidos',
+  'top-shortcut:inicio': 'Início',
+  'top-shortcut:notificacoes': 'Notificações',
+  'top-shortcut:compras': 'Painel de compras',
+  'top-shortcut:atualizar': 'Atualizar sistema',
+  'system-shortcut:compras-carrinho': 'Carrinho de compras',
+  'system-shortcut:separacao-carrinho': 'Lista de separação'
+};
+
+function permLabelFromEl(el) {
+  if (!el) return '';
+  const clone = el.cloneNode(true);
+  clone.querySelectorAll('i, svg, img, script, style, .chamado-badge, .badge, [hidden]').forEach((n) => n.remove());
+  const visible = String(clone.textContent || '').replace(/\s+/g, ' ').trim();
+  if (visible) return visible.slice(0, 80);
+  const data = String(el.dataset.navLabel || '').trim();
+  if (data) return data.slice(0, 80);
+  return String(el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+}
+
+function sanitizePermLabel(label, key) {
+  const k = String(key || '');
+  if (PERM_LABEL_FALLBACK[k]) return PERM_LABEL_FALLBACK[k];
+  let s = String(label || '').replace(/\s+/g, ' ').trim();
+  try {
+    s = s.replace(/^[^\p{L}\p{N}]+/u, '');
+    s = s.replace(/([A-Za-zÀ-ÿ)\]])\d+$/u, '$1');
+  } catch (_) {
+    s = s.replace(/^\W+/, '').replace(/([A-Za-zÀ-ÿ)\]])\d+$/, '$1');
+  }
+  return s.trim();
+}
+
+function collectLiveNavMap(selector) {
+  const map = new Map();
+  Array.from(document.querySelectorAll(selector)).forEach((el, idx) => {
+    const key = String(el.dataset.navKey || '').trim();
+    if (!key || map.has(key)) return;
+    map.set(key, {
+      label: permLabelFromEl(el),
+      parentKey: el.dataset.navParent || null,
+      sort: idx + 1
+    });
+  });
+  return map;
+}
+
+function applyLiveSidebarToPermNodes(nodes) {
+  const list = Array.isArray(nodes) ? nodes : [];
+  const sideLive = collectLiveNavMap('#sidebarContent [data-nav-key]');
+  const topLive = collectLiveNavMap('[data-nav-key^="top:"], [data-nav-key^="top-shortcut:"], [data-nav-pos="top"]');
+  const keyToId = new Map();
+  list.forEach((n) => {
+    if (n?.key) keyToId.set(String(n.key), n.id);
+  });
+  list.forEach((n) => {
+    const key = String(n.key || '');
+    const live = sideLive.get(key) || null;
+    const liveTop = !live ? (topLive.get(key) || null) : null;
+    n._inSidebar = !!live;
+    n._inTopMenu = !live && !!liveTop;
+    if (live) {
+      if (live.label) n.label = live.label;
+      n.sort = live.sort;
+      n.pos = 'side';
+      if (live.parentKey && keyToId.has(live.parentKey)) n.parent_id = keyToId.get(live.parentKey);
+      else if (!live.parentKey) n.parent_id = null;
+    } else if (liveTop) {
+      if (liveTop.label) n.label = liveTop.label;
+      n.sort = liveTop.sort;
+      n.pos = 'top';
+      if (liveTop.parentKey && keyToId.has(liveTop.parentKey)) n.parent_id = keyToId.get(liveTop.parentKey);
+      else if (!liveTop.parentKey) n.parent_id = null;
+    } else {
+      n.label = sanitizePermLabel(n.label, key);
+      n.sort = (Number(n.sort) || 0) + 10000;
+    }
+  });
+  return list;
+}
+
+function permMenuGroupOf(node) {
+  if (node?._inSidebar) return 'side';
+  if (node?._inTopMenu || String(node?.pos || '') === 'top') return 'top';
+  return 'other';
+}
+
 /* ============ Página ============ */
 function ensurePane(root){
   let pane = document.getElementById('dadosColaboradores');
