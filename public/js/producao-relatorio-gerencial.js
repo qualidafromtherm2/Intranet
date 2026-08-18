@@ -13,13 +13,14 @@
 
   const SECOES = [
     { id: 'executivo', label: 'Dashboard Executivo', icon: 'fa-gauge-high', pg: 1 },
-    { id: 'postos', label: 'Tempo por Posto', icon: 'fa-industry', pg: 2 },
-    { id: 'ri', label: 'Tempo de RI', icon: 'fa-clipboard-check', pg: 3 },
-    { id: 'ops', label: 'Ciclo por OP', icon: 'fa-list-ol', pg: 4 },
-    { id: 'detalhe', label: 'Detalhe dos Ciclos', icon: 'fa-clock', pg: 5 },
-    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 6 },
-    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 7 },
-    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 8 },
+    { id: 'maquinas', label: 'Máquinas produzidas', icon: 'fa-gears', pg: 2 },
+    { id: 'postos', label: 'Tempo por Posto', icon: 'fa-industry', pg: 3 },
+    { id: 'ri', label: 'Tempo de RI', icon: 'fa-clipboard-check', pg: 4 },
+    { id: 'ops', label: 'Ciclo por OP', icon: 'fa-list-ol', pg: 5 },
+    { id: 'detalhe', label: 'Detalhe dos Ciclos', icon: 'fa-clock', pg: 6 },
+    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 7 },
+    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 8 },
+    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 9 },
   ];
 
   function _esc(s) {
@@ -171,12 +172,13 @@
     const hdr = () => _headerHtml(periodo);
 
     const icons = {
-      executivo: 'fa-gauge-high', postos: 'fa-industry', ri: 'fa-clipboard-check',
+      executivo: 'fa-gauge-high', maquinas: 'fa-gears', postos: 'fa-industry', ri: 'fa-clipboard-check',
       ops: 'fa-list-ol', detalhe: 'fa-clock', evolucao: 'fa-chart-column',
       plano: 'fa-list-check', conclusao: 'fa-flag-checkered',
     };
     const titles = {
-      executivo: 'Dashboard Executivo', postos: 'Tempo por Posto', ri: 'Tempo de RI',
+      executivo: 'Dashboard Executivo', maquinas: 'Máquinas produzidas',
+      postos: 'Tempo por Posto', ri: 'Tempo de RI',
       ops: 'Ciclo por Ordem de Produção', detalhe: 'Detalhe dos Ciclos',
       evolucao: 'Evolução no Período', plano: 'Plano de Ação', conclusao: 'Conclusão Executiva',
     };
@@ -192,12 +194,24 @@
         <div class="at-rel-ger-grid-2">
           <div class="at-rel-ger-card"><h4>Tempo médio por posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartPostoExec"></canvas></div></div>
           <div class="at-rel-ger-card"><h4>Faixas de tempo no posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartFaixasExec"></canvas></div></div>
-        </div>
-        <div class="at-rel-ger-card" style="margin-top:14px;">
+        </div>`,
+      maquinas: `
+        <div id="prodRelGerProdKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
+        <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
+          Conta a máquina no momento em que a <strong>RI da Inspeção final</strong> é registrada e a OP sai do kanban
+          (entrada no estoque de máquinas). Máquinas ainda na coluna Inspeção final <strong>não</strong> entram neste total.
+        </p>
+        <div class="at-rel-ger-card">
           <h4>Máquinas produzidas por dia</h4>
           <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Clique em uma barra para ver os modelos daquele dia.</p>
           <div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartProdDia"></canvas></div>
           <div id="prodRelGerProdDiaDetalhe" style="display:none;margin-top:12px;"></div>
+        </div>
+        <div class="at-rel-ger-card" style="margin-top:14px;"><h4>Liberações da Inspeção final</h4>
+          <div style="overflow:auto;max-height:420px;"><table class="at-rel-ger-tbl">
+            <thead><tr><th>Data</th><th>OP</th><th>Modelo</th><th class="r">Qtd</th></tr></thead>
+            <tbody id="prodRelGerProdLibBody"></tbody>
+          </table></div>
         </div>`,
       postos: `
         <div id="prodRelGerPostoKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
@@ -245,10 +259,9 @@
           </table></div>
         </div>`,
       evolucao: `
-        <div class="at-rel-ger-card"><h4 id="prodRelGerEvolTitulo">Máquinas produzidas por dia</h4>
-          <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Clique em uma barra para ver os modelos produzidos naquele dia (Inspeção final / Embalagem).</p>
+        <div class="at-rel-ger-card"><h4 id="prodRelGerEvolTitulo">Máquinas produzidas no período</h4>
+          <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Total de máquinas liberadas na Inspeção final (RI registrada).</p>
           <div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartEvol"></canvas></div>
-          <div id="prodRelGerEvolDetalhe" style="display:none;margin-top:12px;"></div>
         </div>`,
       plano: `
         <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
@@ -445,6 +458,18 @@
         faixas.map((r) => r.total),
         '#38bdf8', false
       );
+    }
+
+    if (sec === 'maquinas') {
+      const wrap = document.getElementById('prodRelGerProdKpis');
+      if (wrap) {
+        const diasComProd = (data.producao_diaria || []).filter((r) => (r.total || 0) > 0).length;
+        wrap.innerHTML = [
+          { label: 'Máquinas produzidas', value: k.maquinas_produzidas ?? 0, cor: '#0ea5e9' },
+          { label: 'Dias com produção', value: diasComProd, cor: ACCENT },
+          { label: 'Liberações (OPs)', value: (data.producao_liberacoes || []).length, cor: ACCENT2 },
+        ].map((c) => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      }
       _renderBarProducaoDia('prodRelGerChartProdDia', 'prodDia', 'prodRelGerProdDiaDetalhe', data);
     }
 
@@ -485,9 +510,12 @@
     }
 
     if (sec === 'evolucao') {
+      const multi = data.evolucao_tipo === 'mes';
       const titulo = document.getElementById('prodRelGerEvolTitulo');
-      if (titulo) titulo.textContent = 'Máquinas produzidas por dia';
-      _renderBarProducaoDia('prodRelGerChartEvol', 'evol', 'prodRelGerEvolDetalhe', data);
+      if (titulo) titulo.textContent = multi ? 'Máquinas produzidas por mês' : 'Máquinas produzidas por semana';
+      const rows = multi ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
+      const labels = multi ? rows.map((r) => r.label) : rows.map((r) => r.semana);
+      _renderBar('prodRelGerChartEvol', 'evol', labels, rows.map((r) => r.total || 0), '#0ea5e9', false);
     }
 
     _chartsRendered.add(sec);
@@ -551,6 +579,19 @@
             <td>${_esc(r.usuario_fim || '—')}</td>
           </tr>`).join('')
         : '<tr><td colspan="6" style="text-align:center;color:#94a3b8;">Nenhum ciclo finalizado no período.</td></tr>';
+    }
+
+    const libBody = document.getElementById('prodRelGerProdLibBody');
+    if (libBody) {
+      const rows = data.producao_liberacoes || [];
+      libBody.innerHTML = rows.length
+        ? rows.map((r) => `<tr>
+            <td>${_esc(_fmtDataHora(r.liberado_em))}</td>
+            <td>${_esc(r.numero_op || '—')}</td>
+            <td>${_esc(r.modelo || '—')}</td>
+            <td class="r">${r.qtd || 1}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="4" style="text-align:center;color:#94a3b8;">Nenhuma máquina liberada na Inspeção final neste período.</td></tr>';
     }
   }
 

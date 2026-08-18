@@ -2756,7 +2756,12 @@ router.get('/mao-obra', async (req, res) => {
   try {
     const dataRef = String(req.query?.data || dateKeyInTz(new Date())).slice(0, 10);
     const itens = await buscarMaoObraPorData(dataRef);
-    return res.json({ success: true, data: dataRef, itens });
+    return res.json({
+      success: true,
+      data: dataRef,
+      registrado: Array.isArray(itens) && itens.length > 0,
+      itens,
+    });
   } catch (err) {
     console.error('[producao] Erro ao listar MO da linha:', err.message);
     return res.status(500).json({ success: false, error: err.message });
@@ -2773,6 +2778,7 @@ router.post('/mao-obra', express.json(), async (req, res) => {
       posto_key: String(it.posto_key || it.key || '').trim(),
       posto_nome: String(it.posto_nome || it.nome || '').trim(),
       quantidade: quantidadeMoValida(it.quantidade),
+      operadores: Array.isArray(it.operadores) ? it.operadores : [],
     }));
     const salvo = await salvarMaoObraDia(dataRef, itens, usuario);
     return res.json({ success: true, ...salvo });

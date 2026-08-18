@@ -369,3 +369,83 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   color: #334155;
   background: #f1f5f9;
 }
+
+.nav-admin-modal-perm {
+  width: min(420px, 96vw);
+  min-height: 62vh;
+}
+
+.nav-admin-perm-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-height: 46vh;
+}
+
+.nav-admin-perm-busca {
+  width: 100%;
+  box-sizing: border-box;
+  background: #0f172a;
+  border: 1px solid #475569;
+  border-radius: 8px;
+  color: #f1f5f9;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+
+.nav-admin-perm-tree {
+  flex: 1;
+  overflow: auto;
+  max-height: 56vh;
+  padding: 4px 0 8px;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.nav-admin-perm-cat {
+  padding: 6px 0 4px;
+}
+
+.nav-admin-perm-cat-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, .45);
+  padding: 8px 14px 4px;
+}
+
+.nav-admin-perm-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: rgba(218, 224, 255, .9);
+  font-size: 14px;
+  padding: 8px 14px 8px 24px;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.nav-admin-perm-item:hover {
+  background: rgba(80, 109, 255, .08);
+}
+
+.nav-admin-perm-item.is-selected {
+  background: #2563eb;
+  color: #fff;
+}
+
+.nav-admin-perm-item.is-hidden,
+.nav-admin-perm-cat.is-hidden {
+  display: none;
+}
+
+.nav-admin-perm-empty {
+  padding: 28px 16px;
+  text-align: center;
+  color: #94a3b8;
+  font-size: 13px;
+}

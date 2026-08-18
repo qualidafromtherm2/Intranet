@@ -76,12 +76,28 @@ async function garantirSchemaTempoProducao() {
       posto_key        TEXT NOT NULL,
       posto_nome       TEXT NOT NULL,
       quantidade       INTEGER NOT NULL DEFAULT 1,
+      operadores       JSONB NOT NULL DEFAULT '[]'::jsonb,
       usuario          TEXT,
       created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
     );
     CREATE UNIQUE INDEX IF NOT EXISTS uq_mao_obra_linha_dia_posto
       ON producao.mao_obra_linha (data_referencia, posto_key);
+
+    CREATE TABLE IF NOT EXISTS producao.mao_obra_linha_hist (
+      id               BIGSERIAL PRIMARY KEY,
+      data_referencia  DATE NOT NULL,
+      posto_key        TEXT NOT NULL,
+      posto_nome       TEXT NOT NULL,
+      quantidade       INTEGER NOT NULL DEFAULT 1,
+      operadores       JSONB NOT NULL DEFAULT '[]'::jsonb,
+      inicio           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      fim              TIMESTAMPTZ,
+      usuario          TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+    CREATE INDEX IF NOT EXISTS idx_mao_obra_hist_dia_posto
+      ON producao.mao_obra_linha_hist (data_referencia, posto_key, inicio);
   `);
     if (pool) await ensureSchemasCompatViews(pool);
     schemaCriado = true;
@@ -120,6 +136,25 @@ async function garantirSchemaTempoProducao() {
   await dbQuery(`
     CREATE UNIQUE INDEX IF NOT EXISTS uq_mao_obra_linha_dia_posto
       ON producao.mao_obra_linha (data_referencia, posto_key);
+  `);
+  await dbQuery(`ALTER TABLE producao.mao_obra_linha ADD COLUMN IF NOT EXISTS operadores JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS producao.mao_obra_linha_hist (
+      id               BIGSERIAL PRIMARY KEY,
+      data_referencia  DATE NOT NULL,
+      posto_key        TEXT NOT NULL,
+      posto_nome       TEXT NOT NULL,
+      quantidade       INTEGER NOT NULL DEFAULT 1,
+      operadores       JSONB NOT NULL DEFAULT '[]'::jsonb,
+      inicio           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      fim              TIMESTAMPTZ,
+      usuario          TEXT,
+      created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_mao_obra_hist_dia_posto
+      ON producao.mao_obra_linha_hist (data_referencia, posto_key, inicio);
   `);
     schemaMigrado = true;
   }
@@ -520,24 +555,161 @@ function lookupMo(map, dia, postoNome, postoKey = '') {
   return 1;
 }
 
+function normalizarOperadoresMo(lista) {
+  const arr = Array.isArray(lista) ? lista : [];
+  const nomes = [];
+  const visto = new Set();
+  for (const item of arr) {
+    const nome = String(
+      item && typeof item === 'object'
+        ? (item.username || item.nome || item.usuario || '')
+        : item
+    ).trim();
+    if (!nome) continue;
+    const key = nome.toLowerCase();
+    if (visto.has(key)) continue;
+    visto.add(key);
+    nomes.push(nome);
+  }
+  return nomes;
+}
+
+function operadoresMoIguais(a, b) {
+  const aa = normalizarOperadoresMo(a);
+  const bb = normalizarOperadoresMo(b);
+  if (aa.length !== bb.length) return false;
+  return aa.every((v, i) => v === bb[i]);
+}
+
+function mapearPeriodoMo(r) {
+  return {
+    id: Number(r.id) || null,
+    posto_key: String(r.posto_key || ''),
+    posto_nome: String(r.posto_nome || ''),
+    quantidade: quantidadeMoValida(r.quantidade),
+    operadores: normalizarOperadoresMo(r.operadores),
+    inicio: r.inicio || null,
+    fim: r.fim || null,
+    usuario: r.usuario || null,
+    data_referencia: String(r.data_referencia || '').slice(0, 10),
+  };
+}
+
+function periodosMoDoPosto(periodosMap, postoNome, postoKey = '') {
+  if (!periodosMap) return [];
+  const byNome = periodosMap.get(`nome:${normalizarPostoMo(postoNome)}`);
+  if (Array.isArray(byNome) && byNome.length) return byNome;
+  if (postoKey) {
+    const byKey = periodosMap.get(`key:${String(postoKey)}`);
+    if (Array.isArray(byKey) && byKey.length) return byKey;
+  }
+  return [];
+}
+
+function calcularTempoUtilComMo(inicio, fim, turnos, periodos, qtdFallback) {
+  const t0 = new Date(inicio).getTime();
+  const t1 = new Date(fim).getTime();
+  if (!Number.isFinite(t0) || !Number.isFinite(t1) || t1 <= t0) return 0;
+  const lista = (periodos || [])
+    .map((p) => ({
+      ini: new Date(p.inicio).getTime(),
+      fim: p.fim ? new Date(p.fim).getTime() : t1,
+      qtd: quantidadeMoValida(p.quantidade),
+    }))
+    .filter((p) => Number.isFinite(p.ini) && Number.isFinite(p.fim) && p.fim > p.ini)
+    .sort((a, b) => a.ini - b.ini);
+
+  if (!lista.length) {
+    return aplicarProporcaoMo(calcularTempoUtilMs(inicio, fim, turnos), qtdFallback);
+  }
+
+  let total = 0;
+  let cursor = t0;
+  for (const p of lista) {
+    const a = Math.max(cursor, p.ini);
+    const b = Math.min(t1, p.fim);
+    if (b > a) {
+      total += aplicarProporcaoMo(calcularTempoUtilMs(new Date(a), new Date(b), turnos), p.qtd);
+      cursor = Math.max(cursor, b);
+    }
+  }
+  if (cursor < t1) {
+    total += aplicarProporcaoMo(calcularTempoUtilMs(new Date(cursor), new Date(t1), turnos), qtdFallback);
+  }
+  return total;
+}
+
+async function buscarPeriodosMoPorData(dataRef) {
+  await garantirSchemaTempoProducao();
+  const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
+  const { rows } = await dbQuery(
+    `SELECT id, posto_key, posto_nome, quantidade, operadores, usuario,
+            inicio, fim, data_referencia::text AS data_referencia
+       FROM producao.mao_obra_linha_hist
+      WHERE data_referencia = $1::date
+      ORDER BY posto_key, inicio ASC, id ASC`,
+    [dk]
+  );
+  return rows.map(mapearPeriodoMo);
+}
+
+async function buscarPeriodosMoPeriodo(inicio, fim) {
+  await garantirSchemaTempoProducao();
+  const dkIni = dateKeyInTz(new Date(inicio || Date.now()));
+  const dkFim = dateKeyInTz(new Date(fim || Date.now()));
+  const { rows } = await dbQuery(
+    `SELECT id, posto_key, posto_nome, quantidade, operadores, usuario,
+            inicio, fim, data_referencia::text AS data_referencia
+       FROM producao.mao_obra_linha_hist
+      WHERE data_referencia >= $1::date
+        AND data_referencia <= $2::date
+      ORDER BY inicio ASC, id ASC`,
+    [dkIni, dkFim]
+  );
+  const map = new Map();
+  for (const r of rows) {
+    const periodo = mapearPeriodoMo(r);
+    const kNome = `nome:${normalizarPostoMo(periodo.posto_nome)}`;
+    const kKey = `key:${periodo.posto_key}`;
+    if (!map.has(kNome)) map.set(kNome, []);
+    if (!map.has(kKey)) map.set(kKey, []);
+    map.get(kNome).push(periodo);
+    if (periodo.posto_key) map.get(kKey).push(periodo);
+  }
+  return map;
+}
+
 async function buscarMaoObraPorData(dataRef) {
   await garantirSchemaTempoProducao();
   const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
   const { rows } = await dbQuery(
-    `SELECT posto_key, posto_nome, quantidade, usuario,
+    `SELECT posto_key, posto_nome, quantidade, operadores, usuario,
             data_referencia::text AS data_referencia
        FROM producao.mao_obra_linha
       WHERE data_referencia = $1::date
       ORDER BY id`,
     [dk]
   );
-  return rows.map((r) => ({
-    posto_key: String(r.posto_key || ''),
-    posto_nome: String(r.posto_nome || ''),
-    quantidade: quantidadeMoValida(r.quantidade),
-    usuario: r.usuario || null,
-    data_referencia: String(r.data_referencia || dk).slice(0, 10),
-  }));
+  const hist = await buscarPeriodosMoPorData(dk);
+  const histPorKey = new Map();
+  for (const p of hist) {
+    const k = p.posto_key || normalizarPostoMo(p.posto_nome);
+    if (!histPorKey.has(k)) histPorKey.set(k, []);
+    histPorKey.get(k).push(p);
+  }
+  const itens = rows.map((r) => {
+    const postoKey = String(r.posto_key || '');
+    return {
+      posto_key: postoKey,
+      posto_nome: String(r.posto_nome || ''),
+      quantidade: quantidadeMoValida(r.quantidade),
+      operadores: normalizarOperadoresMo(r.operadores),
+      usuario: r.usuario || null,
+      data_referencia: String(r.data_referencia || dk).slice(0, 10),
+      historico: histPorKey.get(postoKey) || histPorKey.get(normalizarPostoMo(r.posto_nome)) || [],
+    };
+  });
+  return itens;
 }
 
 async function salvarMaoObraDia(dataRef, itens, usuario) {
@@ -550,23 +722,56 @@ async function salvarMaoObraDia(dataRef, itens, usuario) {
     const postoNome = String(item.posto_nome || item.nome || postoKey).trim();
     if (!postoKey || !postoNome) continue;
     const quantidade = quantidadeMoValida(item.quantidade);
+    const operadores = normalizarOperadoresMo(item.operadores).slice(0, quantidade);
+    const { rows: atualRows } = await dbQuery(
+      `SELECT quantidade, operadores
+         FROM producao.mao_obra_linha
+        WHERE data_referencia = $1::date AND posto_key = $2
+        LIMIT 1`,
+      [dk, postoKey]
+    );
+    const atual = atualRows[0] || null;
+    const mudou = !atual
+      || quantidadeMoValida(atual.quantidade) !== quantidade
+      || !operadoresMoIguais(atual.operadores, operadores);
+
     const { rows } = await dbQuery(
       `INSERT INTO producao.mao_obra_linha
-         (data_referencia, posto_key, posto_nome, quantidade, usuario, updated_at)
-       VALUES ($1::date, $2, $3, $4, $5, NOW())
+         (data_referencia, posto_key, posto_nome, quantidade, operadores, usuario, updated_at)
+       VALUES ($1::date, $2, $3, $4, $5::jsonb, $6, NOW())
        ON CONFLICT (data_referencia, posto_key) DO UPDATE SET
          posto_nome = EXCLUDED.posto_nome,
          quantidade = EXCLUDED.quantidade,
+         operadores = EXCLUDED.operadores,
          usuario = EXCLUDED.usuario,
          updated_at = NOW()
-       RETURNING posto_key, posto_nome, quantidade`,
-      [dk, postoKey, postoNome, quantidade, usuario || null]
+       RETURNING posto_key, posto_nome, quantidade, operadores`,
+      [dk, postoKey, postoNome, quantidade, JSON.stringify(operadores), usuario || null]
     );
+
+    if (mudou) {
+      await dbQuery(
+        `UPDATE producao.mao_obra_linha_hist
+            SET fim = NOW()
+          WHERE data_referencia = $1::date
+            AND posto_key = $2
+            AND fim IS NULL`,
+        [dk, postoKey]
+      );
+      await dbQuery(
+        `INSERT INTO producao.mao_obra_linha_hist
+           (data_referencia, posto_key, posto_nome, quantidade, operadores, inicio, usuario)
+         VALUES ($1::date, $2, $3, $4, $5::jsonb, NOW(), $6)`,
+        [dk, postoKey, postoNome, quantidade, JSON.stringify(operadores), usuario || null]
+      );
+    }
+
     if (rows[0]) {
       out.push({
         posto_key: rows[0].posto_key,
         posto_nome: rows[0].posto_nome,
         quantidade: quantidadeMoValida(rows[0].quantidade),
+        operadores: normalizarOperadoresMo(rows[0].operadores),
       });
     }
   }
@@ -602,12 +807,18 @@ async function calcularTempoTotalOpUtil(opRefs) {
   const fimGeral = regs[regs.length - 1].fim || agora.toISOString();
   const turnos = await buscarTurnosNoPeriodo(inicioGeral, fimGeral);
   const moMap = opRefs?.moMap || await buscarMapaMoPeriodo(inicioGeral, fimGeral);
+  const moPeriodos = opRefs?.moPeriodos || await buscarPeriodosMoPeriodo(inicioGeral, fimGeral);
   let totalMs = 0;
   for (const reg of regs) {
     const fim = reg.fim || agora.toISOString();
-    const ms = calcularTempoUtilMs(reg.inicio, fim, turnos);
     const dia = dateKeyInTz(new Date(reg.inicio));
-    totalMs += aplicarProporcaoMo(ms, lookupMo(moMap, dia, reg.posto_origem));
+    totalMs += calcularTempoUtilComMo(
+      reg.inicio,
+      fim,
+      turnos,
+      periodosMoDoPosto(moPeriodos, reg.posto_origem),
+      lookupMo(moMap, dia, reg.posto_origem)
+    );
   }
   return { tempo_ms: totalMs, tempo_formatado: formatarDuracao(totalMs) };
 }
@@ -630,8 +841,15 @@ async function calcularTempoPostoUtil(opRefs) {
   const fim = new Date();
   const turnos = await buscarTurnosNoPeriodo(reg.inicio, fim);
   const moMap = opRefs?.moMap || await buscarMapaMoPeriodo(reg.inicio, fim);
+  const moPeriodos = opRefs?.moPeriodos || await buscarPeriodosMoPeriodo(reg.inicio, fim);
   const qtdMo = lookupMo(moMap, dateKeyInTz(new Date(reg.inicio)), reg.posto_origem);
-  const ms = aplicarProporcaoMo(calcularTempoUtilMs(reg.inicio, fim, turnos), qtdMo);
+  const ms = calcularTempoUtilComMo(
+    reg.inicio,
+    fim,
+    turnos,
+    periodosMoDoPosto(moPeriodos, reg.posto_origem),
+    qtdMo
+  );
   return {
     registro: reg,
     tempo_ms: ms,
@@ -649,6 +867,7 @@ async function calcularTemposPostoPorOps(ops) {
   const resultado = {};
   const agora = new Date();
   const moMap = await buscarMapaMoPeriodo(addDaysToDateKey(dateKeyInTz(agora), -45), agora);
+  const moPeriodos = await buscarPeriodosMoPeriodo(addDaysToDateKey(dateKeyInTz(agora), -45), agora);
   await Promise.all(lista.map(async (op) => {
     const opProducaoId = Number(op.op_producao_id) || Number(op.id) || 0;
     const numeroOp = String(op.numero_op || op.identificacao || '').trim();
@@ -656,7 +875,7 @@ async function calcularTemposPostoPorOps(ops) {
     const key = opProducaoId > 0 ? `id:${opProducaoId}` : (numeroOp ? `op:${numeroOp.toUpperCase()}` : null);
     if (!key) return;
     const tempo = await calcularTempoPostoUtil({
-      opProducaoId, numeroOp, kanbanProgramacaoId, moMap,
+      opProducaoId, numeroOp, kanbanProgramacaoId, moMap, moPeriodos,
     });
     resultado[key] = tempo;
   }));
@@ -872,4 +1091,7 @@ module.exports = {
   buscarMaoObraPorData,
   salvarMaoObraDia,
   buscarMapaMoPeriodo,
+  buscarPeriodosMoPeriodo,
+  calcularTempoUtilComMo,
+  periodosMoDoPosto,
 };

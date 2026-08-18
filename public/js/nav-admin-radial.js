@@ -101,7 +101,57 @@
       || parentKey.split(':').pop();
   }
 
-  function htmlSelectBotoesAgrupado(botoes, selectedKey) {
+  /** Mesma regra de "Permissões por botão": nome visível no menu, sem ícone. */
+  function labelNavEl(el) {
+    if (!el) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('i, svg, img, script, style, .chamado-badge, .badge, [hidden]').forEach((n) => n.remove());
+    const visible = String(clone.textContent || '').replace(/\s+/g, ' ').trim();
+    if (visible) return visible.slice(0, 80);
+    const data = String(el.dataset.navLabel || '').trim();
+    if (data) return data.slice(0, 80);
+    return String(el.getAttribute('title') || el.getAttribute('aria-label') || '').trim().slice(0, 80);
+  }
+
+  function coletarBotoesMenuLateral(botoesApi) {
+    const byKey = new Map((botoesApi || []).map((b) => [String(b.key), b]));
+    const root = document.getElementById('sidebarContent') || document.querySelector('.left-side');
+    if (!root) {
+      return (botoesApi || []).filter((b) => b?.key && !NAV_KEYS_OBSOLETOS.includes(b.key));
+    }
+
+    const visto = new Set();
+    const resultado = [];
+
+    function pushEl(el, parentKey, parentLabel, parentSort, sort) {
+      const meta = metaFromEl(el);
+      if (!meta?.navKey || NAV_KEYS_OBSOLETOS.includes(meta.navKey) || visto.has(meta.navKey)) return;
+      if (String(meta.navKey).startsWith('side:custom:') && !byKey.has(meta.navKey)) return;
+      visto.add(meta.navKey);
+      const fromApi = byKey.get(meta.navKey) || {};
+      resultado.push({
+        ...fromApi,
+        key: meta.navKey,
+        label: labelNavEl(el) || meta.navLabel || fromApi.label || meta.navKey,
+        parent_key: el.dataset.navParent || parentKey || fromApi.parent_key || '',
+        parent_label: parentLabel || fromApi.parent_label || '',
+        parent_sort: parentSort,
+        sort,
+      });
+    }
+
+    Array.from(root.querySelectorAll('.side-wrapper')).forEach((wrap, gi) => {
+      const title = wrap.querySelector(':scope > .side-title');
+      const parentKey = title?.dataset?.navKey || '';
+      const parentLabel = labelNavEl(title) || String(title?.textContent || '').replace(/\s+/g, ' ').trim();
+      Array.from(wrap.querySelectorAll('.side-menu [data-nav-key], .side-menu .shell-nav-button[data-mirror-nav]'))
+        .forEach((el, ii) => pushEl(el, parentKey, parentLabel, gi, ii));
+    });
+
+    return resultado.length ? resultado : (botoesApi || []).filter((b) => b?.key && !NAV_KEYS_OBSOLETOS.includes(b.key));
+  }
+
+  function agruparBotoesMenu(botoes) {
     const lista = (botoes || []).filter((b) => b?.key && !NAV_KEYS_OBSOLETOS.includes(b.key));
     const grupos = new Map();
     const soltos = [];
@@ -127,13 +177,44 @@
       if (a.sort !== b.sort) return a.sort - b.sort;
       return a.label.localeCompare(b.label, 'pt-BR');
     });
-
-    let html = '<option value="">— Selecione —</option>';
     gruposOrd.forEach((g) => {
       g.items.sort((a, b) => {
         const ds = (Number(a.sort) || 0) - (Number(b.sort) || 0);
         return ds || String(a.label).localeCompare(String(b.label), 'pt-BR');
       });
+    });
+    soltos.sort((a, b) => String(a.label).localeCompare(String(b.label), 'pt-BR'));
+    return { gruposOrd, soltos };
+  }
+
+  function htmlListaBotoesComoPermissoes(botoes) {
+    const { gruposOrd, soltos } = agruparBotoesMenu(botoes);
+    if (!gruposOrd.length && !soltos.length) {
+      return '<div class="nav-admin-perm-empty">Nenhum botão nesta lista.</div>';
+    }
+    let html = '<div class="nav-admin-perm-tree" id="navAdminVisaoBotaoLista">';
+    gruposOrd.forEach((g) => {
+      html += `<div class="nav-admin-perm-cat">
+        <div class="nav-admin-perm-cat-label">${esc(g.label)}</div>
+        <div class="nav-admin-perm-cat-items">`;
+      g.items.forEach((b) => {
+        const busca = `${g.label} ${b.label}`.toLowerCase();
+        html += `<button type="button" class="nav-admin-perm-item" data-key="${esc(b.key)}" data-search="${esc(busca)}">${esc(b.label)}</button>`;
+      });
+      html += '</div></div>';
+    });
+    soltos.forEach((b) => {
+      html += `<button type="button" class="nav-admin-perm-item" data-key="${esc(b.key)}" data-search="${esc(String(b.label).toLowerCase())}">${esc(b.label)}</button>`;
+    });
+    html += '</div>';
+    return html;
+  }
+
+  function htmlSelectBotoesAgrupado(botoes, selectedKey) {
+    const { gruposOrd, soltos } = agruparBotoesMenu(botoes);
+
+    let html = '<option value="">— Selecione —</option>';
+    gruposOrd.forEach((g) => {
       html += `<optgroup label="${esc(g.label)}">`;
       g.items.forEach((b) => {
         const sel = b.key === selectedKey ? ' selected' : '';
@@ -142,7 +223,6 @@
       html += '</optgroup>';
     });
 
-    soltos.sort((a, b) => String(a.label).localeCompare(String(b.label), 'pt-BR'));
     soltos.forEach((b) => {
       const sel = b.key === selectedKey ? ' selected' : '';
       html += `<option value="${esc(b.key)}" data-label="${esc(b.label)}"${sel}>${esc(b.label)}</option>`;
@@ -653,26 +733,29 @@
 
   async function abrirModalEscolherBotaoVisao(titulo, filtro, onEscolher) {
     await carregarBotoes();
-    const lista = botoesCache.filter((b) => {
+    const permitidos = visaoClienteDataKeysPermitidos();
+    const lista = coletarBotoesMenuLateral(botoesCache).filter((b) => {
       if (NAV_KEYS_OBSOLETOS.includes(b.key)) return false;
-      if (filtro === 'permitidos') return visaoClienteDataKeysPermitidos().has(b.key);
-      if (filtro === 'nao_permitidos') return !visaoClienteDataKeysPermitidos().has(b.key);
+      if (filtro === 'permitidos') return permitidos.has(b.key);
+      if (filtro === 'nao_permitidos') return !permitidos.has(b.key);
       return true;
     });
 
     const overlay = criarModal(
       titulo,
-      `<div class="nav-admin-field">
-        <label>Botão do menu</label>
-        <select id="navAdminVisaoBotaoSel">${htmlSelectBotoesAgrupado(lista, '')}</select>
+      `<div class="nav-admin-perm-picker">
+        <input type="search" id="navAdminVisaoBotaoBusca" class="nav-admin-perm-busca" placeholder="Buscar permissão..." autocomplete="off">
+        <input type="hidden" id="navAdminVisaoBotaoSel" value="">
+        ${htmlListaBotoesComoPermissoes(lista)}
       </div>`,
       `<button type="button" class="nav-admin-btn nav-admin-btn-secondary nav-admin-cancelar">Cancelar</button>
        <button type="button" class="nav-admin-btn nav-admin-btn-primary" id="navAdminVisaoBotaoOk">Confirmar</button>`
     );
+    overlay.querySelector('.nav-admin-modal')?.classList.add('nav-admin-modal-perm');
 
-    overlay.querySelector('.nav-admin-cancelar').addEventListener('click', () => overlay.remove());
-    overlay.querySelector('#navAdminVisaoBotaoOk').addEventListener('click', async () => {
-      const navKey = overlay.querySelector('#navAdminVisaoBotaoSel').value;
+    const hidden = overlay.querySelector('#navAdminVisaoBotaoSel');
+    const confirmar = async () => {
+      const navKey = hidden.value;
       if (!navKey) return alert('Selecione um botão.');
       overlay.remove();
       try {
@@ -680,6 +763,32 @@
       } catch (err) {
         alert(err.message || String(err));
       }
+    };
+
+    overlay.querySelector('.nav-admin-cancelar').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#navAdminVisaoBotaoOk').addEventListener('click', confirmar);
+
+    overlay.querySelector('#navAdminVisaoBotaoLista')?.addEventListener('click', (e) => {
+      const item = e.target.closest('.nav-admin-perm-item');
+      if (!item) return;
+      overlay.querySelectorAll('.nav-admin-perm-item.is-selected').forEach((el) => el.classList.remove('is-selected'));
+      item.classList.add('is-selected');
+      hidden.value = item.dataset.key || '';
+    });
+    overlay.querySelector('#navAdminVisaoBotaoLista')?.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.nav-admin-perm-item')) confirmar();
+    });
+
+    overlay.querySelector('#navAdminVisaoBotaoBusca')?.addEventListener('input', (e) => {
+      const q = String(e.target.value || '').trim().toLowerCase();
+      overlay.querySelectorAll('.nav-admin-perm-item').forEach((item) => {
+        const ok = !q || String(item.dataset.search || '').includes(q);
+        item.classList.toggle('is-hidden', !ok);
+      });
+      overlay.querySelectorAll('.nav-admin-perm-cat').forEach((cat) => {
+        const any = Array.from(cat.querySelectorAll('.nav-admin-perm-item')).some((i) => !i.classList.contains('is-hidden'));
+        cat.classList.toggle('is-hidden', !any);
+      });
     });
   }
 
