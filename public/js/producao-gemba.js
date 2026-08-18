@@ -16,6 +16,7 @@
   let _fotoObjUrl = null;
   let _videoObjUrl = null;
   let _fotoDepoisObjUrl = null;
+  let _usuariosAtivos = null;
 
   function $(id) { return document.getElementById(id); }
 
@@ -186,13 +187,62 @@
     `).join('');
   }
 
-  function preencherFormulario(row, historico) {
+  async function carregarUsuariosAtivos() {
+    if (Array.isArray(_usuariosAtivos)) return _usuariosAtivos;
+    const tentar = async (url) => {
+      const resp = await fetch(url, { credentials: 'include' });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const payload = await resp.json().catch(() => ({}));
+      if (Array.isArray(payload?.users)) {
+        return payload.users.map((u) => String(u || '').trim()).filter(Boolean);
+      }
+      if (Array.isArray(payload?.usuarios)) {
+        return payload.usuarios.map((u) => String(u?.username || u || '').trim()).filter(Boolean);
+      }
+      return [];
+    };
+    try {
+      _usuariosAtivos = await tentar('/api/users/ativos');
+    } catch (_) {
+      try {
+        _usuariosAtivos = await tentar('/api/usuarios/ativos');
+      } catch (_) {
+        _usuariosAtivos = [];
+      }
+    }
+    _usuariosAtivos = Array.from(new Set(_usuariosAtivos)).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    return _usuariosAtivos;
+  }
+
+  function garantirSelectResponsavel() {
+    const el = $('gembaFormResponsavel');
+    if (!el) return null;
+    if (el.tagName === 'SELECT') return el;
+    const sel = document.createElement('select');
+    sel.id = 'gembaFormResponsavel';
+    el.replaceWith(sel);
+    return sel;
+  }
+
+  async function preencherSelectResponsavel(valorAtual) {
+    const sel = garantirSelectResponsavel();
+    if (!sel) return;
+    const users = await carregarUsuariosAtivos();
+    const atual = String(valorAtual || '').trim();
+    const lista = users.slice();
+    if (atual && !lista.includes(atual)) lista.unshift(atual);
+    sel.innerHTML = '<option value="">Selecione o responsável...</option>'
+      + lista.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
+    sel.value = atual;
+  }
+
+  async function preencherFormulario(row, historico) {
     $('gembaFormId').value = row?.id || '';
     $('gembaFormTitulo').value = row?.titulo || '';
     $('gembaFormDescricao').value = row?.descricao || '';
     $('gembaFormStatus').value = row?.status || 'aberta';
     $('gembaFormComentario').value = '';
-    if ($('gembaFormResponsavel')) $('gembaFormResponsavel').value = row?.responsavel_acao || '';
+    await preencherSelectResponsavel(row?.responsavel_acao);
     if ($('gembaFormPlanoAcao')) $('gembaFormPlanoAcao').value = row?.plano_acao || '';
     if ($('gembaFormPrazo')) $('gembaFormPrazo').value = toDateInput(row?.prazo);
     if ($('gembaFormDataConclusao')) $('gembaFormDataConclusao').value = toDateInput(row?.data_conclusao);
@@ -212,14 +262,14 @@
     revogarPreviews();
     $('gembaForm')?.reset();
     mostrarGuia('registro');
-    preencherFormulario(row, []);
+    await preencherFormulario(row, []);
     modal.hidden = false;
     $('gembaFormTitulo')?.focus();
     if (!row?.id) return;
     try {
       const resp = await fetch(`/api/gemba/${encodeURIComponent(row.id)}`);
       const json = await resp.json().catch(() => ({}));
-      if (resp.ok && json.data) preencherFormulario(json.data, json.historico || []);
+      if (resp.ok && json.data) await preencherFormulario(json.data, json.historico || []);
     } catch (_) {}
   }
 
