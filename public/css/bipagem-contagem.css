@@ -55,6 +55,7 @@
 .bip-btn--danger { color: var(--bip-red); border-color: #f0b8be; background: #fff; }
 .bip-btn[disabled] { opacity: .48; cursor: not-allowed; transform: none; }
 .bip-btn--icon { width: 40px; padding: 0; }
+.bip-btn--compact { min-height: 34px; padding: 7px 10px; font-size: 12px; }
 
 .bipagem-shell { max-width: 1500px; margin: 0 auto; padding: 16px 20px 28px; }
 .bipagem-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, .7fr); gap: 16px; align-items: start; }
@@ -167,6 +168,8 @@
   .bip-session-actions { width: 100%; }
   .bip-session-actions .bip-btn { flex: 1 1 auto; }
   .bip-reading { padding: 10px; }
+  .bip-card-head .bip-btn--compact span { display: none; }
+  .bip-card-head .bip-btn--compact { width: 36px; min-height: 36px; padding: 0; flex: 0 0 auto; }
 }
 
 @media (prefers-reduced-motion: reduce) {

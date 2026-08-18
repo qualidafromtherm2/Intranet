@@ -71,3 +71,13 @@ test('interface aceita Enter e Tab, câmera contínua e fila de rede', () => {
   assert.match(html, /id="bipagemContagemPane"/);
   assert.match(css, /@media \(max-width: 640px\)/);
 });
+
+test('bipagem permite copiar todas as leituras em formato tabular', () => {
+  const rota = ler('routes/bipagemContagem.js');
+  const frontend = ler('public/js/bipagem-contagem.js');
+  const html = ler('menu_produto.html');
+  assert.match(rota, /router\.get\('\/sessoes\/:id\/leituras'/);
+  assert.match(frontend, /async function copiarLeituras\(\)/);
+  assert.match(frontend, /cabecalho\.join\('\\t'\)/);
+  assert.match(html, /id="bipCopyReadings"/);
+});

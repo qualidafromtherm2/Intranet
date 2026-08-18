@@ -130,6 +130,7 @@
   }
 
   function renderLeituras() {
+    if (el.copyReadings) el.copyReadings.disabled = !state.sessao || !state.leituras.length;
     if (!state.leituras.length) {
       el.leituras.innerHTML = '<div class="bip-empty-list"><i class="fa-solid fa-barcode"></i><br>Nenhuma leitura confirmada ainda.</div>';
       return;
@@ -147,6 +148,67 @@
         ${state.sessao?.status === 'ativa' ? `<button class="bip-btn bip-btn--icon bip-btn--danger" type="button" data-remove-leitura="${item.id}" title="Desfazer esta leitura" aria-label="Desfazer esta leitura"><i class="fa-solid fa-rotate-left"></i></button>` : ''}
       </article>
     `).join('');
+  }
+
+  function limparCampoClipboard(valor) {
+    return String(valor ?? '').replace(/[\t\r\n]+/g, ' ').trim();
+  }
+
+  function dataReferenciaClipboard(valor) {
+    if (!valor) return '';
+    const texto = String(valor).slice(0, 10);
+    const partes = texto.split('-');
+    return partes.length === 3 ? partes.reverse().join('/') : texto;
+  }
+
+  async function escreverClipboard(texto) {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(texto);
+      return;
+    }
+    const area = document.createElement('textarea');
+    area.value = texto;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    const copiou = document.execCommand('copy');
+    area.remove();
+    if (!copiou) throw new Error('O navegador não permitiu copiar automaticamente.');
+  }
+
+  async function copiarLeituras() {
+    if (!state.sessao) return;
+    const botao = el.copyReadings;
+    const htmlOriginal = botao.innerHTML;
+    botao.disabled = true;
+    botao.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i><span>Copiando…</span>';
+    try {
+      const dados = await api(`/sessoes/${state.sessao.id}/leituras`);
+      const leituras = Array.isArray(dados.leituras) ? dados.leituras : [];
+      if (!leituras.length) throw new Error('Esta contagem ainda não possui leituras para copiar.');
+      const cabecalho = ['Sessão', 'Status', 'Código bipado', 'Formato', 'Modelo', 'OP', 'Data referência', 'Origem', 'Bipado por', 'Bipado em'];
+      const linhas = leituras.map((item) => [
+        state.sessao.nome || `Contagem #${state.sessao.id}`,
+        state.sessao.status || '',
+        item.valor_bruto || '',
+        item.formato || '',
+        item.modelo || '',
+        item.ordem_producao || '',
+        dataReferenciaClipboard(item.data_referencia),
+        item.origem || '',
+        item.lido_por || '',
+        dataHora(item.lido_em),
+      ].map(limparCampoClipboard).join('\t'));
+      await escreverClipboard([cabecalho.join('\t'), ...linhas].join('\n'));
+      toast(`${leituras.length} leitura(s) copiadas. Agora é só colar.`);
+    } catch (err) {
+      toast(err.message || 'Não foi possível copiar as leituras.');
+    } finally {
+      botao.innerHTML = htmlOriginal;
+      botao.disabled = !state.sessao || !state.leituras.length;
+    }
   }
 
   function renderSessao() {
@@ -430,6 +492,7 @@
       await carregarSessoes();
       toast('Contagem atualizada.');
     });
+    el.copyReadings.addEventListener('click', copiarLeituras);
     el.newSession.addEventListener('click', () => {
       pararCamera();
       state.sessao = null; state.leituras = []; localStorage.removeItem(ACTIVE_KEY); renderSessao(); el.newName.focus();
@@ -458,6 +521,7 @@
       sound: $('bipSoundToggle'), refresh: $('bipRefresh'), feedback: $('bipFeedback'), feedbackIcon: $('bipFeedbackIcon'),
       feedbackTitle: $('bipFeedbackTitle'), feedbackDetail: $('bipFeedbackDetail'), total: $('bipTotal'), pendentes: $('bipPending'),
       pendingBox: $('bipPendingBox'), leituras: $('bipReadings'), history: $('bipHistory'), toast: $('bipToast'),
+      copyReadings: $('bipCopyReadings'),
     });
     if (!el.pane || !el.menu) return;
     bind(); renderSessao(); carregarSessoes();

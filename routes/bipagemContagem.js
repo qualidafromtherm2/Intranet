@@ -211,6 +211,27 @@ router.get('/sessoes/:id', async (req, res) => {
   }
 });
 
+router.get('/sessoes/:id/leituras', async (req, res) => {
+  try {
+    await garantirEstrutura();
+    const id = numeroPositivo(req.params.id, 0, Number.MAX_SAFE_INTEGER);
+    if (!id) return res.status(400).json({ ok: false, error: 'Contagem inválida.' });
+    const sessao = await buscarSessao(id);
+    if (!sessao) return res.status(404).json({ ok: false, error: 'Contagem não encontrada.' });
+    const { rows } = await dbQuery(`
+      SELECT id, valor_bruto, formato, modelo, ordem_producao,
+             data_referencia, origem, lido_por, lido_em
+        FROM logistica.bipagem_contagem_leituras
+       WHERE sessao_id = $1
+       ORDER BY lido_em, id
+    `, [id]);
+    res.json({ ok: true, sessao, leituras: rows });
+  } catch (err) {
+    console.error('[bipagem-contagem] copiar leituras:', err);
+    res.status(500).json({ ok: false, error: 'Não foi possível carregar todas as leituras.' });
+  }
+});
+
 router.post('/sessoes/:id/leituras', express.json(), async (req, res) => {
   try {
     await garantirEstrutura();
