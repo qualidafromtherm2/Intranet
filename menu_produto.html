@@ -7770,8 +7770,8 @@
 
                 </div>
 
-                <!-- Linha 2: Horário início | Duração em horas | Repetir? — três colunas -->
-                <div style="grid-column:1/-1;display:grid;grid-template-columns:repeat(3,1fr);gap:12px;align-items:end;">
+                <!-- Linha 2: Horário | Duração | Repetir | Responsável -->
+                <div class="agenda-linha-horario">
 
                   <!-- Horário início (col 1) — oculto para Lembrete -->
                   <div id="agendaGrupoHorarios">
@@ -7814,6 +7814,14 @@
                     </label>
                   </div>
 
+                  <!-- Responsável (col 4) -->
+                  <div id="agendaGrupoResponsavel">
+                    <label>
+                      <span>Responsável</span>
+                      <select id="agendaResponsavelSelect"></select>
+                    </label>
+                  </div>
+
                 </div>
 
                 <!-- Dias da semana — exibido quando Repetir = Sim -->
@@ -7846,10 +7854,6 @@
                       <input id="agendaCafeCheckbox" type="checkbox" />
                     </label>
                   </div>
-                  <label class="agenda-cafe-check">
-                    <span>Avisar por e-mail</span>
-                    <input id="agendaAvisoEmail" type="checkbox" />
-                  </label>
                 </div>
 
                 <!-- Link da reunião — apenas Reunião online -->

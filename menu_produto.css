@@ -11327,6 +11327,14 @@ table.tabela td.num {
   gap: 12px;
 }
 
+.agenda-linha-horario {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
 .agenda-form-grid label {
   display: grid;
   gap: 6px;
@@ -12051,9 +12059,13 @@ table.tabela td.num {
     align-items: flex-end;
   }
 
-  /* Formul�rio de cria��o: colunas viram uma */
+  /* Formulário de criação: colunas viram uma */
   .agenda-form-grid {
     grid-template-columns: 1fr;
+  }
+
+  .agenda-linha-horario {
+    grid-template-columns: 1fr 1fr;
   }
 }
 

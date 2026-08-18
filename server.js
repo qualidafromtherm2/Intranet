@@ -4718,6 +4718,7 @@ app.post('/api/rh/reservas', async (req, res) => {
   const cafe = !!body.cafe;
   const avisoEmail = !!body.avisoEmail;
   const avisoWhatsapp = !!body.avisoWhatsapp;
+  const criadoPorPost = String(body.criadoPor || userLogado).trim() || userLogado;
   const descricao = String(body.descricao || '').trim() || null;
   const visitantes = String(body.visitantes || '').trim() || null;
   const linkReuniao = String(body.linkReuniao || '').trim() || null;
@@ -4768,7 +4769,7 @@ app.post('/api/rh/reservas', async (req, res) => {
         (tipo_espaco, tema_reuniao, data_reserva, hora_inicio, hora_fim, repetir, repetir_todos_meses, dias_semana, cafe, descricao, visitantes, criado_por, link_reuniao, anexo_url, anexo_nome, aviso_email, aviso_whatsapp)
        VALUES ($1, $2, $3::date, $4::time, $5::time, $6, $7, $8::text[], $9, $10, $11, $12, $13, $14, $15, $16, $17)
        RETURNING id`,
-      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, userLogado, linkReuniao, anexoUrl, anexoNome, avisoEmail, avisoWhatsapp]
+      [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, criadoPorPost, linkReuniao, anexoUrl, anexoNome, avisoEmail, avisoWhatsapp]
     );
 
     const reservaId = insertReserva.rows[0].id;
@@ -4849,10 +4850,8 @@ app.post('/api/rh/reservas', async (req, res) => {
       }
     }
 
-    const destinosEmail = avisosResolvidos.filter((item) => item.avisoEmail).map((item) => item.username);
-
     let emailAviso = null;
-    if (avisoEmail && destinosEmail.length) {
+    if (participantes.length) {
       try {
         const { notificarNovaReserva } = require('./utils/reservasEmail');
         emailAviso = await notificarNovaReserva({
@@ -4866,7 +4865,7 @@ app.post('/api/rh/reservas', async (req, res) => {
           descricao,
           visitantes,
           linkReuniao,
-          participantes: destinosEmail,
+          participantes,
           criadoPor: userLogado
         });
       } catch (errEmail) {
@@ -4974,6 +4973,8 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
       return res.status(403).json({ error: 'Somente o criador, o setor RH ou um administrador pode alterar esta reserva' });
     }
 
+    const criadoPorNovo = String(body.criadoPor || atualRows[0].criado_por || userLogado).trim() || userLogado;
+
     const reservaAtual = atualRows[0];
     const reservaAtualRecorrente = !!reservaAtual.repetir;
     const dataBaseAtualIso = normalizarDataIsoRh(reservaAtual.data_reserva) || String(reservaAtual.data_reserva || '').slice(0, 10);
@@ -5059,7 +5060,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
           cafe,
           descricao,
           visitantes,
-          userLogado,
+          criadoPorNovo,
           linkReuniaoPut,
           anexoUrlPut,
           anexoNomePut,
@@ -5143,7 +5144,7 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
           cafe,
           descricao,
           visitantes,
-          userLogado,
+          criadoPorNovo,
           linkReuniaoPut,
           anexoUrlPut,
           anexoNomePut,
@@ -5176,9 +5177,10 @@ app.put('/api/rh/reservas/:id', async (req, res) => {
                 anexo_nome = $14,
                 aviso_email = $15,
                 aviso_whatsapp = $16,
+                criado_por = $17,
                 atualizado_em = NOW()
-          WHERE id = $17`,
-        [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, avisoEmail, avisoWhatsapp, reservaId]
+          WHERE id = $18`,
+        [tipoEspaco, tema, dataReserva, horaInicio, horaFim, repetir, repetirTodosMeses, diasSemana, cafe, descricao, visitantes, linkReuniaoPut, anexoUrlPut, anexoNomePut, avisoEmail, avisoWhatsapp, criadoPorNovo, reservaId]
       );
       await inserirParticipantesReservaRh(reservaId, participantes);
       escopoAplicado = 'registro';
