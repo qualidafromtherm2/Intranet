@@ -9,6 +9,15 @@ router.use(express.json());
 
 let schemaOk = false;
 
+const NAV_KEYS_OBSOLETOS = ['side:rh:constr18', 'side:produtos:constr3'];
+
+async function desativarBotoesObsoletos() {
+  await pool.query(
+    `UPDATE public.nav_node SET active = FALSE WHERE key = ANY($1::text[])`,
+    [NAV_KEYS_OBSOLETOS]
+  );
+}
+
 async function ensureSchema() {
   if (schemaOk) return;
   await pool.query(`
@@ -28,6 +37,7 @@ async function ensureSchema() {
     CREATE INDEX IF NOT EXISTS idx_nav_botao_hist_key
       ON public.nav_botao_historico (nav_key, created_at DESC)
   `);
+  await desativarBotoesObsoletos();
   schemaOk = true;
 }
 
@@ -86,14 +96,17 @@ router.get('/botoes', async (_req, res) => {
         n.selector,
         n.sort,
         n.position,
-        p.key AS parent_key
+        p.key AS parent_key,
+        p.label AS parent_label,
+        p.sort AS parent_sort
       FROM public.nav_node n
       LEFT JOIN public.nav_node p ON p.id = n.parent_id
       WHERE n.active = TRUE
         AND n.position = 'side'
         AND COALESCE(n.selector, '') <> ''
+        AND NOT (n.key = ANY($1::text[]))
       ORDER BY p.sort NULLS FIRST, p.id NULLS FIRST, n.sort, n.id
-    `);
+    `, [NAV_KEYS_OBSOLETOS]);
     res.json({ ok: true, botoes: rows });
   } catch (err) {
     console.error('[nav/admin/botoes]', err.message);
@@ -296,6 +309,60 @@ router.get('/visao-cliente/:userId', async (req, res) => {
     );
     res.json({ ok: true, userId: String(userId), nodes: rows });
   } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+// POST /api/nav/admin/visao-cliente/:userId/permissao
+// Body: { nav_key, allow: true|false }
+router.post('/visao-cliente/:userId/permissao', async (req, res) => {
+  try {
+    const uid = String(req.params.userId || '').trim();
+    const navKey = String(req.body?.nav_key || '').trim();
+    const allow = req.body?.allow !== false;
+    if (!navKey) return res.status(400).json({ ok: false, error: 'nav_key obrigatório.' });
+    if (NAV_KEYS_OBSOLETOS.includes(navKey)) {
+      return res.status(400).json({ ok: false, error: 'Botão obsoleto.' });
+    }
+
+    const { rows: uRows } = await pool.query(
+      `SELECT id FROM public.auth_user WHERE id::text = $1 OR username = $1 LIMIT 1`,
+      [uid]
+    );
+    if (!uRows.length) return res.status(404).json({ ok: false, error: 'Usuário não encontrado.' });
+    const userId = uRows[0].id;
+
+    const { rows: nRows } = await pool.query(
+      `SELECT id, label FROM public.nav_node WHERE key = $1 AND active = TRUE LIMIT 1`,
+      [navKey]
+    );
+    if (!nRows.length) return res.status(404).json({ ok: false, error: 'Botão não encontrado.' });
+
+    await pool.query(
+      `INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, node_id) DO UPDATE SET allow = EXCLUDED.allow`,
+      [userId, nRows[0].id, allow]
+    );
+
+    const { rows } = await pool.query(
+      `SELECT t.id, t.parent_id, t.key, t.label, t.pos, t.sort, t.allowed, t.user_override,
+              (SELECT selector FROM public.nav_node n WHERE n.id = t.id) AS selector
+         FROM public.auth_user_permissions_tree($1) t
+        ORDER BY t.pos, t.parent_id NULLS FIRST, t.sort, t.id`,
+      [userId]
+    );
+
+    res.json({
+      ok: true,
+      userId: String(userId),
+      nav_key: navKey,
+      nav_label: nRows[0].label,
+      allow,
+      nodes: rows,
+    });
+  } catch (err) {
+    console.error('[nav/admin/visao-cliente/permissao]', err.message);
     res.status(500).json({ ok: false, error: err.message });
   }
 });

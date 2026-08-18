@@ -39,6 +39,14 @@
   font-size: 16px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
   pointer-events: none;
+  opacity: 0;
+  transform: scale(0.35);
+  transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.16s ease;
+}
+
+.nav-radial-overlay.is-open .nav-radial-hub {
+  opacity: 1;
+  transform: scale(1);
 }
 
 .nav-radial-item {
@@ -84,18 +92,38 @@
   pointer-events: none;
 }
 
+.nav-radial-overlay:not(.is-open) .nav-radial-item {
+  transform: scale(0.35);
+  opacity: 0;
+  pointer-events: none;
+}
+
 .nav-radial-item:hover {
   background: #0ea5e9;
   border-color: #bae6fd;
 }
 
+.nav-radial-overlay:not(.is-active) {
+  visibility: hidden;
+}
+
+.nav-radial-overlay.is-active {
+  visibility: visible;
+}
+
 /* Modo reordenar */
+body.nav-admin-reorder-mode .nav-radial-overlay {
+  display: none !important;
+}
+
+body.nav-admin-reorder-mode .left-side .nav-admin-target,
 body.nav-admin-reorder-mode .sidebar-content .nav-admin-target {
   outline: 2px dashed #38bdf8;
   outline-offset: 2px;
   cursor: grab;
 }
 
+body.nav-admin-reorder-mode .left-side .side-menu.nav-drop-target,
 body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   background: rgba(56, 189, 248, 0.08);
   border-radius: 8px;
@@ -158,6 +186,17 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   cursor: pointer;
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
+}
+
+.nav-visao-cliente-bar #navVisaoClienteAdd {
+  background: rgba(16, 185, 129, 0.35);
+  border-color: rgba(167, 243, 208, 0.55);
+}
+
+.nav-visao-cliente-bar #navVisaoClienteRemove {
+  background: rgba(239, 68, 68, 0.28);
+  border-color: rgba(254, 202, 202, 0.45);
 }
 
 /* Modais admin nav */
@@ -165,7 +204,7 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   position: fixed;
   inset: 0;
   z-index: 10085;
-  background: rgba(2, 6, 23, 0.55);
+  background: rgba(2, 6, 23, 0.78);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -173,14 +212,14 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
 }
 
 .nav-admin-modal {
-  background: var(--content-bg, #1e2233);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #1e293b;
+  border: 1px solid #334155;
   border-radius: 14px;
   width: min(720px, 96vw);
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.55);
 }
 
 .nav-admin-modal header {
@@ -188,7 +227,8 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   align-items: center;
   justify-content: space-between;
   padding: 14px 18px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid #334155;
+  background: #1e293b;
 }
 
 .nav-admin-modal header h3 {
@@ -201,14 +241,17 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   padding: 16px 18px;
   overflow: auto;
   flex: 1;
+  background: #1e293b;
+  color: #e2e8f0;
 }
 
 .nav-admin-modal footer {
   padding: 12px 18px;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid #334155;
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+  background: #1e293b;
 }
 
 .nav-admin-table {
@@ -248,12 +291,18 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
 .nav-admin-field input,
 .nav-admin-field select,
 .nav-admin-field textarea {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: #0f172a;
+  border: 1px solid #475569;
   border-radius: 8px;
-  color: #e2e8f0;
+  color: #f1f5f9;
   padding: 8px 10px;
   font-size: 13px;
+}
+
+.nav-admin-meta-chave {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
 }
 
 .nav-admin-btn {
@@ -278,12 +327,45 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   color: #e2e8f0;
 }
 
-.chamado-field-pagina-botao select {
+.chamado-modal-body .chamado-field-pagina-botao select,
+.chamado-field-pagina-botao select#chamadoPaginaBotao {
   width: 100%;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px;
-  color: #e2e8f0;
+  box-sizing: border-box;
   padding: 8px 10px;
+  border: 1px solid #b9c7d8;
+  border-radius: 7px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
   font-size: 13px;
+}
+
+.chamado-field-pagina-botao select option {
+  background: #fff;
+  color: #172033;
+}
+
+.chamado-field-pagina-botao #chamadoPaginaBotaoCodigo {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #b9c7d8;
+  border-radius: 7px;
+  background: #fff;
+  color: #172033;
+  font: inherit;
+  font-size: 13px;
+}
+
+.nav-admin-field select optgroup {
+  background: #0f172a;
+  color: #94a3b8;
+  font-weight: 700;
+}
+
+.chamado-field-pagina-botao select optgroup {
+  font-weight: 800;
+  color: #334155;
+  background: #f1f5f9;
 }

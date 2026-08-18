@@ -4,16 +4,57 @@
 
   const LONG_PRESS_MS = 550;
   const API = '/api/nav/admin';
+  const NAV_KEYS_OBSOLETOS = ['side:rh:constr18', 'side:produtos:constr3'];
+  const NAV_TARGET_SEL = [
+    '.side-menu > a[data-nav-key]',
+    '.side-menu a[data-nav-key]',
+    '.shell-nav-button[data-mirror-nav]',
+    '.menu-link[data-nav-key]',
+  ].join(',');
 
   let radialOverlay = null;
   let radialContext = null;
   let pressTimer = null;
+  let pressTargetEl = null;
+  let suppressClickUntil = 0;
   let reorderState = null;
   let visaoClienteAtiva = false;
+  let visaoClienteUserId = null;
+  let visaoClienteUsername = '';
   let botoesCache = [];
+  let adminInicializado = false;
+  let delegacaoAtiva = false;
+  let pageDelegacaoAtiva = false;
+  const ACTIONS_MENU = ['chamado', 'mover', 'renomear', 'historico', 'visao'];
+  const ACTIONS_PAGINA = ['chamado', 'historico', 'visao'];
+  const ACTION_DEFS = {
+    chamado: { icon: 'fa-headset', label: 'Abrir chamado' },
+    mover: { icon: 'fa-arrows-up-down-left-right', label: 'Alterar posição' },
+    renomear: { icon: 'fa-pen', label: 'Editar botão' },
+    historico: { icon: 'fa-clock-rotate-left', label: 'Abrir histórico' },
+    visao: { icon: 'fa-eye', label: 'Visão cliente' },
+  };
+
+  let radialModo = 'menu';
 
   function ehAdmin() {
-    return typeof window.usuarioEhAdminSistema === 'function' && window.usuarioEhAdminSistema();
+    if (typeof window.usuarioEhAdminSistema === 'function') {
+      return window.usuarioEhAdminSistema();
+    }
+    const rawRoles = window.userRoles ?? window.__sessionUser?.roles ?? [];
+    const roles = Array.isArray(rawRoles)
+      ? rawRoles
+      : String(rawRoles || '').split(',').map((s) => s.trim()).filter(Boolean);
+    return roles.some((role) => String(role || '').trim().toLowerCase() === 'admin');
+  }
+
+  function usuarioLogado() {
+    return !!window.__sessionUser;
+  }
+
+  function actionIdsForModo(modo) {
+    if (!ehAdmin()) return ['chamado'];
+    return modo === 'pagina' ? ACTIONS_PAGINA : ACTIONS_MENU;
   }
 
   function esc(s) {
@@ -37,12 +78,138 @@
   }
 
   function menuTargets() {
-    const sel = [
-      '.sidebar-content .menu-link[data-nav-key]',
-      '.sidebar-content .side-menu > a[data-nav-key]',
-      '.sidebar-content .shell-nav-button[data-mirror-nav]',
-    ].join(',');
-    return Array.from(document.querySelectorAll(sel));
+    const root = document.getElementById('sidebarContent') || document.querySelector('.left-side');
+    if (!root) return [];
+    return Array.from(root.querySelectorAll(NAV_TARGET_SEL));
+  }
+
+  function alvoMenuFromEvent(e) {
+    const root = document.getElementById('sidebarContent') || document.querySelector('.left-side');
+    if (!root) return null;
+    const el = e.target?.closest?.(NAV_TARGET_SEL);
+    if (!el || !root.contains(el)) return null;
+    return el;
+  }
+
+  function removerBotoesObsoletosDom() {
+    NAV_KEYS_OBSOLETOS.forEach((key) => {
+      document.querySelectorAll(`[data-nav-key="${CSS.escape(key)}"]`).forEach((el) => el.remove());
+    });
+  }
+
+  function labelGrupoPai(parentKey, fallbackLabel) {
+    if (fallbackLabel) return String(fallbackLabel).trim();
+    if (!parentKey) return 'Outros';
+    const el = document.querySelector(`.side-title[data-nav-key="${CSS.escape(parentKey)}"]`);
+    return String(el?.dataset?.navLabel || el?.textContent || parentKey).trim().replace(/\s+/g, ' ').slice(0, 60)
+      || parentKey.split(':').pop();
+  }
+
+  function htmlSelectBotoesAgrupado(botoes, selectedKey) {
+    const lista = (botoes || []).filter((b) => b?.key && !NAV_KEYS_OBSOLETOS.includes(b.key));
+    const grupos = new Map();
+    const soltos = [];
+
+    lista.forEach((b) => {
+      const pk = b.parent_key || b.parentKey || '';
+      if (!pk) {
+        soltos.push(b);
+        return;
+      }
+      if (!grupos.has(pk)) {
+        grupos.set(pk, {
+          key: pk,
+          label: labelGrupoPai(pk, b.parent_label),
+          sort: Number(b.parent_sort) || 0,
+          items: [],
+        });
+      }
+      grupos.get(pk).items.push(b);
+    });
+
+    const gruposOrd = Array.from(grupos.values()).sort((a, b) => {
+      if (a.sort !== b.sort) return a.sort - b.sort;
+      return a.label.localeCompare(b.label, 'pt-BR');
+    });
+
+    let html = '<option value="">— Selecione —</option>';
+    gruposOrd.forEach((g) => {
+      g.items.sort((a, b) => {
+        const ds = (Number(a.sort) || 0) - (Number(b.sort) || 0);
+        return ds || String(a.label).localeCompare(String(b.label), 'pt-BR');
+      });
+      html += `<optgroup label="${esc(g.label)}">`;
+      g.items.forEach((b) => {
+        const sel = b.key === selectedKey ? ' selected' : '';
+        html += `<option value="${esc(b.key)}" data-label="${esc(b.label)}"${sel}>${esc(b.label)}</option>`;
+      });
+      html += '</optgroup>';
+    });
+
+    soltos.sort((a, b) => String(a.label).localeCompare(String(b.label), 'pt-BR'));
+    soltos.forEach((b) => {
+      const sel = b.key === selectedKey ? ' selected' : '';
+      html += `<option value="${esc(b.key)}" data-label="${esc(b.label)}"${sel}>${esc(b.label)}</option>`;
+    });
+
+    return html;
+  }
+
+  function contextoPaginaFromTarget(targetEl) {
+    const el = targetEl instanceof Element ? targetEl : null;
+    const navEl = el?.closest?.('[data-nav-key]');
+    const section = el?.closest?.(
+      '.content-section, .pane, [role="tabpanel"], .main-content, .wrapper > div[id], section[id]'
+    );
+    const titulo = section?.querySelector?.('h1,h2,h3,.content-section-title,.lp-tab-btn.is-active,.main-header-link.is-active')
+      || document.querySelector('.main-header-link.is-active, .lp-tab-btn.is-active, h1, h2');
+    const tituloTxt = String(titulo?.textContent || document.title || 'Página')
+      .trim().replace(/\s+/g, ' ').slice(0, 120);
+    const hash = (location.hash || '').replace(/^#/, '') || 'inicio';
+    const navKey = String(navEl?.dataset?.navKey || '').trim();
+    const navLabel = String(navEl?.dataset?.navLabel || tituloTxt).trim();
+    const codigoRef = navKey || section?.id || hash;
+    const tag = el ? el.tagName.toLowerCase() : 'pagina';
+    const elId = el?.id ? `#${el.id}` : '';
+    const elCls = el?.className ? `.${String(el.className).split(/\s+/)[0]}` : '';
+
+    const contextoDescricao = [
+      '[Contexto automático — admin]',
+      `Tela/área: ${tituloTxt}`,
+      `Referência: ${codigoRef}`,
+      `URL: ${location.pathname}${location.hash || ''}`,
+      el ? `Clique em: ${tag}${elId}${elCls}` : '',
+      '',
+      'Descreva abaixo o problema, sugestão ou o que deseja solicitar:',
+      '',
+    ].filter(Boolean).join('\n');
+
+    return {
+      modo: 'pagina',
+      el: navEl || el,
+      navKey: navKey || `page:${hash}`,
+      navLabel: tituloTxt,
+      paginaCodigo: codigoRef,
+      contextoDescricao,
+    };
+  }
+
+  function deveIgnorarPressPagina(e) {
+    if (!usuarioLogado() || visaoClienteAtiva) return true;
+    if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return true;
+    if (radialOverlay?.classList.contains('is-active')) return true;
+    if (alvoMenuFromEvent(e)) return true;
+    const t = e.target;
+    if (!(t instanceof Element)) return true;
+    if (t.closest('.left-side, #sidebarContent, .nav-radial-overlay, .nav-admin-modal-overlay, .chamado-modal-overlay, .agenda-modal-overlay')) return true;
+    if (t.closest('input, textarea, select, button, a, label, [contenteditable="true"]')) return true;
+    return false;
+  }
+
+  function angulosRadial(qtd) {
+    if (qtd === 1) return [-90];
+    if (qtd === 3) return [-90, 18, 126];
+    return [-90, -18, 54, 126, 198];
   }
 
   function metaFromEl(el) {
@@ -67,7 +234,7 @@
       navLabel = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
     }
 
-    return navKey ? { el, navKey, navLabel, navSelector } : null;
+    return navKey ? { el, navKey, navLabel, navSelector, modo: 'menu' } : null;
   }
 
   function ensureRadialOverlay() {
@@ -82,34 +249,23 @@
 
     radialOverlay.querySelector('.nav-radial-backdrop').addEventListener('click', fecharRadial);
 
-    const actions = [
-      { id: 'chamado', icon: 'fa-headset', label: 'Abrir chamado', angle: -90 },
-      { id: 'mover', icon: 'fa-arrows-up-down-left-right', label: 'Alterar posição', angle: -18 },
-      { id: 'renomear', icon: 'fa-pen', label: 'Editar botão', angle: 54 },
-      { id: 'historico', icon: 'fa-clock-rotate-left', label: 'Abrir histórico', angle: 126 },
-      { id: 'visao', icon: 'fa-eye', label: 'Visão cliente', angle: 198 },
-    ];
-
-    const radius = 78;
-    actions.forEach((act, idx) => {
+    Object.entries(ACTION_DEFS).forEach(([id, def]) => {
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'nav-radial-item';
-      btn.dataset.action = act.id;
-      btn.style.transitionDelay = `${idx * 0.03}s`;
-      btn.innerHTML = `<i class="fa-solid ${act.icon}"></i><span class="nav-radial-item-label">${esc(act.label)}</span>`;
+      btn.dataset.action = id;
+      btn.innerHTML = `<i class="fa-solid ${def.icon}"></i><span class="nav-radial-item-label">${esc(def.label)}</span>`;
       btn.addEventListener('click', (e) => {
         e.stopPropagation();
-        executarAcaoRadial(act.id);
+        executarAcaoRadial(id);
       });
       radialOverlay.appendChild(btn);
-      btn._angle = act.angle;
     });
 
     return radialOverlay;
   }
 
-  function posicionarRadial(x, y) {
+  function posicionarRadial(x, y, actionIds) {
     const ov = ensureRadialOverlay();
     ov.style.left = '0';
     ov.style.top = '0';
@@ -117,21 +273,31 @@
     hub.style.left = `${x}px`;
     hub.style.top = `${y}px`;
 
+    const ids = actionIds || ACTIONS_MENU;
+    const angles = angulosRadial(ids.length);
     const radius = 78;
+    let idx = 0;
+
     ov.querySelectorAll('.nav-radial-item').forEach((btn) => {
-      const rad = (btn._angle * Math.PI) / 180;
-      const px = x + Math.cos(rad) * radius;
-      const py = y + Math.sin(rad) * radius;
-      btn.style.left = `${px}px`;
-      btn.style.top = `${py}px`;
+      const actId = btn.dataset.action;
+      const show = ids.includes(actId);
+      btn.style.display = show ? '' : 'none';
+      if (!show) return;
+      const angle = angles[idx++];
+      const rad = (angle * Math.PI) / 180;
+      btn.style.left = `${x + Math.cos(rad) * radius}px`;
+      btn.style.top = `${y + Math.sin(rad) * radius}px`;
+      btn._angle = angle;
     });
   }
 
-  function abrirRadial(ctx, x, y) {
-    if (!ehAdmin()) return;
+  function abrirRadial(ctx, x, y, modo) {
+    if (!usuarioLogado()) return;
     radialContext = ctx;
+    radialModo = modo === 'pagina' ? 'pagina' : 'menu';
     const ov = ensureRadialOverlay();
-    posicionarRadial(x, y);
+    const ids = actionIdsForModo(radialModo);
+    posicionarRadial(x, y, ids);
     ov.classList.add('is-active');
     requestAnimationFrame(() => ov.classList.add('is-open'));
   }
@@ -139,21 +305,24 @@
   function fecharRadial() {
     if (!radialOverlay) return;
     radialOverlay.classList.remove('is-open');
+    radialContext = null;
     setTimeout(() => {
-      radialOverlay.classList.remove('is-active');
-      radialContext = null;
-    }, 180);
+      if (radialOverlay && !radialOverlay.classList.contains('is-open')) {
+        radialOverlay.classList.remove('is-active');
+      }
+    }, 200);
   }
 
   function executarAcaoRadial(actionId) {
     const ctx = radialContext;
     fecharRadial();
     if (!ctx) return;
+    if (!ehAdmin() && actionId !== 'chamado') return;
 
     if (actionId === 'chamado') abrirChamadoDoBotao(ctx);
-    else if (actionId === 'mover') iniciarModoReordenar(ctx);
-    else if (actionId === 'renomear') abrirModalRenomear(ctx);
-    else if (actionId === 'historico') abrirModalHistorico(ctx);
+    else if (actionId === 'mover' && ctx.modo !== 'pagina') iniciarModoReordenar(ctx);
+    else if (actionId === 'renomear' && ctx.modo !== 'pagina') abrirModalRenomear(ctx);
+    else if (actionId === 'historico') abrirHistoricoDoContexto(ctx);
     else if (actionId === 'visao') abrirModalVisaoCliente();
   }
 
@@ -162,25 +331,45 @@
     try {
       const r = await fetch(`${API}/botoes`, { credentials: 'include' });
       const d = await r.json();
-      if (r.ok && d.ok) botoesCache = d.botoes || [];
+      if (r.ok && d.ok) {
+        botoesCache = (d.botoes || []).filter((b) => !NAV_KEYS_OBSOLETOS.includes(b.key));
+      }
     } catch (_) {}
     return botoesCache;
   }
 
-  function optionsBotoesSelect(selectedKey) {
-    return botoesCache.map((b) => {
-      const sel = b.key === selectedKey ? ' selected' : '';
-      return `<option value="${esc(b.key)}" data-label="${esc(b.label)}"${sel}>${esc(b.label)} (${esc(b.key)})</option>`;
-    }).join('');
-  }
-
   async function abrirChamadoDoBotao(ctx) {
     await carregarBotoes();
-    if (typeof window.abrirChamadoSuporteComBotao === 'function') {
-      window.abrirChamadoSuporteComBotao({ nav_key: ctx.navKey, nav_label: ctx.navLabel });
+    if (typeof window.abrirChamadoSuporteComBotao !== 'function') {
+      alert('Modal de chamado indisponível.');
       return;
     }
-    alert('Modal de chamado indisponível.');
+    const opts = {
+      nav_key: ctx.navKey,
+      nav_label: ctx.navLabel,
+      aba: 'novo',
+    };
+    if (ctx.modo === 'pagina') {
+      opts.contexto_descricao = ctx.contextoDescricao || '';
+      opts.contexto_pagina_codigo = ctx.paginaCodigo || ctx.navKey || '';
+      if (String(ctx.navKey || '').startsWith('page:')) {
+        opts.nav_key = '';
+      }
+    }
+    window.abrirChamadoSuporteComBotao(opts);
+  }
+
+  function abrirHistoricoDoContexto(ctx) {
+    const temChaveMenu = ctx.navKey && !String(ctx.navKey).startsWith('page:') && !String(ctx.navKey).startsWith('side:custom:');
+    if (temChaveMenu) {
+      abrirModalHistorico(ctx);
+      return;
+    }
+    abrirModalEscolherBotaoVisao('Histórico — escolha o botão', 'todos', async (navKey) => {
+      await carregarBotoes();
+      const b = botoesCache.find((x) => x.key === navKey);
+      abrirModalHistorico({ navKey, navLabel: b?.label || navKey, el: null });
+    });
   }
 
   function criarModal(titulo, bodyHtml, footerHtml) {
@@ -208,7 +397,7 @@
         <label for="navAdminRenameInput">Novo nome</label>
         <input id="navAdminRenameInput" type="text" maxlength="80" value="${esc(ctx.navLabel)}">
       </div>
-      <div style="font-size:11px;color:#64748b;">Chave: ${esc(ctx.navKey)}</div>`,
+      <div class="nav-admin-meta-chave">Chave: ${esc(ctx.navKey)}</div>`,
       `<button type="button" class="nav-admin-btn nav-admin-btn-secondary nav-admin-cancelar">Cancelar</button>
        <button type="button" class="nav-admin-btn nav-admin-btn-primary nav-admin-salvar-rename">Salvar</button>`
     );
@@ -329,14 +518,16 @@
       .catch(() => {});
 
     overlay.querySelector('#navAdminVisaoAplicar').addEventListener('click', async () => {
-      const uid = overlay.querySelector('#navAdminVisaoUser').value;
+      const sel = overlay.querySelector('#navAdminVisaoUser');
+      const uid = sel.value;
       if (!uid) return;
+      const username = sel.selectedOptions?.[0]?.textContent?.trim() || '';
       overlay.remove();
-      await aplicarVisaoCliente(uid);
+      await aplicarVisaoCliente(uid, username);
     });
   }
 
-  async function aplicarVisaoCliente(userId) {
+  async function aplicarVisaoCliente(userId, username) {
     try {
       const r = await fetch(`${API}/visao-cliente/${encodeURIComponent(userId)}`, { credentials: 'include' });
       const d = await r.json();
@@ -346,10 +537,70 @@
         window.__applyNavPermissionTree(d);
       }
       visaoClienteAtiva = true;
+      visaoClienteUserId = String(d.userId || userId);
+      visaoClienteUsername = username || '';
       mostrarBarraVisaoCliente(d);
     } catch (err) {
       alert('Erro ao aplicar visão: ' + err.message);
     }
+  }
+
+  async function alterarPermissaoVisaoCliente(navKey, allow) {
+    if (!visaoClienteUserId) return;
+    const r = await fetch(`${API}/visao-cliente/${encodeURIComponent(visaoClienteUserId)}/permissao`, {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ nav_key: navKey, allow }),
+    });
+    const d = await r.json();
+    if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+    if (typeof window.__applyNavPermissionTree === 'function') {
+      window.__applyNavPermissionTree(d);
+    }
+    return d;
+  }
+
+  async function abrirModalEscolherBotaoVisao(titulo, filtro, onEscolher) {
+    await carregarBotoes();
+    const lista = botoesCache.filter((b) => {
+      if (NAV_KEYS_OBSOLETOS.includes(b.key)) return false;
+      if (filtro === 'permitidos') return visaoClienteDataKeysPermitidos().has(b.key);
+      if (filtro === 'nao_permitidos') return !visaoClienteDataKeysPermitidos().has(b.key);
+      return true;
+    });
+
+    const overlay = criarModal(
+      titulo,
+      `<div class="nav-admin-field">
+        <label>Botão do menu</label>
+        <select id="navAdminVisaoBotaoSel">${htmlSelectBotoesAgrupado(lista, '')}</select>
+      </div>`,
+      `<button type="button" class="nav-admin-btn nav-admin-btn-secondary nav-admin-cancelar">Cancelar</button>
+       <button type="button" class="nav-admin-btn nav-admin-btn-primary" id="navAdminVisaoBotaoOk">Confirmar</button>`
+    );
+
+    overlay.querySelector('.nav-admin-cancelar').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#navAdminVisaoBotaoOk').addEventListener('click', async () => {
+      const navKey = overlay.querySelector('#navAdminVisaoBotaoSel').value;
+      if (!navKey) return alert('Selecione um botão.');
+      overlay.remove();
+      try {
+        await onEscolher(navKey);
+      } catch (err) {
+        alert(err.message || String(err));
+      }
+    });
+  }
+
+  function visaoClienteDataKeysPermitidos() {
+    const keys = new Set();
+    if (window.__navPermissionsByKey) {
+      Object.entries(window.__navPermissionsByKey).forEach(([k, v]) => {
+        if (v) keys.add(k);
+      });
+    }
+    return keys;
   }
 
   function mostrarBarraVisaoCliente(data) {
@@ -357,13 +608,31 @@
     const bar = document.createElement('div');
     bar.id = 'navVisaoClienteBar';
     bar.className = 'nav-visao-cliente-bar';
+    const nomeUser = visaoClienteUsername ? ` (${esc(visaoClienteUsername)})` : '';
     bar.innerHTML = `
       <i class="fa-solid fa-eye"></i>
-      <span>Visão cliente ativa (usuário #${esc(data.userId)})</span>
+      <span>Visão cliente ativa${nomeUser}</span>
+      <button type="button" id="navVisaoClienteAdd">Adicionar botão</button>
+      <button type="button" id="navVisaoClienteRemove">Remover botão</button>
       <button type="button" id="navVisaoClienteFechar">Fechar visão cliente</button>`;
     document.body.appendChild(bar);
+
+    bar.querySelector('#navVisaoClienteAdd').addEventListener('click', () => {
+      abrirModalEscolherBotaoVisao('Liberar botão para o usuário', 'nao_permitidos', async (navKey) => {
+        await alterarPermissaoVisaoCliente(navKey, true);
+      });
+    });
+
+    bar.querySelector('#navVisaoClienteRemove').addEventListener('click', () => {
+      abrirModalEscolherBotaoVisao('Remover botão deste usuário', 'permitidos', async (navKey) => {
+        await alterarPermissaoVisaoCliente(navKey, false);
+      });
+    });
+
     bar.querySelector('#navVisaoClienteFechar').addEventListener('click', async () => {
       visaoClienteAtiva = false;
+      visaoClienteUserId = null;
+      visaoClienteUsername = '';
       bar.remove();
       if (typeof window.applyCurrentUserPermissionsToUI === 'function') {
         await window.applyCurrentUserPermissionsToUI();
@@ -373,6 +642,8 @@
 
   function iniciarModoReordenar(ctx) {
     if (reorderState) cancelarReordenar();
+    fecharRadial();
+    cancelarPress();
     document.body.classList.add('nav-admin-reorder-mode');
     ctx.el.classList.add('nav-admin-target');
     ctx.el.setAttribute('draggable', 'true');
@@ -380,24 +651,25 @@
     const hint = document.createElement('div');
     hint.className = 'nav-admin-reorder-hint';
     hint.id = 'navAdminReorderHint';
-    hint.innerHTML = `<span>Arraste <b>${esc(ctx.navLabel)}</b> para a nova posição</span>
+    hint.innerHTML = `<span>Arraste <b>${esc(ctx.navLabel)}</b> para a nova posição (sem segurar — arraste direto)</span>
       <button type="button" id="navAdminReorderCancel">Cancelar</button>`;
     document.body.appendChild(hint);
     hint.querySelector('#navAdminReorderCancel').addEventListener('click', cancelarReordenar);
 
-    document.querySelectorAll('.sidebar-content .side-menu').forEach((menu) => {
+    document.querySelectorAll('.sidebar-content .side-menu, .left-side .side-menu').forEach((menu) => {
       menu.classList.add('nav-drop-target');
     });
 
-    reorderState = { ctx, hint };
-
-    ctx.el.addEventListener('dragstart', onReorderDragStart);
-    ctx.el.addEventListener('dragend', onReorderDragEnd);
-
-    document.querySelectorAll('.sidebar-content .side-menu').forEach((menu) => {
+    const menus = Array.from(document.querySelectorAll('.sidebar-content .side-menu, .left-side .side-menu'));
+    menus.forEach((menu) => {
       menu.addEventListener('dragover', onReorderDragOver);
       menu.addEventListener('drop', onReorderDrop);
     });
+
+    reorderState = { ctx, hint, menus };
+
+    ctx.el.addEventListener('dragstart', onReorderDragStart);
+    ctx.el.addEventListener('dragend', onReorderDragEnd);
   }
 
   function onReorderDragStart(e) {
@@ -473,11 +745,16 @@
     if (reorderState?.ctx?.el) {
       reorderState.ctx.el.classList.remove('nav-admin-target');
       reorderState.ctx.el.removeAttribute('draggable');
+      reorderState.ctx.el.removeEventListener('dragstart', onReorderDragStart);
+      reorderState.ctx.el.removeEventListener('dragend', onReorderDragEnd);
     }
-    document.querySelectorAll('.sidebar-content .side-menu').forEach((menu) => {
-      menu.classList.remove('nav-drop-target');
-      menu.replaceWith(menu.cloneNode(true));
-    });
+    if (reorderState?.menus) {
+      reorderState.menus.forEach((menu) => {
+        menu.classList.remove('nav-drop-target');
+        menu.removeEventListener('dragover', onReorderDragOver);
+        menu.removeEventListener('drop', onReorderDrop);
+      });
+    }
     reorderState = null;
   }
 
@@ -517,63 +794,159 @@
   }
 
   function iniciarPress(e, el) {
-    if (!ehAdmin() || visaoClienteAtiva) return;
+    if (!usuarioLogado() || visaoClienteAtiva) return;
+    if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return;
+    if (radialOverlay?.classList.contains('is-active')) return;
     if (e.button != null && e.button !== 0) return;
     cancelarPress();
     const meta = metaFromEl(el);
     if (!meta) return;
 
+    pressTargetEl = el;
     const x = e.clientX ?? (e.touches && e.touches[0]?.clientX) ?? 0;
     const y = e.clientY ?? (e.touches && e.touches[0]?.clientY) ?? 0;
 
     pressTimer = setTimeout(() => {
       pressTimer = null;
-      abrirRadial(meta, x, y);
+      suppressClickUntil = Date.now() + 900;
+      abrirRadial(meta, x, y, 'menu');
     }, LONG_PRESS_MS);
   }
 
-  function bindLongPress() {
-    menuTargets().forEach((el) => {
-      if (el.dataset.navAdminBound === '1') return;
-      el.dataset.navAdminBound = '1';
+  function iniciarPressPagina(e) {
+    if (deveIgnorarPressPagina(e)) return;
+    if (e.button != null && e.button !== 0) return;
+    cancelarPress();
+    pressTargetEl = e.target;
+    const x = e.clientX ?? 0;
+    const y = e.clientY ?? 0;
 
-      el.addEventListener('mousedown', (e) => iniciarPress(e, el));
-      el.addEventListener('touchstart', (e) => iniciarPress(e, el), { passive: true });
-      el.addEventListener('mouseup', cancelarPress);
-      el.addEventListener('mouseleave', cancelarPress);
-      el.addEventListener('touchend', cancelarPress);
-      el.addEventListener('touchcancel', cancelarPress);
-      el.addEventListener('contextmenu', (e) => {
-        if (!ehAdmin()) return;
-        e.preventDefault();
-        const meta = metaFromEl(el);
-        if (meta) abrirRadial(meta, e.clientX, e.clientY);
-      });
+    pressTimer = setTimeout(() => {
+      pressTimer = null;
+      suppressClickUntil = Date.now() + 900;
+      const ctx = contextoPaginaFromTarget(pressTargetEl);
+      abrirRadial(ctx, x, y, 'pagina');
+    }, LONG_PRESS_MS);
+  }
+
+  function bindPressPagina() {
+    if (!usuarioLogado() || pageDelegacaoAtiva) return;
+    pageDelegacaoAtiva = true;
+
+    document.addEventListener('mousedown', iniciarPressPagina, true);
+    document.addEventListener('mouseup', finalizarPress, true);
+    document.addEventListener('click', bloquearClickPosLongPress, true);
+
+    document.addEventListener('contextmenu', (e) => {
+      if (!usuarioLogado() || visaoClienteAtiva) return;
+      if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return;
+      if (alvoMenuFromEvent(e)) return;
+      if (deveIgnorarPressPagina(e)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const ctx = contextoPaginaFromTarget(e.target);
+      suppressClickUntil = Date.now() + 900;
+      abrirRadial(ctx, e.clientX, e.clientY, 'pagina');
+    }, true);
+  }
+
+  function finalizarPress(e) {
+    if (pressTimer) {
+      cancelarPress();
+      pressTargetEl = null;
+      return;
+    }
+    if (Date.now() < suppressClickUntil) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+    }
+    pressTargetEl = null;
+  }
+
+  function bloquearClickPosLongPress(e) {
+    if (Date.now() >= suppressClickUntil) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+  }
+
+  function bindLongPress() {
+    if (!usuarioLogado() || delegacaoAtiva) return;
+    const root = document.getElementById('sidebarContent') || document.querySelector('.left-side');
+    if (!root) return;
+    delegacaoAtiva = true;
+
+    root.addEventListener('mousedown', (e) => {
+      const el = alvoMenuFromEvent(e);
+      if (el) iniciarPress(e, el);
     });
+
+    root.addEventListener('touchstart', (e) => {
+      const el = alvoMenuFromEvent(e);
+      if (el) iniciarPress(e, el);
+    }, { passive: true });
+
+    root.addEventListener('mouseup', finalizarPress, true);
+    root.addEventListener('mouseleave', (e) => {
+      if (pressTargetEl && !pressTargetEl.contains(e.relatedTarget)) cancelarPress();
+    }, true);
+    root.addEventListener('touchend', finalizarPress, true);
+    root.addEventListener('touchcancel', cancelarPress, true);
+    root.addEventListener('click', bloquearClickPosLongPress, true);
+
+    root.addEventListener('contextmenu', (e) => {
+      if (!usuarioLogado()) return;
+      if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return;
+      const el = alvoMenuFromEvent(e);
+      if (!el) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const meta = metaFromEl(el);
+      if (meta) {
+        suppressClickUntil = Date.now() + 900;
+        abrirRadial(meta, e.clientX, e.clientY, 'menu');
+      }
+    }, true);
   }
 
   function init() {
-    if (!ehAdmin()) return;
+    if (!usuarioLogado()) return;
+    if (ehAdmin()) removerBotoesObsoletosDom();
     bindLongPress();
-    aplicarOrdemSalva();
-    carregarBotoes();
+    bindPressPagina();
+    if (ehAdmin() && !adminInicializado) {
+      adminInicializado = true;
+      aplicarOrdemSalva();
+      carregarBotoes();
+    }
   }
 
-  document.addEventListener('DOMContentLoaded', () => {
-    setTimeout(init, 800);
+  function tentarInit(tentativa) {
+    if (usuarioLogado()) {
+      init();
+      return;
+    }
+    if (tentativa < 40) {
+      setTimeout(() => tentarInit(tentativa + 1), 250);
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && radialOverlay?.classList.contains('is-active')) {
+      fecharRadial();
+    }
   });
 
-  window.addEventListener('auth:loggedIn', () => setTimeout(init, 400));
-  window.addEventListener('auth:changed', () => setTimeout(init, 400));
+  document.addEventListener('DOMContentLoaded', () => tentarInit(0));
 
-  const sidebar = document.getElementById('sidebarContent');
-  if (sidebar) {
-    const obs = new MutationObserver(() => bindLongPress());
-    obs.observe(sidebar, { childList: true, subtree: true });
-  }
+  document.addEventListener('auth:loggedIn', () => setTimeout(init, 150));
+  window.addEventListener('auth:changed', () => setTimeout(init, 150));
 
   window.__navAdminRecarregarBotoes = () => {
     botoesCache = [];
     return carregarBotoes();
   };
+
+  window.__navAdminHtmlSelectBotoes = htmlSelectBotoesAgrupado;
 })();
