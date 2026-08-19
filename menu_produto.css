@@ -24925,6 +24925,7 @@ html.light-mode #minhasComprasWrapper {
   #qualidadeFabricaPane .pir-pending-table .pir-cell-code,
   #qualidadeFabricaPane .pir-pending-table .pir-cell-description,
   #qualidadeFabricaPane .pir-pending-table .pir-cell-alerts,
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-obs,
   #qualidadeFabricaPane .pir-pending-table .pir-cell-created { grid-column: 1 / -1; }
   #qualidadeFabricaPane .pir-pending-table .pir-cell-code { order: 1; font-size: 14px; }
   #qualidadeFabricaPane .pir-pending-table .pir-cell-description { order: 2; line-height: 1.4; overflow-wrap: anywhere; }
@@ -24932,8 +24933,9 @@ html.light-mode #minhasComprasWrapper {
   #qualidadeFabricaPane .pir-pending-table .pir-cell-alerts > div { justify-content: flex-start !important; }
   #qualidadeFabricaPane .pir-pending-table .pir-cell-lot { order: 4; }
   #qualidadeFabricaPane .pir-pending-table .pir-cell-nfe { order: 5; }
-  #qualidadeFabricaPane .pir-pending-table .pir-cell-quantity { order: 6; }
-  #qualidadeFabricaPane .pir-pending-table .pir-cell-created { order: 7; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-obs { order: 6; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-quantity { order: 7; }
+  #qualidadeFabricaPane .pir-pending-table .pir-cell-created { order: 8; }
   #qualidadeFabricaPane .pir-pending-table tbody > tr:not(.qualidade-pir-pendente-row) { display: block; grid-column: 1 / -1; }
   #qualidadeFabricaPane .pir-pending-table tbody > tr:not(.qualidade-pir-pendente-row) td { display: block; width: 100%; }
 }
@@ -25116,6 +25118,7 @@ html.light-mode #minhasComprasWrapper {
       "photo description action"
       "alerts alerts alerts"
       "lot nfe quantity"
+      "obs obs obs"
       "created created created";
     gap: 0 10px;
     padding: 10px !important;
@@ -25131,6 +25134,7 @@ html.light-mode #minhasComprasWrapper {
   #qualidadeFabricaPane .pir-cell-alerts { grid-area: alerts !important; padding: 8px 0 5px !important; border-top: 1px solid #e4eaf1 !important; }
   #qualidadeFabricaPane .pir-cell-lot { grid-area: lot !important; }
   #qualidadeFabricaPane .pir-cell-nfe { grid-area: nfe !important; }
+  #qualidadeFabricaPane .pir-cell-obs { grid-area: obs !important; }
   #qualidadeFabricaPane .pir-cell-quantity { grid-area: quantity !important; }
   #qualidadeFabricaPane .pir-cell-created { grid-area: created !important; padding-bottom: 0 !important; }
   #qualidadeFabricaPane .pir-cell-action { grid-area: action; align-self: center; padding: 0 !important; }
@@ -25162,6 +25166,7 @@ html.light-mode #minhasComprasWrapper {
       "quantity quantity"
       "alerts alerts"
       "lot nfe"
+      "obs obs"
       "created created"
       "action action";
     margin-bottom: 8px;

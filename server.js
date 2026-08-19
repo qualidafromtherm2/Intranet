@@ -14931,6 +14931,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ALTER TABLE produto.produtos_omie
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT
+    `).catch(() => {});
 
     const q = String(req.query.q || '').trim();
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
@@ -14938,6 +14942,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       WITH base AS (
         SELECT er.id, er.numero_nfe, er.numero_pedido, er.lote, er.codigo_produto,
                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.pir,
+               er.motivo_sem_nfe,
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
                po.url_imagem AS produto_url_imagem,
@@ -15030,13 +15035,14 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
              OR er.descricao_produto ILIKE $1
              OR er.numero_nfe ILIKE $1
              OR er.numero_pedido ILIKE $1
+             OR er.motivo_sem_nfe ILIKE $1
            )
          ORDER BY er.criado_em DESC
          LIMIT 300
       )
       SELECT
         id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
-        qtd, unidade, data_emissao, criado_em, pir,
+        qtd, unidade, data_emissao, criado_em, pir, motivo_sem_nfe,
         produto_customizado,
         pir_vai_direto_identificacao,
         fornecedor_atual,
