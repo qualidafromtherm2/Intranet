@@ -7,6 +7,7 @@
  *   node scripts/sync_notas_fiscais_vendas_omie.js
  *   node scripts/sync_notas_fiscais_vendas_omie.js --limpar-testes
  *   node scripts/sync_notas_fiscais_vendas_omie.js --apenas-pendentes
+ *   node scripts/sync_notas_fiscais_vendas_omie.js --sem-itens
  *
  * Observação:
  * - Este script preenche apenas vendas.notas_fiscais_omie.
@@ -211,7 +212,12 @@ async function upsertNFe(client, dados) {
       data_emissao    = COALESCE(EXCLUDED.data_emissao,  vendas.notas_fiscais_omie.data_emissao),
       message_id_ultimo = EXCLUDED.message_id_ultimo,
       author_ultimo   = EXCLUDED.author_ultimo,
-      payload_ultimo  = EXCLUDED.payload_ultimo,
+      payload_ultimo  = CASE
+        WHEN jsonb_typeof(EXCLUDED.payload_ultimo->'det') = 'array'
+         AND jsonb_array_length(EXCLUDED.payload_ultimo->'det') > 0
+          THEN EXCLUDED.payload_ultimo
+        ELSE COALESCE(vendas.notas_fiscais_omie.payload_ultimo, EXCLUDED.payload_ultimo)
+      END,
       ativa           = EXCLUDED.ativa,
       updated_at      = NOW()
   `, [
@@ -268,6 +274,7 @@ async function ensureFlatColumns(client) {
 async function main() {
   const limparTestes_ = process.argv.includes('--limpar-testes');
   const apenasPendentes = process.argv.includes('--apenas-pendentes');
+  const apenasSemItens = process.argv.includes('--sem-itens');
   const client = await pool.connect();
 
   try {
@@ -300,6 +307,28 @@ async function main() {
           .filter(Boolean)
       );
       console.log(`Modo --apenas-pendentes: ${identidadesPendentes.size} identidades alvo.`);
+    }
+    if (apenasSemItens) {
+      const pend = await client.query(`
+        SELECT identidade
+        FROM vendas.notas_fiscais_omie
+        WHERE identidade IS NOT NULL
+          AND (
+            jsonb_typeof(payload_ultimo->'det') IS DISTINCT FROM 'array'
+            OR jsonb_array_length(COALESCE(payload_ultimo->'det', '[]'::jsonb)) = 0
+          )
+      `);
+      const semItens = new Set(
+        pend.rows
+          .map((r) => String(r.identidade || '').trim())
+          .filter(Boolean)
+      );
+      if (identidadesPendentes) {
+        identidadesPendentes = new Set([...identidadesPendentes].filter((id) => semItens.has(id)));
+      } else {
+        identidadesPendentes = semItens;
+      }
+      console.log(`Modo --sem-itens: ${identidadesPendentes.size} identidades alvo.`);
     }
 
     let pagina = 1;

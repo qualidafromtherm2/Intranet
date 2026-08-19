@@ -115,6 +115,7 @@ scripts/_archive/
 scripts/teste_*
 scripts/test_*
 scripts/debug_*
+scripts/_tmp_*
 scripts/relatorio_*.json
 
 # referências obsoletas

@@ -43,6 +43,15 @@ const {
   enderecoEtqParaMovimentacao,
   atribuirFifoCores,
 } = require('./utils/etqEndereco');
+const {
+  LOCAL_AREA_VERMELHA,
+  LOCAL_ENG_AMOSTRAS,
+  NOME_AREA_VERMELHA,
+  NOME_ENG_AMOSTRAS,
+  LOCAIS_BLOQUEADOS_SEPARACAO,
+  isLocalBloqueadoSeparacao,
+  destinoPorStatusPirEng
+} = require('./utils/locaisSeparacaoBloqueados');
 const OMIE_WEBHOOK_TOKEN = process.env.OMIE_WEBHOOK_TOKEN || null; // se NULL, não exige token
 // Em server.js (topo do arquivo)
 // chave: id da etiqueta (p.ex. número da OP), valor: { fileName, printed: boolean }
@@ -8175,7 +8184,7 @@ app.post([
         dataEmissao: parsed.dataEmissao,
         messageId,
         author,
-        payload: body,
+        payload: payloadNfParaGravar(body),
       });
 
       await registrarEventoNotaFiscalVenda(client, {
@@ -8194,8 +8203,8 @@ app.post([
 
       await client.query('COMMIT');
 
-      // Webhook Omie não traz CFOP — consulta ConsultarNF em fila (após responder 200).
-      if (tipoDocumento === 'NFe' && !upsertResult?.cfop) {
+      // Webhook Omie não traz itens (det) nem CFOP completo — ConsultarNF em fila após o 200.
+      if (tipoDocumento === 'NFe' && (!upsertResult?.cfop || !payloadNfParaGravar(body))) {
         agendarEnrichCfopNotaVenda({
           identidade,
           chaveNfe: parsed.chaveNfe,
@@ -14873,6 +14882,76 @@ async function ensureNavPirEng() {
 }
 ensureNavPirEng().catch(() => {});
 
+let _areaVermelhaProjetosNavPromise = null;
+async function ensureNavAreaVermelhaProjetos() {
+  if (_areaVermelhaProjetosNavPromise) return _areaVermelhaProjetosNavPromise;
+  _areaVermelhaProjetosNavPromise = (async () => {
+    await pool.query(`
+      INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+      SELECT $1, $2, 'side', p.id, $3, TRUE, $4
+        FROM public.nav_node p
+       WHERE p.key = 'side:qualidade'
+      ON CONFLICT (key) DO UPDATE SET
+        label = EXCLUDED.label,
+        position = EXCLUDED.position,
+        parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+        sort = EXCLUDED.sort,
+        active = TRUE,
+        selector = EXCLUDED.selector
+    `, ['side:qualidade:area-vermelha', 'Area vermelha', 30, '#menu-qualidade-area-vermelha']);
+    await pool.query(`
+      INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+      SELECT $1, $2, 'side', p.id, $3, TRUE, $4
+        FROM public.nav_node p
+       WHERE p.key = 'side:engenharia'
+      ON CONFLICT (key) DO UPDATE SET
+        label = EXCLUDED.label,
+        position = EXCLUDED.position,
+        parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+        sort = EXCLUDED.sort,
+        active = TRUE,
+        selector = EXCLUDED.selector
+    `, ['side:engenharia:projetos', 'Projetos', 55, '#menu-engenharia-projetos']);
+    const copies = [
+      ['side:qualidade:area-vermelha', 'side:qualidade:manuais'],
+      ['side:engenharia:projetos', 'side:engenharia:desenho-tecnico']
+    ];
+    for (const [key, sibling] of copies) {
+      await pool.query(`
+        INSERT INTO public.auth_role_permission (role, node_id, allow)
+        SELECT arp.role, n.id, arp.allow
+          FROM public.nav_node n
+          JOIN public.nav_node s ON s.key = $2
+          JOIN public.auth_role_permission arp ON arp.node_id = s.id
+         WHERE n.key = $1
+        ON CONFLICT (role, node_id) DO NOTHING
+      `, [key, sibling]);
+      await pool.query(`
+        INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+        SELECT aup.user_id, n.id, aup.allow
+          FROM public.nav_node n
+          JOIN public.nav_node s ON s.key = $2
+          JOIN public.auth_user_permission aup ON aup.node_id = s.id
+         WHERE n.key = $1
+        ON CONFLICT (user_id, node_id) DO NOTHING
+      `, [key, sibling]);
+      await pool.query(`
+        INSERT INTO public.auth_role_permission (role, node_id, allow)
+        SELECT 'admin', n.id, TRUE
+          FROM public.nav_node n
+         WHERE n.key = $1
+        ON CONFLICT (role, node_id) DO UPDATE SET allow = TRUE
+      `, [key]);
+    }
+  })().catch((err) => {
+    _areaVermelhaProjetosNavPromise = null;
+    console.error('[nav area-vermelha/projetos]', err.message);
+    throw err;
+  });
+  return _areaVermelhaProjetosNavPromise;
+}
+ensureNavAreaVermelhaProjetos().catch(() => {});
+
 // Normal: retorna todos os registros não-ocultos (impressa=false e impressa=true).
 // mostrar_ocultos=1: retorna apenas os ocultos.
 // Inclui id_impresso (último ETQ_rec_impresso para o item, quando impressa=true).
@@ -15295,7 +15374,18 @@ app.patch('/api/etiquetas/recebimento/:id/pir-eng-status', express.json(), async
       [id, status]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
-    res.json({ ok: true, ...result.rows[0] });
+    const row = result.rows[0];
+    let transferencia = null;
+    const destino = destinoPorStatusPirEng(status);
+    if (destino) {
+      transferencia = await _trfEtiquetasRecebimentoParaLocal(
+        id,
+        destino.codigo,
+        destino.nome,
+        status === 'reprovado' ? 'Reprovar material → Área vermelha' : 'Projeto → Engenharia e amostras'
+      );
+    }
+    res.json({ ok: true, ...row, transferencia });
   } catch (err) {
     console.error('[etiquetas/pir-eng-status]', err);
     res.status(500).json({ error: err?.message || 'Falha ao gravar status PIR_ENG.' });
@@ -16269,8 +16359,9 @@ app.get('/api/etiquetas/rec-impresso/ids-fifo-batch', async (req, res) => {
         WHERE p.codigo = ANY($1::text[])
           AND COALESCE(i.qtd, 0) > 0
           AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
+          AND TRIM(COALESCE(NULLIF(TRIM(i.local_estoque_codigo), ''), $2)) <> ALL($3::text[])
         ORDER BY p.codigo ASC, i.id ASC`,
-      [uniq]
+      [uniq, LOGISTICA_ALMOX_LOCAL_COD, LOCAIS_BLOQUEADOS_SEPARACAO]
     );
 
     const dados = {};
@@ -16951,6 +17042,108 @@ async function _etqDebitarEndereco(client, { codigo, endereco, qtd, usuario }) {
 
 const LOGISTICA_ALMOX_LOCAL_COD = '10717096386';
 const LOGISTICA_PRODUCAO_LOCAL_COD = '10431538872'; // 3. ESTOQUE PRODUÇÃO
+
+async function _logisticaAssertQtdLivreSeparacao(client, codigoProduto, qtd) {
+  const codigo = String(codigoProduto || '').trim();
+  const qtdNum = parseFloat(qtd);
+  if (!codigo || !Number.isFinite(qtdNum) || qtdNum <= 0) return;
+  const { rows } = await client.query(
+    `SELECT COALESCE(SUM(saldo), 0)::float AS livre
+       FROM logistica.estoque_atual
+      WHERE TRIM(codigo) = TRIM($1)
+        AND TRIM(COALESCE(local_codigo, '')) <> ALL($2::text[])`,
+    [codigo, LOCAIS_BLOQUEADOS_SEPARACAO]
+  );
+  const livre = Number(rows[0]?.livre || 0);
+  if (qtdNum > livre + 1e-9) {
+    const err = new Error(
+      `Quantidade ${qtdNum} é maior que o disponível para separação (${livre}). ` +
+      `Área vermelha e Engenharia não entram nesta conta. Diminua a quantidade da separação.`
+    );
+    err.code = 'SEP_QTD_MAIOR_QUE_LIVRE';
+    throw err;
+  }
+}
+
+async function _trfEtiquetasRecebimentoParaLocal(etqRecebimentoId, destinoCodigo, destinoNome, obsBase) {
+  const id = Number(etqRecebimentoId);
+  const dest = String(destinoCodigo || '').trim();
+  const destNome = String(destinoNome || dest).trim();
+  if (!id || !dest) return { ok: false, error: 'Destino ou ID inválido.' };
+
+  const { rows: recRows } = await pool.query(
+    `SELECT id, TRIM(COALESCE(codigo_produto, '')) AS codigo_produto,
+            COALESCE(qtd, 0) AS qtd, numero_nfe, lote
+       FROM etiqueta."ETQ_recebimento"
+      WHERE id = $1`,
+    [id]
+  );
+  if (!recRows[0]) return { ok: false, error: 'Recebimento não encontrado.' };
+  const rec = recRows[0];
+  const codigoTexto = String(rec.codigo_produto || '').trim();
+  if (!codigoTexto) return { ok: false, error: 'Recebimento sem código de produto.' };
+
+  const q = (sql, params) => pool.query(sql, params);
+  let idProd = await resolverCodigoProdutoPreferindoAtivo(q, codigoTexto, { strictAtivo: true });
+  if (!idProd) idProd = await _sincronizarProdutoOmiePorCodigoTexto(codigoTexto);
+  if (!idProd) {
+    return { ok: false, error: `Produto "${codigoTexto}" não encontrado na Omie para transferir o estoque.` };
+  }
+
+  const { rows: impressos } = await pool.query(
+    `SELECT id, COALESCE(qtd, 0) AS qtd,
+            COALESCE(NULLIF(TRIM(local_estoque_codigo), ''), $2) AS origem
+       FROM etiqueta."ETQ_rec_impresso"
+      WHERE origem_id = $1
+        AND COALESCE(qtd, 0) > 0
+      ORDER BY id ASC`,
+    [id, ETQ_ARMAZENAR_LOCAL_ORIGEM]
+  );
+
+  const movimentos = impressos.length
+    ? impressos.map((i) => ({
+      etqId: Number(i.id),
+      qtd: Number(i.qtd) || 0,
+      origem: String(i.origem || ETQ_ARMAZENAR_LOCAL_ORIGEM)
+    }))
+    : [{
+      etqId: null,
+      qtd: Number(rec.qtd) || 0,
+      origem: ETQ_ARMAZENAR_LOCAL_ORIGEM
+    }];
+
+  const idsMovidos = [];
+  for (const mov of movimentos) {
+    if (!(mov.qtd > 0)) continue;
+    if (mov.origem === dest) {
+      if (mov.etqId) idsMovidos.push(mov.etqId);
+      continue;
+    }
+    try {
+      await _omieIncluirTrfEstoqueSeparacao({
+        origem: mov.origem,
+        destino: dest,
+        id_prod: idProd,
+        codigo_texto: codigoTexto,
+        qtd: mov.qtd,
+        obs: `${obsBase || 'PIR_ENG'} NF ${rec.numero_nfe || '-'} | Lote ${rec.lote || '-'} | rec ${id}${mov.etqId ? ` | ID ${mov.etqId}` : ''}`
+      });
+    } catch (err) {
+      return { ok: false, error: err?.message || 'Omie recusou a transferência para o armazém.', ids: idsMovidos };
+    }
+    if (mov.etqId) {
+      await pool.query(
+        `UPDATE etiqueta."ETQ_rec_impresso"
+            SET local_estoque_codigo = $2,
+                local_estoque_nome = $3
+          WHERE id = $1`,
+        [mov.etqId, dest, destNome]
+      );
+      idsMovidos.push(mov.etqId);
+    }
+  }
+  return { ok: true, ids: idsMovidos, destino: dest, destino_nome: destNome };
+}
 const LOGISTICA_PRODUCAO_LOCAL_NOME = '3. ESTOQUE PRODUÇÃO';
 const LOGISTICA_AT_LOCAL_COD = '10887875683'; // AKESA PJ
 const LOGISTICA_AT_LOCAL_NOME = 'AKESA PJ';
@@ -17223,6 +17416,11 @@ async function _logisticaExecutarTrfOmieSeparacao(client, solicIds, { cod_local_
   if (!origem) {
     const err = new Error('Selecione o armazém de origem para registrar a transferência na Omie.');
     err.code = 'OMIE_ORIGEM_OBRIGATORIA';
+    throw err;
+  }
+  if (isLocalBloqueadoSeparacao(origem)) {
+    const err = new Error('Não é permitido separar a partir da Área vermelha ou da Engenharia.');
+    err.code = 'OMIE_ORIGEM_BLOQUEADA';
     throw err;
   }
 
@@ -17676,7 +17874,9 @@ async function _etqDebitarPorId(client, { id, qtd, codigoOmie }) {
   const qtdNum = parseFloat(qtd);
   if (!etqId || !Number.isFinite(qtdNum) || qtdNum <= 0) return null;
   const { rows } = await client.query(
-    `SELECT id, COALESCE(qtd, 0) AS qtd, TRIM(endereco) AS endereco, TRIM(COALESCE(codigo_produto, '')) AS codigo_produto
+    `SELECT id, COALESCE(qtd, 0) AS qtd, TRIM(endereco) AS endereco,
+            TRIM(COALESCE(codigo_produto, '')) AS codigo_produto,
+            TRIM(COALESCE(local_estoque_codigo, '')) AS local_estoque_codigo
        FROM etiqueta."ETQ_rec_impresso"
       WHERE id = $1
       FOR UPDATE`,
@@ -17686,6 +17886,12 @@ async function _etqDebitarPorId(client, { id, qtd, codigoOmie }) {
   if (!row) {
     const err = new Error(`Etiqueta ID ${etqId} não encontrada.`);
     err.code = 'ETQ_ID_NAO_ENCONTRADO';
+    throw err;
+  }
+  const localEtq = String(row.local_estoque_codigo || '').trim() || LOGISTICA_ALMOX_LOCAL_COD;
+  if (isLocalBloqueadoSeparacao(localEtq)) {
+    const err = new Error(`Etiqueta ID ${etqId} está em Área vermelha ou Engenharia e não pode ser usada na separação.`);
+    err.code = 'ETQ_ID_BLOQUEADO';
     throw err;
   }
   if (codigoOmie) {
@@ -21915,6 +22121,27 @@ async function ensureVendasNotasOmieTables(client) {
   _vendasNotasOmieTablesReady = true;
 }
 
+/** Payload da NF com lista de itens (det). Envelope de webhook não conta. */
+function payloadNfParaGravar(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  if (Array.isArray(payload.det) && payload.det.length) return payload;
+  if (payload.event && typeof payload.event === 'object'
+      && Array.isArray(payload.event.det) && payload.event.det.length) {
+    return payload.event;
+  }
+  const first = Array.isArray(payload.nfCadastro) ? payload.nfCadastro[0] : null;
+  if (first && typeof first === 'object' && Array.isArray(first.det) && first.det.length) {
+    return first;
+  }
+  return null;
+}
+
+function valorTotalFromNfPayload(nf = {}) {
+  const icmsTot = (nf && nf.total && nf.total.ICMSTot) ? nf.total.ICMSTot : {};
+  const n = Number(icmsTot.vNF || icmsTot.vProd || nf?.total?.vNF || 0);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
 /** Extrai CFOPs únicos dos itens da NF (Omie det[].prod.CFOP). */
 function extractCfopsFromNfPayload(nfOrPayload = {}) {
   const root =
@@ -22005,7 +22232,7 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
       await ensureVendasNotasOmieTables(client);
 
       const atual = await client.query(
-        `SELECT cfop, chave_nfe, id_nf_omie, numero_nota
+        `SELECT cfop, chave_nfe, id_nf_omie, numero_nota, payload_ultimo, valor_total
            FROM vendas.notas_fiscais_omie
           WHERE identidade = $1
           LIMIT 1`,
@@ -22013,27 +22240,48 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
       );
       const row = atual.rows[0];
       if (!row) return;
-      if (String(row.cfop || '').trim()) return;
 
-      const nf = await consultarNfOmieParaCfop({
-        chaveNfe: chaveNfe || row.chave_nfe,
-        idNfOmie: idNfOmie || row.id_nf_omie,
-        numeroNota: numeroNota || row.numero_nota,
-      });
-      const cfop = extractCfopsFromNfPayload(nf);
-      if (!cfop) {
-        console.warn('[vendas/cfop] ConsultarNF sem CFOP:', id);
+      const payloadAtual = payloadNfParaGravar(row.payload_ultimo);
+      const temCfop = !!String(row.cfop || '').trim();
+      if (payloadAtual && temCfop) return;
+
+      if (payloadAtual && !temCfop) {
+        const cfopLocal = extractCfopsFromNfPayload(payloadAtual);
+        if (cfopLocal) {
+          await client.query(
+            `UPDATE vendas.notas_fiscais_omie
+                SET cfop = $1, updated_at = NOW()
+              WHERE identidade = $2
+                AND COALESCE(TRIM(cfop), '') = ''`,
+            [cfopLocal, id]
+          );
+          console.log('[vendas/cfop] preenchido do payload:', { identidade: id, cfop: cfopLocal });
+        }
         return;
       }
 
+      const nf = payloadNfParaGravar(await consultarNfOmieParaCfop({
+        chaveNfe: chaveNfe || row.chave_nfe,
+        idNfOmie: idNfOmie || row.id_nf_omie,
+        numeroNota: numeroNota || row.numero_nota,
+      }));
+      if (!nf) {
+        console.warn('[vendas/cfop] ConsultarNF sem itens:', id);
+        return;
+      }
+      const cfop = extractCfopsFromNfPayload(nf);
+      const valorTotal = valorTotalFromNfPayload(nf);
+
       await client.query(
         `UPDATE vendas.notas_fiscais_omie
-            SET cfop = $1, updated_at = NOW()
-          WHERE identidade = $2
-            AND COALESCE(TRIM(cfop), '') = ''`,
-        [cfop, id]
+            SET payload_ultimo = $1,
+                cfop = COALESCE(NULLIF(TRIM($2), ''), cfop),
+                valor_total = COALESCE($3, valor_total),
+                updated_at = NOW()
+          WHERE identidade = $4`,
+        [nf, cfop, valorTotal, id]
       );
-      console.log('[vendas/cfop] preenchido:', { identidade: id, cfop });
+      console.log('[vendas/cfop] preenchido:', { identidade: id, cfop, tem_itens: true });
     } catch (err) {
       const fault = String(err?.faultstring || err?.message || err);
       const waitMatch = fault.match(/Aguarde\s+(\d+)\s+segundos?/i);
@@ -22113,7 +22361,15 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       data_emissao = COALESCE(EXCLUDED.data_emissao, vendas.notas_fiscais_omie.data_emissao),
       message_id_ultimo = COALESCE(EXCLUDED.message_id_ultimo, vendas.notas_fiscais_omie.message_id_ultimo),
       author_ultimo = COALESCE(EXCLUDED.author_ultimo, vendas.notas_fiscais_omie.author_ultimo),
-      payload_ultimo = COALESCE(EXCLUDED.payload_ultimo, vendas.notas_fiscais_omie.payload_ultimo),
+      payload_ultimo = CASE
+        WHEN jsonb_typeof(EXCLUDED.payload_ultimo->'det') = 'array'
+         AND jsonb_array_length(EXCLUDED.payload_ultimo->'det') > 0
+          THEN EXCLUDED.payload_ultimo
+        WHEN jsonb_typeof(vendas.notas_fiscais_omie.payload_ultimo->'det') = 'array'
+         AND jsonb_array_length(vendas.notas_fiscais_omie.payload_ultimo->'det') > 0
+          THEN vendas.notas_fiscais_omie.payload_ultimo
+        ELSE COALESCE(EXCLUDED.payload_ultimo, vendas.notas_fiscais_omie.payload_ultimo)
+      END,
       ativa = EXCLUDED.ativa,
       updated_at = NOW();
   `, [
@@ -23977,6 +24233,7 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     }
 
     const { qtd, codigo } = await _logisticaObterQtyCodigoSeparacao(client, ids);
+    await _logisticaAssertQtdLivreSeparacao(client, codigo_produto || codigo, qtd);
     let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
       etqDebit = await _etqDebitarSeparacaoAlmox(client, {
@@ -24004,6 +24261,8 @@ app.patch('/api/logistica/itens_solicitados/separar', async (req, res) => {
     await client.query('ROLLBACK').catch(() => {});
     if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
       || err?.code === 'ETQ_ID_NAO_ENCONTRADO' || err?.code === 'ETQ_ID_PRODUTO'
+      || err?.code === 'ETQ_ID_BLOQUEADO' || err?.code === 'OMIE_ORIGEM_BLOQUEADA'
+      || err?.code === 'SEP_QTD_MAIOR_QUE_LIVRE'
       || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
       || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
@@ -24242,6 +24501,12 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
       return res.json({ ok: true, reintegrado: true, n_solic: reint.n_solic_base, new_n_solic: null });
     }
 
+    const codigoRefPre = codigo_produto || (await client.query(
+      `SELECT MIN(codigo_produto) AS codigo FROM logistica.carrinho WHERE id = ANY($1::bigint[])`,
+      [cIds]
+    )).rows[0]?.codigo;
+    await _logisticaAssertQtdLivreSeparacao(client, codigoRefPre, qtySep);
+
     let etqDebit = null;
     if (String(cod_local_origem || '').trim() === LOGISTICA_ALMOX_LOCAL_COD) {
       const codigoRef = codigo_produto || (await client.query(
@@ -24448,6 +24713,8 @@ app.post('/api/logistica/itens_solicitados/separar-parcial', async (req, res) =>
     try { await client.query('ROLLBACK'); } catch (_) {}
     if (err?.code === 'ETQ_SALDO_SEPARACAO' || err?.code === 'ETQ_ENDERECO_OBRIGATORIO'
       || err?.code === 'ETQ_ID_NAO_ENCONTRADO' || err?.code === 'ETQ_ID_PRODUTO'
+      || err?.code === 'ETQ_ID_BLOQUEADO' || err?.code === 'OMIE_ORIGEM_BLOQUEADA'
+      || err?.code === 'SEP_QTD_MAIOR_QUE_LIVRE'
       || err?.code === 'OMIE_ORIGEM_OBRIGATORIA' || err?.code === 'OMIE_DESTINO_OBRIGATORIO'
       || err?.code === 'OMIE_TRF_SEPARACAO' || err?.code === 'OMIE_CREDENCIAIS') {
       return res.status(400).json({ ok: false, error: err.message });
@@ -24559,9 +24826,10 @@ async function _logisticaFetchEnderecoEtqMap(codigos) {
       WHERE p.codigo = ANY($1::text[])
         AND i.endereco IS NOT NULL AND TRIM(i.endereco) <> ''
         AND COALESCE(i.qtd, 0) > 0
+        AND TRIM(COALESCE(NULLIF(TRIM(i.local_estoque_codigo), ''), $2)) <> ALL($3::text[])
       GROUP BY p.codigo, TRIM(i.endereco)
       ORDER BY p.codigo, TRIM(i.endereco)`,
-    [list]
+    [list, LOGISTICA_ALMOX_LOCAL_COD, LOCAIS_BLOQUEADOS_SEPARACAO]
   );
   const dados = {};
   for (const row of rows) {
@@ -26019,7 +26287,8 @@ app.get('/api/logistica/estoque/batch', async (req, res) => {
         local_nome: row.local_nome || row.local_codigo,
         saldo: row.saldo,
         unidade: row.unidade || '',
-        updated_at: row.updated_at || null
+        updated_at: row.updated_at || null,
+        bloqueado_separacao: isLocalBloqueadoSeparacao(row.local_codigo)
       });
 
       if (!minimos[row.codigo]) minimos[row.codigo] = { min: 0, saldoAlmox: 0, abaixo: false };

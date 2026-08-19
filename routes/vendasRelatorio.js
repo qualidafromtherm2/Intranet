@@ -744,9 +744,12 @@ async function anexarItensNosRegistros(registros) {
   }
 
   const byPedido = new Map();
-  const semNf = registros.filter((r) => !r.nf_id || !byNf.has(String(r.nf_id)));
+  const precisaPedido = registros.filter((r) => {
+    const nfItens = r.nf_id ? byNf.get(String(r.nf_id)) : null;
+    return !Array.isArray(nfItens) || nfItens.length === 0;
+  });
   const codigos = [...new Set(
-    semNf
+    precisaPedido
       .map((r) => Number(r.codigo_pedido))
       .filter((n) => Number.isFinite(n) && n > 0)
   )];
@@ -780,12 +783,10 @@ async function anexarItensNosRegistros(registros) {
   }
 
   return registros.map((r) => {
-    let itens = [];
-    if (r.nf_id && byNf.has(String(r.nf_id))) {
-      itens = byNf.get(String(r.nf_id)) || [];
-    } else {
-      itens = byPedido.get(String(r.codigo_pedido || '')) || [];
-    }
+    const nfItens = r.nf_id ? (byNf.get(String(r.nf_id)) || []) : [];
+    const itens = nfItens.length
+      ? nfItens
+      : (byPedido.get(String(r.codigo_pedido || '')) || []);
     return { ...r, itens };
   });
 }
@@ -821,7 +822,9 @@ function valorLiquidoItemProd(prod = {}, det = {}) {
  * somenteIncluidos=true → só CFOPs marcados na config (CFOP vazio entra).
  */
 function itensFromNfPayload(payload, opts = {}) {
-  const det = Array.isArray(payload?.det) ? payload.det : [];
+  const det = Array.isArray(payload?.det)
+    ? payload.det
+    : (Array.isArray(payload?.event?.det) ? payload.event.det : []);
   const somenteIncluidos = opts.somenteIncluidos === true;
   const cfopsIncluidos = opts.cfopsIncluidos instanceof Set ? opts.cfopsIncluidos : null;
   const out = [];

@@ -748,6 +748,18 @@
       <i class="fa-solid fa-book-open" style="margin-right:8px;"></i>
       Lista mestra
     </a>
+
+    <a href="#"
+       id="menu-qualidade-area-vermelha"
+       class="menu-link"
+       data-nav-key="side:qualidade:area-vermelha"
+       data-nav-parent="side:qualidade"
+       data-nav-pos="side"
+       data-nav-label="Area vermelha"
+       data-nav-selector="#menu-qualidade-area-vermelha">
+      <i class="fa-solid fa-ban" style="margin-right:8px;"></i>
+      Area vermelha
+    </a>
   </div>
 </div>
 
@@ -3635,6 +3647,43 @@
                     </table>
                   </div>
                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div id="qualidadeAreaVermelhaPane" class="tab-pane" style="display:none;">
+            <div class="content-wrapper">
+              <div class="content-wrapper-header">
+                <div class="content-wrapper-context">
+                  <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                    <i class="fa-solid fa-ban" style="color:#ef4444;"></i>
+                    <span>Área vermelha</span>
+                  </h3>
+                  <div class="content-text">Produtos com status Reprovar material. O ID foi enviado ao armazém 7. AREA VERMELHA e não entra em separação.</div>
+                </div>
+              </div>
+              <div style="display:flex;gap:10px;margin:12px 0;flex-wrap:wrap;">
+                <input id="qualidadeAreaVermelhaBusca" type="text" placeholder="Pesquisar código, descrição, NFe ou lote..." autocomplete="off"
+                  style="flex:1;min-width:220px;max-width:420px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-color);" />
+                <button id="qualidadeAreaVermelhaRefreshBtn" class="content-button" type="button" style="background:#334155;color:#fff;">
+                  <i class="fa-solid fa-rotate-right"></i> Atualizar
+                </button>
+              </div>
+              <div id="qualidadeAreaVermelhaMeta" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;"></div>
+              <div style="overflow:auto;max-height:calc(100vh - 260px);border:1px solid var(--border-color);border-radius:10px;">
+                <table style="width:100%;border-collapse:collapse;min-width:860px;font-size:14px;">
+                  <thead>
+                    <tr style="background:#1e293b;color:#fff;">
+                      <th style="padding:10px 12px;text-align:left;">Código</th>
+                      <th style="padding:10px 12px;text-align:left;">Descrição</th>
+                      <th style="padding:10px 12px;text-align:left;">IDs no armazém</th>
+                      <th style="padding:10px 12px;text-align:left;">NFe / Lote</th>
+                      <th style="padding:10px 12px;text-align:left;">Quem</th>
+                      <th style="padding:10px 12px;text-align:left;">Quando</th>
+                    </tr>
+                  </thead>
+                  <tbody id="qualidadeAreaVermelhaBody"></tbody>
+                </table>
               </div>
             </div>
           </div>
@@ -9915,6 +9964,43 @@
               </table>
             </div>
             <p id="engDesenhoGlobalVazio" style="color:var(--inactive-color);font-size:14px;padding:16px 0;">Nenhum desenho técnico registrado.</p>
+          </div>
+        </div>
+      </div>
+
+      <div id="engenhariaProjetosPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper">
+          <div class="content-wrapper-header">
+            <div class="content-wrapper-context">
+              <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
+                <i class="fa-solid fa-drafting-compass" style="color:#6366f1;"></i>
+                <span>Projetos</span>
+              </h3>
+              <div class="content-text">Materiais exclusivos da engenharia. O ID foi enviado ao armazém 8. ENGENHARIA E AMOSTRAS e não entra em separação de produção.</div>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;margin:12px 0;flex-wrap:wrap;">
+            <input id="engenhariaProjetosBusca" type="text" placeholder="Pesquisar código, descrição, NFe ou lote..." autocomplete="off"
+              style="flex:1;min-width:220px;max-width:420px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-color);" />
+            <button id="engenhariaProjetosRefreshBtn" class="content-button" type="button" style="background:#334155;color:#fff;">
+              <i class="fa-solid fa-rotate-right"></i> Atualizar
+            </button>
+          </div>
+          <div id="engenhariaProjetosMeta" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;"></div>
+          <div style="overflow:auto;max-height:calc(100vh - 260px);border:1px solid var(--border-color);border-radius:10px;">
+            <table style="width:100%;border-collapse:collapse;min-width:860px;font-size:14px;">
+              <thead>
+                <tr style="background:#1e293b;color:#fff;">
+                  <th style="padding:10px 12px;text-align:left;">Código</th>
+                  <th style="padding:10px 12px;text-align:left;">Descrição</th>
+                  <th style="padding:10px 12px;text-align:left;">IDs no armazém</th>
+                  <th style="padding:10px 12px;text-align:left;">NFe / Lote</th>
+                  <th style="padding:10px 12px;text-align:left;">Quem</th>
+                  <th style="padding:10px 12px;text-align:left;">Quando</th>
+                </tr>
+              </thead>
+              <tbody id="engenhariaProjetosBody"></tbody>
+            </table>
           </div>
         </div>
       </div>
