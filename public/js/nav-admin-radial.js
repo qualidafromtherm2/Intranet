@@ -21,15 +21,17 @@
   let adminInicializado = false;
   let delegacaoAtiva = false;
   let pageDelegacaoAtiva = false;
-  const ACTIONS_MENU = ['chamado', 'mover', 'renomear', 'historico', 'visao'];
-  const ACTIONS_PAGINA = ['chamado', 'historico', 'visao'];
+  const ACTIONS_MENU = ['chamado', 'mover', 'renomear', 'historico', 'visao', 'permissoes'];
+  const ACTIONS_PAGINA = ['chamado', 'historico', 'visao', 'permissoes'];
   const ACTION_DEFS = {
     chamado: { icon: 'fa-headset', label: 'Abrir chamado' },
     mover: { icon: 'fa-arrows-up-down-left-right', label: 'Alterar posição' },
     renomear: { icon: 'fa-pen', label: 'Editar botão' },
     historico: { icon: 'fa-clock-rotate-left', label: 'Abrir histórico' },
     visao: { icon: 'fa-eye', label: 'Visão cliente' },
+    permissoes: { icon: 'fa-user-lock', label: 'Ver permissões' },
   };
+  const OWNER_USERNAME = 'leandro.s';
 
   let radialModo = 'menu';
 
@@ -231,42 +233,159 @@
     return html;
   }
 
-  function contextoPaginaFromTarget(targetEl) {
-    const el = targetEl instanceof Element ? targetEl : null;
-    const navEl = el?.closest?.('[data-nav-key]');
-    const section = el?.closest?.(
-      '.content-section, .pane, [role="tabpanel"], .main-content, .wrapper > div[id], section[id]'
-    );
-    const titulo = section?.querySelector?.('h1,h2,h3,.content-section-title,.lp-tab-btn.is-active,.main-header-link.is-active')
-      || document.querySelector('.main-header-link.is-active, .lp-tab-btn.is-active, h1, h2');
-    const tituloTxt = String(titulo?.textContent || document.title || 'Página')
-      .trim().replace(/\s+/g, ' ').slice(0, 120);
-    const hash = (location.hash || '').replace(/^#/, '') || 'inicio';
-    const navKey = String(navEl?.dataset?.navKey || '').trim();
-    const navLabel = String(navEl?.dataset?.navLabel || tituloTxt).trim();
-    const codigoRef = navKey || section?.id || hash;
-    const tag = el ? el.tagName.toLowerCase() : 'pagina';
-    const elId = el?.id ? `#${el.id}` : '';
-    const elCls = el?.className ? `.${String(el.className).split(/\s+/)[0]}` : '';
+  function elementoEstaVisivel(el) {
+    if (!(el instanceof Element)) return false;
+    const st = getComputedStyle(el);
+    if (st.display === 'none' || st.visibility === 'hidden' || Number(st.opacity) === 0) return false;
+    const r = el.getBoundingClientRect();
+    return r.width > 1 && r.height > 1;
+  }
 
-    const contextoDescricao = [
-      '[Contexto automático — admin]',
-      `Tela/área: ${tituloTxt}`,
-      `Referência: ${codigoRef}`,
-      `URL: ${location.pathname}${location.hash || ''}`,
-      el ? `Clique em: ${tag}${elId}${elCls}` : '',
+  function textoLimpoEl(el) {
+    if (!(el instanceof Element)) return '';
+    const clone = el.cloneNode(true);
+    clone.querySelectorAll('i, svg, img, script, style, .badge, .lp-tab-count, .chamado-badge').forEach((n) => n.remove());
+    return String(clone.textContent || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function contextoDescricaoChamado(local, referencia) {
+    return [
+      `Local: ${local || 'Área da página'}`,
+      `Referência: ${referencia || 'Página atual'}`,
       '',
       'Descreva abaixo o problema, sugestão ou o que deseja solicitar:',
       '',
-    ].filter(Boolean).join('\n');
+    ].join('\n');
+  }
+
+  function paneVisivel() {
+    return Array.from(document.querySelectorAll('.tab-pane, .kanban-page')).find(elementoEstaVisivel) || null;
+  }
+
+  function referenciaTelaAtual(el) {
+    const lpRoot = el?.closest?.('#listaProdutos, #listaProdutosConteudo, #solicitacoesConteudo, #kanbanSolicitacoesConteudo');
+    if (lpRoot) {
+      const active = document.querySelector('#listaProdutos .lp-tab-btn.lp-tab-active');
+      const t = textoLimpoEl(active);
+      if (t) return t.slice(0, 80);
+    }
+    const pane = el?.closest?.('.tab-pane, .kanban-page') || paneVisivel();
+    if (pane) {
+      const lp = pane.querySelector('.lp-tab-btn.lp-tab-active');
+      if (lp && elementoEstaVisivel(lp)) {
+        const t = textoLimpoEl(lp);
+        if (t) return t.slice(0, 80);
+      }
+      const title = Array.from(pane.querySelectorAll('.content-section-title, [data-nav-label]'))
+        .find((n) => elementoEstaVisivel(n) && textoLimpoEl(n));
+      if (title) {
+        const t = title.dataset?.navLabel || textoLimpoEl(title);
+        if (t) return String(t).replace(/\s+/g, ' ').trim().slice(0, 80);
+      }
+    }
+    const header = document.querySelector('.main-header-link.is-active, .menu-link.active, .menu-link.is-active');
+    if (header && elementoEstaVisivel(header)) {
+      return (header.dataset?.navLabel || textoLimpoEl(header) || labelNavEl(header)).slice(0, 80);
+    }
+    const side = document.querySelector('.side-menu a.active, .side-menu .is-active, .side-menu [aria-current="page"]');
+    if (side) return labelNavEl(side).slice(0, 80);
+    return 'Página atual';
+  }
+
+  function navKeyDaTela(el) {
+    const pane = el?.closest?.('.tab-pane, .kanban-page') || paneVisivel();
+    if (pane?.id) {
+      const sel = document.querySelector(
+        `[data-nav-selector="#${CSS.escape(pane.id)}"], [data-target="${CSS.escape(pane.id)}"]`
+      );
+      const meta = metaFromEl(sel);
+      if (meta?.navKey) return meta.navKey;
+      const porId = {
+        listaProdutos: 'side:produtos:lista',
+        inicio: 'side:inicio',
+      };
+      if (porId[pane.id]) return porId[pane.id];
+    }
+    const lp = el?.closest?.('#listaProdutos, #listaProdutosConteudo');
+    if (lp) return 'side:produtos:lista';
+    return '';
+  }
+
+  function nomeLocalClicado(el) {
+    if (!(el instanceof Element)) return 'Área da página';
+
+    const card = el.closest('.produto-catalogo-card');
+    if (card) {
+      const codigo = String(card.dataset.productCode || '').trim();
+      const desc = textoLimpoEl(card.querySelector('.produto-card-descricao'));
+      let campo = 'Card do produto';
+      if (el.tagName === 'IMG' || el.closest('img') || el.closest('[style*="height:140px"]')) campo = 'Foto do produto';
+      else if (el.closest('.produto-card-descricao')) campo = 'Descrição';
+      else if (el.closest('[id^="estoque-card-"], [id^="min-badge-"], [id^="compra-badge-"]')) campo = 'Estoque';
+      else if (el.closest('button')) campo = textoLimpoEl(el.closest('button')) || 'Botão Ações';
+      const prod = [codigo, desc].filter(Boolean).join(' — ');
+      return (prod ? `${campo} (${prod})` : campo).slice(0, 160);
+    }
+
+    let cur = el;
+    for (let i = 0; i < 10 && cur && cur !== document.body; i++) {
+      const aria = String(cur.getAttribute?.('aria-label') || '').trim();
+      if (aria) return aria.slice(0, 120);
+      const title = String(cur.getAttribute?.('title') || '').trim();
+      if (title && title.length < 90) return title.slice(0, 120);
+      const dl = String(cur.dataset?.navLabel || cur.dataset?.label || cur.dataset?.campo || '').trim();
+      if (dl) return dl.slice(0, 120);
+      const ph = String(cur.getAttribute?.('placeholder') || '').trim();
+      if (ph) return `Campo: ${ph}`.slice(0, 120);
+      if (cur.id) {
+        const lab = document.querySelector(`label[for="${CSS.escape(cur.id)}"]`);
+        const lt = textoLimpoEl(lab);
+        if (lt) return lt.slice(0, 120);
+      }
+      cur = cur.parentElement;
+    }
+
+    const field = el.closest('label, th, dt, legend, .content-section-title');
+    const ft = textoLimpoEl(field);
+    if (ft && ft.length <= 80) return ft;
+
+    const nearby = el.closest('[id]') ;
+    if (nearby?.id && nearby.id.length > 2 && nearby.id.length < 40 && !/^(svg|bar)$/i.test(nearby.id)) {
+      const pretty = nearby.id
+        .replace(/([a-z])([A-Z])/g, '$1 $2')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+      if (pretty) return pretty.slice(0, 80);
+    }
+
+    const txt = textoLimpoEl(el).slice(0, 80);
+    if (txt) return txt;
+    return 'Área da página';
+  }
+
+  function chaveMenuValida(navKey) {
+    const k = String(navKey || '').trim();
+    if (!k) return false;
+    if (k.startsWith('page:')) return false;
+    if (k.startsWith('side:custom:')) return false;
+    return true;
+  }
+
+  function contextoPaginaFromTarget(targetEl) {
+    const el = targetEl instanceof Element ? targetEl : null;
+    const local = nomeLocalClicado(el);
+    const referencia = referenciaTelaAtual(el);
+    const navKey = navKeyDaTela(el);
+    const navEl = navKey ? document.querySelector(`[data-nav-key="${CSS.escape(navKey)}"]`) : null;
+    const navLabel = navEl ? (labelNavEl(navEl) || navEl.dataset?.navLabel || referencia) : referencia;
 
     return {
       modo: 'pagina',
-      el: navEl || el,
-      navKey: navKey || `page:${hash}`,
-      navLabel: tituloTxt,
-      paginaCodigo: codigoRef,
-      contextoDescricao,
+      el: el || navEl,
+      navKey: navKey || `page:${referencia}`,
+      navLabel,
+      paginaCodigo: navKey || referencia,
+      contextoDescricao: contextoDescricaoChamado(local, referencia),
     };
   }
 
@@ -278,14 +397,15 @@
     const t = e.target;
     if (!(t instanceof Element)) return true;
     if (t.closest('.left-side, #sidebarContent, .nav-radial-overlay, .nav-admin-modal-overlay, .chamado-modal-overlay, .agenda-modal-overlay')) return true;
-    if (t.closest('input, textarea, select, button, a, label, [contenteditable="true"]')) return true;
+    if (t.closest('input, textarea, select, [contenteditable="true"]')) return true;
     return false;
   }
 
   function angulosRadial(qtd) {
-    if (qtd === 1) return [-90];
-    if (qtd === 3) return [-90, 18, 126];
-    return [-90, -18, 54, 126, 198];
+    const n = Math.max(1, Number(qtd) || 1);
+    if (n === 1) return [-90];
+    const step = 360 / n;
+    return Array.from({ length: n }, (_, i) => -90 + i * step);
   }
 
   function metaFromEl(el) {
@@ -310,7 +430,9 @@
       navLabel = (el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 80);
     }
 
-    return navKey ? { el, navKey, navLabel, navSelector, modo: 'menu' } : null;
+    const parentLabel = labelGrupoPai(el.dataset?.navParent || '', '');
+    const contextoDescricao = contextoDescricaoChamado(navLabel, parentLabel || 'Menu lateral');
+    return navKey ? { el, navKey, navLabel, navSelector, modo: 'menu', contextoDescricao } : null;
   }
 
   function ensureRadialOverlay() {
@@ -351,7 +473,7 @@
 
     const ids = actionIds || ACTIONS_MENU;
     const angles = angulosRadial(ids.length);
-    const radius = 78;
+    const radius = ids.length > 5 ? 88 : 78;
     let idx = 0;
 
     ov.querySelectorAll('.nav-radial-item').forEach((btn) => {
@@ -400,6 +522,7 @@
     else if (actionId === 'renomear' && ctx.modo !== 'pagina') abrirModalRenomear(ctx);
     else if (actionId === 'historico') abrirHistoricoDoContexto(ctx);
     else if (actionId === 'visao') abrirModalVisaoCliente();
+    else if (actionId === 'permissoes') abrirPermissoesDoContexto(ctx);
   }
 
   async function carregarBotoes() {
@@ -424,19 +547,17 @@
       nav_key: ctx.navKey,
       nav_label: ctx.navLabel,
       aba: 'novo',
+      contexto_descricao: ctx.contextoDescricao || '',
+      contexto_pagina_codigo: ctx.paginaCodigo || ctx.navKey || ctx.navLabel || '',
     };
-    if (ctx.modo === 'pagina') {
-      opts.contexto_descricao = ctx.contextoDescricao || '';
-      opts.contexto_pagina_codigo = ctx.paginaCodigo || ctx.navKey || '';
-      if (String(ctx.navKey || '').startsWith('page:')) {
-        opts.nav_key = '';
-      }
+    if (!chaveMenuValida(ctx.navKey)) {
+      opts.nav_key = '';
     }
     window.abrirChamadoSuporteComBotao(opts);
   }
 
   function abrirHistoricoDoContexto(ctx) {
-    const temChaveMenu = ctx.navKey && !String(ctx.navKey).startsWith('page:') && !String(ctx.navKey).startsWith('side:custom:');
+    const temChaveMenu = chaveMenuValida(ctx.navKey);
     if (temChaveMenu) {
       abrirModalHistorico(ctx);
       return;
@@ -446,6 +567,95 @@
       const b = botoesCache.find((x) => x.key === navKey);
       abrirModalHistorico({ navKey, navLabel: b?.label || navKey, el: null });
     });
+  }
+
+  function abrirPermissoesDoContexto(ctx) {
+    if (!ehAdmin()) return;
+    if (chaveMenuValida(ctx?.navKey)) {
+      abrirModalPermissoes(ctx.navKey, ctx.navLabel);
+      return;
+    }
+    abrirModalEscolherBotaoVisao('Permissões — escolha o botão', 'todos', async (navKey) => {
+      await carregarBotoes();
+      const b = botoesCache.find((x) => x.key === navKey);
+      abrirModalPermissoes(navKey, b?.label || navKey);
+    });
+  }
+
+  async function abrirModalPermissoes(navKey, navLabel) {
+    const overlay = criarModal(
+      `Permissões — ${navLabel || navKey}`,
+      `<p class="nav-admin-perm-hint">Ative ou desative o acesso deste botão para cada usuário.</p>
+       <input type="search" id="navAdminPermUserBusca" class="nav-admin-perm-busca" placeholder="Buscar usuário..." autocomplete="off">
+       <div id="navAdminPermUserLista" class="nav-admin-perm-users">Carregando...</div>`,
+      `<button type="button" class="nav-admin-btn nav-admin-btn-secondary nav-admin-cancelar">Fechar</button>`
+    );
+    overlay.querySelector('.nav-admin-modal')?.classList.add('nav-admin-modal-perm');
+    overlay.querySelector('.nav-admin-cancelar').addEventListener('click', () => overlay.remove());
+
+    const listaEl = overlay.querySelector('#navAdminPermUserLista');
+    const buscaEl = overlay.querySelector('#navAdminPermUserBusca');
+
+    function renderUsuarios(usuarios) {
+      if (!usuarios.length) {
+        listaEl.innerHTML = '<div class="nav-admin-perm-empty">Nenhum usuário encontrado.</div>';
+        return;
+      }
+      listaEl.innerHTML = usuarios.map((u) => {
+        const nome = u.nome && u.nome !== u.username ? `${u.username} — ${u.nome}` : u.username;
+        const checked = u.allowed ? ' checked' : '';
+        const disabled = u.protegido ? ' disabled' : '';
+        const lock = u.protegido ? ' <span class="nav-admin-perm-lock">protegido</span>' : '';
+        return `<label class="nav-admin-perm-user" data-search="${esc(String(nome).toLowerCase())}">
+          <span class="nav-admin-perm-user-nome">${esc(nome)}${lock}</span>
+          <input type="checkbox" class="nav-admin-perm-toggle" data-user-id="${esc(u.id)}"${checked}${disabled}>
+        </label>`;
+      }).join('');
+
+      listaEl.querySelectorAll('.nav-admin-perm-toggle').forEach((chk) => {
+        chk.addEventListener('change', async () => {
+          const uid = chk.dataset.userId;
+          const allow = chk.checked;
+          chk.disabled = true;
+          try {
+            const r = await fetch(`${API}/visao-cliente/${encodeURIComponent(uid)}/permissao`, {
+              method: 'POST',
+              credentials: 'include',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ nav_key: navKey, allow }),
+            });
+            const d = await r.json();
+            if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+          } catch (err) {
+            chk.checked = !allow;
+            alert('Não foi possível alterar: ' + (err.message || err));
+          } finally {
+            if (!chk.closest('.nav-admin-perm-user')?.querySelector('.nav-admin-perm-lock')) {
+              chk.disabled = false;
+            }
+          }
+        });
+      });
+    }
+
+    buscaEl.addEventListener('input', () => {
+      const q = String(buscaEl.value || '').trim().toLowerCase();
+      listaEl.querySelectorAll('.nav-admin-perm-user').forEach((row) => {
+        const hay = row.dataset.search || '';
+        row.classList.toggle('is-hidden', !!q && !hay.includes(q));
+      });
+    });
+
+    try {
+      const r = await fetch(`${API}/permissoes/${encodeURIComponent(navKey)}`, { credentials: 'include' });
+      const d = await r.json();
+      if (!r.ok || !d.ok) throw new Error(d.error || `HTTP ${r.status}`);
+      const titulo = overlay.querySelector('h3');
+      if (titulo && d.nav_label) titulo.textContent = `Permissões — ${d.nav_label}`;
+      renderUsuarios(d.usuarios || []);
+    } catch (err) {
+      listaEl.innerHTML = `<div class="nav-admin-perm-empty" style="color:#f87171;">Falha ao carregar: ${esc(err.message || err)}</div>`;
+    }
   }
 
   function criarModal(titulo, bodyHtml, footerHtml) {

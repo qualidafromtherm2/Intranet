@@ -6527,6 +6527,20 @@ router.post('/at/tipos-assunto', async (req, res) => {
   }
 });
 
+router.delete('/at/tipos-assunto/:id', async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id || id <= 0) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+  try {
+    await ensureSchema();
+    const { rowCount } = await pool.query(`DELETE FROM sac.tipo_assunto WHERE id = $1`, [id]);
+    if (!rowCount) return res.status(404).json({ ok: false, error: 'Tipo não encontrado.' });
+    return res.json({ ok: true });
+  } catch (err) {
+    console.error('[SAC/AT] excluir tipo-assunto:', err);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/at/cep/:cep', async (req, res) => {
   const cep = String(req.params?.cep || '').replace(/\D/g, '');
   if (cep.length !== 8) {

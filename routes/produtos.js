@@ -1329,6 +1329,53 @@ router.put('/:codigo/multiplo', express.json(), async (req, res) => {
   }
 });
 
+async function atualizarEstoqueMinimoProdutoOmie(codigo, minimo) {
+  const client = await dbGetClient();
+  try {
+    await client.query('BEGIN');
+    await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+    const result = await client.query(
+      `UPDATE produto.produtos_omie
+          SET estoque_minimo = $2
+        WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+        RETURNING codigo, estoque_minimo`,
+      [codigo, minimo]
+    );
+    await client.query('COMMIT');
+    return result;
+  } catch (e) {
+    try { await client.query('ROLLBACK'); } catch (_) {}
+    throw e;
+  } finally {
+    client.release();
+  }
+}
+
+router.put('/:codigo/estoque-minimo', express.json(), async (req, res) => {
+  try {
+    if (!await exigirPermissaoEditarProduto(req, res)) return;
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+
+    const minimo = Number(String(req.body?.estoque_minimo ?? req.body?.quan_min ?? '').replace(',', '.'));
+    if (!Number.isFinite(minimo) || minimo < 0) {
+      return res.status(400).json({ ok: false, error: 'Informe um estoque mínimo válido.' });
+    }
+
+    const result = await atualizarEstoqueMinimoProdutoOmie(codigo, minimo);
+    if (!result.rows.length) return res.status(404).json({ ok: false, error: 'Produto não encontrado' });
+
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      estoque_minimo: Number(result.rows[0].estoque_minimo)
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/estoque-minimo]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
 async function atualizarProdutoCustomizadoOmie(codigo, valor) {
   const client = await dbGetClient();
   try {
