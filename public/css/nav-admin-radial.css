@@ -449,3 +449,57 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   color: #94a3b8;
   font-size: 13px;
 }
+
+.nav-admin-perm-hint {
+  margin: 0 0 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.nav-admin-perm-users {
+  max-height: 56vh;
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.nav-admin-perm-user {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid #1e293b;
+  cursor: pointer;
+}
+
+.nav-admin-perm-user:last-child {
+  border-bottom: none;
+}
+
+.nav-admin-perm-user.is-hidden {
+  display: none;
+}
+
+.nav-admin-perm-user-nome {
+  font-size: 13px;
+  color: #e2e8f0;
+}
+
+.nav-admin-perm-lock {
+  margin-left: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #94a3b8;
+}
+
+.nav-admin-perm-toggle {
+  width: 18px;
+  height: 18px;
+  accent-color: #0ea5e9;
+  cursor: pointer;
+  flex-shrink: 0;
+}

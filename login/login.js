@@ -1280,3 +1280,12 @@ window.addEventListener('auth:changed', () => {
 window.openNotificacoes = openNotificacoes;   // torna global imediatamente
 
 bindNotificationsUI();
+
+(function carregarCampoEstoqueMinimoQtd() {
+  const ja = document.querySelector('script[src*="modal-qtd-estoque-minimo.js"]');
+  if (ja) return;
+    const s = document.createElement('script');
+    s.src = '/public/js/modal-qtd-estoque-minimo.js?v=20260819a';
+    s.async = false;
+    document.head.appendChild(s);
+})();

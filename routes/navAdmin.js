@@ -401,5 +401,57 @@ router.post('/visao-cliente/:userId/permissao', async (req, res) => {
   }
 });
 
+const OWNER_USERNAME = 'leandro.s';
+
+// GET /api/nav/admin/permissoes/:navKey — quem tem acesso a este botão
+router.get('/permissoes/:navKey', async (req, res) => {
+  try {
+    const navKey = decodeURIComponent(String(req.params.navKey || '').trim());
+    if (!navKey) return res.status(400).json({ ok: false, error: 'nav_key obrigatório.' });
+    if (NAV_KEYS_OBSOLETOS.includes(navKey)) {
+      return res.status(400).json({ ok: false, error: 'Botão obsoleto.' });
+    }
+
+    const { rows: nRows } = await pool.query(
+      `SELECT id, label, key FROM public.nav_node WHERE key = $1 AND active = TRUE LIMIT 1`,
+      [navKey]
+    );
+    if (!nRows.length) return res.status(404).json({ ok: false, error: 'Botão não encontrado.' });
+
+    const { rows } = await pool.query(
+      `SELECT u.id::text AS id,
+              u.username::text AS username,
+              COALESCE(NULLIF(TRIM(u.nome_completo), ''), u.username::text) AS nome,
+              COALESCE((
+                SELECT t.allowed
+                  FROM public.auth_user_permissions_tree(u.id) t
+                 WHERE t.key = $1
+                 LIMIT 1
+              ), false) AS allowed
+         FROM public.auth_user u
+        ORDER BY u.username`,
+      [navKey]
+    );
+
+    const usuarios = rows.map((u) => ({
+      id: u.id,
+      username: u.username,
+      nome: u.nome,
+      allowed: u.allowed === true,
+      protegido: String(u.username || '').trim().toLowerCase() === OWNER_USERNAME,
+    }));
+
+    res.json({
+      ok: true,
+      nav_key: nRows[0].key,
+      nav_label: nRows[0].label,
+      usuarios,
+    });
+  } catch (err) {
+    console.error('[nav/admin/permissoes]', err.message);
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.registrarHistoricoNav = registrarHistorico;

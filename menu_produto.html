@@ -4348,12 +4348,6 @@
 
               <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
                 <div class="form-field" style="margin:0;flex:0 1 280px;">
-                  <label for="atNovoTipoAssunto">Novo tipo</label>
-                  <input id="atNovoTipoAssunto" type="text" readonly placeholder="Clique para digitar um novo tipo de assunto" maxlength="120" style="width:100%;cursor:text;" />
-                </div>
-              </div>
-              <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;align-items:flex-end;">
-                <div class="form-field" style="margin:0;flex:0 1 280px;">
                   <label for="atTipoAtendimento">Tipo de atendimento</label>
                   <select id="atTipoAtendimento" style="width:100%;">
                     <option value="">Selecione</option>
@@ -4364,14 +4358,8 @@
                   </select>
                 </div>
                 <div class="form-field" style="margin:0;flex:0 1 280px;">
-                  <label for="atTipoAssunto">Tipo de assunto</label>
-                  <select id="atTipoAssunto" style="width:100%;">
-                    <option value="">Selecione</option>
-                    <option value="Devolução">Devolução</option>
-                    <option value="Envio de peça">Envio de peça</option>
-                    <option value="Atendimento de técnico">Atendimento de técnico</option>
-                    <option value="Dúvidas">Dúvidas</option>
-                  </select>
+                  <label for="atTipoAssuntoCombo">Tipo de assunto</label>
+                  <div id="atTipoAssuntoCombo" class="at-tipo-falha-combo" style="max-width:none;display:block;"></div>
                 </div>
                 <div class="form-field at-campo-fullonly" style="margin:0;flex:1 1 240px;position:relative;">
                   <label for="atSerieBusca">Pesquisar número de série</label>
@@ -4682,6 +4670,7 @@
                     Aguardando NF AT
                     <span id="atGuiaNfAtCount" style="background:#374151;color:#e5e7eb;font-size:10px;font-weight:700;border-radius:20px;padding:1px 7px;min-width:18px;text-align:center;">0</span>
                   </button>
+                  <span id="atGuiasTipoAssunto" style="display:contents;"></span>
                 </div>
 
                 <!-- Modo tabela -->
@@ -5391,10 +5380,6 @@
             <div class="at-em-body" style="padding:18px 20px;display:flex;flex-direction:column;gap:18px;overflow-y:auto;flex:1;min-height:0;">
               <!-- Guia Atendimento -->
               <div id="atEmPaneAtendimento" class="at-em-pane" data-at-em-pane="atendimento">
-                <div class="at-em-wrap" style="margin-bottom:10px;">
-                  <label class="at-em-lbl">Novo tipo</label>
-                  <input type="text" id="atEmNovoTipoAssunto" class="at-em-input" readonly placeholder="Clique para digitar um novo tipo de assunto" maxlength="120">
-                </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:10px;">
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Data</label>
@@ -5413,13 +5398,7 @@
                   </div>
                   <div class="at-em-wrap">
                     <label class="at-em-lbl">Tipo de assunto</label>
-                    <select id="atEmTipoAssunto" class="at-em-input">
-                      <option value="">Selecione</option>
-                      <option value="Devolução">Devolução</option>
-                      <option value="Envio de peça">Envio de peça</option>
-                      <option value="Atendimento de técnico">Atendimento de técnico</option>
-                      <option value="Dúvidas">Dúvidas</option>
-                    </select>
+                    <div id="atEmTipoAssuntoCombo" class="at-tipo-falha-combo" style="max-width:none;display:block;"></div>
                   </div>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
@@ -14103,6 +14082,7 @@
   <script src="/public/js/sessao_resiliente.js?v=20260617b"></script>
   <script type="module" src="login/login.js"></script>
   <script src="/public/js/at-tipo-falha.js?v=20260718f" defer></script>
+  <script src="/public/js/at-tipo-assunto.js?v=20260818a" defer></script>
   <script src="/public/js/at-masp-relatorio.js?v=20260718g" defer></script>
   <script src="/public/js/vendas-relatorio-gerencial.js?v=20260818b" defer></script>
   <script src="/public/js/logistica-relatorio-gerencial.js?v=20260818a" defer></script>
@@ -14112,7 +14092,7 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260818-tipo-assunto"></script>
+  <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
@@ -16270,6 +16250,17 @@ function attachDropZone(ul) {
   max-width: 280px;
   width: 100%;
   vertical-align: middle;
+}
+.at-em-wrap .at-tipo-falha-combo,
+.form-field .at-tipo-falha-combo {
+  max-width: none;
+  display: block;
+}
+.at-em-wrap .at-tipo-falha-trigger {
+  padding: 6px 10px;
+  font-size: 13px;
+  background: var(--input-bg, #1e2535);
+  border-radius: 7px;
 }
 .at-tipo-falha-trigger {
   width: 100%;

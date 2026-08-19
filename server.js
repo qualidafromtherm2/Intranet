@@ -24393,6 +24393,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         SELECT DISTINCT ON (i.id)
                c.id AS carr_id, i.id AS solic_id, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                i.usuario_separando,
+               COALESCE(NULLIF(TRIM(c.comentario), ''), NULLIF(TRIM(ss.observacao), '')) AS comentario_item,
                COALESCE(i.urgente, ss.urgente, false) AS urgente,
                c.id_user,
                c.codigo_produto, c.descricao, c.unidade,
@@ -24425,6 +24426,7 @@ app.get('/api/logistica/kanban/itens', async (req, res) => {
         const { rows: derivRows } = await pool.query(`
              SELECT c.id AS carr_id, i.id AS solic_id, i.n_solic, i.status, i.observacao, i.motivo, i.cod_local, i.nome_local,
                  i.usuario_separando,
+                 NULLIF(TRIM(c.comentario), '') AS comentario_item,
                  c.codigo_produto, c.descricao, c.unidade,
                  c.quantidade::numeric AS quantidade,
                  i.quantidade_solicitada::numeric AS quantidade_solicitada,
