@@ -1,5 +1,5 @@
 // routes/testesProducao.js
-// Relatórios de teste de bombas de calor — schema testes.relatorios + testes.leituras
+// Relatórios de teste de bombas de calor — testes.relatorios + testes.leituras + testes.leituras_ftibr
 'use strict';
 
 const express = require('express');
@@ -605,7 +605,8 @@ router.get('/relatorios', requireAuth, async (req, res) => {
         ROUND((AVG(l.temp_dif) FILTER (WHERE l.temp_dif > 0.5))::numeric, 2) AS delta_t_medio,
         ROUND((AVG(l.kw_aquecimento) FILTER (WHERE l.kw_aquecimento > 1))::numeric, 2) AS kw_aq_medio,
         ROUND(MAX(l.cop)::numeric, 2) AS cop_max,
-        COUNT(l.id)::int AS leituras_count
+        COUNT(l.id)::int AS leituras_count,
+        (SELECT COUNT(*)::int FROM testes.leituras_ftibr f WHERE f.relatorio_id = r.id) AS ftibr_count
       FROM testes.relatorios r
       LEFT JOIN testes.leituras l ON l.relatorio_id = r.id
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -622,6 +623,40 @@ router.get('/relatorios', requireAuth, async (req, res) => {
   }
 });
 
+// GET /api/testes/relatorios/:id/ftibr — só as leituras inverter (todas as colunas)
+router.get('/relatorios/:id/ftibr', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id < 1) {
+      return res.status(400).json({ error: 'ID inválido.' });
+    }
+
+    const rel = await dbQuery(
+      `SELECT * FROM testes.relatorios WHERE id = $1`,
+      [id]
+    );
+    if (!rel.rows?.length) {
+      return res.status(404).json({ error: 'Relatório não encontrado.' });
+    }
+
+    const ftibr = await dbQuery(
+      `SELECT * FROM testes.leituras_ftibr
+       WHERE relatorio_id = $1
+       ORDER BY id ASC`,
+      [id]
+    );
+
+    res.json({
+      ok: true,
+      relatorio: rel.rows[0],
+      leituras_ftibr: ftibr.rows || [],
+    });
+  } catch (err) {
+    console.error('[testes/relatorios/:id/ftibr]', err);
+    res.status(500).json({ error: err.message || 'Erro ao carregar leituras FTIBR.' });
+  }
+});
+
 // GET /api/testes/relatorios/:id
 router.get('/relatorios/:id', requireAuth, async (req, res) => {
   try {
@@ -631,8 +666,7 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
     }
 
     const rel = await dbQuery(
-      `SELECT id, criado_em, linha, modelo, num_op, operador, total_registros, arquivo_xlsx
-       FROM testes.relatorios WHERE id = $1`,
+      `SELECT * FROM testes.relatorios WHERE id = $1`,
       [id]
     );
     if (!rel.rows?.length) {
@@ -640,15 +674,20 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
     }
 
     const relatorio = rel.rows[0];
-    const leit = await dbQuery(
-      `SELECT id, data_hora, temp_ambiente, temp_entrada, temp_saida, temp_dif,
-              tensao, corrente, vazao, kcal_h, kw_aquecimento, kw_consumo, cop,
-              pressao_alta, pressao_baixa
-       FROM testes.leituras
-       WHERE relatorio_id = $1
-       ORDER BY id ASC`,
-      [id]
-    );
+    const [leit, ftibr] = await Promise.all([
+      dbQuery(
+        `SELECT * FROM testes.leituras
+         WHERE relatorio_id = $1
+         ORDER BY id ASC`,
+        [id]
+      ),
+      dbQuery(
+        `SELECT * FROM testes.leituras_ftibr
+         WHERE relatorio_id = $1
+         ORDER BY id ASC`,
+        [id]
+      ),
+    ]);
 
     const comparativo = analisarComparativoLeituras(leit.rows || []);
     const leituras = comparativo.leituras_classificadas;
@@ -676,6 +715,7 @@ router.get('/relatorios/:id', requireAuth, async (req, res) => {
       ok: true,
       relatorio,
       leituras,
+      leituras_ftibr: ftibr.rows || [],
       stats,
       diagnostico,
       comparativo: {

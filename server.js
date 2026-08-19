@@ -14818,6 +14818,57 @@ async function ensureNavEtqExpedicao() {
 }
 ensureNavEtqExpedicao().catch(() => {});
 
+let _pirEngNavPromise = null;
+async function ensureNavPirEng() {
+  if (_pirEngNavPromise) return _pirEngNavPromise;
+  _pirEngNavPromise = (async () => {
+    await pool.query(`
+      INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+      SELECT $1, $2, 'side', p.id, $3, TRUE, $4
+        FROM public.nav_node p
+       WHERE p.key = 'side:engenharia'
+      ON CONFLICT (key) DO UPDATE SET
+        label = EXCLUDED.label,
+        position = EXCLUDED.position,
+        parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+        sort = EXCLUDED.sort,
+        active = TRUE,
+        selector = EXCLUDED.selector
+    `, ['side:engenharia:pir-eng', 'PIR_ENG', 50, '#menu-engenharia-pir-eng']);
+    await pool.query(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT arp.role, n.id, arp.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_role_permission arp ON arp.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO NOTHING
+    `, ['side:engenharia:pir-eng', 'side:engenharia:desenho-tecnico']);
+    await pool.query(`
+      INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+      SELECT aup.user_id, n.id, aup.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_user_permission aup ON aup.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (user_id, node_id) DO NOTHING
+    `, ['side:engenharia:pir-eng', 'side:engenharia:desenho-tecnico']);
+    await pool.query(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT 'admin', n.id, TRUE
+        FROM public.nav_node n
+       WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO UPDATE SET allow = TRUE
+    `, ['side:engenharia:pir-eng']);
+  })().catch((err) => {
+    _pirEngNavPromise = null;
+    console.error('[pir-eng] falha ao garantir nav:', err.message);
+    throw err;
+  });
+  return _pirEngNavPromise;
+}
+ensureNavPirEng().catch(() => {});
+
 // Normal: retorna todos os registros não-ocultos (impressa=false e impressa=true).
 // mostrar_ocultos=1: retorna apenas os ocultos.
 // Inclui id_impresso (último ETQ_rec_impresso para o item, quando impressa=true).
@@ -14935,14 +14986,33 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ALTER TABLE etiqueta."ETQ_recebimento"
       ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT
     `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS necessario_eng BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS necessario_eng_em TIMESTAMPTZ
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS necessario_eng_liberado BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS necessario_eng_liberado_em TIMESTAMPTZ
+    `).catch(() => {});
 
     const q = String(req.query.q || '').trim();
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
+    const modoEng = req.query.necessario_eng === '1' || req.query.necessario_eng === 'true';
     const sql = `
       WITH base AS (
         SELECT er.id, er.numero_nfe, er.numero_pedido, er.lote, er.codigo_produto,
                er.descricao_produto, er.qtd, er.unidade, er.data_emissao, er.criado_em, er.pir,
                er.motivo_sem_nfe,
+               COALESCE(er.necessario_eng, FALSE) AS necessario_eng,
+               COALESCE(er.necessario_eng_liberado, FALSE) AS necessario_eng_liberado,
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
                po.url_imagem AS produto_url_imagem,
@@ -15007,9 +15077,17 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                 OR TRIM(COALESCE(p.codigo_produto::text, '')) = TRIM(COALESCE(er.codigo_produto, ''))
              LIMIT 1
           ) po ON TRUE
-         WHERE COALESCE(er.pir, false) = false
-           AND COALESCE(po.pir_vai_direto_identificacao, FALSE) = FALSE
-           AND (
+         WHERE (
+             (
+               $3::boolean = true
+               AND COALESCE(er.necessario_eng, false) = true
+               AND COALESCE(er.necessario_eng_liberado, false) = false
+             )
+             OR (
+               $3::boolean = false
+               AND COALESCE(er.pir, false) = false
+               AND COALESCE(po.pir_vai_direto_identificacao, FALSE) = FALSE
+               AND (
              -- Entrada manual (sem NF-e/pedido) sempre aparece na lista PIR, mesmo fora de MP
              UPPER(TRIM(COALESCE(er.numero_pedido, ''))) LIKE 'MANUAL%'
              OR UPPER(TRIM(COALESCE(er.numero_nfe, ''))) LIKE 'SEM-NFE%'
@@ -15025,6 +15103,8 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                  UPPER(TRIM(COALESCE(po.codint_familia, ''))) = 'MP'
                  OR UPPER(SPLIT_PART(TRIM(COALESCE(po.codigo, '')), '.', 2)) = 'MP'
                  OR UPPER(SPLIT_PART(TRIM(COALESCE(er.codigo_produto, '')), '.', 2)) = 'MP'
+               )
+             )
                )
              )
            )
@@ -15043,6 +15123,8 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       SELECT
         id, numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
         qtd, unidade, data_emissao, criado_em, pir, motivo_sem_nfe,
+        necessario_eng,
+        necessario_eng_liberado,
         produto_customizado,
         pir_vai_direto_identificacao,
         fornecedor_atual,
@@ -15079,7 +15161,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       FROM base
     `;
     const like = q ? `%${q}%` : null;
-    const result = await pool.query(sql, [like, semMp]);
+    const result = await pool.query(sql, [like, semMp, modoEng]);
     res.json({
       etiquetas: (result.rows || []).map((r) => ({
         ...r,
@@ -15087,10 +15169,12 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         fornecedor_mudou: r.fornecedor_mudou === true,
         produto_customizado: r.produto_customizado === true,
         pir_vai_direto_identificacao: r.pir_vai_direto_identificacao === true,
+        necessario_eng: r.necessario_eng === true,
+        necessario_eng_liberado: r.necessario_eng_liberado === true,
         tem_alteracao: r.tem_alteracao === true,
         qtd_alteracoes: Number(r.qtd_alteracoes || 0)
       })),
-      filtro: semMp ? 'sem_mp' : 'mp'
+      filtro: modoEng ? 'necessario_eng' : (semMp ? 'sem_mp' : 'mp')
     });
   } catch (err) {
     console.error('[etiquetas/pendentes-pir]', err);
@@ -15117,6 +15201,62 @@ app.patch('/api/etiquetas/recebimento/:id/pir', express.json(), async (req, res)
   } catch (err) {
     console.error('[etiquetas/pir]', err);
     res.status(500).json({ error: err?.message || 'Falha ao atualizar PIR.' });
+  }
+});
+
+async function ensureEtqNecessarioEngColumns() {
+  await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado_em TIMESTAMPTZ`);
+}
+
+// PATCH /api/etiquetas/recebimento/:id/necessario-eng — marca item para PIR_ENG (não trava o PIR)
+app.patch('/api/etiquetas/recebimento/:id/necessario-eng', express.json(), async (req, res) => {
+  try {
+    await ensureEtqNecessarioEngColumns();
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const raw = req.body?.necessario_eng;
+    const marcado = raw === true || raw === 1 || raw === '1' || raw === 'true';
+    const result = await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET necessario_eng = $2,
+              necessario_eng_em = CASE WHEN $2 THEN NOW() ELSE necessario_eng_em END,
+              necessario_eng_liberado = CASE WHEN $2 THEN FALSE ELSE necessario_eng_liberado END,
+              necessario_eng_liberado_em = CASE WHEN $2 THEN NULL ELSE necessario_eng_liberado_em END
+        WHERE id = $1
+        RETURNING id, necessario_eng, necessario_eng_liberado, codigo_produto, numero_nfe, lote, pir`,
+      [id, marcado]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[etiquetas/necessario-eng]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao marcar Necessário ENG.' });
+  }
+});
+
+// PATCH /api/etiquetas/recebimento/:id/necessario-eng-liberar — engenharia libera o item
+app.patch('/api/etiquetas/recebimento/:id/necessario-eng-liberar', express.json(), async (req, res) => {
+  try {
+    await ensureEtqNecessarioEngColumns();
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const result = await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET necessario_eng_liberado = TRUE,
+              necessario_eng_liberado_em = NOW()
+        WHERE id = $1
+          AND COALESCE(necessario_eng, FALSE) = TRUE
+        RETURNING id, necessario_eng, necessario_eng_liberado, codigo_produto, lote, pir`,
+      [id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado ou não marcado como Necessário ENG.' });
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[etiquetas/necessario-eng-liberar]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao liberar ENG.' });
   }
 });
 

@@ -59,6 +59,124 @@
     return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
   }
 
+  const COLS_LEITURAS = [
+    { k: 'id', label: 'ID', dig: 0 },
+    { k: 'data_hora', label: 'Data/hora' },
+    { k: 'temp_ambiente', label: 'T amb', dig: 1 },
+    { k: 'temp_entrada', label: 'T ent', dig: 1 },
+    { k: 'temp_saida', label: 'T sai', dig: 1 },
+    { k: 'temp_dif', label: 'ΔT', dig: 2 },
+    { k: 'tensao', label: 'Tensão', dig: 1 },
+    { k: 'corrente', label: 'Corrente', dig: 1 },
+    { k: 'vazao', label: 'Vazão', dig: 1 },
+    { k: 'kcal_h', label: 'kcal/h', dig: 0 },
+    { k: 'kw_aquecimento', label: 'kW aq', dig: 1 },
+    { k: 'kw_consumo', label: 'kW cons', dig: 1 },
+    { k: 'cop', label: 'COP', dig: 1 },
+    { k: 'pressao_alta', label: 'P alta', dig: 1 },
+    { k: 'pressao_baixa', label: 'P baixa', dig: 1 },
+    { k: 'rpm_ventilador', label: 'RPM vent.', dig: 0 },
+    { k: 'abertura_valvula', label: 'Válvula', dig: 0 },
+    { k: 'hz_compressor', label: 'Hz comp.', dig: 1 },
+    { k: 'corrente_compressor', label: 'A comp.', dig: 1 },
+  ];
+
+  const COLS_FTIBR = [
+    { k: 'id', label: 'ID', dig: 0 },
+    { k: 'perfil', label: 'Perfil' },
+    { k: 'nome_maquina', label: 'Máquina' },
+    { k: 'data_hora', label: 'Data/hora' },
+    { k: 'temp_ambiente', label: 'T amb', dig: 1 },
+    { k: 'temp_entrada', label: 'T ent', dig: 1 },
+    { k: 'temp_saida', label: 'T sai', dig: 1 },
+    { k: 'temp_dif', label: 'ΔT', dig: 2 },
+    { k: 'temp_evaporador', label: 'T evap.', dig: 1 },
+    { k: 'temp_meio_evaporador', label: 'T meio evap.', dig: 1 },
+    { k: 'temp_descarga', label: 'T descarga', dig: 1 },
+    { k: 'temp_succao', label: 'T sucção', dig: 1 },
+    { k: 'temp_saida_condensador', label: 'T sai cond.', dig: 1 },
+    { k: 'temp_dissipador', label: 'T dissipador', dig: 1 },
+    { k: 'tensao_ac', label: 'V AC', dig: 1 },
+    { k: 'tensao_cc', label: 'V CC', dig: 1 },
+    { k: 'freq_sistema', label: 'Freq. sist.', dig: 1 },
+    { k: 'corrente_maquina', label: 'A máq.', dig: 1 },
+    { k: 'corrente_compressor', label: 'A comp.', dig: 1 },
+    { k: 'rpm_ventilador', label: 'RPM vent.', dig: 0 },
+    { k: 'hz_compressor', label: 'Hz comp.', dig: 1 },
+    { k: 'abertura_valvula', label: 'Válvula', dig: 0 },
+  ];
+
+  function fmtCell(row, col) {
+    const v = row?.[col.k];
+    if (v == null || v === '') return '—';
+    if (typeof v === 'number') return fmtNum(v, col.dig != null ? col.dig : 1);
+    return esc(String(v));
+  }
+
+  function renderColsTable(cols, rows, rowClassFn) {
+    if (!rows?.length) return '<div class="pt-empty">Nenhum registro.</div>';
+    return `
+      <table class="pt-table">
+        <thead>
+          <tr>${cols.map((c) => `<th>${esc(c.label)}</th>`).join('')}</tr>
+        </thead>
+        <tbody>
+          ${rows.map((row, i) => `
+            <tr class="${rowClassFn ? (rowClassFn(row, i) || '') : ''}">
+              ${cols.map((c) => `<td>${fmtCell(row, c)}</td>`).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  }
+
+  function closeFtibrModal() {
+    $('ptFtibrModal')?.remove();
+  }
+
+  function showFtibrModal(relatorio, rows) {
+    closeFtibrModal();
+    const r = relatorio || {};
+    const overlay = document.createElement('div');
+    overlay.id = 'ptFtibrModal';
+    overlay.className = 'pt-modal';
+    overlay.innerHTML = `
+      <div class="pt-modal-card" role="dialog" aria-label="Leituras FTIBR">
+        <div class="pt-modal-head">
+          <div>
+            <h3><i class="fa-solid fa-microchip" style="color:#38bdf8;"></i> Leituras FTIBR</h3>
+            <p>OP ${esc(r.num_op || '—')} · ${esc(r.modelo || '—')} · ${fmtNum(rows?.length || 0, 0)} registro(s) · todas as colunas</p>
+          </div>
+          <button type="button" class="pt-btn" id="ptFtibrFecharBtn"><i class="fa-solid fa-xmark"></i> Fechar</button>
+        </div>
+        <div class="pt-table-wrap" style="max-height:min(70vh,560px);">
+          ${renderColsTable(COLS_FTIBR, rows || [])}
+        </div>
+      </div>
+    `;
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeFtibrModal();
+    });
+    document.body.appendChild(overlay);
+    $('ptFtibrFecharBtn')?.addEventListener('click', closeFtibrModal);
+  }
+
+  async function openFtibr(relatorioId, relatorioHint) {
+    try {
+      setStatus('Carregando leituras FTIBR...');
+      const data = await apiGet(`/api/testes/relatorios/${relatorioId}/ftibr`);
+      setStatus('');
+      if (!data.leituras_ftibr?.length) {
+        setStatus('Este relatório não tem registro FTIBR.', true);
+        return;
+      }
+      showFtibrModal(data.relatorio || relatorioHint, data.leituras_ftibr);
+    } catch (err) {
+      setStatus(err.message || 'Falha ao abrir FTIBR', true);
+    }
+  }
+
   function veredictoMeta(v) {
     if (v === 'aprovado') return { label: 'Aprovado', color: '#22c55e', bg: 'rgba(34,197,94,.14)', border: 'rgba(34,197,94,.35)' };
     if (v === 'reprovado') return { label: 'Atenção crítica', color: '#ef4444', bg: 'rgba(239,68,68,.14)', border: 'rgba(239,68,68,.4)' };
@@ -230,6 +348,36 @@
         display:inline-flex; align-items:center; gap:5px; padding:2px 8px; border-radius:999px;
         font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
       }
+      #producaoTestesPane .pt-ftibr-btn {
+        width:34px; height:34px; border-radius:8px; border:1px solid rgba(56,189,248,.4);
+        background:rgba(14,165,233,.16); color:#7dd3fc; cursor:pointer;
+        display:inline-flex; align-items:center; justify-content:center; font-size:14px;
+      }
+      #producaoTestesPane .pt-ftibr-btn:hover { filter:brightness(1.15); }
+      .pt-modal {
+        position:fixed; inset:0; z-index:12000; background:rgba(2,6,23,.72);
+        display:flex; align-items:center; justify-content:center; padding:18px;
+      }
+      .pt-modal .pt-modal-card {
+        width:min(1180px,100%); max-height:90vh; overflow:auto;
+        background:#0f172a; border:1px solid rgba(56,189,248,.3); border-radius:14px; padding:16px;
+      }
+      .pt-modal .pt-modal-head { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; margin-bottom:12px; }
+      .pt-modal .pt-modal-head h3 { margin:0; color:#f8fafc; font-size:18px; display:flex; align-items:center; gap:8px; }
+      .pt-modal .pt-modal-head p { margin:6px 0 0; color:#94a3b8; font-size:13px; }
+      .pt-modal .pt-table { width:100%; border-collapse:collapse; font-size:12px; }
+      .pt-modal .pt-table th, .pt-modal .pt-table td {
+        padding:8px 10px; border-bottom:1px solid rgba(148,163,184,.12); white-space:nowrap; color:#e2e8f0;
+      }
+      .pt-modal .pt-table th {
+        text-align:left; color:#94a3b8; font-size:10px; text-transform:uppercase; letter-spacing:.04em;
+        position:sticky; top:0; background:#0f172a;
+      }
+      .pt-modal .pt-table-wrap { overflow:auto; border-radius:10px; border:1px solid rgba(148,163,184,.18); }
+      .pt-modal .pt-btn {
+        height:36px; padding:0 12px; border-radius:8px; border:1px solid rgba(148,163,184,.24);
+        background:rgba(255,255,255,.06); color:#e2e8f0; cursor:pointer; display:inline-flex; align-items:center; gap:8px;
+      }
       @media (max-width: 960px) {
         #producaoTestesPane .pt-charts { grid-template-columns:1fr; }
         #producaoTestesPane .pt-chart-card.wide { grid-column:auto; }
@@ -363,7 +511,8 @@
         <thead>
           <tr>
             <th>Data</th><th>OP</th><th>Modelo</th><th>Linha</th><th>Operador</th>
-            <th>Leituras</th><th>COP méd.</th><th>COP máx.</th><th>ΔT méd.</th>
+            <th>Arquivo</th><th>Leituras</th><th>COP méd.</th><th>COP máx.</th><th>ΔT méd.</th>
+            <th>FTIBR</th>
           </tr>
         </thead>
         <tbody>
@@ -374,10 +523,18 @@
               <td>${esc(r.modelo || '—')}</td>
               <td>${esc(r.linha || '—')}</td>
               <td>${esc(r.operador || '—')}</td>
+              <td title="${esc(r.arquivo_xlsx || '')}">${esc(r.arquivo_xlsx || '—')}</td>
               <td>${fmtNum(r.leituras_count || r.total_registros, 0)}</td>
               <td>${fmtNum(r.cop_medio, 1)}</td>
               <td>${fmtNum(r.cop_max, 1)}</td>
               <td>${fmtNum(r.delta_t_medio, 1)}</td>
+              <td>
+                ${Number(r.ftibr_count) > 0
+                  ? `<button type="button" class="pt-ftibr-btn" data-ftibr-id="${r.id}" title="Abrir ${fmtNum(r.ftibr_count, 0)} leitura(s) FTIBR">
+                       <i class="fa-solid fa-microchip"></i>
+                     </button>`
+                  : '<span class="pt-muted">—</span>'}
+              </td>
             </tr>
           `).join('')}
         </tbody>
@@ -385,6 +542,12 @@
     `;
     wrap.querySelectorAll('tr[data-id]').forEach((tr) => {
       tr.addEventListener('click', () => openDetalhe(tr.getAttribute('data-id')));
+    });
+    wrap.querySelectorAll('[data-ftibr-id]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        openFtibr(btn.getAttribute('data-ftibr-id'));
+      });
     });
   }
 
@@ -471,6 +634,7 @@
       const comp = cmp.comparacao || {};
       const barras = cmp.barras_comparativas || {};
       const leituras = data.leituras || [];
+      const leiturasFtibr = data.leituras_ftibr || [];
       const diag = data.diagnostico || {};
       const ver = veredictoMeta(diag.veredicto);
       const keyIds = new Set(
@@ -510,8 +674,14 @@
                 · ${esc(r.linha || '')}
                 · Operador ${esc(r.operador || '—')}
                 · ${fmtData(r.criado_em)}
+                ${r.arquivo_xlsx ? `· ${esc(r.arquivo_xlsx)}` : ''}
               </p>
             </div>
+            ${leiturasFtibr.length ? `
+              <button type="button" class="pt-btn pt-btn-primary" id="prodTestesFtibrBtn">
+                <i class="fa-solid fa-microchip"></i> FTIBR (${fmtNum(leiturasFtibr.length, 0)})
+              </button>
+            ` : ''}
           </div>
 
           ${(cmp.narrativa || []).length ? `
@@ -590,14 +760,14 @@
           </div>
 
           <div class="pt-section-title"><i class="fa-solid fa-table" style="color:#94a3b8;"></i> Todas as leituras
-            <span class="pt-muted"> · destacadas = momentos-chave da comparação</span>
+            <span class="pt-muted"> · todas as colunas · destacadas = momentos-chave</span>
           </div>
           <div class="pt-table-wrap" style="max-height:420px;">
             <table class="pt-table">
               <thead>
                 <tr>
-                  <th>#</th><th>Fase</th><th>Hora</th><th>T ent</th><th>T sai</th><th>ΔT</th>
-                  <th>COP</th><th>kW aq</th><th>kW cons</th><th>P alta</th><th>P baixa</th><th>A</th>
+                  <th>#</th><th>Fase</th>
+                  ${COLS_LEITURAS.map((c) => `<th>${esc(c.label)}</th>`).join('')}
                 </tr>
               </thead>
               <tbody>
@@ -608,16 +778,13 @@
                     <tr class="${isPico ? 'pt-row-pico' : isKey ? 'pt-row-key' : ''}" style="${l.fase === 'parada' ? 'opacity:.65;' : ''}">
                       <td><strong>${i + 1}</strong></td>
                       <td>${fasePill(l.fase)}</td>
-                      <td>${esc(l.data_hora || '—')}</td>
-                      <td>${fmtNum(l.temp_entrada, 1)}</td>
-                      <td>${fmtNum(l.temp_saida, 1)}</td>
-                      <td>${fmtNum(l.temp_dif, 2)}</td>
-                      <td><strong style="color:${Number(l.cop) >= 4 ? '#34d399' : Number(l.cop) >= 2.5 ? '#fbbf24' : '#f87171'};">${fmtNum(l.cop, 1)}</strong></td>
-                      <td>${fmtNum(l.kw_aquecimento, 1)}</td>
-                      <td>${fmtNum(l.kw_consumo, 1)}</td>
-                      <td>${fmtNum(l.pressao_alta, 1)}</td>
-                      <td>${fmtNum(l.pressao_baixa, 1)}</td>
-                      <td>${fmtNum(l.corrente, 1)}</td>
+                      ${COLS_LEITURAS.map((c) => {
+                        if (c.k === 'cop') {
+                          const color = Number(l.cop) >= 4 ? '#34d399' : Number(l.cop) >= 2.5 ? '#fbbf24' : '#f87171';
+                          return `<td><strong style="color:${color};">${fmtCell(l, c)}</strong></td>`;
+                        }
+                        return `<td>${fmtCell(l, c)}</td>`;
+                      }).join('')}
                     </tr>
                   `;
                 }).join('')}
@@ -652,10 +819,15 @@
       $('prodTestesVoltarBtn')?.addEventListener('click', () => {
         _view = 'lista';
         destroyCharts();
+        closeFtibrModal();
         renderListaShell();
         renderKpis();
         renderMachines();
         loadRelatorios($('prodTestesSearch')?.value || '');
+      });
+
+      $('prodTestesFtibrBtn')?.addEventListener('click', () => {
+        showFtibrModal(r, leiturasFtibr);
       });
 
       root.querySelectorAll('tr.clickable[data-id]').forEach((tr) => {
