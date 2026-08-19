@@ -40565,7 +40565,26 @@ function tokenizarTextoAssociacaoNfePedido(valor) {
   )];
 }
 
-function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
+function extrairIdentificadoresTecnicosAssociacaoNfePedido(valor) {
+  const texto = String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase();
+  const encontrados = texto.match(/[A-Z0-9]+(?:[-/.][A-Z0-9]+)+|(?=[A-Z0-9]*[A-Z])(?=[A-Z0-9]*\d)[A-Z0-9]{6,}/g) || [];
+
+  return [...new Set(encontrados
+    .map((codigo) => codigo.replace(/[^A-Z0-9]/g, ''))
+    .filter((codigo) => codigo.length >= 6))];
+}
+
+function prefixoComumAssociacaoNfePedido(valorA, valorB) {
+  const limite = Math.min(valorA.length, valorB.length);
+  let tamanho = 0;
+  while (tamanho < limite && valorA[tamanho] === valorB[tamanho]) tamanho += 1;
+  return tamanho;
+}
+
+function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
   const itensCabec = itemReceb?.itensCabec || {};
   const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
   const codigoPedidoBruto = String(itemPedido?.c_produto || '').trim();
@@ -40577,16 +40596,27 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
   const descricaoRec = normalizarTextoAssociacaoNfePedido(descricaoRecBruta);
   const descricaoPedido = normalizarTextoAssociacaoNfePedido(descricaoPedidoBruta);
 
+  const nIdProdutoRec = Number(itensCabec?.nIdProduto || 0);
+  const nIdProdutoPedido = Number(itemPedido?.n_cod_prod || 0);
+  const matchIdProduto = Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0
+    && Number.isFinite(nIdProdutoPedido) && nIdProdutoPedido > 0
+    && nIdProdutoRec === nIdProdutoPedido;
+  const matchCodigoProduto = !!codigoRec && !!codigoPedido && codigoRec === codigoPedido;
+
   let score = 0;
+  let scoreTextual = 0;
+  const motivos = [];
 
   if (codigoRec && codigoPedido) {
-    if (codigoRec === codigoPedido) score += 1000;
-    else if (codigoRec.includes(codigoPedido) || codigoPedido.includes(codigoRec)) score += 180;
+    if (matchCodigoProduto) scoreTextual += 1300;
+    else if (codigoRec.includes(codigoPedido) || codigoPedido.includes(codigoRec)) scoreTextual += 120;
   }
 
+  if (matchIdProduto) scoreTextual += 1600;
+
   if (descricaoRec && descricaoPedido) {
-    if (descricaoRec === descricaoPedido) score += 800;
-    else if (descricaoRec.includes(descricaoPedido) || descricaoPedido.includes(descricaoRec)) score += 140;
+    if (descricaoRec === descricaoPedido) scoreTextual += 500;
+    else if (descricaoRec.includes(descricaoPedido) || descricaoPedido.includes(descricaoRec)) scoreTextual += 100;
   }
 
   const tokensRec = tokenizarTextoAssociacaoNfePedido(descricaoRecBruta);
@@ -40602,33 +40632,153 @@ function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
     }
   });
 
-  score += coincidencias * 35;
-  score += pesoCoincidencias * 2;
+  scoreTextual += Math.min(180, coincidencias * 22 + pesoCoincidencias * 1.5);
+
+  const identificadoresRec = extrairIdentificadoresTecnicosAssociacaoNfePedido(descricaoRecBruta);
+  const identificadoresPedido = extrairIdentificadoresTecnicosAssociacaoNfePedido(descricaoPedidoBruta);
+  const identificadoresPedidoSet = new Set(identificadoresPedido);
+  const identificadorTecnicoExato = identificadoresRec.some((codigo) => identificadoresPedidoSet.has(codigo));
+  const conflitoIdentificadorTecnico = !identificadorTecnicoExato
+    && identificadoresRec.some((codigoRecTecnico) => identificadoresPedido.some((codigoPedidoTecnico) => (
+      prefixoComumAssociacaoNfePedido(codigoRecTecnico, codigoPedidoTecnico) >= 5
+    )));
+
+  if (identificadorTecnicoExato) scoreTextual += 260;
+  if (conflitoIdentificadorTecnico) {
+    scoreTextual -= 170;
+    motivos.push('identificador_tecnico_divergente');
+  }
+
+  score += scoreTextual;
 
   const qtdRec = Number(itensCabec?.nQtdeNFe);
   const qtdPedido = Number(itemPedido?.n_qtde);
+  let proporcaoQuantidade = null;
   if (Number.isFinite(qtdRec) && Number.isFinite(qtdPedido)) {
     const diferenca = Math.abs(qtdRec - qtdPedido);
     if (diferenca < 0.0001) {
-      score += 60;
+      score += 180;
     } else if (Math.min(qtdRec, qtdPedido) > 0) {
-      const proporcao = Math.max(qtdRec, qtdPedido) / Math.min(qtdRec, qtdPedido);
-      if (proporcao <= 1.25) score += 18;
-      else if (proporcao <= 2) score += 8;
+      proporcaoQuantidade = Math.max(qtdRec, qtdPedido) / Math.min(qtdRec, qtdPedido);
+      if (proporcaoQuantidade <= 1.05) score += 130;
+      else if (proporcaoQuantidade <= 1.25) score += 55;
+      else if (proporcaoQuantidade <= 2) score -= 25;
+      else if (proporcaoQuantidade <= 3) score -= 150;
+      else score -= 260;
+
+      if (proporcaoQuantidade > 2) motivos.push('quantidade_muito_divergente');
+    } else if (Math.max(Math.abs(qtdRec), Math.abs(qtdPedido)) > 0) {
+      score -= 260;
+      proporcaoQuantidade = Number.POSITIVE_INFINITY;
+      motivos.push('quantidade_muito_divergente');
     }
   }
 
-  // Valor total: reforça match quando valores são iguais/próximos; penaliza divergência >30%
   const valorRec = Number(itensCabec?.vTotalItem ?? null);
   const valorPedido = Number(itemPedido?.n_val_tot ?? null);
+  let diferencaValorPercentual = null;
   if (Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
-    const diffPct = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
-    if (diffPct < 0.001) score += 80;
-    else if (diffPct < 0.05) score += 40;
-    else if (diffPct > 0.30) score -= 40;
+    diferencaValorPercentual = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
+    if (diferencaValorPercentual < 0.001) score += 130;
+    else if (diferencaValorPercentual < 0.05) score += 90;
+    else if (diferencaValorPercentual < 0.15) score += 35;
+    else if (diferencaValorPercentual < 0.30) score -= 30;
+    else if (diferencaValorPercentual < 0.60) score -= 150;
+    else score -= 320;
+
+    if (diferencaValorPercentual >= 0.30) motivos.push('valor_muito_divergente');
   }
 
-  return score;
+  const textoForte = matchIdProduto || matchCodigoProduto || identificadorTecnicoExato || scoreTextual >= 220;
+  const bloqueado = !matchIdProduto && !matchCodigoProduto && (
+    (diferencaValorPercentual !== null && diferencaValorPercentual >= 0.60 && !textoForte)
+    || (proporcaoQuantidade !== null && proporcaoQuantidade > 4 && !textoForte)
+  );
+
+  if (bloqueado) motivos.push('vinculo_textual_bloqueado');
+
+  return {
+    score: bloqueado ? -100000 : Math.round(score),
+    bloqueado,
+    matchIdProduto,
+    matchCodigoProduto,
+    identificadorTecnicoExato,
+    conflitoIdentificadorTecnico,
+    proporcaoQuantidade,
+    diferencaValorPercentual,
+    motivos
+  };
+}
+
+function calcularScoreAssociacaoNfePedido(itemReceb, itemPedido) {
+  return avaliarAssociacaoNfePedido(itemReceb, itemPedido).score;
+}
+
+function resolverAtribuicaoGlobalAssociacaoNfePedido(matrizAvaliacoes) {
+  const quantidadeLinhas = matrizAvaliacoes.length;
+  const quantidadeItensPedido = matrizAvaliacoes[0]?.length || 0;
+  if (!quantidadeLinhas) return [];
+
+  // Colunas artificiais com score zero permitem deixar qualquer linha sem vínculo.
+  const quantidadeColunas = quantidadeItensPedido + quantidadeLinhas;
+  const maiorScore = Math.max(0, ...matrizAvaliacoes.flat().map((avaliacao) => avaliacao?.score || 0));
+  const u = new Array(quantidadeLinhas + 1).fill(0);
+  const v = new Array(quantidadeColunas + 1).fill(0);
+  const p = new Array(quantidadeColunas + 1).fill(0);
+  const caminho = new Array(quantidadeColunas + 1).fill(0);
+
+  for (let linha = 1; linha <= quantidadeLinhas; linha += 1) {
+    p[0] = linha;
+    let colunaAtual = 0;
+    const custoMinimo = new Array(quantidadeColunas + 1).fill(Number.POSITIVE_INFINITY);
+    const usada = new Array(quantidadeColunas + 1).fill(false);
+
+    do {
+      usada[colunaAtual] = true;
+      const linhaAtual = p[colunaAtual];
+      let delta = Number.POSITIVE_INFINITY;
+      let proximaColuna = 0;
+
+      for (let coluna = 1; coluna <= quantidadeColunas; coluna += 1) {
+        if (usada[coluna]) continue;
+        const score = coluna <= quantidadeItensPedido
+          ? Number(matrizAvaliacoes[linhaAtual - 1]?.[coluna - 1]?.score || 0)
+          : 0;
+        const custoReduzido = (maiorScore - score) - u[linhaAtual] - v[coluna];
+        if (custoReduzido < custoMinimo[coluna]) {
+          custoMinimo[coluna] = custoReduzido;
+          caminho[coluna] = colunaAtual;
+        }
+        if (custoMinimo[coluna] < delta) {
+          delta = custoMinimo[coluna];
+          proximaColuna = coluna;
+        }
+      }
+
+      for (let coluna = 0; coluna <= quantidadeColunas; coluna += 1) {
+        if (usada[coluna]) {
+          u[p[coluna]] += delta;
+          v[coluna] -= delta;
+        } else {
+          custoMinimo[coluna] -= delta;
+        }
+      }
+      colunaAtual = proximaColuna;
+    } while (p[colunaAtual] !== 0);
+
+    do {
+      const colunaAnterior = caminho[colunaAtual];
+      p[colunaAtual] = p[colunaAnterior];
+      colunaAtual = colunaAnterior;
+    } while (colunaAtual !== 0);
+  }
+
+  const atribuicoes = new Array(quantidadeLinhas).fill(-1);
+  for (let coluna = 1; coluna <= quantidadeColunas; coluna += 1) {
+    const linha = p[coluna];
+    if (linha > 0 && coluna <= quantidadeItensPedido) atribuicoes[linha - 1] = coluna - 1;
+  }
+  return atribuicoes;
 }
 
 function normalizarCfopServicoRecebimento(valor) {
@@ -40786,29 +40936,6 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
   );
 
   const itensPedido = itensPedidoResult.rows;
-  const itensPedidoOrdenados = [...itensPedido].sort((a, b) => {
-    const aItem = Number(a?.n_cod_item || 0);
-    const bItem = Number(b?.n_cod_item || 0);
-    return aItem - bItem;
-  });
-  const mapaPorCodigoProduto = new Map();
-  const mapaPorIdProduto = new Map();
-
-  for (const item of itensPedido) {
-    const codigo = String(item?.c_produto || '').trim();
-    const idProduto = Number(item?.n_cod_prod);
-
-    if (codigo) {
-      if (!mapaPorCodigoProduto.has(codigo)) mapaPorCodigoProduto.set(codigo, []);
-      mapaPorCodigoProduto.get(codigo).push(item);
-    }
-
-    if (Number.isFinite(idProduto) && idProduto > 0) {
-      if (!mapaPorIdProduto.has(idProduto)) mapaPorIdProduto.set(idProduto, []);
-      mapaPorIdProduto.get(idProduto).push(item);
-    }
-  }
-
   const itensPedidoUsados = new Set();
   const obterChaveUsoItemPedido = (itemPedido) => {
     const nCodItem = Number(itemPedido?.n_cod_item || 0);
@@ -40820,41 +40947,36 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     if (itemPedido) itensPedidoUsados.add(obterChaveUsoItemPedido(itemPedido));
     return itemPedido;
   };
-  const escolherMelhorCandidatoPedido = (itemReceb, candidatos = []) => {
-    let melhorItem = null;
-    let melhorScore = -1;
 
-    candidatos
-      .filter(itemPedidoDisponivel)
-      .forEach((candidato) => {
-        const scoreAtual = calcularScoreAssociacaoNfePedido(itemReceb, candidato);
-        if (scoreAtual > melhorScore) {
-          melhorScore = scoreAtual;
-          melhorItem = candidato;
-        }
-      });
-
-    return { item: melhorItem, score: melhorScore };
+  const itemRecebimentoEhServico = (itemReceb) => {
+    const cabec = itemReceb?.itensCabec || {};
+    const infoAdic = itemReceb?.itensInfoAdic || {};
+    const cfop = String(
+      cabec?.cCFOP
+      || cabec?.cCfop
+      || infoAdic?.cCFOP
+      || infoAdic?.cCfop
+      || infoAdic?.cCFOPEntrada
+      || infoAdic?.cCfopEntrada
+      || ''
+    ).trim();
+    return normalizarCfopServicoRecebimento(cfop).servico;
   };
 
-  // Sorted-greedy: pré-calcula o melhor score possível de cada item da NF e processa
-  // em ordem de confiança decrescente, evitando que itens com match fraco "roubem"
-  // itens do pedido de itens com match forte que aparecem depois na sequência da NF.
-  const melhoresScoresPossiveis = itensReceb.map((item) => {
-    let melhor = 0;
-    for (const pedItem of itensPedido) {
-      const s = calcularScoreAssociacaoNfePedido(item, pedItem);
-      if (s > melhor) melhor = s;
-    }
-    return melhor;
-  });
-  const ordemProcessamento = itensReceb
-    .map((_, idx) => idx)
-    .sort((a, b) => melhoresScoresPossiveis[b] - melhoresScoresPossiveis[a]);
+  const matrizAvaliacoes = itensReceb.map((itemReceb) => (
+    itemRecebimentoEhServico(itemReceb)
+      ? itensPedido.map(() => ({
+          score: -100000,
+          bloqueado: true,
+          motivos: ['item_servico_nao_disputa_pedido']
+        }))
+      : itensPedido.map((itemPedido) => avaliarAssociacaoNfePedido(itemReceb, itemPedido))
+  ));
+  const atribuicoesGlobais = resolverAtribuicaoGlobalAssociacaoNfePedido(matrizAvaliacoes);
 
   const resultadosPorIdx = new Array(itensReceb.length);
 
-  for (const idx of ordemProcessamento) {
+  for (let idx = 0; idx < itensReceb.length; idx += 1) {
     const item = itensReceb[idx];
     const itensCabec = item?.itensCabec || {};
     const itensInfoAdic = item?.itensInfoAdic || {};
@@ -40877,48 +40999,71 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     let itemPedidoVinculo = null;
     let criterioMatch = null;
     let scoreMatch = 0;
+    let requerRevisao = false;
+    let motivoRevisao = null;
+    let sugestaoGlobal = null;
 
-    if (Number.isFinite(nIdProdutoRec) && nIdProdutoRec > 0 && mapaPorIdProduto.has(nIdProdutoRec)) {
-      const candidatos = mapaPorIdProduto.get(nIdProdutoRec);
-      const { item: melhorPorId, score } = escolherMelhorCandidatoPedido(item, candidatos);
-      if (melhorPorId) {
-        itemPedidoVinculo = reservarItemPedido(melhorPorId);
-        criterioMatch = 'id_produto';
-        scoreMatch = Math.max(score, 1200);
-      }
-    }
+    const indicePedidoAtribuido = Number(atribuicoesGlobais[idx]);
+    const candidatoGlobal = indicePedidoAtribuido >= 0 ? itensPedido[indicePedidoAtribuido] : null;
+    const avaliacaoGlobal = indicePedidoAtribuido >= 0
+      ? matrizAvaliacoes[idx]?.[indicePedidoAtribuido]
+      : null;
 
-    if (!itemPedidoVinculo && codigoProdutoRec && mapaPorCodigoProduto.has(codigoProdutoRec)) {
-      const candidatos = mapaPorCodigoProduto.get(codigoProdutoRec);
-      const { item: melhorPorCodigo, score } = escolherMelhorCandidatoPedido(item, candidatos);
-      if (melhorPorCodigo) {
-        itemPedidoVinculo = reservarItemPedido(melhorPorCodigo);
-        criterioMatch = 'codigo_produto';
-        scoreMatch = Math.max(score, 1000);
-      }
-    }
+    if (candidatoGlobal && avaliacaoGlobal && !avaliacaoGlobal.bloqueado) {
+      const scoresAlternativos = matrizAvaliacoes[idx]
+        .filter((_, indice) => indice !== indicePedidoAtribuido)
+        .map((avaliacao) => Number(avaliacao?.score || 0))
+        .sort((a, b) => b - a);
+      const melhorAlternativo = scoresAlternativos[0] ?? 0;
+      const margemConfianca = avaliacaoGlobal.score - melhorAlternativo;
+      const matchExato = avaliacaoGlobal.matchIdProduto || avaliacaoGlobal.matchCodigoProduto;
+      const sinaisContraditorios = !matchExato && (
+        avaliacaoGlobal.conflitoIdentificadorTecnico
+        || (avaliacaoGlobal.identificadorTecnicoExato
+          && Number(avaliacaoGlobal.proporcaoQuantidade || 0) > 2)
+      );
+      const confiavel = matchExato || (
+        avaliacaoGlobal.score >= 160
+        && margemConfianca >= 35
+        && !sinaisContraditorios
+      );
 
-    if (!itemPedidoVinculo) {
-      const { item: melhorSimilaridade, score } = escolherMelhorCandidatoPedido(item, itensPedido);
-      if (melhorSimilaridade && score >= 35) {
-        itemPedidoVinculo = reservarItemPedido(melhorSimilaridade);
-        criterioMatch = 'descricao_similar';
-        scoreMatch = score;
-      }
-    }
+      scoreMatch = avaliacaoGlobal.score;
 
-    if (!itemPedidoVinculo && itensPedido.length === 1 && itemPedidoDisponivel(itensPedido[0])) {
-      itemPedidoVinculo = reservarItemPedido(itensPedido[0]);
-      criterioMatch = 'fallback_item_unico_pedido';
-      scoreMatch = 5;
-    }
-
-    if (!itemPedidoVinculo && itensPedido.length === itensReceb.length) {
-      const candidatoSequencia = itensPedidoOrdenados.find(itemPedidoDisponivel);
-      if (candidatoSequencia) {
-        itemPedidoVinculo = reservarItemPedido(candidatoSequencia);
-        criterioMatch = 'fallback_sequencia';
-        scoreMatch = 1;
+      if (confiavel) {
+        itemPedidoVinculo = reservarItemPedido(candidatoGlobal);
+        criterioMatch = avaliacaoGlobal.matchIdProduto
+          ? 'id_produto'
+          : avaliacaoGlobal.matchCodigoProduto
+            ? 'codigo_produto'
+            : avaliacaoGlobal.identificadorTecnicoExato
+              ? 'identificador_tecnico_global'
+              : 'combinacao_global';
+      } else if (avaliacaoGlobal.score >= 40) {
+        // A sugestão continua sem vínculo automático, mas fica reservada para não
+        // aparecer simultaneamente como uma sobra independente do pedido.
+        reservarItemPedido(candidatoGlobal);
+        requerRevisao = true;
+        criterioMatch = 'revisar';
+        const motivos = [...new Set([
+          ...(avaliacaoGlobal.motivos || []),
+          ...(margemConfianca < 35 ? ['opcoes_com_pontuacao_proxima'] : []),
+          ...(sinaisContraditorios ? ['sinais_contraditorios'] : []),
+          'baixa_confianca'
+        ])];
+        motivoRevisao = motivos.join(', ');
+        sugestaoGlobal = {
+          pedido_n_cod_ped: nCodPed,
+          pedido_numero: String(pedido?.c_numero || '').trim() || null,
+          pedido_n_cod_item: Number(candidatoGlobal?.n_cod_item || 0) || null,
+          pedido_codigo_produto: String(candidatoGlobal?.c_produto || '').trim() || null,
+          pedido_descricao_produto: String(candidatoGlobal?.c_descricao || '').trim() || null,
+          pedido_qtde: candidatoGlobal?.n_qtde ?? null,
+          pedido_unidade: String(candidatoGlobal?.c_unidade || '').trim() || null,
+          pedido_valor_total: candidatoGlobal?.n_val_tot ?? null,
+          criterio_match: 'sugestao_combinacao_global',
+          score_match: avaliacaoGlobal.score
+        };
       }
     }
 
@@ -40960,6 +41105,8 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         item_servico: servicoCfop.servico,
         servico_cfop_entrada: servicoCfop.cfopEntrada,
         pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
+        requer_revisao: requerRevisao,
+        motivo_revisao: motivoRevisao,
         pedido_n_cod_ped: !servicoCfop.servico && itemPedidoVinculo ? nCodPed : null,
         pedido_numero: !servicoCfop.servico && itemPedidoVinculo ? (String(pedido?.c_numero || '').trim() || null) : null,
         pedido_n_cod_item: Number.isFinite(nCodItem) && nCodItem > 0 ? nCodItem : null,
@@ -40970,7 +41117,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
         criterio_match: criterioMatch,
         score_match: scoreMatch,
-        pedido_sugestoes: []
+        pedido_sugestoes: sugestaoGlobal ? [sugestaoGlobal] : []
       }
     };
   }
@@ -40979,12 +41126,16 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     const previewItem = resultado?.previewItem;
     if (!previewItem || previewItem.pedido_item_encontrado || previewItem.item_servico) return;
 
-    previewItem.pedido_sugestoes = await listarSugestoesComplementaresAssociacaoNfePedido({
+    const sugestoesComplementares = await listarSugestoesComplementaresAssociacaoNfePedido({
       itemReceb: resultado.itemReceb,
       nCodPedAtual: nCodPed,
       nCodFornecedor,
       limite: 3
     });
+    previewItem.pedido_sugestoes = [
+      ...(Array.isArray(previewItem.pedido_sugestoes) ? previewItem.pedido_sugestoes : []),
+      ...sugestoesComplementares
+    ];
   }));
 
   const previewItens = resultadosPorIdx.map((r) => r.previewItem);
@@ -41014,6 +41165,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     itens_pedido_total: itensPedido.length,
     itens_nf_total: itensReceb.length,
     itens_match_total: previewItens.filter(item => item.pedido_item_encontrado).length,
+    itens_revisao_total: previewItens.filter(item => item.requer_revisao).length,
     itens_sem_match_total: previewItens.filter(item => !item.pedido_item_encontrado).length,
     recebimento_omie: recebimento,
     itens_preview: previewItens,
