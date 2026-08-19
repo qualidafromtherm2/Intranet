@@ -14422,7 +14422,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
     console.log(`\n┌${_sep}\n│ [RECEB-MANUAL] ✓ ENT Omie ok  cod=${codProdRaw}  qtd=${qtdNum}  omie=${omieEntCodigo || '-'}\n└${_sep}`);
 
     const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
-    const { pirInicial, ehMp } = await resolverDestinoPirRecebimento(pool, codProdRaw);
+    const { pirInicial, ehMp, necessarioEng } = await resolverDestinoPirRecebimento(pool, codProdRaw);
 
     const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
     const codProd = sanitize(codProdRaw, 30);
@@ -14455,6 +14455,7 @@ app.post('/api/etiquetas/recebimento/manual', express.json(), async (req, res) =
         omie_ent_codigo: omieEntCodigo,
       });
     }
+    await stampEtqNecessarioEng(idEtq, necessarioEng);
 
     const zpl = _gerarZplRecebimentoBloco({
       codProd, descProd, loteTxt, dataExibir, idEtq, layout: layoutRecebimento,
@@ -14625,11 +14626,13 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
       // Destino: MP → PIR; fora de MP / vai_direto → Identificação
       let pirInicial = false;
       let ehMp = false;
+      let necessarioEng = false;
       try {
         const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
         const destinoPir = await resolverDestinoPirRecebimento(pool, codProdRaw);
         pirInicial = destinoPir.pirInicial;
         ehMp = destinoPir.ehMp === true;
+        necessarioEng = destinoPir.necessarioEng === true;
       } catch (_) { /* segue com pir=false */ }
 
       // ── Salva no banco primeiro para obter o ID ───────────────────────────
@@ -14649,6 +14652,7 @@ app.post('/api/etiquetas/recebimento/preview', express.json(), async (req, res) 
           ]
         );
         idEtq = ins.rows[0]?.id;
+        await stampEtqNecessarioEng(idEtq, necessarioEng);
         gerados.push({
           cod: codProdRaw,
           id: idEtq,
@@ -14983,6 +14987,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ADD COLUMN IF NOT EXISTS pir_vai_direto_identificacao BOOLEAN NOT NULL DEFAULT FALSE
     `).catch(() => {});
     await pool.query(`
+      ALTER TABLE produto.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_necessario_eng BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
+    await pool.query(`
       ALTER TABLE etiqueta."ETQ_recebimento"
       ADD COLUMN IF NOT EXISTS motivo_sem_nfe TEXT
     `).catch(() => {});
@@ -15018,6 +15026,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                po.url_imagem AS produto_url_imagem,
                COALESCE(po.produto_customizado, FALSE) AS produto_customizado,
                COALESCE(po.pir_vai_direto_identificacao, FALSE) AS pir_vai_direto_identificacao,
+               COALESCE(po.pir_necessario_eng, FALSE) AS pir_necessario_eng,
                po.dinc AS po_dinc,
                UPPER(TRIM(COALESCE(po.codint_familia, ''))) AS codint_familia,
                (
@@ -15058,7 +15067,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                ) AS qtd_alteracoes
           FROM etiqueta."ETQ_recebimento" er
           LEFT JOIN LATERAL (
-            SELECT p.codigo, p.codigo_produto, img.url_imagem, p.produto_customizado, p.pir_vai_direto_identificacao, p.dinc, p.codint_familia
+            SELECT p.codigo, p.codigo_produto, img.url_imagem, p.produto_customizado, p.pir_vai_direto_identificacao, p.pir_necessario_eng, p.dinc, p.codint_familia
               FROM produto.produtos_omie p
               LEFT JOIN LATERAL (
                 SELECT TRIM(pi.url_imagem) AS url_imagem
@@ -15080,8 +15089,11 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
          WHERE (
              (
                $3::boolean = true
-               AND COALESCE(er.necessario_eng, false) = true
                AND COALESCE(er.necessario_eng_liberado, false) = false
+               AND (
+                 COALESCE(er.necessario_eng, false) = true
+                 OR COALESCE(po.pir_necessario_eng, false) = true
+               )
              )
              OR (
                $3::boolean = false
@@ -15209,6 +15221,19 @@ async function ensureEtqNecessarioEngColumns() {
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_em TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado_em TIMESTAMPTZ`);
+}
+
+async function stampEtqNecessarioEng(idEtq, necessarioEng) {
+  if (!idEtq || necessarioEng !== true) return;
+  await ensureEtqNecessarioEngColumns();
+  await pool.query(
+    `UPDATE etiqueta."ETQ_recebimento"
+        SET necessario_eng = TRUE,
+            necessario_eng_em = NOW(),
+            necessario_eng_liberado = FALSE
+      WHERE id = $1`,
+    [idEtq]
+  );
 }
 
 // PATCH /api/etiquetas/recebimento/:id/necessario-eng — marca item para PIR_ENG (não trava o PIR)

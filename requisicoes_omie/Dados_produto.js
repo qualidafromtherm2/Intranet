@@ -724,6 +724,37 @@ try {
     }
   });
 
+  (async () => {
+    try {
+      const codigoAprov = String(dados.codigo_produto || dados.codigo || codigo || '').trim();
+      if (!ulDetalhes || !codigoAprov) return;
+      const resp = await fetch(`/api/engenharia/produto-aprovacao/${encodeURIComponent(codigoAprov)}`, { credentials: 'include' });
+      const payload = await resp.json().catch(() => ({}));
+      const ap = payload?.aprovacao;
+      const statusTxt = ap ? (ap.status_label || ap.status || '—') : 'Sem registro';
+      const quemTxt = ap?.definido_por || '—';
+      let quandoTxt = '—';
+      if (ap?.definido_em) {
+        const d = new Date(ap.definido_em);
+        quandoTxt = Number.isNaN(d.getTime()) ? String(ap.definido_em) : d.toLocaleString('pt-BR');
+      }
+      [
+        { label: 'Status de aprovação', val: statusTxt },
+        { label: 'Quem definiu', val: quemTxt },
+        { label: 'Quando', val: quandoTxt }
+      ].forEach((f) => {
+        const li = document.createElement('li');
+        li.innerHTML = `
+          <div class="products">${f.label}</div>
+          <div class="status-text">${String(f.val).replace(/[&<>"]/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch]))}</div>
+        `;
+        ulDetalhes.appendChild(li);
+      });
+    } catch (e) {
+      console.warn('[Detalhes] aprovação do produto:', e);
+    }
+  })();
+
 
   // 3.8) Popula Dados de cadastro
   const camposCadastro = [

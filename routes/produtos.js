@@ -1235,6 +1235,20 @@ async function ensureProdutosOmiePirVaiDiretoColumn() {
   await ensureProdutosOmiePirVaiDiretoColumnPromise;
 }
 
+let ensureProdutosOmiePirNecessarioEngColumnPromise = null;
+async function ensureProdutosOmiePirNecessarioEngColumn() {
+  if (!ensureProdutosOmiePirNecessarioEngColumnPromise) {
+    ensureProdutosOmiePirNecessarioEngColumnPromise = dbQuery(`
+      ALTER TABLE produto.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_necessario_eng BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch((err) => {
+      ensureProdutosOmiePirNecessarioEngColumnPromise = null;
+      throw err;
+    });
+  }
+  await ensureProdutosOmiePirNecessarioEngColumnPromise;
+}
+
 async function ensureProdutosOmieItemLimitadoColumn() {
   if (!ensureProdutosOmieItemLimitadoColumnPromise) {
     ensureProdutosOmieItemLimitadoColumnPromise = dbQuery(`
@@ -1545,6 +1559,47 @@ router.put('/:codigo/pir-vai-direto-identificacao', express.json(), async (req, 
     });
   } catch (err) {
     console.error('[PUT /api/produtos/:codigo/pir-vai-direto-identificacao]', err);
+    res.status(500).json({ ok: false, error: String(err.message || err) });
+  }
+});
+
+router.put('/:codigo/pir-necessario-eng', express.json(), async (req, res) => {
+  try {
+    await ensureProdutosOmiePirNecessarioEngColumn();
+    const codigo = String(req.params.codigo || '').trim();
+    if (!codigo) return res.status(400).json({ ok: false, error: 'Código obrigatório' });
+    const raw = req.body?.pir_necessario_eng;
+    const valor = raw === true || raw === 1 || raw === '1' || raw === 'true';
+    const client = await dbGetClient();
+    let result;
+    try {
+      await client.query('BEGIN');
+      await client.query("SELECT set_config('app.produtos_omie_write_source', 'omie_manual', true)");
+      result = await client.query(
+        `UPDATE produto.produtos_omie
+            SET pir_necessario_eng = $2
+          WHERE ${sqlWhereProdutosOmieIdentidade('', '$1')}
+          RETURNING codigo, codigo_produto, pir_necessario_eng`,
+        [codigo, valor]
+      );
+      await client.query('COMMIT');
+    } catch (e) {
+      try { await client.query('ROLLBACK'); } catch (_) {}
+      throw e;
+    } finally {
+      client.release();
+    }
+    if (!result.rows.length) {
+      return res.status(404).json({ ok: false, error: `Produto não encontrado para o código "${codigo}".` });
+    }
+    res.json({
+      ok: true,
+      codigo: result.rows[0].codigo,
+      codigo_produto: result.rows[0].codigo_produto,
+      pir_necessario_eng: result.rows[0].pir_necessario_eng === true
+    });
+  } catch (err) {
+    console.error('[PUT /api/produtos/:codigo/pir-necessario-eng]', err);
     res.status(500).json({ ok: false, error: String(err.message || err) });
   }
 });

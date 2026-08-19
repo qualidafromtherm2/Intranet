@@ -5,6 +5,7 @@
  * - MP (família/código xx.MP....) → pir=false → lista PIR (Qualidade)
  * - fora de MP → pir=true → Identificação do produto (Logística)
  * - pir_vai_direto_identificacao → sempre Identificação
+ * - pir_necessario_eng → também entra na lista PIR_ENG (sem travar Identificação)
  */
 
 function codigoTemSegmentoMp(codigo) {
@@ -42,10 +43,16 @@ function calcularPirInicial({ vaiDireto, ehMp }) {
 async function resolverDestinoPirRecebimento(pool, codigoProduto) {
   const cod = String(codigoProduto || '').trim();
   let vaiDireto = false;
+  let necessarioEng = false;
   let ehMp = codigoTemSegmentoMp(cod);
   try {
+    await pool.query(`
+      ALTER TABLE produto.produtos_omie
+      ADD COLUMN IF NOT EXISTS pir_necessario_eng BOOLEAN NOT NULL DEFAULT FALSE
+    `).catch(() => {});
     const { rows } = await pool.query(
       `SELECT COALESCE(pir_vai_direto_identificacao, FALSE) AS vai_direto,
+              COALESCE(pir_necessario_eng, FALSE) AS necessario_eng,
               UPPER(TRIM(COALESCE(codint_familia, ''))) AS codint_familia,
               codigo,
               codigo_produto::text AS codigo_produto
@@ -57,6 +64,7 @@ async function resolverDestinoPirRecebimento(pool, codigoProduto) {
     );
     if (rows[0]) {
       vaiDireto = rows[0].vai_direto === true;
+      necessarioEng = rows[0].necessario_eng === true;
       ehMp = produtoEhFamiliaMp(rows[0], cod);
     }
   } catch (_) {
@@ -66,6 +74,7 @@ async function resolverDestinoPirRecebimento(pool, codigoProduto) {
     pirInicial: calcularPirInicial({ vaiDireto, ehMp }),
     ehMp,
     vaiDireto,
+    necessarioEng,
   };
 }
 

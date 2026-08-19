@@ -212,10 +212,25 @@ const NF_DATA_EMISSAO_SQL = `CASE
 END`;
 
 /** Faturamento = notas fiscais de saída no período (não depende do pedido ter sido sincronizado). */
-/** Valor líquido do item no payload Omie: vProd − vDesc. */
+function nfJsonNumSql(...exprs) {
+  const parts = exprs.map((expr) =>
+    `NULLIF(REGEXP_REPLACE(TRIM(COALESCE(${expr}, '')), ',', '.', 'g'), '')::numeric`
+  );
+  return `COALESCE(${parts.join(', ')}, 0)`;
+}
+
+/** Valor final do item: VProd + VFrete + VOutro + Vseg + VIPI − VDesc. */
 const NF_ITEM_LIQUIDO_SQL = `(
-  COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'vProd', '')), ',', '.', 'g'), '')::numeric, 0)
-  - COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'vDesc', '')), ',', '.', 'g'), '')::numeric, 0)
+  ${nfJsonNumSql(`d->'prod'->>'vProd'`)}
+  + ${nfJsonNumSql(`d->'prod'->>'vFrete'`)}
+  + ${nfJsonNumSql(`d->'prod'->>'vOutro'`, `d->'prod'->>'vOutros'`)}
+  + ${nfJsonNumSql(`d->'prod'->>'vSeg'`, `d->'prod'->>'vSeguro'`)}
+  + ${nfJsonNumSql(
+    `d->'prod'->>'vIPI'`,
+    `d->'imposto'->'IPI'->'IPITrib'->>'vIPI'`,
+    `d->'imposto'->'IPI'->>'vIPI'`
+  )}
+  - ${nfJsonNumSql(`d->'prod'->>'vDesc'`)}
 )`;
 
 const NF_ITEM_CFOP_DIGITS_SQL = `REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'CFOP', '')), '\\D', '', 'g')`;
@@ -785,15 +800,24 @@ function mapItensPedidoRows(rows) {
   }));
 }
 
-function valorLiquidoItemProd(prod = {}) {
-  const bruto = Number.parseFloat(String(prod.vProd ?? '0').replace(',', '.')) || 0;
-  const desc = Number.parseFloat(String(prod.vDesc ?? '0').replace(',', '.')) || 0;
+function nfNumCampo(valor) {
+  return Number.parseFloat(String(valor ?? '0').replace(',', '.')) || 0;
+}
+
+function valorLiquidoItemProd(prod = {}, det = {}) {
+  const ipi = det?.imposto?.IPI || {};
+  const bruto = nfNumCampo(prod.vProd)
+    + nfNumCampo(prod.vFrete)
+    + nfNumCampo(prod.vOutro ?? prod.vOutros)
+    + nfNumCampo(prod.vSeg ?? prod.vSeguro)
+    + nfNumCampo(prod.vIPI ?? ipi?.IPITrib?.vIPI ?? ipi?.vIPI);
+  const desc = nfNumCampo(prod.vDesc);
   return Math.round(Math.max(0, bruto - desc) * 100) / 100;
 }
 
 /**
  * Itens do payload da NF.
- * Valor sempre líquido (vProd − vDesc).
+ * Valor final: VProd + VFrete + VOutro + Vseg + VIPI − VDesc.
  * somenteIncluidos=true → só CFOPs marcados na config (CFOP vazio entra).
  */
 function itensFromNfPayload(payload, opts = {}) {
@@ -812,7 +836,7 @@ function itensFromNfPayload(payload, opts = {}) {
       codigo: String(prod.cProd || prod.codigo || '').trim(),
       descricao: String(prod.xProd || prod.descricao || '-').trim() || '-',
       quantidade: Math.round((Number.parseFloat(qRaw) || 0) * 100) / 100,
-      valor_total: valorLiquidoItemProd(prod),
+      valor_total: valorLiquidoItemProd(prod, d),
       cfop: cfopDigits,
     });
   }
@@ -833,7 +857,7 @@ router.get('/vendas/relatorio-gerencial/pedido-itens/:codigoPedido', async (req,
       if (Number.isFinite(codigoNum) && codigoNum < 0) nfId = Math.abs(codigoNum);
     }
 
-    // Prefere itens da NF (valor líquido vProd−vDesc) quando houver nf_id.
+    // Prefere itens da NF (valor final VProd+frete+outros+seguro+IPI−desconto) quando houver nf_id.
     if (Number.isFinite(nfId) && nfId > 0) {
       const { rows: nfRows } = await pool.query(`
         SELECT payload_ultimo, numero_nota, numero_pedido, id_pedido_omie
