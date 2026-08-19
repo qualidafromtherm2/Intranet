@@ -40584,6 +40584,17 @@ function prefixoComumAssociacaoNfePedido(valorA, valorB) {
   return tamanho;
 }
 
+function normalizarUnidadeAssociacaoNfePedido(valor) {
+  const unidade = String(valor || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+  const equivalencias = {
+    UNIDAD: 'UN', UNIDADE: 'UN', UNIDADES: 'UN', UND: 'UN', UNID: 'UN', UNIT: 'UN',
+    PC: 'UN', PCS: 'UN', PECA: 'UN', PECAS: 'UN', UN: 'UN',
+    METRO: 'MTS', METROS: 'MTS', MT: 'MTS', M: 'MTS', MTS: 'MTS',
+    QUILOGRAMA: 'KG', QUILOGRAMAS: 'KG', KGS: 'KG', KG: 'KG'
+  };
+  return equivalencias[unidade] || unidade;
+}
+
 function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
   const itensCabec = itemReceb?.itensCabec || {};
   const codigoRecBruto = String(itensCabec?.cCodigoProduto || '').trim();
@@ -40606,6 +40617,12 @@ function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
   let score = 0;
   let scoreTextual = 0;
   const motivos = [];
+  const unidadeNf = normalizarUnidadeAssociacaoNfePedido(
+    itensCabec?.cUnidadeNFe || itensCabec?.cUnidadeNfe
+  );
+  const unidadePedido = normalizarUnidadeAssociacaoNfePedido(itemPedido?.c_unidade);
+  const conversaoUnidadeNecessaria = !!unidadeNf && !!unidadePedido && unidadeNf !== unidadePedido;
+  if (conversaoUnidadeNecessaria) motivos.push('conversao_unidade_necessaria');
 
   if (codigoRec && codigoPedido) {
     if (matchCodigoProduto) scoreTextual += 1300;
@@ -40654,7 +40671,7 @@ function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
   const qtdRec = Number(itensCabec?.nQtdeNFe);
   const qtdPedido = Number(itemPedido?.n_qtde);
   let proporcaoQuantidade = null;
-  if (Number.isFinite(qtdRec) && Number.isFinite(qtdPedido)) {
+  if (!conversaoUnidadeNecessaria && Number.isFinite(qtdRec) && Number.isFinite(qtdPedido)) {
     const diferenca = Math.abs(qtdRec - qtdPedido);
     if (diferenca < 0.0001) {
       score += 180;
@@ -40680,7 +40697,7 @@ function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
   const valorRec = Number(itensCabec?.nPrecoUnit ?? null);
   const valorPedido = Number(itemPedido?.n_val_unit ?? null);
   let diferencaValorPercentual = null;
-  if (Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
+  if (!conversaoUnidadeNecessaria && Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
     diferencaValorPercentual = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
     if (diferencaValorPercentual < 0.001) score += 130;
     else if (diferencaValorPercentual < 0.05) score += 90;
@@ -40709,6 +40726,9 @@ function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
     conflitoIdentificadorTecnico,
     proporcaoQuantidade,
     diferencaValorPercentual,
+    conversaoUnidadeNecessaria,
+    unidadeNf,
+    unidadePedido,
     motivos
   };
 }
@@ -40782,6 +40802,21 @@ function resolverAtribuicaoGlobalAssociacaoNfePedido(matrizAvaliacoes) {
     if (linha > 0 && coluna <= quantidadeItensPedido) atribuicoes[linha - 1] = coluna - 1;
   }
   return atribuicoes;
+}
+
+function calcularCfopEntradaPorCategoriaCompra(categoriaCompra, ufNfe) {
+  const categoria = String(categoriaCompra || '').trim();
+  const uf = String(ufNfe || '').trim().toUpperCase();
+  if (!categoria || !uf) return null;
+
+  const dentroEstado = uf === 'SC';
+  // Matéria-prima nacional e importada possuem a mesma destinação:
+  // industrialização/produção. A origem altera apenas 1.x (SC) ou 2.x.
+  if (categoria === '2.01.03' || categoria === '2.01.04') {
+    return dentroEstado ? '1.101' : '2.101';
+  }
+
+  return dentroEstado ? '1.556' : '2.556';
 }
 
 function normalizarCfopServicoRecebimento(valor) {
@@ -41031,6 +41066,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         avaliacaoGlobal.score >= 160
         && margemConfianca >= 35
         && !sinaisContraditorios
+        && !avaliacaoGlobal.conversaoUnidadeNecessaria
       );
 
       scoreMatch = avaliacaoGlobal.score;
@@ -41047,7 +41083,9 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       } else if (avaliacaoGlobal.score >= 40) {
         // A sugestão continua sem vínculo automático, mas fica reservada para não
         // aparecer simultaneamente como uma sobra independente do pedido.
-        reservarItemPedido(candidatoGlobal);
+        // Exceção: quando existe conversão de unidade, o item precisa continuar
+        // visível na lista de não vinculados para o usuário informar o fator.
+        if (!avaliacaoGlobal.conversaoUnidadeNecessaria) reservarItemPedido(candidatoGlobal);
         requerRevisao = true;
         criterioMatch = 'revisar';
         const motivos = [...new Set([
@@ -41105,7 +41143,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         nf_codigo_produto: codigoProdutoRec || null,
         nf_descricao_produto: descricaoProdutoRec || null,
         nf_qtde: itensCabec?.nQtdeNFe ?? null,
-        nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+        nf_unidade: String(itensCabec?.cUnidadeNFe || itensCabec?.cUnidadeNfe || '').trim() || null,
         nf_valor_unitario: itensCabec?.nPrecoUnit ?? null,
         nf_valor_total: itensCabec?.vTotalItem ?? null,
         nf_cfop: cfopNf || null,
@@ -41125,6 +41163,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
         criterio_match: criterioMatch,
         score_match: scoreMatch,
+        conversao_unidade_necessaria: !!avaliacaoGlobal?.conversaoUnidadeNecessaria,
         pedido_sugestoes: sugestaoGlobal ? [sugestaoGlobal] : []
       }
     };
@@ -41860,6 +41899,35 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       });
     }
 
+    // Conversões entre grandezas diferentes (ex.: KG da NF-e para MTS do
+    // pedido) nunca podem herdar silenciosamente a quantidade total do pedido.
+    // Exigimos a quantidade convertida e a unidade de destino confirmadas na UI.
+    const conversoesInvalidas = itensParaEnviar.flatMap((itemEditar) => {
+      const seq = Number(itemEditar?.itensIde?.nSequencia || 0);
+      const override = overrideMap.get(seq);
+      if (!override?.conversaoUnidade) return [];
+      const codItem = Number(itemEditar?.itensIde?.nIdItPedidoExistente || 0);
+      const metaItem = itemMetaPorCodItem[String(codItem)] || null;
+      const quantidadeConvertida = Number(override?.nQtde);
+      const unidadeConvertida = normalizarUnidadeAssociacaoNfePedido(override?.cUnidade);
+      const unidadePedido = normalizarUnidadeAssociacaoNfePedido(metaItem?.c_unidade);
+      if (!Number.isFinite(quantidadeConvertida) || quantidadeConvertida <= 0 || !unidadeConvertida) {
+        return [{ n_sequencia: seq, motivo: 'Informe a quantidade convertida e a unidade de destino.' }];
+      }
+      if (unidadePedido && unidadeConvertida !== unidadePedido) {
+        return [{ n_sequencia: seq, motivo: `A unidade convertida deve ser ${metaItem?.c_unidade}.` }];
+      }
+      return [];
+    });
+    if (conversoesInvalidas.length > 0) {
+      return res.status(422).json({
+        ok: false,
+        error_type: 'conversao_unidade_invalida',
+        error: 'Revise as conversões de unidade antes de associar a NF-e.',
+        itens: conversoesInvalidas
+      });
+    }
+
     itensParaEnviar.forEach((itemEditar) => {
       const itensIde = itemEditar?.itensIde || {};
       const acao = String(itensIde?.cAcao || '').trim().toUpperCase();
@@ -42085,14 +42153,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           cCategCompraRegraCfop = cCategCompraReceb;
           ufNfeRegraCfop = ufNfe;
           if (ufNfe && cCategCompraReceb) {
-            const dentroEstado = ufNfe === 'SC';
-            if (cCategCompraReceb === '2.01.04') {
-              cfopCalculado = '1.102';
-            } else if (cCategCompraReceb === '2.01.03') {
-              cfopCalculado = dentroEstado ? '1.101' : '2.101';
-            } else {
-              cfopCalculado = dentroEstado ? '1.556' : '2.556';
-            }
+            cfopCalculado = calcularCfopEntradaPorCategoriaCompra(cCategCompraReceb, ufNfe);
             console.log(`[Compras/NFeAssociarPedido] CFOP calculado: ${cfopCalculado} (UF_NFe=${ufNfe} codUf=${codigoUfNfe} categ=${cCategCompraReceb})`);
           }
         } catch (errCfop) {
