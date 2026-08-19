@@ -40674,8 +40674,11 @@ function avaliarAssociacaoNfePedido(itemReceb, itemPedido) {
     }
   }
 
-  const valorRec = Number(itensCabec?.vTotalItem ?? null);
-  const valorPedido = Number(itemPedido?.n_val_tot ?? null);
+  // nPrecoUnit é o preço unitário base informado pela NF-e; os componentes
+  // fiscais ficam em campos próprios e compõem vTotalItem. A associação deve
+  // comparar grandezas equivalentes: preço unitário da NF x preço unitário do pedido.
+  const valorRec = Number(itensCabec?.nPrecoUnit ?? null);
+  const valorPedido = Number(itemPedido?.n_val_unit ?? null);
   let diferencaValorPercentual = null;
   if (Number.isFinite(valorRec) && Number.isFinite(valorPedido) && valorRec > 0 && valorPedido > 0) {
     diferencaValorPercentual = Math.abs(valorRec - valorPedido) / Math.max(valorRec, valorPedido);
@@ -40806,6 +40809,7 @@ async function listarSugestoesComplementaresAssociacaoNfePedido({
             pp.c_produto,
             pp.c_descricao,
             pp.n_qtde,
+            pp.n_val_unit,
             pp.n_val_tot,
             pp.c_unidade,
             pp.n_cod_prod
@@ -40874,6 +40878,7 @@ async function listarSugestoesComplementaresAssociacaoNfePedido({
       pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
       pedido_qtde: itemPedido?.n_qtde ?? null,
       pedido_unidade: String(itemPedido?.c_unidade || '').trim() || null,
+      pedido_valor_unitario: itemPedido?.n_val_unit ?? null,
       pedido_valor_total: itemPedido?.n_val_tot ?? null,
       criterio_match: itemPedido?.criterio_match || null,
       score_match: Number(itemPedido?.score_match || 0) || 0
@@ -41060,6 +41065,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
           pedido_descricao_produto: String(candidatoGlobal?.c_descricao || '').trim() || null,
           pedido_qtde: candidatoGlobal?.n_qtde ?? null,
           pedido_unidade: String(candidatoGlobal?.c_unidade || '').trim() || null,
+          pedido_valor_unitario: candidatoGlobal?.n_val_unit ?? null,
           pedido_valor_total: candidatoGlobal?.n_val_tot ?? null,
           criterio_match: 'sugestao_combinacao_global',
           score_match: avaliacaoGlobal.score
@@ -41100,6 +41106,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         nf_descricao_produto: descricaoProdutoRec || null,
         nf_qtde: itensCabec?.nQtdeNFe ?? null,
         nf_unidade: String(itensCabec?.cUnidadeNfe || '').trim() || null,
+        nf_valor_unitario: itensCabec?.nPrecoUnit ?? null,
         nf_valor_total: itensCabec?.vTotalItem ?? null,
         nf_cfop: cfopNf || null,
         item_servico: servicoCfop.servico,
@@ -41114,6 +41121,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         pedido_descricao_produto: String(itemPedidoVinculo?.c_descricao || '').trim() || null,
         pedido_qtde: itemPedidoVinculo?.n_qtde ?? null,
         pedido_unidade: String(itemPedidoVinculo?.c_unidade || '').trim() || null,
+        pedido_valor_unitario: itemPedidoVinculo?.n_val_unit ?? null,
         pedido_valor_total: itemPedidoVinculo?.n_val_tot ?? null,
         criterio_match: criterioMatch,
         score_match: scoreMatch,
@@ -41152,6 +41160,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
       pedido_descricao_produto: String(itemPedido?.c_descricao || '').trim() || null,
       pedido_qtde: itemPedido?.n_qtde ?? null,
       pedido_unidade: String(itemPedido?.c_unidade || '').trim() || null,
+      pedido_valor_unitario: itemPedido?.n_val_unit ?? null,
       pedido_valor_total: itemPedido?.n_val_tot ?? null,
       item_informativo_sugerido: true,
       motivo: 'Item do pedido sem linha correspondente na NF-e'
@@ -41202,6 +41211,144 @@ async function obterInfoCategoriaRecebimentoOmie(recebimento) {
     descricao: catRow?.descricao || cCategCompraConsultar,
     inativa: catRow?.conta_inativa === 'S'
   };
+}
+
+function copiarCamposDefinidosPedidoCompra(origem, campos) {
+  const destino = {};
+  campos.forEach((campo) => {
+    if (origem?.[campo] !== undefined && origem?.[campo] !== null) {
+      destino[campo] = origem[campo];
+    }
+  });
+  return destino;
+}
+
+async function chamarApiPedidoCompraOmie(call, parametro) {
+  const resposta = await fetch('https://app.omie.com.br/api/v1/produtos/pedidocompra/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      call,
+      app_key: OMIE_APP_KEY,
+      app_secret: OMIE_APP_SECRET,
+      param: [parametro]
+    })
+  });
+  const dados = await resposta.json().catch(() => ({}));
+  if (!resposta.ok || dados?.faultstring) {
+    throw new Error(String(dados?.faultstring || dados?.error || `Omie retornou HTTP ${resposta.status}`));
+  }
+  return dados;
+}
+
+function montarPayloadAlteracaoPedidoCompra(pedidoConsulta, valoresUnitariosPorItem) {
+  const cabecalhoConsulta = pedidoConsulta?.cabecalho_consulta || pedidoConsulta?.cabecalho || {};
+  const produtosConsulta = pedidoConsulta?.produtos_consulta || pedidoConsulta?.produtos || [];
+  const freteConsulta = pedidoConsulta?.frete_consulta || pedidoConsulta?.frete || {};
+  const departamentosConsulta = pedidoConsulta?.departamentos_consulta || pedidoConsulta?.departamentos || [];
+  const parcelasConsulta = pedidoConsulta?.parcelas_consulta || pedidoConsulta?.parcelas || [];
+  const nCodPed = Number(cabecalhoConsulta?.nCodPed || 0);
+
+  if (!Number.isFinite(nCodPed) || nCodPed <= 0 || !Array.isArray(produtosConsulta) || !produtosConsulta.length) {
+    throw new Error('A Omie não retornou o pedido completo para alteração dos preços.');
+  }
+
+  const cabecalhoAlterar = copiarCamposDefinidosPedidoCompra(cabecalhoConsulta, [
+    'nCodPed', 'cCodIntPed', 'dDtPrevisao', 'cCodParc', 'nQtdeParc', 'cCnpjCpfFor',
+    'nCodFor', 'cCodIntFor', 'cCodCateg', 'nCodCompr', 'cContato', 'cContrato',
+    'nCodCC', 'nCodIntCC', 'nCodProj', 'cNumPedido', 'cObs', 'cObsInt'
+  ]);
+  cabecalhoAlterar.nCodPed = nCodPed;
+  if (cabecalhoAlterar.nCodFor || cabecalhoAlterar.cCodIntFor) {
+    delete cabecalhoAlterar.cCnpjCpfFor;
+  }
+
+  const produtosAlterar = produtosConsulta.map((produto) => {
+    const nCodItem = Number(produto?.nCodItem || 0);
+    const alteracao = valoresUnitariosPorItem.get(nCodItem);
+    const produtoAlterar = copiarCamposDefinidosPedidoCompra(produto, [
+      'cCodIntItem', 'nCodItem', 'cCodIntProd', 'nCodProd', 'cProduto', 'cDescricao',
+      'cNCM', 'cUnidade', 'cEAN', 'nPesoLiq', 'nPesoBruto', 'nQtde', 'nValUnit',
+      'nDesconto', 'nValorIcms', 'nValorSt', 'nValorIpi', 'nValorPis', 'nValorCofins',
+      'cObs', 'cMkpAtuPv', 'cMkpAtuSm', 'nMkpPerc', 'codigo_local_estoque', 'cCodCateg'
+    ]);
+    if (alteracao) produtoAlterar.nValUnit = alteracao.nValUnit;
+    return produtoAlterar;
+  });
+
+  const payload = {
+    cabecalho_alterar: cabecalhoAlterar,
+    produtos_alterar: produtosAlterar
+  };
+
+  if (freteConsulta && Object.keys(freteConsulta).length) {
+    payload.frete_alterar = copiarCamposDefinidosPedidoCompra(freteConsulta, [
+      'nCodTransp', 'cCodIntTransp', 'cTpFrete', 'cPlaca', 'cUF', 'nQtdVol',
+      'cEspVol', 'cMarVol', 'cNumVol', 'nPesoLiq', 'nPesoBruto', 'nValFrete',
+      'nValSeguro', 'cLacre', 'nValOutras'
+    ]);
+  }
+  if (Array.isArray(departamentosConsulta) && departamentosConsulta.length) {
+    payload.departamentos_alterar = departamentosConsulta.map((departamento) => (
+      copiarCamposDefinidosPedidoCompra(departamento, ['cCodDepto', 'nPerc'])
+    ));
+  }
+  if (Array.isArray(parcelasConsulta) && parcelasConsulta.length) {
+    payload.parcelas_alterar = parcelasConsulta.map((parcela) => (
+      copiarCamposDefinidosPedidoCompra(parcela, ['nParcela', 'dVencto', 'nValor', 'nDias', 'nPercent', 'cTipoDoc'])
+    ));
+  }
+  return payload;
+}
+
+async function atualizarPrecosUnitariosPedidosOmie(itensOverride) {
+  const alteracoesPorPedido = new Map();
+  itensOverride.forEach((override) => {
+    if (!Object.prototype.hasOwnProperty.call(override || {}, 'nValUnit')) return;
+    const nCodPed = Number(override?.nIdPedidoExistente || 0);
+    const nCodItem = Number(override?.nIdItPedidoExistente || 0);
+    const nValUnit = Number(override?.nValUnit);
+    if (!Number.isFinite(nCodPed) || nCodPed <= 0 || !Number.isFinite(nCodItem) || nCodItem <= 0) {
+      throw new Error('Não foi possível identificar o pedido/item cujo preço foi editado.');
+    }
+    if (!Number.isFinite(nValUnit) || nValUnit <= 0) {
+      throw new Error(`Informe um preço unitário válido para o item ${nCodItem}.`);
+    }
+    if (!alteracoesPorPedido.has(nCodPed)) alteracoesPorPedido.set(nCodPed, new Map());
+    alteracoesPorPedido.get(nCodPed).set(nCodItem, { nValUnit });
+  });
+
+  const pedidosAtualizados = [];
+  for (const [nCodPed, valoresUnitariosPorItem] of alteracoesPorPedido.entries()) {
+    const pedidoConsulta = await chamarApiPedidoCompraOmie('ConsultarPedCompra', { nCodPed });
+    const itensConsulta = pedidoConsulta?.produtos_consulta || pedidoConsulta?.produtos || [];
+    const idsEncontrados = new Set(itensConsulta.map((item) => Number(item?.nCodItem || 0)));
+    const itemAusente = [...valoresUnitariosPorItem.keys()].find((nCodItem) => !idsEncontrados.has(nCodItem));
+    if (itemAusente) throw new Error(`Item ${itemAusente} não foi encontrado no pedido ${nCodPed} na Omie.`);
+
+    const payloadAlteracao = montarPayloadAlteracaoPedidoCompra(pedidoConsulta, valoresUnitariosPorItem);
+    await chamarApiPedidoCompraOmie('AlteraPedCompra', payloadAlteracao);
+
+    // Evita uma segunda consulta idêntica em sequência (bloqueio de consumo
+    // redundante da Omie). Como a alteração já foi aceita, sincroniza o banco
+    // local com o mesmo pedido consultado e os novos preços enviados.
+    const pedidoAtualizado = JSON.parse(JSON.stringify(pedidoConsulta));
+    const produtosAtualizados = pedidoAtualizado?.produtos_consulta || pedidoAtualizado?.produtos || [];
+    produtosAtualizados.forEach((produto) => {
+      const alteracao = valoresUnitariosPorItem.get(Number(produto?.nCodItem || 0));
+      if (alteracao) {
+        produto.nValUnit = alteracao.nValUnit;
+        const quantidade = Number(produto?.nQtde || 0);
+        const desconto = Number(produto?.nDesconto || 0);
+        if (Number.isFinite(quantidade) && quantidade > 0) {
+          produto.nValTot = Math.max(0, (alteracao.nValUnit * quantidade) - (Number.isFinite(desconto) ? desconto : 0));
+        }
+      }
+    });
+    await upsertPedidoCompra(pedidoAtualizado, 'nfe-associacao:preco-unitario', null, { confirmadoOmie: true });
+    pedidosAtualizados.push(nCodPed);
+  }
+  return pedidosAtualizados;
 }
 
 // GET /api/compras/categorias-ativas
@@ -41300,6 +41447,7 @@ function montarPreviewAssociacaoDiretaZinca(recebimento) {
       nf_descricao_produto: descricao || null,
       nf_qtde: cab?.nQtdeNFe ?? null,
       nf_unidade: String(cab?.cUnidadeNfe || '').trim() || null,
+      nf_valor_unitario: cab?.nPrecoUnit ?? null,
       nf_valor_total: cab?.vTotalItem ?? item?.nValTot ?? null,
       nf_cfop: cfop || null,
       item_servico: true,
@@ -41611,6 +41759,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
         }))
       });
     }
+
+    // Se o usuário corrigiu o preço unitário na prévia, altera primeiro o
+    // pedido real na Omie. A associação só continua depois que a alteração foi
+    // aceita e o pedido atualizado foi sincronizado no banco local.
+    const pedidosComPrecoAtualizado = await atualizarPrecosUnitariosPedidosOmie(itensOverride);
 
     try {
       const pedidoNumero = plano.c_numero_pedido || numeroPedido || String(nCodPed || '');
@@ -42382,6 +42535,7 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
 
     return res.json({
       ok: true,
+      pedidos_preco_atualizado: pedidosComPrecoAtualizado,
       message: alertaItemAssociacao
         ? `Pedido ${plano.c_numero_pedido || plano.n_cod_ped} vinculado à NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} na Omie, com alerta de item: ${alertaItemAssociacao}`
         : (vinculoConfirmado
