@@ -15010,6 +15010,10 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
       ALTER TABLE etiqueta."ETQ_recebimento"
       ADD COLUMN IF NOT EXISTS necessario_eng_liberado_em TIMESTAMPTZ
     `).catch(() => {});
+    await pool.query(`
+      ALTER TABLE etiqueta."ETQ_recebimento"
+      ADD COLUMN IF NOT EXISTS pir_eng_status TEXT
+    `).catch(() => {});
 
     const q = String(req.query.q || '').trim();
     const semMp = req.query.sem_mp === '1' || req.query.sem_mp === 'true';
@@ -15021,6 +15025,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
                er.motivo_sem_nfe,
                COALESCE(er.necessario_eng, FALSE) AS necessario_eng,
                COALESCE(er.necessario_eng_liberado, FALSE) AS necessario_eng_liberado,
+               NULLIF(TRIM(er.pir_eng_status), '') AS pir_eng_status,
                po.codigo AS po_codigo,
                po.codigo_produto AS po_codigo_produto,
                po.url_imagem AS produto_url_imagem,
@@ -15089,11 +15094,12 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
          WHERE (
              (
                $3::boolean = true
-               AND COALESCE(er.necessario_eng_liberado, false) = false
-               AND (
-                 COALESCE(er.necessario_eng, false) = true
-                 OR COALESCE(po.pir_necessario_eng, false) = true
-               )
+               AND LOWER(TRIM(COALESCE(er.pir_eng_status, CASE
+                     WHEN COALESCE(er.necessario_eng, false) = true
+                      AND COALESCE(er.necessario_eng_liberado, false) = false
+                     THEN 'necessario_eng'
+                     ELSE ''
+                   END))) = 'necessario_eng'
              )
              OR (
                $3::boolean = false
@@ -15137,6 +15143,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         qtd, unidade, data_emissao, criado_em, pir, motivo_sem_nfe,
         necessario_eng,
         necessario_eng_liberado,
+        pir_eng_status,
         produto_customizado,
         pir_vai_direto_identificacao,
         fornecedor_atual,
@@ -15183,6 +15190,7 @@ app.get('/api/etiquetas/recebimento/pendentes-pir', async (req, res) => {
         pir_vai_direto_identificacao: r.pir_vai_direto_identificacao === true,
         necessario_eng: r.necessario_eng === true,
         necessario_eng_liberado: r.necessario_eng_liberado === true,
+        pir_eng_status: String(r.pir_eng_status || '').trim() || null,
         tem_alteracao: r.tem_alteracao === true,
         qtd_alteracoes: Number(r.qtd_alteracoes || 0)
       })),
@@ -15221,6 +15229,7 @@ async function ensureEtqNecessarioEngColumns() {
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_em TIMESTAMPTZ`);
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado BOOLEAN NOT NULL DEFAULT FALSE`);
   await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS necessario_eng_liberado_em TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE etiqueta."ETQ_recebimento" ADD COLUMN IF NOT EXISTS pir_eng_status TEXT`);
 }
 
 async function stampEtqNecessarioEng(idEtq, necessarioEng) {
@@ -15230,7 +15239,8 @@ async function stampEtqNecessarioEng(idEtq, necessarioEng) {
     `UPDATE etiqueta."ETQ_recebimento"
         SET necessario_eng = TRUE,
             necessario_eng_em = NOW(),
-            necessario_eng_liberado = FALSE
+            necessario_eng_liberado = FALSE,
+            pir_eng_status = 'necessario_eng'
       WHERE id = $1`,
     [idEtq]
   );
@@ -15249,9 +15259,10 @@ app.patch('/api/etiquetas/recebimento/:id/necessario-eng', express.json(), async
           SET necessario_eng = $2,
               necessario_eng_em = CASE WHEN $2 THEN NOW() ELSE necessario_eng_em END,
               necessario_eng_liberado = CASE WHEN $2 THEN FALSE ELSE necessario_eng_liberado END,
-              necessario_eng_liberado_em = CASE WHEN $2 THEN NULL ELSE necessario_eng_liberado_em END
+              necessario_eng_liberado_em = CASE WHEN $2 THEN NULL ELSE necessario_eng_liberado_em END,
+              pir_eng_status = CASE WHEN $2 THEN 'necessario_eng' ELSE pir_eng_status END
         WHERE id = $1
-        RETURNING id, necessario_eng, necessario_eng_liberado, codigo_produto, numero_nfe, lote, pir`,
+        RETURNING id, necessario_eng, necessario_eng_liberado, pir_eng_status, codigo_produto, numero_nfe, lote, pir`,
       [id, marcado]
     );
     if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
@@ -15259,6 +15270,35 @@ app.patch('/api/etiquetas/recebimento/:id/necessario-eng', express.json(), async
   } catch (err) {
     console.error('[etiquetas/necessario-eng]', err);
     res.status(500).json({ error: err?.message || 'Falha ao marcar Necessário ENG.' });
+  }
+});
+
+// PATCH /api/etiquetas/recebimento/:id/pir-eng-status — decisão da engenharia (sai da PIR_ENG)
+app.patch('/api/etiquetas/recebimento/:id/pir-eng-status', express.json(), async (req, res) => {
+  try {
+    await ensureEtqNecessarioEngColumns();
+    const id = Number(req.params.id);
+    if (!id) return res.status(400).json({ error: 'ID inválido.' });
+    const status = String(req.body?.status || '').trim().toLowerCase();
+    const ok = new Set(['aprovado', 'reprovado', 'projeto', 'necessario_eng']);
+    if (!ok.has(status)) {
+      return res.status(400).json({ error: 'Status inválido. Use aprovado, reprovado, projeto ou necessario_eng.' });
+    }
+    const result = await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento"
+          SET pir_eng_status = $2,
+              necessario_eng = ($2 = 'necessario_eng'),
+              necessario_eng_liberado = ($2 <> 'necessario_eng'),
+              necessario_eng_liberado_em = CASE WHEN $2 <> 'necessario_eng' THEN NOW() ELSE NULL END
+        WHERE id = $1
+        RETURNING id, pir_eng_status, necessario_eng, necessario_eng_liberado, codigo_produto, lote`,
+      [id, status]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Registro não encontrado.' });
+    res.json({ ok: true, ...result.rows[0] });
+  } catch (err) {
+    console.error('[etiquetas/pir-eng-status]', err);
+    res.status(500).json({ error: err?.message || 'Falha ao gravar status PIR_ENG.' });
   }
 });
 

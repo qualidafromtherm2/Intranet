@@ -1,5 +1,13 @@
 // produtos/engenharia_paineis.js — painéis globais Engenharia (menu lateral)
 (function initEngenhariaPaineis() {
+  if (!document.querySelector('script[data-gg-gerador]')) {
+    const s = document.createElement('script');
+    s.src = '/public/js/engenharia-gerador-graficos.js?v=20260819a';
+    s.defer = true;
+    s.dataset.ggGerador = '1';
+    document.head.appendChild(s);
+  }
+
   const menuAlteracoes = document.getElementById('menu-engenharia-alteracoes');
   const menuDesenho = document.getElementById('menu-engenharia-desenho-tecnico');
   if (!menuAlteracoes && !menuDesenho) return;

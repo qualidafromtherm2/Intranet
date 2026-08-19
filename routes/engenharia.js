@@ -94,6 +94,49 @@ function resolveFileTimestamp(file) {
 }
 
 module.exports = (pool) => {
+  (async () => {
+    await pool.query(`
+      INSERT INTO public.nav_node (key, label, position, parent_id, sort, active, selector)
+      SELECT $1, $2, 'side', p.id, $3, TRUE, $4
+        FROM public.nav_node p
+       WHERE p.key = 'side:engenharia'
+      ON CONFLICT (key) DO UPDATE SET
+        label = EXCLUDED.label,
+        position = EXCLUDED.position,
+        parent_id = COALESCE(EXCLUDED.parent_id, public.nav_node.parent_id),
+        sort = EXCLUDED.sort,
+        active = TRUE,
+        selector = EXCLUDED.selector
+    `, ['side:engenharia:gerador-graficos', 'Gerados de graficos', 60, '#menu-engenharia-gerador-graficos']);
+    await pool.query(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT arp.role, n.id, arp.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_role_permission arp ON arp.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO NOTHING
+    `, ['side:engenharia:gerador-graficos', 'side:engenharia:desenho-tecnico']);
+    await pool.query(`
+      INSERT INTO public.auth_user_permission (user_id, node_id, allow)
+      SELECT aup.user_id, n.id, aup.allow
+        FROM public.nav_node n
+        JOIN public.nav_node s ON s.key = $2
+        JOIN public.auth_user_permission aup ON aup.node_id = s.id
+       WHERE n.key = $1
+      ON CONFLICT (user_id, node_id) DO NOTHING
+    `, ['side:engenharia:gerador-graficos', 'side:engenharia:desenho-tecnico']);
+    await pool.query(`
+      INSERT INTO public.auth_role_permission (role, node_id, allow)
+      SELECT 'admin', n.id, TRUE
+        FROM public.nav_node n
+       WHERE n.key = $1
+      ON CONFLICT (role, node_id) DO UPDATE SET allow = TRUE
+    `, ['side:engenharia:gerador-graficos']);
+  })().catch((err) => {
+    console.error('[gerador-graficos] falha ao garantir nav:', err.message);
+  });
+
   router.get('/fromthest/latest-installer', async (_req, res) => {
     try {
       const supabase = getSupabase();

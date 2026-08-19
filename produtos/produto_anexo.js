@@ -1,4 +1,12 @@
 (function () {
+  if (!document.querySelector('script[data-gg-gerador]')) {
+    const s = document.createElement('script');
+    s.src = '/public/js/engenharia-gerador-graficos.js?v=20260819a';
+    s.defer = true;
+    s.dataset.ggGerador = '1';
+    document.head.appendChild(s);
+  }
+
   const TAB_ID = 'listaAnexos';
   const LIST_ID = 'listaAnexosConteudo';
   const BUTTON_ID = 'btnNovoAnexo';
