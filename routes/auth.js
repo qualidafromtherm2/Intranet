@@ -71,6 +71,83 @@ router.post('/login', async (req, res) => {
   }
 });
 
+async function localizarUsuarioPrimeiraSenha(usernameRaw) {
+  const digitado = String(usernameRaw || '').trim();
+  if (!digitado) {
+    return { ok: false, motivo: 'parametro', error: 'Informe o usuário.' };
+  }
+
+  const sel = await pool.query(
+    `SELECT id, username
+       FROM public.auth_user
+      WHERE lower(btrim(username)) = lower($1) OR id::text = $1
+      LIMIT 1`,
+    [digitado]
+  );
+
+  if (sel.rows.length === 0) {
+    const sug = await pool.query(
+      `SELECT username
+         FROM public.auth_user
+        WHERE username ILIKE ($1 || '%')
+        ORDER BY username
+        LIMIT 5`,
+      [digitado]
+    );
+    const nomes = sug.rows.map((r) => r.username).filter(Boolean);
+    const extra = nomes.length
+      ? ` Logins parecidos: ${nomes.join(', ')}. Use o login completo.`
+      : ' Confira o login no Cadastro de colaboradores (não é só o primeiro nome).';
+    console.warn('[auth/first-password] recusado: usuario nao encontrado', {
+      digitado,
+      sugestoes: nomes
+    });
+    return {
+      ok: false,
+      motivo: 'nao_encontrado',
+      error: `Não achei o usuário "${digitado}".${extra}`,
+      sugestoes: nomes
+    };
+  }
+
+  const u = sel.rows[0];
+  const chk = await pool.query(
+    `SELECT (password_hash = crypt('123', password_hash)) AS is123
+       FROM public.auth_user
+      WHERE id = $1`,
+    [u.id]
+  );
+  const is123 = !!chk.rows[0]?.is123;
+  if (!is123) {
+    console.warn('[auth/first-password] recusado: senha atual nao e 123', {
+      digitado,
+      id: u.id,
+      username: u.username
+    });
+    return {
+      ok: false,
+      motivo: 'nao_e_123',
+      error: `A senha de "${u.username}" não está mais como 123. No Cadastro de colaboradores, clique em Resetar senha de novo.`
+    };
+  }
+
+  return { ok: true, user: u };
+}
+
+// POST /first-password-check — valida se dá para trocar a senha inicial (123)
+router.post('/first-password-check', async (req, res) => {
+  try {
+    const loc = await localizarUsuarioPrimeiraSenha(req.body?.username);
+    if (!loc.ok) {
+      return res.status(401).json({ ok: false, error: loc.error, sugestoes: loc.sugestoes || [] });
+    }
+    return res.json({ ok: true, username: loc.user.username });
+  } catch (e) {
+    console.error('[auth/first-password-check]', e);
+    return res.status(500).json({ ok: false, error: 'Erro interno' });
+  }
+});
+
 // POST /first-password
 // Troca a senha inicial ("123") por uma nova e inicia a sessão.
 router.post('/first-password', async (req, res) => {
@@ -85,34 +162,11 @@ router.post('/first-password', async (req, res) => {
       return res.status(400).json({ ok: false, error: 'A nova senha deve ter no mínimo 6 caracteres e ser diferente de "123".' });
     }
 
-    // Resposta única para usuário inexistente e senha já trocada — não revela quais contas existem.
-    const recusar = () => res.status(401).json({ ok: false, error: 'Não é possível definir a senha inicial desta conta.' });
-
-    // 1) Busca o usuário na auth_user (o teu backend usa esse schema)
-    const sel = await pool.query(
-      `SELECT id, username, password_hash
-         FROM public.auth_user
-        WHERE username = $1 OR id::text = $1
-        LIMIT 1`,
-      [username]
-    );
-    if (sel.rows.length === 0) {
-      return recusar();
+    const loc = await localizarUsuarioPrimeiraSenha(username);
+    if (!loc.ok) {
+      return res.status(401).json({ ok: false, error: loc.error, sugestoes: loc.sugestoes || [] });
     }
-    const u = sel.rows[0];
-
-    // 2) Permite trocar somente se a senha atual ainda for "123"
-    //    (compara o hash atual com "123")
-    const chk = await pool.query(
-      `SELECT (password_hash = crypt('123', password_hash)) AS is123
-         FROM public.auth_user
-        WHERE id = $1`,
-      [u.id]
-    );
-    const is123 = !!chk.rows[0]?.is123;
-    if (!is123) {
-      return recusar();
-    }
+    const u = loc.user;
 
     // 3) Atualiza para a nova senha (hash via pgcrypto/bcrypt no Postgres)
     await pool.query(

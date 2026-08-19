@@ -874,6 +874,22 @@ btnVoltarLogin?.addEventListener('click', () => {
   overlay.querySelector('#signInPassword')?.focus();
 });
 
+  overlay.querySelectorAll('[data-toggle-password]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const input = overlay.querySelector('#' + btn.getAttribute('data-toggle-password'));
+      if (!input) return;
+      const mostrar = input.type === 'password';
+      input.type = mostrar ? 'text' : 'password';
+      btn.setAttribute('aria-label', mostrar ? 'Ocultar senha' : 'Mostrar senha');
+      btn.title = mostrar ? 'Ocultar senha' : 'Mostrar senha';
+      const icon = btn.querySelector('i');
+      if (icon) {
+        icon.classList.toggle('fa-eye', !mostrar);
+        icon.classList.toggle('fa-eye-slash', mostrar);
+      }
+    });
+  });
+
 
   // abre modal ao clicar no ícone de perfil (já foi configurado no DOMContentLoaded)
   // Apenas garante que a função global existe
@@ -934,13 +950,27 @@ formSignIn?.addEventListener('submit', async (e) => {
 
   // === CURTO-CIRCUITO: senha inicial "123" abre o painel de nova senha ===
   if (password === '123') {
-    window.__pendingResetUsername = username; // guardamos quem vai trocar
-    overlay.querySelector('#container')?.classList.add('right-panel-active'); // efeito CodePen
+    try {
+      const chk = await fetch('/api/auth/first-password-check', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      const chkJs = await chk.json().catch(() => ({}));
+      if (!chk.ok || chkJs?.ok === false) {
+        alert(chkJs.error || 'Não é possível definir a senha inicial desta conta.');
+        return;
+      }
+      window.__pendingResetUsername = chkJs.username || username;
+    } catch (_e) {
+      window.__pendingResetUsername = username;
+    }
+    overlay.querySelector('#container')?.classList.add('right-panel-active');
     const hint = overlay.querySelector('#changePassHint');
-    if (hint) hint.textContent = `Usuário: ${username}`;
-    // foco no campo nova senha
+    if (hint) hint.textContent = `Usuário: ${window.__pendingResetUsername}`;
     setTimeout(() => overlay.querySelector('#newPassword')?.focus(), 0);
-    return; // não tenta logar com 123
+    return;
   }
 
   // --- INÍCIO: Mostra spinner e oculta texto ---
@@ -1035,6 +1065,9 @@ formCriar?.addEventListener('submit', async (e) => {
 
   if (!username) return alert('Usuário não identificado.');
   if (!newPass || newPass !== confirmPass) return alert('As senhas não conferem');
+  if (newPass.length < 6 || newPass === '123') {
+    return alert('A nova senha deve ter no mínimo 6 caracteres e ser diferente de "123".');
+  }
 
   const btn = overlay.querySelector('#btnCriarConta');
   if (btn) {

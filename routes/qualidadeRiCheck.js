@@ -1,7 +1,7 @@
 // routes/qualidadeRiCheck.js — RI Registro de Inspeção (kanban produção)
 'use strict';
 
-const { registrarRiConcluida } = require('../utils/tempoProducao');
+const { registrarRiConcluida, iniciarCicloPosto } = require('../utils/tempoProducao');
 const {
   dispararNotificacaoRiCheck,
   dispararNotificacaoOcorrencia,
@@ -549,6 +549,14 @@ function formatarDataBROmie(data = new Date()) {
 
 function deveEntrarEstoqueMaquinas(statusRi) {
   return isKanbanInspecaoFinal(statusRi) || isKanbanEmbalagem(statusRi);
+}
+
+function proximoPostoAposRi(statusRi) {
+  const n = normKanbanStatusLabel(statusRi);
+  if (n === 'montagem hermetica') return 'Montagem eletrica';
+  if (n === 'montagem eletrica') return 'Teste';
+  if (n === 'teste') return 'Inspeção final';
+  return '';
 }
 
 async function incluirEntradaEstoqueMaquinasOmie({
@@ -2269,6 +2277,7 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
 
     const kanbanProgId = Number(check.id_kanban_programacao) || null;
     const avancarParaEstoqueMaq = deveEntrarEstoqueMaquinas(statusRi);
+    const proximoPosto = avancarParaEstoqueMaq ? '' : proximoPostoAposRi(statusRi);
     let estoqueMaq = null;
     if (avancarParaEstoqueMaq) {
       try {
@@ -2299,7 +2308,11 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
     await dbQuery(
       `UPDATE producao."Kanban_programacao"
           SET ri = FALSE,
-              status = CASE WHEN $4::boolean THEN 'Finalizado' ELSE status END,
+              status = CASE
+                WHEN $4::boolean THEN 'Finalizado'
+                WHEN $5::text <> '' THEN $5
+                ELSE status
+              END,
               estoque_maq_entrada_em = CASE
                 WHEN $4::boolean THEN COALESCE(estoque_maq_entrada_em, NOW())
                 ELSE estoque_maq_entrada_em
@@ -2308,11 +2321,11 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
            OR op_producao_id = $2
            OR op_iapp_id = $2
            OR ($3 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))`,
-      [kanbanProgId, opRefId, numeroOp || '', avancarParaEstoqueMaq]
+      [kanbanProgId, opRefId, numeroOp || '', avancarParaEstoqueMaq, proximoPosto || '']
     );
 
+    const opProdId = Number(check.op_producao_id) || Number(check.op_iapp_id) || opRefId;
     try {
-      const opProdId = Number(check.op_producao_id) || Number(check.op_iapp_id) || opRefId;
       await registrarRiConcluida({
         kanbanProgramacaoId: kanbanProgId,
         opProducaoId: opProdId,
@@ -2326,13 +2339,30 @@ router.post('/:id/liberar', requireAuth, express.json(), async (req, res) => {
       console.error('[tempo_producao] Falha ao registrar RI concluída:', tempoErr.message);
     }
 
+    if (proximoPosto) {
+      try {
+        await iniciarCicloPosto({
+          kanbanProgramacaoId: kanbanProgId,
+          opProducaoId: opProdId,
+          numeroOp: numeroOp || '',
+          postoOrigem: proximoPosto,
+          operacao: `Entrada em ${proximoPosto}`,
+          usuario,
+          skipNotificacao: true,
+        });
+      } catch (tempoErr) {
+        console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto após RI:', tempoErr.message);
+      }
+    }
+
     const localFiltro = kanbanOrigem || statusRi || null;
     const atualizado = await carregarCheckCompleto(checkId, localFiltro);
     const opProducaoId = Number(check.op_producao_id) || 0;
+    const kanbanStatusFinal = avancarParaEstoqueMaq ? 'Finalizado' : (proximoPosto || statusRi);
     return res.json({
       ok: true,
       ...atualizado,
-      kanban_status: avancarParaEstoqueMaq ? 'Finalizado' : statusRi,
+      kanban_status: kanbanStatusFinal,
       ri_ativo: false,
       somente_ri: true,
       numero_op: numeroOp || null,

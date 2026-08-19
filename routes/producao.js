@@ -34,7 +34,7 @@ const {
   listarOperadoresSetorProducao,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
-const { dispararNotificacaoTransicaoPosto, dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
+const { dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
 const {
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
@@ -3046,16 +3046,19 @@ router.post('/iniciar-producao', express.json(), async (req, res) => {
   }
 });
 
+function isRiFlagAtivo(val) {
+  return val === true || val === 't' || val === 1 || val === '1' || val === 'true';
+}
+
 /* ---------------------------------------------------------------
- * POST /api/producao/finalizar-operacao — Controle_operacoes + próximo posto
+ * POST /api/producao/finalizar-operacao — encerra o posto e ativa RI
+ * (não muda o kanban; avanço só na liberação da RI pela qualidade)
  * --------------------------------------------------------------- */
 router.post('/finalizar-operacao', express.json(), async (req, res) => {
   try {
     await garantirSchemaKanbanProgramacao();
     const opProducaoId = Number(req.body?.op_producao_id) || 0;
     const numeroOp = String(req.body?.numero_op || '').trim();
-    const proximoStatus = String(req.body?.proximo_status || req.body?.operacao || '').trim();
-    const operacao = proximoStatus || 'Finalizar operação';
     const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
     let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
     const postoAtualBody = String(req.body?.posto_atual || '').trim();
@@ -3063,13 +3066,12 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
     if (!numeroOp && opProducaoId <= 0) {
       return res.status(400).json({ success: false, error: 'Informe numero_op ou op_producao_id.' });
     }
-    if (!proximoStatus) {
-      return res.status(400).json({ success: false, error: 'Próximo posto não informado.' });
-    }
 
+    let statusDb = '';
+    let riJaAtivo = false;
     if (!kanbanProgramacaoId) {
       const { rows } = await dbQuery(
-        `SELECT id, status FROM producao."Kanban_programacao"
+        `SELECT id, status, ri FROM producao."Kanban_programacao"
           WHERE ($1::bigint > 0 AND op_producao_id = $1)
              OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
           ORDER BY created_at DESC, id DESC
@@ -3077,18 +3079,24 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
         [opProducaoId || 0, numeroOp || '']
       );
       kanbanProgramacaoId = rows[0]?.id || null;
-      if (!postoAtualBody && rows[0]?.status) {
-        req._postoAtualKanban = String(rows[0].status).trim();
-      }
-    } else if (!postoAtualBody) {
+      statusDb = String(rows[0]?.status || '').trim();
+      riJaAtivo = isRiFlagAtivo(rows[0]?.ri);
+    } else {
       const { rows } = await dbQuery(
-        `SELECT status FROM producao."Kanban_programacao" WHERE id = $1`,
+        `SELECT status, ri FROM producao."Kanban_programacao" WHERE id = $1`,
         [kanbanProgramacaoId]
       );
-      req._postoAtualKanban = String(rows[0]?.status || '').trim();
+      statusDb = String(rows[0]?.status || '').trim();
+      riJaAtivo = isRiFlagAtivo(rows[0]?.ri);
     }
 
-    const postoAtual = postoAtualBody || req._postoAtualKanban || '';
+    const postoAtual = postoAtualBody || statusDb || '';
+    if (riJaAtivo) {
+      return res.status(409).json({
+        success: false,
+        error: 'OP já está aguardando RI da qualidade neste posto.',
+      });
+    }
 
     const paradaAberta = await buscarParadaAberta({ kanbanProgramacaoId, numeroOp });
     if (paradaAberta) {
@@ -3115,60 +3123,19 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
     }
 
-    const proximoNorm = normPostoKanban(proximoStatus);
-    const permanecerInspecaoFinal = isPostoInspecaoFinal(postoAtual)
-      && (proximoNorm === 'embalagem' || proximoNorm === 'finalizado' || isPostoInspecaoFinal(proximoStatus) || !proximoNorm);
-    const statusGravar = permanecerInspecaoFinal ? 'Inspeção final' : proximoStatus;
+    const statusGravar = isPostoInspecaoFinal(postoAtual) ? 'Inspeção final' : (postoAtual || statusDb);
 
     if (kanbanProgramacaoId) {
-      const postoNorm = normPostoKanban(statusGravar);
-      const ativarRi = permanecerInspecaoFinal || (
-        postoNorm
-        && postoNorm !== 'finalizado'
-        && postoNorm !== 'programado'
-        && postoNorm !== 'pedidos'
-        && postoNorm !== 'embalagem'
-      );
-      const forcarRiOff = !permanecerInspecaoFinal && (postoNorm === 'embalagem' || postoNorm === 'finalizado');
       await dbQuery(
         `UPDATE producao."Kanban_programacao"
-            SET status = $1,
-                ri = CASE
-                  WHEN $4::boolean THEN FALSE
-                  WHEN $3::boolean THEN TRUE
-                  ELSE ri
-                END
+            SET status = COALESCE(NULLIF($1, ''), status),
+                ri = TRUE
           WHERE id = $2`,
-        [statusGravar, kanbanProgramacaoId, ativarRi, forcarRiOff]
+        [statusGravar, kanbanProgramacaoId]
       );
     }
 
-    if (!permanecerInspecaoFinal) {
-      try {
-        await iniciarCicloPosto({
-          kanbanProgramacaoId,
-          opProducaoId,
-          numeroOp,
-          postoOrigem: statusGravar,
-          operacao: `Entrada em ${statusGravar}`,
-          usuario,
-          skipNotificacao: true,
-        });
-      } catch (tempoErr) {
-        console.error('[tempo_producao] Falha ao iniciar ciclo no próximo posto:', tempoErr.message);
-      }
-    }
-
-    if (!permanecerInspecaoFinal && postoFechado && postoAtual && statusGravar && postoAtual !== statusGravar) {
-      dispararNotificacaoTransicaoPosto({
-        numeroOp: postoFechado.numero_op || numeroOp,
-        postoDe: postoAtual,
-        postoPara: statusGravar,
-        inicio: postoFechado.inicio,
-        fim: postoFechado.fim,
-        usuarioFim: postoFechado.usuario_fim || usuario,
-      });
-    } else if (postoFechado?.id) {
+    if (postoFechado?.id) {
       dispararNotificacaoRegistroTempo(postoFechado.id);
     }
 
@@ -3177,14 +3144,15 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
       opProducaoId,
       numeroOp,
       usuario,
-      operacao: permanecerInspecaoFinal ? 'Inspeção final — aguardando RI' : operacao,
+      operacao: statusGravar ? `${statusGravar} — aguardando RI` : 'Finalizar operação — aguardando RI',
     });
     return res.json({
       success: true,
       registro: row,
       kanban_programacao_id: kanbanProgramacaoId,
       status: statusGravar,
-      permanece_inspecao_final: permanecerInspecaoFinal,
+      ri_ativo: true,
+      permanece_posto: true,
     });
   } catch (err) {
     console.error('[producao] Erro ao finalizar operação:', err.message);
