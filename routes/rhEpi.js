@@ -1559,11 +1559,14 @@ router.get('/epi/entregas', async (req, res) => {
          e.created_at,
          COALESCE(u.nome_completo, u.username) AS colaborador,
          u.username,
-         f.name AS funcao
+         f.name AS funcao,
+         s.assinatura_url,
+         s.assinado_em
        FROM rh.epi_entrega e
        JOIN public.auth_user u ON u.id = e.user_id
        LEFT JOIN public.auth_user_profile up ON up.user_id = u.id
        LEFT JOIN public.auth_funcao f ON f.id = up.funcao_id
+       LEFT JOIN rh.epi_solicitacao s ON s.id = e.solicitacao_id
        ${where}
        ORDER BY e.data_entrega DESC NULLS LAST, e.id DESC
        LIMIT 1000`,

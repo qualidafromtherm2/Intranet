@@ -882,6 +882,17 @@ async function syncProdutosOmie() {
 // ════════════════════════════════════════════════════════════════════════════
 async function syncPedidosVenda(cfg) {
   log('── [pedidos_venda] Iniciando...');
+  try {
+    const {
+      ensurePedidoVendaUpsert,
+      reconciliarPedidosFaturadosEtapa,
+    } = require('../utils/ensurePedidoVendaUpsert');
+    await ensurePedidoVendaUpsert(pool);
+    const nRec = await reconciliarPedidosFaturadosEtapa(pool);
+    if (nRec > 0) log(`  [pedidos_venda] reconciliados faturados/etapa: ${nRec}`);
+  } catch (eEns) {
+    log(`  [pedidos_venda] aviso ensure upsert: ${eEns.message}`);
+  }
   let pagina = 1, totalPaginas = 1, sincronizados = 0, erros = 0;
 
   // Usa janela de 7 dias para pedidos_venda (data_previsao pode ser futura;

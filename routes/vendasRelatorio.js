@@ -194,10 +194,15 @@ function buildEtapaFilter(etapaRaw) {
       label: 'Todos',
     };
   }
+  // Entregues = NF do período (já em nf_emitidas) + pedido faturado/entregue.
+  // Aceita faturado=S mesmo com etapa antiga (Omie muda etapa depois do faturamento;
+  // sync antigo deixava etapa 60 e excluía NF autorizada do relatório).
   return {
     sql: ` AND (
              p.codigo_pedido IS NULL
-             OR TRIM(COALESCE(p.etapa::text, '')) = '70'
+             OR TRIM(COALESCE(p.etapa::text, '')) IN ('70', '80')
+             OR UPPER(TRIM(COALESCE(p.faturado::text, ''))) IN ('S', '1', 'SIM', 'TRUE')
+             OR UPPER(TRIM(COALESCE(p.raw_payload->'infoCadastro'->>'faturado', ''))) IN ('S', '1', 'SIM', 'TRUE')
            )`,
     label: 'Entregues',
   };

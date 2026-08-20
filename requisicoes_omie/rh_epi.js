@@ -510,6 +510,7 @@ function ensureEpiPane(root) {
                 <th>Tam.</th>
                 <th>Entrega</th>
                 <th>Devolução</th>
+                <th>Assinatura</th>
                 <th></th>
               </tr>
             </thead>
@@ -1070,10 +1071,16 @@ function renderEntregas(pane) {
   if (count) count.textContent = String(_epiEntregas.length);
   if (!tbody) return;
   if (!_epiEntregas.length) {
-    tbody.innerHTML = '<tr><td colspan="10" class="epi-empty">Nenhuma entrega registrada.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="11" class="epi-empty">Nenhuma entrega registrada.</td></tr>';
     return;
   }
-  tbody.innerHTML = _epiEntregas.map((e) => `
+  tbody.innerHTML = _epiEntregas.map((e) => {
+    const assinatura = e.assinatura_url
+      ? `<a href="${epiEscape(e.assinatura_url)}" target="_blank" rel="noopener noreferrer" title="Ver assinatura">
+           <img class="epi-sign-thumb" src="${epiEscape(e.assinatura_url)}" alt="Assinatura" />
+         </a>`
+      : '—';
+    return `
     <tr data-ent-id="${e.id}">
       <td>${epiEscape(e.codigo_item || e.id)}</td>
       <td>${epiEscape(e.colaborador || e.username || '')}</td>
@@ -1084,12 +1091,13 @@ function renderEntregas(pane) {
       <td>${epiEscape(e.tamanho || '—')}</td>
       <td>${epiFmtDateBR(e.data_entrega)}</td>
       <td>${epiFmtDateBR(e.data_devolucao)}</td>
+      <td>${assinatura}</td>
       <td>
         <button type="button" class="epi-btn epi-btn-ghost epi-ent-devolver" data-id="${e.id}" title="Registrar devolução" ${e.data_devolucao ? 'disabled' : ''}>Devolver</button>
         <button type="button" class="epi-btn epi-btn-danger epi-ent-del" data-id="${e.id}">Excluir</button>
       </td>
-    </tr>
-  `).join('');
+    </tr>`;
+  }).join('');
 }
 
 function openConfigModal(pane) {

@@ -8213,6 +8213,50 @@ app.post([
         });
       }
 
+      // NF autorizada ⇒ pedido deve constar como faturado/entregue no relatório.
+      // Atualiza etapa/faturado na hora e enfileira ConsultarPedido (fonte Omie).
+      const statusNfNorm = String(statusUltimo || '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase();
+      const nfAutorizada = statusNfNorm.includes('autoriz');
+      if (nfAutorizada && (parsed.idPedidoOmie || parsed.numeroPedido)) {
+        try {
+          if (parsed.idPedidoOmie) {
+            await pool.query(
+              `UPDATE vendas.pedidos_venda
+                  SET faturado = COALESCE(NULLIF(TRIM(faturado), ''), 'S'),
+                      etapa = CASE
+                        WHEN TRIM(COALESCE(etapa::text, '')) IN ('70', '80') THEN etapa
+                        ELSE '70'
+                      END,
+                      updated_at = NOW()
+                WHERE codigo_pedido = $1`,
+              [parsed.idPedidoOmie]
+            );
+          } else if (parsed.numeroPedido) {
+            await pool.query(
+              `UPDATE vendas.pedidos_venda
+                  SET faturado = COALESCE(NULLIF(TRIM(faturado), ''), 'S'),
+                      etapa = CASE
+                        WHEN TRIM(COALESCE(etapa::text, '')) IN ('70', '80') THEN etapa
+                        ELSE '70'
+                      END,
+                      updated_at = NOW()
+                WHERE numero_pedido = $1`,
+              [String(parsed.numeroPedido)]
+            );
+          }
+        } catch (ePed) {
+          console.warn('[webhook/notas-vendas] aviso ao marcar pedido faturado:', ePed?.message || ePed);
+        }
+        try {
+          _pedidoSyncEnqueue(parsed.idPedidoOmie || null, parsed.numeroPedido || null);
+        } catch (eEnq) {
+          console.warn('[webhook/notas-vendas] aviso ao enfileirar sync pedido:', eEnq?.message || eEnq);
+        }
+      }
+
       console.log('[webhook/notas-vendas] gravado:', { topic, identidade, tipoDocumento, statusUltimo, numeroNota: parsed.numeroNota });
 
       return res.status(200).json({
@@ -45790,6 +45834,22 @@ function iniciarCronAgendamento() {
 // ──────────────────────────────────────────────────────────────────────────────
 
 async function startServer() {
+  if (pool) {
+    try {
+      const {
+        ensurePedidoVendaUpsert,
+        reconciliarPedidosFaturadosEtapa,
+      } = require('./utils/ensurePedidoVendaUpsert');
+      await ensurePedidoVendaUpsert(pool);
+      const nRec = await reconciliarPedidosFaturadosEtapa(pool);
+      if (nRec > 0) {
+        console.log(`[boot] pedidos faturados com etapa antiga corrigidos: ${nRec}`);
+      }
+    } catch (eBootPed) {
+      console.warn('[boot] ensurePedidoVendaUpsert:', eBootPed?.message || eBootPed);
+    }
+  }
+
   if (pool) {
     try {
       await warmupPgPool();
