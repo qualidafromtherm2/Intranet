@@ -49,30 +49,52 @@ const parseNumber = (value: number | string | null | undefined) => {
   return Number.isFinite(parsed) ? parsed : Number.NaN
 }
 
+const normalizeText = (value: string | null | undefined, fallback = '') => {
+  const text = String(value ?? '').trim()
+  return text || fallback
+}
+
+const compareText = (left: string | null | undefined, right: string | null | undefined) =>
+  normalizeText(left).localeCompare(normalizeText(right), 'pt-BR')
+
 const isInactive = (value: string | null | undefined) => String(value || '').toUpperCase() === 'S'
 const isObsolete = (descricao: string | null | undefined) => String(descricao || '').toUpperCase().startsWith('OBSOLETO')
 const isEngineering = (descricao: string | null | undefined) => String(descricao || '').toUpperCase().startsWith('ENGENHARIA')
 
 const buildLocationMaps = (locations: InventoryLocationsResponse) => {
   const byProduct = new Map<string, Array<{ codigo: string; nome: string }>>()
-  const locationOptions = locations.locais.map((location) => ({
-    value: location.local_codigo,
-    label: location.local_nome,
-    count: Number(location.total || 0),
-  }))
+  const locationOptions = locations.locais
+    .map((location) => {
+      const codigo = normalizeText(location.local_codigo)
+      const label = normalizeText(location.local_nome, codigo || 'Sem local informado')
+
+      if (!codigo) return null
+
+      return {
+        value: codigo,
+        label,
+        count: Number(location.total || 0),
+      }
+    })
+    .filter((location): location is ProductFilterOption => Boolean(location))
 
   for (const location of locations.locais) {
-    for (const code of location.codigos) {
-      const key = code.trim().toUpperCase()
+    const codigoLocal = normalizeText(location.local_codigo)
+    const nomeLocal = normalizeText(location.local_nome, codigoLocal || 'Sem local informado')
+    if (!codigoLocal) continue
+
+    for (const code of location.codigos || []) {
+      const key = normalizeText(code).toUpperCase()
+      if (!key) continue
       const current = byProduct.get(key) ?? []
-      current.push({ codigo: location.local_codigo, nome: location.local_nome })
+      current.push({ codigo: codigoLocal, nome: nomeLocal })
       byProduct.set(key, current)
     }
   }
 
   return {
     byProduct,
-    locationOptions: locationOptions.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
+    locationOptions: locationOptions.sort((a, b) => compareText(a.label, b.label)),
   }
 }
 
@@ -188,7 +210,7 @@ const buildCountOptions = (entries: string[]) => {
     counts.set(value, (counts.get(value) ?? 0) + 1)
   }
   return [...counts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right, 'pt-BR'))
+    .sort(([left], [right]) => compareText(left, right))
     .map(([value, count]) => ({ value, label: value, count }))
 }
 
@@ -202,7 +224,7 @@ export const buildFilterMeta = (products: ProductRecord[], locations: InventoryL
   }
 
   const typeItems: ProductFilterOption[] = [...typeCounts.entries()]
-    .sort(([left], [right]) => left.localeCompare(right, 'pt-BR'))
+    .sort(([left], [right]) => compareText(left, right))
     .map(([value, count]) => ({
       value,
       label: value === '__outros__' ? 'Outros' : value,

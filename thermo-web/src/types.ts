@@ -74,8 +74,8 @@ export interface CartResponse {
 }
 
 export interface InventoryLocation {
-  local_codigo: string
-  local_nome: string
+  local_codigo: string | null
+  local_nome: string | null
   codigos: string[]
   total: number
 }

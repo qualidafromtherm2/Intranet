@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { demoSnapshot } from '../data/demo'
-import { defaultFilters, filterProducts, mergePilotData, paginateProducts } from './products'
+import type { InventoryLocationsResponse } from '../types'
+import { buildFilterMeta, defaultFilters, filterProducts, mergePilotData, paginateProducts } from './products'
 
 const merged = mergePilotData(demoSnapshot.products, demoSnapshot.purchases, demoSnapshot.locations)
 
@@ -22,5 +23,69 @@ describe('product pilot filters', () => {
     const secondPage = paginateProducts(merged, 2, 4)
     expect(firstPage).toHaveLength(4)
     expect(secondPage[0]?.codigo).not.toBe(firstPage[0]?.codigo)
+  })
+
+  it('normalizes null inventory labels without dropping products', () => {
+    const locations: InventoryLocationsResponse = {
+      ok: true,
+      locais: [
+        {
+          local_codigo: '4237-A1',
+          local_nome: null,
+          codigos: ['4237'],
+          total: 1,
+        },
+      ],
+    }
+
+    const products = mergePilotData(
+      {
+        total: 1,
+        page: 1,
+        limit: 500,
+        itens: [
+          {
+            codigo_produto: 10,
+            codigo_produto_integracao: null,
+            codigo: '4237',
+            descricao: 'Produto real 4237',
+            descricao_familia: null,
+            unidade: 'UN',
+            tipoitem: null,
+            ncm: null,
+            valor_unitario: null,
+            quantidade_estoque: null,
+            estoque_minimo: 0,
+            saldo_almox: 1,
+            saldo_expedicao: 0,
+            saldo_enderecado: 1,
+            abaixo_minimo: false,
+            estoque_negativo: false,
+            expedicao_negativa: false,
+            saldo_endereco_sem_omie: false,
+            saldo_divergente_endereco: false,
+            diferenca_saldo_endereco: 0,
+            item_limitado: false,
+            inativo: null,
+            bloqueado: null,
+            marca: null,
+            modelo: null,
+            dalt: null,
+            halt: null,
+            dinc: null,
+            hinc: null,
+            primeira_imagem: null,
+          },
+        ],
+      },
+      { ok: true, total: 0, itens: [] },
+      locations,
+    )
+
+    const meta = buildFilterMeta(products, locations)
+
+    expect(products).toHaveLength(1)
+    expect(products[0]?.locaisPositivos[0]).toEqual({ codigo: '4237-A1', nome: '4237-A1' })
+    expect(meta.locations[0]).toEqual({ value: '4237-A1', label: '4237-A1', count: 1 })
   })
 })
