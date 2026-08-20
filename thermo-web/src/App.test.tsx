@@ -4,18 +4,27 @@ import { describe, expect, it, vi } from 'vitest'
 import { ModalShell } from './App'
 
 describe('ModalShell', () => {
-  it('fecha ao clicar no backdrop explícito', async () => {
+  it('fecha ao clicar no backdrop explícito e preserva painel estreito para drawer', async () => {
     const user = userEvent.setup()
     const onClose = vi.fn()
 
     render(
-      <ModalShell open title="Navegação operacional" onClose={onClose}>
+      <ModalShell
+        open
+        title="Navegação operacional"
+        onClose={onClose}
+        panelStyle={{ width: '88vw', maxWidth: '24rem', flexShrink: 0 }}
+      >
         <div>Conteúdo do painel</div>
       </ModalShell>,
     )
 
+    const panel = screen.getByTestId('modal-panel')
     await user.click(screen.getByRole('button', { name: 'Fechar Navegação operacional pelo fundo' }))
 
+    expect(panel.getAttribute('style')).toContain('width: 88vw')
+    expect(panel.getAttribute('style')).toContain('max-width: 24rem')
+    expect(panel.getAttribute('style')).toContain('flex-shrink: 0')
     expect(onClose).toHaveBeenCalledTimes(1)
   })
 

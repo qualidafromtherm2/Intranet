@@ -21,7 +21,7 @@ import {
   X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
 import { ThermoLogo } from './components/ThermoLogo'
 import { usePilotData } from './hooks/usePilotData'
 import { currency, quantity, relativeLabel } from './lib/format'
@@ -68,6 +68,7 @@ export function ModalShell({
   children,
   description,
   panelClassName,
+  panelStyle,
 }: {
   open: boolean
   title: string
@@ -75,6 +76,7 @@ export function ModalShell({
   children: ReactNode
   description?: string
   panelClassName?: string
+  panelStyle?: CSSProperties
 }) {
   if (!open) return null
 
@@ -87,11 +89,13 @@ export function ModalShell({
         onClick={onClose}
       />
       <section
-        className={clsx('relative z-10 flex h-full w-full max-w-md flex-col bg-white shadow-2xl', panelClassName)}
+        className={clsx('relative z-10 flex h-full max-w-md flex-col bg-white shadow-2xl', panelClassName)}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         aria-describedby={description ? `${title}-description` : undefined}
+        style={panelStyle}
+        data-testid="modal-panel"
       >
         <header className="flex items-start justify-between gap-3 border-b border-thermo-border px-5 py-4">
           <div>
@@ -650,7 +654,7 @@ function App() {
         title="Navegação operacional"
         description="Substituto acessível para o menu lateral nas larguras mobile e tablet."
         onClose={() => setMobileNavOpen(false)}
-        panelClassName="w-[min(88vw,24rem)]"
+        panelStyle={{ width: '88vw', maxWidth: '24rem', flexShrink: 0 }}
       >
         <nav id="mobile-operational-nav" className="space-y-2" aria-label="Navegação operacional mobile">
           {navItems.map(({ label, icon: Icon, active }) => (
