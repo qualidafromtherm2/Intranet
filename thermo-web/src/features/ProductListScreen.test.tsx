@@ -131,7 +131,17 @@ vi.mock('../hooks/usePilotData', () => ({
 
 describe('ProductListScreen', () => {
   it('renders neutral placeholder when product has no image and hides "Não comprado ainda"', () => {
-    render(<ProductListScreen canOpenCart canOpenSeparation />)
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
 
     expect(screen.getByLabelText('Produto 4237 sem imagem')).toBeInTheDocument()
     expect(screen.queryByText('Não comprado ainda')).not.toBeInTheDocument()

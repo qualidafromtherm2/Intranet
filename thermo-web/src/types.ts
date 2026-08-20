@@ -161,6 +161,34 @@ export interface PermissionTreeResponse {
 
 export type AppView = 'home' | 'products'
 
+export type ShellNavStatus = 'migrated' | 'pending'
+
+export interface ShellNavItem {
+  id: string
+  key: string
+  label: string
+  pos: string | null
+  selector: string | null
+  icon: string
+  status: ShellNavStatus
+  view: AppView | null
+  allowed: boolean
+  children: ShellNavItem[]
+}
+
+export interface ShellNavSection {
+  id: string
+  key: string
+  label: string
+  icon: string
+  children: ShellNavItem[]
+}
+
+export interface ShellNavigationCatalog {
+  sections: ShellNavSection[]
+  selectorMap: Map<string, PermissionNode[]>
+}
+
 export interface ShellAction {
   id: string
   title: string
@@ -250,4 +278,70 @@ export interface PilotSnapshot {
   locations: InventoryLocationsResponse
   user: PilotUserContext
   sseEvents: ProductStreamEvent[]
+}
+
+export interface ReservationItem {
+  id: number
+  data: string
+  tipo: string | null
+  tema: string | null
+  inicio: string | null
+  fim: string | null
+  cafe: boolean
+  criadoPor: string | null
+  podeEditar: boolean
+  participantes: string[]
+  repetir: boolean
+  repetirTodosMeses: boolean
+  diasSemana: string[]
+  realizada: boolean
+  cancelada: boolean
+  avisoEmail: boolean
+  avisoWhatsapp: boolean
+  participantesAvisos: Record<string, { email?: boolean; whatsapp?: boolean }>
+}
+
+export interface ReservationResponse {
+  ok: boolean
+  reservas: ReservationItem[]
+}
+
+export interface ReminderItem {
+  id: number
+  data: string
+  texto: string
+  criadoPor: string | null
+  destinatarios: string[]
+}
+
+export interface ReminderResponse {
+  ok: boolean
+  lembretes: ReminderItem[]
+}
+
+export interface ActivityEvent {
+  id: number
+  ocorrido_em: string
+  categoria: string | null
+  acao: string
+  codigo_produto: string | null
+  codigo_produto_omie: string | null
+  n_solic: string | null
+  usuario_id: string | null
+  usuario_nome: string | null
+  sucesso: boolean | null
+  detalhe: Record<string, unknown> | null
+  rota: string | null
+  metodo_http: string | null
+  sessao_tipo: string | null
+  sessao_origem: string | null
+  sessao_iniciado_em: string | null
+  sessao_finalizado_em: string | null
+  sessao_descricao: string | null
+}
+
+export interface ActivityResponse {
+  ok: boolean
+  total_eventos: number
+  eventos: ActivityEvent[]
 }

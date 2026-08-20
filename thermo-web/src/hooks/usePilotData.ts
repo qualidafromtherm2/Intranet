@@ -5,6 +5,7 @@ import type { FiltersState, ProductFiltersMeta, ProductRecord, ProductStreamEven
 
 const pageSize = 50
 const cacheTtlMs = 5 * 60 * 1000
+const sessionStorageKey = 'thermo.pilot.products.state'
 
 type PilotCacheState = {
   products: ProductRecord[]
@@ -36,12 +37,54 @@ let inFlightPrefetch: Promise<PilotSnapshot> | null = null
 const hasUsableCache = () => pilotCache.products.length > 0
 const cacheExpired = () => !pilotCache.fetchedAt || Date.now() - pilotCache.fetchedAt > cacheTtlMs
 
+const readSessionState = () => {
+  if (typeof window === 'undefined') return null
+  try {
+    const raw = window.sessionStorage.getItem(sessionStorageKey)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<PilotCacheState>
+    return parsed
+  } catch {
+    return null
+  }
+}
+
+const persistSessionState = () => {
+  if (typeof window === 'undefined') return
+  try {
+    window.sessionStorage.setItem(
+      sessionStorageKey,
+      JSON.stringify({
+        filters: pilotCache.filters,
+        page: pilotCache.page,
+        viewMode: pilotCache.viewMode,
+      }),
+    )
+  } catch {
+    // ignore session persistence issues
+  }
+}
+
+const hydrateSessionState = () => {
+  const saved = readSessionState()
+  if (!saved) return
+  pilotCache = {
+    ...pilotCache,
+    filters: saved.filters ? { ...defaultFilters, ...saved.filters } : pilotCache.filters,
+    page: typeof saved.page === 'number' ? saved.page : pilotCache.page,
+    viewMode: saved.viewMode === 'list' ? 'list' : pilotCache.viewMode,
+  }
+}
+
+hydrateSessionState()
+
 const saveCache = (next: Partial<PilotCacheState>) => {
   pilotCache = {
     ...pilotCache,
     ...next,
     filters: next.filters ? { ...next.filters } : pilotCache.filters,
   }
+  persistSessionState()
 }
 
 async function fetchPilotSnapshot(): Promise<PilotSnapshot> {
@@ -107,6 +150,16 @@ export async function prefetchPilotData({ force = false }: { force?: boolean } =
 export function resetPilotDataCache() {
   pilotCache = initialCacheState()
   inFlightPrefetch = null
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(sessionStorageKey)
+  }
+}
+
+export function getPilotDataCacheState() {
+  return {
+    ...pilotCache,
+    filters: { ...pilotCache.filters },
+  }
 }
 
 export function usePilotData() {

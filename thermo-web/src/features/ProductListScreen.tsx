@@ -408,11 +408,15 @@ function EmptyState({
 }
 
 export function ProductListScreen({
-  canOpenCart,
-  canOpenSeparation,
+  permissions,
 }: {
-  canOpenCart: boolean
-  canOpenSeparation: boolean
+  permissions: {
+    canOpenCart: boolean
+    canOpenSeparation: boolean
+    canEditCatalog: boolean
+    cartReason: string | null
+    separationReason: string | null
+  }
 }) {
   const { filtered, paginated, loading, error, warnings, filters, setFilters, filtersMeta, page, setPage, pageCount, pageSize, viewMode, setViewMode, cartCount, streamEvents, dataMode, reload, fetchedAt } = usePilotData()
   const [filtersOpen, setFiltersOpen] = useState(false)
@@ -516,20 +520,16 @@ export function ProductListScreen({
               <List className="size-4" />
               <span>Lista</span>
             </button>
-            {canOpenCart ? (
-              <button className="thermo-toolbar-button" type="button" onClick={() => openBridge('cart')}>
+            <button className="thermo-toolbar-button disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('cart')} disabled={!permissions.canOpenCart} title={permissions.cartReason || 'Abrir painel de compras legado'}>
                 <ShoppingCart className="size-4" />
                 Compras
                 <span className="rounded-full bg-thermo-navy px-2 py-0.5 text-xs text-white">{cartCount}</span>
-              </button>
-            ) : null}
-            {canOpenSeparation ? (
-              <button className="thermo-toolbar-button" type="button" onClick={() => openBridge('separation')}>
+            </button>
+            <button className="thermo-toolbar-button disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('separation')} disabled={!permissions.canOpenSeparation} title={permissions.separationReason || 'Abrir separações legadas'}>
                 <ClipboardList className="size-4" />
                 Separações
-                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">Legado</span>
-              </button>
-            ) : null}
+                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">{permissions.canOpenSeparation ? 'Legado' : 'Bloqueado'}</span>
+            </button>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
@@ -772,12 +772,64 @@ export function ProductListScreen({
               <div className="mt-1 text-base font-bold text-thermo-navy">{actionProduct.descricao}</div>
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              {canOpenCart ? <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><PackagePlus className="size-4" />Compra</a> : null}
-              {canOpenSeparation ? <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ClipboardList className="size-4" />Separação</a> : null}
+              <a
+                className={clsx('thermo-button justify-start', permissions.canOpenCart ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
+                href={permissions.canOpenCart ? buildLegacyUrl('/menu_produto.html') : undefined}
+                target={permissions.canOpenCart ? '_blank' : undefined}
+                rel={permissions.canOpenCart ? 'noreferrer' : undefined}
+                aria-disabled={!permissions.canOpenCart}
+                onClick={(event) => {
+                  if (!permissions.canOpenCart) event.preventDefault()
+                }}
+                title={permissions.cartReason || 'Abrir compra no legado'}
+              >
+                <PackagePlus className="size-4" />
+                Compra
+              </a>
+              <a
+                className={clsx('thermo-button justify-start', permissions.canOpenSeparation ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
+                href={permissions.canOpenSeparation ? buildLegacyUrl('/menu_produto.html') : undefined}
+                target={permissions.canOpenSeparation ? '_blank' : undefined}
+                rel={permissions.canOpenSeparation ? 'noreferrer' : undefined}
+                aria-disabled={!permissions.canOpenSeparation}
+                onClick={(event) => {
+                  if (!permissions.canOpenSeparation) event.preventDefault()
+                }}
+                title={permissions.separationReason || 'Abrir separação no legado'}
+              >
+                <ClipboardList className="size-4" />
+                Separação
+              </a>
               <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ArrowLeftRight className="size-4" />Movimentação</a>
               <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><Truck className="size-4" />Expedição</a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html#produto-dados')} target="_blank" rel="noreferrer"><Info className="size-4" />Informações / editar produto</a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html#produto-dados')} target="_blank" rel="noreferrer"><Pencil className="size-4" />Editar rápido</a>
+              <a
+                className={clsx('thermo-button justify-start', permissions.canEditCatalog ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
+                href={permissions.canEditCatalog ? buildLegacyUrl('/menu_produto.html#produto-dados') : undefined}
+                target={permissions.canEditCatalog ? '_blank' : undefined}
+                rel={permissions.canEditCatalog ? 'noreferrer' : undefined}
+                aria-disabled={!permissions.canEditCatalog}
+                onClick={(event) => {
+                  if (!permissions.canEditCatalog) event.preventDefault()
+                }}
+                title={permissions.canEditCatalog ? 'Abrir dados do produto no legado' : 'Sua sessão não liberou edição de cadastro do produto.'}
+              >
+                <Info className="size-4" />
+                Informações / editar produto
+              </a>
+              <a
+                className={clsx('thermo-button justify-start', permissions.canEditCatalog ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
+                href={permissions.canEditCatalog ? buildLegacyUrl('/menu_produto.html#produto-dados') : undefined}
+                target={permissions.canEditCatalog ? '_blank' : undefined}
+                rel={permissions.canEditCatalog ? 'noreferrer' : undefined}
+                aria-disabled={!permissions.canEditCatalog}
+                onClick={(event) => {
+                  if (!permissions.canEditCatalog) event.preventDefault()
+                }}
+                title={permissions.canEditCatalog ? 'Abrir edição rápida no legado' : 'Sua sessão não liberou edição de cadastro do produto.'}
+              >
+                <Pencil className="size-4" />
+                Editar rápido
+              </a>
               <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ShoppingCart className="size-4" />Últimas compras</a>
               <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ExternalLink className="size-4" />Manual de instrução</a>
             </div>
