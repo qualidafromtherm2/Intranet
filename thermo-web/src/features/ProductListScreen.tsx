@@ -169,19 +169,20 @@ function MultiSelectField({
 
 function ProductCard({ product, onBridge }: { product: ProductRecord; onBridge: (key: BridgeKey, product?: ProductRecord) => void }) {
   const tone = statusTone(product)
+  const localSummary = product.locaisPositivos.length > 0 ? product.locaisPositivos.map((item) => item.nome).join(' · ') : 'Sem local positivo'
 
   return (
-    <article className="flex h-full flex-col rounded-2xl border border-thermo-border bg-white shadow-sm" data-testid="product-card">
-      <div className="flex items-start gap-4 border-b border-thermo-border px-4 py-4">
+    <article className="flex h-full flex-col rounded-xl border border-thermo-border bg-white shadow-sm" data-testid="product-card">
+      <div className="flex items-start gap-3 border-b border-thermo-border px-3 py-3">
         <img
           src={product.imageUrl || '/branding/thermo-simbolo.png'}
           alt={`Imagem do produto ${product.codigo}`}
-          className="h-20 w-20 rounded-xl border border-thermo-border object-cover"
+          className="h-14 w-14 rounded-lg border border-thermo-border object-cover"
         />
         <div className="min-w-0 flex-1">
           <div className="font-mono text-[11px] font-semibold text-slate-500">{product.codigo}</div>
-          <h3 className="mt-1 line-clamp-2 text-sm font-bold text-thermo-navy">{product.descricao}</h3>
-          <div className="mt-2 flex flex-wrap gap-2">
+          <h3 className="mt-0.5 line-clamp-2 text-[13px] leading-4 font-bold text-thermo-navy">{product.descricao}</h3>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
             <StatusBadge tone={tone}>{statusLabel(product)}</StatusBadge>
             <StatusBadge tone={product.purchaseState === 'em_compra' ? 'amber' : 'slate'}>
               {product.purchaseState === 'em_compra' ? product.compraStatus || 'Em compra' : 'Não comprado ainda'}
@@ -190,46 +191,46 @@ function ProductCard({ product, onBridge }: { product: ProductRecord; onBridge: 
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-4 gap-y-3 px-4 py-4 text-sm">
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-2 px-3 py-3 text-xs">
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Família</dt>
-          <dd className="mt-1 text-thermo-ink">{product.descricao_familia || 'Sem família'}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Família</dt>
+          <dd className="mt-0.5 line-clamp-2 text-thermo-ink">{product.descricao_familia || 'Sem família'}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipo item</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{product.tipoCodigo || product.tipoitem || '—'}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Tipo item</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{product.tipoCodigo || product.tipoitem || '—'}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Origem</dt>
-          <dd className="mt-1 text-thermo-ink">{product.origemCodigo ? originLabels[product.origemCodigo] : 'Não definida'}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Origem</dt>
+          <dd className="mt-0.5 text-thermo-ink">{product.origemCodigo ? originLabels[product.origemCodigo] : 'Não definida'}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Estoque mínimo</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{quantity(product.estoque_minimo, product.unidade)}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Estoque mínimo</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{quantity(product.estoque_minimo, product.unidade)}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Saldo #ALMOX</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{quantity(product.saldo_almox, product.unidade)}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">#ALMOX total</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{quantity(product.saldo_almox, product.unidade)}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Saldo expedição</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{quantity(product.saldo_expedicao, product.unidade)}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Expedição</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{quantity(product.saldo_expedicao, product.unidade)}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Endereçado</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{quantity(product.saldo_enderecado, product.unidade)}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Endereçado</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{quantity(product.saldo_enderecado, product.unidade)}</dd>
         </div>
         <div>
-          <dt className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Valor unitário</dt>
-          <dd className="mt-1 font-mono text-thermo-ink">{currency(product.valor_unitario)}</dd>
+          <dt className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Valor unitário</dt>
+          <dd className="mt-0.5 font-mono text-thermo-ink">{currency(product.valor_unitario)}</dd>
         </div>
       </dl>
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-thermo-border px-4 py-4">
-        <div className="text-xs text-slate-500">
-          {product.locaisPositivos.length > 0 ? `Locais: ${product.locaisPositivos.map((item) => item.nome).join(', ')}` : 'Sem local positivo informado'}
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-thermo-border px-3 py-3">
+        <div className="min-w-0 text-[11px] text-slate-500">
+          <span className="font-semibold text-slate-600">Locais:</span> <span className="line-clamp-2">{localSummary}</span>
         </div>
-        <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onBridge('detail', product)}>
+        <button className="thermo-button thermo-button-secondary shrink-0 px-3 py-2 text-xs" type="button" onClick={() => onBridge('detail', product)}>
           <ExternalLink className="size-4" />
           Abrir legado
         </button>
@@ -240,40 +241,42 @@ function ProductCard({ product, onBridge }: { product: ProductRecord; onBridge: 
 
 function ProductTable({ rows, onBridge }: { rows: ProductRecord[]; onBridge: (key: BridgeKey, product?: ProductRecord) => void }) {
   return (
-    <div className="overflow-x-auto rounded-2xl border border-thermo-border">
+    <div className="overflow-x-auto rounded-xl border border-thermo-border">
       <table className="min-w-full border-collapse text-sm">
-        <thead className="bg-thermo-bg text-left text-[11px] uppercase tracking-[0.14em] text-slate-500">
+        <thead className="bg-thermo-bg text-left text-[10px] uppercase tracking-[0.14em] text-slate-500">
           <tr>
-            <th className="px-4 py-3">Código</th>
-            <th className="px-4 py-3">Descrição</th>
-            <th className="px-4 py-3">Família</th>
-            <th className="px-4 py-3">Tipo</th>
-            <th className="px-4 py-3">Compra</th>
-            <th className="px-4 py-3">#ALMOX</th>
-            <th className="px-4 py-3">Mínimo</th>
-            <th className="px-4 py-3">Ação</th>
+            <th className="px-3 py-2.5">Código</th>
+            <th className="px-3 py-2.5">Descrição</th>
+            <th className="px-3 py-2.5">Família</th>
+            <th className="px-3 py-2.5">Tipo</th>
+            <th className="px-3 py-2.5">Compra</th>
+            <th className="px-3 py-2.5">#ALMOX</th>
+            <th className="px-3 py-2.5">Locais</th>
+            <th className="px-3 py-2.5">Mínimo</th>
+            <th className="px-3 py-2.5">Ação</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((product) => (
             <tr key={product.codigo} className="border-t border-thermo-border align-top">
-              <td className="px-4 py-3 font-mono text-xs font-semibold text-slate-600">{product.codigo}</td>
-              <td className="px-4 py-3">
+              <td className="px-3 py-2.5 font-mono text-xs font-semibold text-slate-600">{product.codigo}</td>
+              <td className="px-3 py-2.5">
                 <div className="font-semibold text-thermo-navy">{product.descricao}</div>
-                <div className="mt-1 flex flex-wrap gap-2">
+                <div className="mt-1 flex flex-wrap gap-1.5">
                   <StatusBadge tone={statusTone(product)}>{statusLabel(product)}</StatusBadge>
                   <StatusBadge tone={product.purchaseState === 'em_compra' ? 'amber' : 'slate'}>
                     {product.purchaseState === 'em_compra' ? product.compraStatus || 'Em compra' : 'Não comprado ainda'}
                   </StatusBadge>
                 </div>
               </td>
-              <td className="px-4 py-3 text-slate-600">{product.descricao_familia || 'Sem família'}</td>
-              <td className="px-4 py-3 font-mono text-slate-600">{product.tipoCodigo || product.tipoitem || '—'}</td>
-              <td className="px-4 py-3 text-slate-600">{product.purchaseState === 'em_compra' ? product.compraStatus || 'Em compra' : 'Não comprado ainda'}</td>
-              <td className="px-4 py-3 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
-              <td className="px-4 py-3 font-mono text-slate-600">{quantity(product.estoque_minimo, product.unidade)}</td>
-              <td className="px-4 py-3">
-                <button className="thermo-button thermo-button-secondary whitespace-nowrap" type="button" onClick={() => onBridge('detail', product)}>
+              <td className="px-3 py-2.5 text-slate-600">{product.descricao_familia || 'Sem família'}</td>
+              <td className="px-3 py-2.5 font-mono text-slate-600">{product.tipoCodigo || product.tipoitem || '—'}</td>
+              <td className="px-3 py-2.5 text-slate-600">{product.purchaseState === 'em_compra' ? product.compraStatus || 'Em compra' : 'Não comprado ainda'}</td>
+              <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
+              <td className="px-3 py-2.5 text-xs text-slate-500">{product.locaisPositivos.length > 0 ? product.locaisPositivos.map((location) => location.nome).join(' · ') : '—'}</td>
+              <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.estoque_minimo, product.unidade)}</td>
+              <td className="px-3 py-2.5">
+                <button className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs" type="button" onClick={() => onBridge('detail', product)}>
                   <ExternalLink className="size-4" />
                   Abrir legado
                 </button>
@@ -413,8 +416,8 @@ export function ProductListScreen({
         </div>
 
         <div className="border-b border-thermo-border px-4 py-4 md:px-6">
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="flex min-w-[18rem] flex-1 items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2">
+          <div className="flex flex-wrap items-center gap-2.5">
+            <label className="flex min-w-[18rem] flex-1 items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2.5">
               <Search className="size-4 text-slate-400" />
               <input
                 value={filters.search}
@@ -430,33 +433,39 @@ export function ProductListScreen({
               ) : null}
             </label>
 
-            <button className="thermo-icon-button" type="button" title="Ler QR Code" aria-label="Ler QR Code" onClick={() => openBridge('qr')}>
+            <button className="thermo-toolbar-button" type="button" title="Ler QR Code" aria-label="Ler QR Code" onClick={() => openBridge('qr')}>
               <QrCode className="size-4" />
+              <span>QR</span>
             </button>
-            <button className="thermo-icon-button" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={() => setFiltersOpen(true)}>
+            <button className="thermo-toolbar-button" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={() => setFiltersOpen(true)}>
               <Filter className="size-4" />
+              <span>Filtrar</span>
             </button>
-            <button className="thermo-icon-button" type="button" title="Atualizar produtos" aria-label="Atualizar produtos" onClick={() => void reload()}>
+            <button className="thermo-toolbar-button" type="button" title="Atualizar produtos" aria-label="Atualizar produtos" onClick={() => void reload()}>
               <RefreshCw className={clsx('size-4', loading && 'animate-spin')} />
+              <span>Atualizar</span>
             </button>
-            <button className="thermo-icon-button" type="button" title="Editar em massa" aria-label="Editar em massa" onClick={() => openBridge('bulk')}>
+            <button className="thermo-toolbar-button" type="button" title="Editar em massa" aria-label="Editar em massa" onClick={() => openBridge('bulk')}>
               <SquarePen className="size-4" />
+              <span>Em massa</span>
             </button>
-            <button className={clsx('thermo-icon-button', viewMode === 'grid' && 'thermo-icon-button-active')} type="button" title="Visualização em grade" aria-label="Visualização em grade" onClick={() => setViewMode('grid')}>
+            <button className={clsx('thermo-toolbar-button', viewMode === 'grid' && 'thermo-icon-button-active')} type="button" title="Visualização em cartões" aria-label="Visualização em cartões" onClick={() => setViewMode('grid')}>
               <Grid2X2 className="size-4" />
+              <span>Cartões</span>
             </button>
-            <button className={clsx('thermo-icon-button', viewMode === 'list' && 'thermo-icon-button-active')} type="button" title="Visualização em lista" aria-label="Visualização em lista" onClick={() => setViewMode('list')}>
+            <button className={clsx('thermo-toolbar-button', viewMode === 'list' && 'thermo-icon-button-active')} type="button" title="Visualização em lista" aria-label="Visualização em lista" onClick={() => setViewMode('list')}>
               <List className="size-4" />
+              <span>Lista</span>
             </button>
             {canOpenCart ? (
-              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => openBridge('cart')}>
+              <button className="thermo-toolbar-button" type="button" onClick={() => openBridge('cart')}>
                 <ShoppingCart className="size-4" />
                 Compras
                 <span className="rounded-full bg-thermo-navy px-2 py-0.5 text-xs text-white">{cartCount}</span>
               </button>
             ) : null}
             {canOpenSeparation ? (
-              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => openBridge('separation')}>
+              <button className="thermo-toolbar-button" type="button" onClick={() => openBridge('separation')}>
                 <ClipboardList className="size-4" />
                 Separações
                 <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">Legado</span>
@@ -478,7 +487,7 @@ export function ProductListScreen({
         </div>
 
         <div className="px-4 py-4 md:px-6">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm">
             <div className="font-semibold text-thermo-navy">{filtered.length} produto(s) visível(is) na lista</div>
             <div className="text-slate-500">
               {dataMode === 'proxy' ? 'Dados reais via proxy do legado' : 'Demo explícita'} · SSE: {latestEvent}
@@ -501,7 +510,7 @@ export function ProductListScreen({
           {!loading && !error && filtered.length > 0 ? (
             <>
               {viewMode === 'grid' ? (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {paginated.map((product) => (
                     <ProductCard key={product.codigo} product={product} onBridge={openBridge} />
                   ))}

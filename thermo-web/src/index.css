@@ -61,11 +61,15 @@ select {
   }
 
   .thermo-icon-button {
-    @apply inline-flex size-10 items-center justify-center rounded-xl border border-thermo-border bg-white text-slate-500 transition hover:border-thermo-navy hover:text-thermo-navy;
+    @apply inline-flex size-11 items-center justify-center rounded-xl border border-thermo-border bg-white text-slate-500 transition hover:border-thermo-navy hover:text-thermo-navy;
   }
 
   .thermo-icon-button-active {
     @apply border-thermo-navy bg-thermo-navy text-white hover:text-white;
+  }
+
+  .thermo-toolbar-button {
+    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-thermo-border bg-white px-3.5 py-2 text-sm font-semibold text-thermo-navy transition hover:border-thermo-navy hover:bg-thermo-bg disabled:cursor-not-allowed disabled:opacity-45;
   }
 
   .thermo-sidebar-link {
