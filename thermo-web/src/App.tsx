@@ -67,19 +67,21 @@ function ModalShell({
   onClose,
   children,
   description,
+  panelClassName,
 }: {
   open: boolean
   title: string
   onClose: () => void
   children: ReactNode
   description?: string
+  panelClassName?: string
 }) {
   if (!open) return null
 
   return (
     <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/45" role="presentation" onClick={onClose}>
       <section
-        className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
+        className={clsx('flex h-full w-full max-w-md flex-col bg-white shadow-2xl', panelClassName)}
         role="dialog"
         aria-modal="true"
         aria-label={title}
@@ -638,7 +640,13 @@ function App() {
           </div>
         </main>
       </div>
-      <ModalShell open={mobileNavOpen} title="Navegação operacional" description="Substituto acessível para o menu lateral nas larguras mobile e tablet." onClose={() => setMobileNavOpen(false)}>
+      <ModalShell
+        open={mobileNavOpen}
+        title="Navegação operacional"
+        description="Substituto acessível para o menu lateral nas larguras mobile e tablet."
+        onClose={() => setMobileNavOpen(false)}
+        panelClassName="w-[min(88vw,24rem)]"
+      >
         <nav id="mobile-operational-nav" className="space-y-2" aria-label="Navegação operacional mobile">
           {navItems.map(({ label, icon: Icon, active }) => (
             <button key={label} type="button" className={clsx('flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-semibold', active ? 'border-thermo-navy bg-thermo-navy text-white' : 'border-thermo-border bg-thermo-bg text-thermo-navy')}>
