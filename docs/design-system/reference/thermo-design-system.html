@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Thermo — Design System · Flux Core</title>
+<meta name="viewport" content="width=1440, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    /* ===== TOKENS DE MARCA (fixos pelo manual — não editáveis por produto) ===== */
+    --navy:#0B1D34;
+    --red:#E31837;
+    --white:#FFFFFF;
+    --gray:#E6E8EB;
+    --sig-gray:#8C8C8C; /* cinza da assinatura — uso restrito a descritor/apoio, por norma do manual */
+
+    /* ===== TOKENS DE PRODUTO (derivados, definidos por este design system) ===== */
+    --navy-2:#132A45;
+    --navy-tint:#3A5A85;      /* navy diluído — usado em state.info, nunca um azul fora da família */
+    --bg:#F5F6F8;
+    --surface:#FFFFFF;
+    --border:#E6E8EB;
+    --border-strong:#D6DADF;
+    --text-primary:#101418;
+    --text-secondary:#5B6470;
+    --text-muted:#8C8C8C;
+
+    --state-info:#3A5A85;
+    --state-success:#1E8E5A;
+    --state-success-bg:#E5F4EC;
+    --state-warning:#B4790C;
+    --state-warning-bg:#FBF1DF;
+    --state-danger:#E31837;
+    --state-danger-bg:#FDEBEE;
+
+    --sp-1:4px; --sp-2:8px; --sp-3:12px; --sp-4:16px; --sp-5:20px; --sp-6:24px; --sp-8:32px; --sp-10:40px;
+    --r-1:4px; --r-2:6px; --r-3:10px; --r-4:14px;
+    --shadow-1:0 1px 2px rgba(11,29,52,.06);
+    --shadow-2:0 6px 20px rgba(11,29,52,.10);
+    --shadow-3:0 20px 60px rgba(11,29,52,.22);
+
+    --h-sm:32px; --h-md:36px; --h-lg:44px;
+    --content-max:1440px; --form-max:640px; --sidebar-w:224px; --sidebar-collapsed:62px; --topbar-h:56px;
+
+    --z-sticky:10; --z-dropdown:30; --z-drawer:40; --z-modal:50; --z-toast:60;
+    --fast:120ms; --normal:180ms; --slow:260ms; --ease:cubic-bezier(.2,0,0,1);
+
+    --font:'Inter',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',Consolas,monospace;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html{scroll-behavior:smooth;}
+  body{font:400 14px/1.55 var(--font); background:var(--bg); color:var(--text-primary); -webkit-font-smoothing:antialiased;}
+  a{color:inherit;}
+  button,input,select,textarea{font:inherit;}
+  button{cursor:pointer;}
+  code,.mono{font-family:var(--mono);}
+  .icon{width:20px; height:20px; fill:none; stroke:currentColor; stroke-width:1.75; stroke-linecap:round; stroke-linejoin:round; flex:none;}
+  .icon.s16{width:16px; height:16px;}
+  .icon.s24{width:24px; height:24px;}
+
+  /* ===================== LAYOUT DO DOCUMENTO ===================== */
+  .layout{display:grid; grid-template-columns:var(--sidebar-w) 1fr; min-height:100vh;}
+  .side{position:sticky; top:0; height:100vh; background:var(--navy); color:#fff; padding:18px 12px; overflow:auto;}
+  .side-brand{display:flex; align-items:center; gap:9px; padding:6px 8px 18px 8px; border-bottom:1px solid rgba(255,255,255,.1); margin-bottom:12px;}
+  .side-brand .wordmark{display:flex; flex-direction:column; line-height:1;}
+  .side-brand .wordmark .name{font-weight:800; font-size:16px; letter-spacing:-.2px;}
+  .side-brand .wordmark .desc{font-weight:600; font-size:7px; letter-spacing:1.4px; color:#9AA6B4; margin-top:2px;}
+  .side b{display:block; margin:16px 9px 5px; color:rgba(255,255,255,.55); font-size:10px; letter-spacing:.08em; text-transform:uppercase; font-weight:700;}
+  .side a{display:block; color:rgba(255,255,255,.82); text-decoration:none; padding:7px 9px; border-radius:6px; font-size:12.5px; font-weight:500;}
+  .side a:hover{background:rgba(255,255,255,.08); color:#fff;}
+  .side a.on{background:rgba(227,24,55,.18); color:#fff; font-weight:700;}
+  .main{min-width:0;}
+
+  .hero{background:var(--surface); border-bottom:1px solid var(--border); padding:40px clamp(24px,4vw,64px);}
+  .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:.08em; color:var(--red); font-weight:700;}
+  .hero h1{font-size:36px; line-height:1.1; letter-spacing:-.02em; margin:8px 0 10px; font-weight:800; color:var(--navy);}
+  .hero p{font-size:15px; color:var(--text-secondary); max-width:68ch; line-height:1.6;}
+  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:18px;}
+  .chips span{border:1px solid var(--border-strong); background:var(--bg); border-radius:20px; padding:5px 11px; font-size:11px; font-weight:600; color:var(--text-secondary);}
+
+  .section{padding:36px clamp(24px,4vw,64px); border-bottom:1px solid var(--border); max-width:1600px;}
+  .section h2{font-size:22px; font-weight:800; color:var(--navy); letter-spacing:-.2px;}
+  .section .lede{font-size:13px; color:var(--text-secondary); max-width:70ch; margin-top:6px; line-height:1.6;}
+  .section h3{font-size:14px; font-weight:800; color:var(--navy); text-transform:uppercase; letter-spacing:.4px; margin:28px 0 12px; display:flex; align-items:center; gap:10px;}
+  .section h3::after{content:""; flex:1; height:1px; background:var(--border);}
+  .section h3:first-of-type{margin-top:24px;}
+
+  /* ===================== TABELAS DE TOKEN ===================== */
+  table.spec{width:100%; border-collapse:collapse; font-size:12.5px;}
+  table.spec th{text-align:left; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); padding:8px 12px; border-bottom:1px solid var(--border-strong);}
+  table.spec td{padding:9px 12px; border-bottom:1px solid var(--border); vertical-align:middle;}
+  table.spec tr:hover td{background:var(--bg);}
+  .swatch{display:inline-flex; align-items:center; gap:9px;}
+  .swatch .dot{width:20px; height:20px; border-radius:6px; border:1px solid rgba(0,0,0,.08); flex-shrink:0;}
+
+  .token-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(150px,1fr)); gap:10px; margin-top:6px;}
+  .token-card{border:1px solid var(--border); border-radius:var(--r-2); padding:10px; background:var(--surface);}
+  .token-card .box{height:44px; border-radius:var(--r-2); margin-bottom:8px;}
+  .token-card .name{font-size:11px; font-weight:700; color:var(--navy);}
+  .token-card .val{font-size:10px; color:var(--text-muted); font-family:var(--mono);}
+
+  /* ===================== INTRO GRID (fundamentos) ===================== */
+  .intro-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:20px;}
+  .intro-card{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-3); padding:14px; box-shadow:var(--shadow-1);}
+  .intro-card .t{font-size:10.5px; font-weight:700; text-transform:uppercase; letter-spacing:.4px; color:var(--text-muted); margin-bottom:6px;}
+  .intro-card .v{font-size:14px; font-weight:700; color:var(--navy);}
+
+  /* ===================== TIPOGRAFIA ===================== */
+  .type-row{display:flex; align-items:baseline; gap:22px; padding:16px 0; border-bottom:1px solid var(--border);}
+  .type-row:last-child{border-bottom:none;}
+  .type-meta{width:170px; flex-shrink:0;}
+  .type-meta .n{font-size:11px; font-weight:700; color:var(--navy);}
+  .type-meta .s{font-size:10.5px; color:var(--text-muted); font-family:var(--mono); margin-top:3px;}
+  .type-sample{color:var(--text-primary);}
+  .ts-display{font-size:40px; font-weight:800; letter-spacing:-.02em; line-height:1.08;}
+  .ts-t1{font-size:28px; font-weight:700; letter-spacing:-.01em;}
+  .ts-t2{font-size:20px; font-weight:700;}
+  .ts-t3{font-size:15px; font-weight:700;}
+  .ts-body{font-size:13px; font-weight:400;}
+  .ts-table{font-size:12.5px; font-weight:500;}
+  .ts-caption{font-size:11px; font-weight:600; text-transform:uppercase; letter-spacing:.5px; color:var(--text-muted);}
+  .ts-mono{font-family:var(--mono); font-size:18px; font-weight:600; color:var(--navy);}
+
+  .note-box{background:var(--bg); border:1px solid var(--border); border-left:3px solid var(--red); border-radius:var(--r-2); padding:12px 14px; font-size:12px; color:var(--text-secondary); line-height:1.6; margin-top:14px;}
+  .note-box b{color:var(--navy);}
+
+  /* ===================== ICONOGRAFIA ===================== */
+  .icon-grid{display:grid; grid-template-columns:repeat(8,1fr); gap:10px; margin-top:6px;}
+  .icon-tile{border:1px solid var(--border); border-radius:var(--r-2); padding:14px 8px; display:flex; flex-direction:column; align-items:center; gap:8px; background:var(--surface);}
+  .icon-tile .icon{color:var(--navy);}
+  .icon-tile .lbl{font-size:9.5px; color:var(--text-muted); text-align:center; font-weight:600;}
+  .icon-size-row{display:flex; gap:28px; align-items:center; margin-top:10px;}
+  .icon-size-row .grp{display:flex; flex-direction:column; align-items:center; gap:8px;}
+  .icon-size-row .grp span{font-size:10.5px; color:var(--text-muted); font-family:var(--mono);}
+
+  /* ===================== COMPONENTES — reuso literal do CSS do produto ===================== */
+  .demo{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-3); padding:20px; box-shadow:var(--shadow-1); margin-top:8px;}
+  .demo-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .demo-row + .demo-row{margin-top:14px;}
+  .demo-caption{font-size:10.5px; color:var(--text-muted); font-weight:700; text-transform:uppercase; letter-spacing:.4px; margin-bottom:8px;}
+
+  .btn{display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; padding:8px 13px; border-radius:var(--r-2); border:1px solid var(--border-strong); background:var(--white); color:var(--navy); transition:all .12s;}
+  .btn:hover{border-color:var(--navy); background:var(--bg);}
+  .btn svg{width:14px; height:14px;}
+  .btn.primary{background:var(--red); border-color:var(--red); color:var(--white);}
+  .btn.navy{background:var(--navy); border-color:var(--navy); color:var(--white);}
+  .btn.ghost{border-color:transparent; background:transparent;}
+  .btn.ghost:hover{background:var(--bg); border-color:var(--border-strong);}
+  .btn:disabled{opacity:.4; cursor:not-allowed;}
+
+  .field{width:220px;}
+  .field label{display:block; font-size:10.5px; font-weight:700; color:var(--text-secondary); text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px;}
+  .field input, .field select{width:100%; border:1px solid var(--border-strong); border-radius:var(--r-2); padding:8px 10px; font-size:12.5px; outline:none;}
+  .field input:focus, .field select:focus{border-color:var(--navy); box-shadow:0 0 0 3px rgba(11,29,52,.08);}
+  .field .hint{font-size:10px; color:var(--text-muted); margin-top:4px;}
+  .field.err input{border-color:var(--red);}
+  .field.err .hint{color:var(--red); font-weight:600;}
+
+  .search-mini{display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--border-strong); border-radius:var(--r-2); padding:7px 10px; width:230px;}
+  .search-mini svg{width:14px; height:14px; color:var(--text-muted);}
+  .search-mini input{border:none; outline:none; font-size:12px; flex:1;}
+  .filter-chip{font-size:11px; font-weight:600; padding:6px 11px; border-radius:20px; background:var(--white); border:1px solid var(--border-strong); color:var(--text-secondary);}
+  .filter-chip.on{background:var(--navy); border-color:var(--navy); color:var(--white);}
+
+  .status-pill{font-size:10px; font-weight:800; padding:3px 8px; border-radius:20px; display:inline-flex; align-items:center; gap:4px;}
+  .status-pill.neu{background:var(--gray); color:var(--text-primary);}
+  .status-pill.ok{background:var(--state-success-bg); color:var(--state-success);}
+  .status-pill.warn{background:var(--state-warning-bg); color:var(--state-warning);}
+  .status-pill.crit{background:var(--state-danger-bg); color:var(--state-danger);}
+  .status-pill::before{content:""; width:5px; height:5px; border-radius:50%; background:currentColor;}
+
+  .alert{display:flex; gap:10px; align-items:flex-start; padding:12px 14px; border-radius:var(--r-2); border:1px solid var(--border); font-size:12.5px; max-width:420px;}
+  .alert.info{background:#EEF2F6; border-color:#D7E0EA; color:var(--navy);}
+  .alert.crit{background:var(--state-danger-bg); border-color:#FBD7DD; color:var(--red);}
+  .alert svg{width:16px; height:16px; flex-shrink:0; margin-top:1px;}
+  .alert b{display:block; margin-bottom:2px;}
+  .alert .a{font-weight:700; text-decoration:underline; cursor:pointer; margin-top:6px; display:inline-block; font-size:11.5px;}
+
+  .card-kpi{background:var(--surface); border:1px solid var(--border); border-radius:var(--r-3); padding:12px 14px; box-shadow:var(--shadow-1); width:170px;}
+  .card-kpi .l{font-size:11px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;}
+  .card-kpi .v{font-size:22px; font-weight:800; color:var(--navy);}
+  .card-kpi.crit{border-color:#FBD7DD; background:linear-gradient(180deg,var(--state-danger-bg) 0%, var(--white) 60%);}
+  .card-kpi.crit .v{color:var(--red);}
+
+  table.data{width:100%; border-collapse:collapse; font-size:12.5px;}
+  table.data thead th{text-align:left; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase; color:var(--text-muted); background:var(--bg); padding:9px 12px; border-bottom:1px solid var(--border);}
+  table.data tbody td{padding:9px 12px; border-bottom:1px solid var(--border);}
+  table.data tbody tr:hover{background:var(--bg);}
+
+  .kcard{background:var(--white); border:1px solid var(--border); border-left:3px solid var(--border-strong); border-radius:var(--r-2); padding:9px 10px; box-shadow:var(--shadow-1); width:210px;}
+  .kcard.urgent{border-left-color:var(--red);}
+  .kcard-id{font-size:9.5px; font-weight:800; color:var(--text-muted); font-family:var(--mono);}
+  .kcard-title{font-size:12px; font-weight:700; margin-top:3px;}
+  .kcard-meta{font-size:10.5px; color:var(--text-secondary); margin-top:5px;}
+  .kcard-foot{display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:8px; border-top:1px dashed var(--border);}
+  .kcard-adv{display:flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color:var(--red); background:none; border:none;}
+
+  .orbit-stepper{display:flex; align-items:center;}
+  .ostep{display:flex; flex-direction:column; align-items:center; gap:5px; width:66px; flex-shrink:0;}
+  .ostep .dot{width:11px; height:11px; border-radius:50%; background:var(--border-strong); border:2px solid var(--white); box-shadow:0 0 0 1px var(--border-strong);}
+  .ostep.done .dot{background:var(--navy); box-shadow:0 0 0 1px var(--navy);}
+  .ostep.now .dot{background:var(--red); box-shadow:0 0 0 3px var(--state-danger-bg);}
+  .ostep .t{font-size:9px; font-weight:700; color:var(--text-muted); text-transform:uppercase;}
+  .ostep.done .t{color:var(--navy);} .ostep.now .t{color:var(--red);}
+  .oline{flex:1; height:2px; background:var(--border-strong); margin:0 -2px 15px -2px; min-width:16px;}
+  .oline.done{background:var(--navy);}
+
+  .modal-mini{width:360px; border-radius:var(--r-4); overflow:hidden; box-shadow:var(--shadow-3); border:1px solid var(--border);}
+  .modal-mini .mh{background:var(--navy); color:#fff; padding:12px 14px; font-size:13px; font-weight:700; display:flex; justify-content:space-between; align-items:center;}
+  .modal-mini .mb{padding:14px; font-size:12px; color:var(--text-secondary); line-height:1.5;}
+  .modal-mini .mf{display:flex; justify-content:flex-end; gap:8px; padding:12px 14px; border-top:1px solid var(--border); background:var(--bg);}
+
+  .toast-demo{background:var(--navy); color:#fff; padding:10px 15px; border-radius:var(--r-2); font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:8px; box-shadow:var(--shadow-2);}
+
+  /* ===================== ESTADOS / VAZIOS ===================== */
+  .state-box{border:1px dashed var(--border-strong); border-radius:var(--r-3); padding:26px; text-align:center; width:260px; background:var(--surface);}
+  .state-box .icon{color:var(--text-muted); margin:0 auto 10px;}
+  .state-box .t{font-size:12.5px; font-weight:700; color:var(--navy);}
+  .state-box .s{font-size:11px; color:var(--text-muted); margin-top:4px;}
+
+  /* ===================== RESPONSIVIDADE — matriz ===================== */
+  .bp-strip{display:flex; gap:10px; margin-top:6px;}
+  .bp-card{flex:1; border:1px solid var(--border); border-radius:var(--r-3); padding:14px; background:var(--surface);}
+  .bp-card .t{font-size:12px; font-weight:800; color:var(--navy);}
+  .bp-card .r{font-size:10.5px; font-family:var(--mono); color:var(--text-muted); margin-top:3px;}
+  .bp-card ul{margin:10px 0 0 16px; font-size:11.5px; color:var(--text-secondary); line-height:1.7;}
+
+  /* ===================== A11Y ===================== */
+  .a11y-grid{display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin-top:8px;}
+  .a11y-item{display:flex; gap:10px; border:1px solid var(--border); border-radius:var(--r-2); padding:12px; background:var(--surface);}
+  .a11y-item svg{width:17px; height:17px; color:var(--state-success); flex-shrink:0; margin-top:1px;}
+  .a11y-item b{font-size:12px; color:var(--navy); display:block; margin-bottom:2px;}
+  .a11y-item span{font-size:11.5px; color:var(--text-secondary); line-height:1.5;}
+
+  ::selection{background:var(--state-danger-bg);}
+</style>
+</head>
+<body>
+
+<div class="layout">
+  <aside class="side">
+    <div class="side-brand">
+      <svg viewBox="0 0 100 100" width="24" height="24" fill="none">
+        <path d="M22,58 A30,30 0 1 1 66,26" stroke="#E31837" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,17 L70,20 L60,37 Z" fill="#E31837"/>
+        <path d="M78,42 A30,30 0 1 1 34,74" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,83 L30,80 L40,63 Z" fill="#FFFFFF"/>
+      </svg>
+      <div class="wordmark"><span class="name">Thermo</span><span class="desc">DESIGN&nbsp;SYSTEM</span></div>
+    </div>
+    <b>Fundamentos</b>
+    <a href="#tokens" class="on">Tokens</a>
+    <a href="#tipografia">Tipografia</a>
+    <a href="#iconografia">Iconografia</a>
+    <b>Sistema</b>
+    <a href="#componentes">Componentes</a>
+    <a href="#navegacao">Navegação</a>
+    <a href="#estados">Estados</a>
+    <a href="#responsividade">Responsividade</a>
+    <a href="#acessibilidade">Acessibilidade</a>
+  </aside>
+
+  <div class="main">
+
+    <div class="hero">
+      <span class="eyebrow">Thermo · Flux Core</span>
+      <h1>Design system operacional</h1>
+      <p>Especificação de referência para as ~9 áreas do Thermo (Produtos, Estoque, Compras, Expedição, Produção, Qualidade, SAC, RH, Administração). Prioriza densidade de informação e leitura rápida sobre efeito visual — é uma ferramenta de operação diária, não uma superfície institucional. Onde a identidade da marca dá a régua (cores, símbolo), este documento formaliza como ela se comporta em tabela, formulário, kanban e estado de erro.</p>
+      <div class="chips">
+        <span>Tema claro</span><span>Grid de 4 px</span><span>Ícones lineares · traço 1,8</span><span>Inter</span><span>WCAG 2.2 AA</span><span>Desktop 1024–1920 · tablet · celular</span>
+      </div>
+    </div>
+
+    <!-- ===================== TOKENS ===================== -->
+    <section class="section" id="tokens">
+      <h2>Tokens</h2>
+      <p class="lede">Dois níveis: tokens de marca vêm fechados do manual e não são editáveis por produto; tokens de produto são derivados deles para resolver problemas que o manual não cobre — estado de sucesso/erro, fundo de aplicação, texto secundário.</p>
+
+      <h3>Cores de marca — fixas pelo manual</h3>
+      <table class="spec">
+        <thead><tr><th>Token</th><th>Valor</th><th>Uso</th></tr></thead>
+        <tbody>
+          <tr><td><span class="swatch"><span class="dot" style="background:#0B1D34"></span>brand.navy</span></td><td class="mono">#0B1D34</td><td>Navegação, títulos, ação principal</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#E31837"></span>brand.red</span></td><td class="mono">#E31837</td><td>Marca, crítico, destrutivo — nunca em bloco de texto longo</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#FFFFFF; border-color:#ccc"></span>surface</span></td><td class="mono">#FFFFFF</td><td>Superfícies e cartões</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#E6E8EB"></span>brand.gray</span></td><td class="mono">#E6E8EB</td><td>Separação, fundo auxiliar</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#8C8C8C"></span>brand.sig-gray</span></td><td class="mono">#8C8C8C</td><td>Restrito a descritor "Sistema de Gestão" e legendas de apoio, por norma do manual (seção 2.1)</td></tr>
+        </tbody>
+      </table>
+
+      <h3>Cores de produto — derivadas</h3>
+      <table class="spec">
+        <thead><tr><th>Token</th><th>Valor</th><th>Uso</th></tr></thead>
+        <tbody>
+          <tr><td><span class="swatch"><span class="dot" style="background:#F5F6F8"></span>background</span></td><td class="mono">#F5F6F8</td><td>Fundo da aplicação — mais frio que branco puro, reduz fadiga em telas densas</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#101418"></span>text.primary</span></td><td class="mono">#101418</td><td>Texto principal</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#5B6470"></span>text.secondary</span></td><td class="mono">#5B6470</td><td>Metadado, legenda, texto de apoio</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#D6DADF"></span>border.strong</span></td><td class="mono">#D6DADF</td><td>Borda de input e divisores com mais peso</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#3A5A85"></span>state.info</span></td><td class="mono">#3A5A85</td><td>Informação neutra — navy diluído, não um azul fora da família</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#1E8E5A"></span>state.success</span></td><td class="mono">#1E8E5A</td><td>Concluído, normal, aprovado</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#B4790C"></span>state.warning</span></td><td class="mono">#B4790C</td><td>Atenção — não crítico ainda</td></tr>
+          <tr><td><span class="swatch"><span class="dot" style="background:#E31837"></span>state.danger</span></td><td class="mono">#E31837</td><td>Erro, bloqueio, exclusão — reaproveita brand.red por decisão, não introduz nova cor</td></tr>
+        </tbody>
+      </table>
+      <div class="note-box"><b>Por que não um azul separado para "info":</b> o manual reserva o vermelho para destaque/crítico e o navy para estrutura/confiança. Um azul genérico de UI quebraria essa lógica de dois-tons. <code>state.info</code> é o próprio navy diluído — informação é "dado", não "ação".</div>
+
+      <h3>Espaçamento, forma e elevação</h3>
+      <div class="token-grid">
+        <div class="token-card"><div class="box" style="background:var(--bg); display:flex; align-items:center; gap:4px; padding:0 8px;"><span style="width:4px;height:16px;background:var(--navy);border-radius:2px"></span><span style="width:8px;height:16px;background:var(--navy);border-radius:2px"></span><span style="width:12px;height:16px;background:var(--navy);border-radius:2px"></span><span style="width:16px;height:16px;background:var(--navy);border-radius:2px"></span></div><div class="name">Espaçamento</div><div class="val">4·8·12·16·20·24·32·40</div></div>
+        <div class="token-card"><div class="box" style="background:var(--navy); border-radius:4px;"></div><div class="name">Raio S1</div><div class="val">4px — inputs pequenos</div></div>
+        <div class="token-card"><div class="box" style="background:var(--navy); border-radius:6px;"></div><div class="name">Raio S2</div><div class="val">6px — botões, badges</div></div>
+        <div class="token-card"><div class="box" style="background:var(--navy); border-radius:10px;"></div><div class="name">Raio S3</div><div class="val">10px — cartões, painéis</div></div>
+        <div class="token-card"><div class="box" style="background:var(--navy); border-radius:14px;"></div><div class="name">Raio S4</div><div class="val">14px — modais</div></div>
+        <div class="token-card"><div class="box" style="background:#fff; box-shadow:var(--shadow-1);"></div><div class="name">Elevação 1</div><div class="val">painéis em repouso</div></div>
+        <div class="token-card"><div class="box" style="background:#fff; box-shadow:var(--shadow-2);"></div><div class="name">Elevação 2</div><div class="val">hover, dropdown</div></div>
+        <div class="token-card"><div class="box" style="background:#fff; box-shadow:var(--shadow-3);"></div><div class="name">Elevação 3</div><div class="val">modal</div></div>
+      </div>
+
+      <h3>Controles, largura e grade</h3>
+      <div class="intro-grid">
+        <div class="intro-card"><div class="t">Alturas</div><div class="v">32 · 36 · 44 px</div></div>
+        <div class="intro-card"><div class="t">Sidebar</div><div class="v">224 px · 62 px recolhida</div></div>
+        <div class="intro-card"><div class="t">Topbar</div><div class="v">56 px</div></div>
+        <div class="intro-card"><div class="t">Formulário</div><div class="v">largura máx. 640 px</div></div>
+        <div class="intro-card"><div class="t">Conteúdo</div><div class="v">largura máx. 1440 px</div></div>
+        <div class="intro-card"><div class="t">Z-index</div><div class="v">10·30·40·50·60</div></div>
+        <div class="intro-card"><div class="t">Movimento</div><div class="v">120·180·260 ms</div></div>
+        <div class="intro-card"><div class="t">Easing</div><div class="v" style="font-size:11px;">cubic-bezier(.2,0,0,1)</div></div>
+      </div>
+      <div class="note-box">Movimento é só <code>opacity</code> e <code>transform</code> — nunca <code>width</code>, <code>height</code> ou propriedades que disparam reflow. É o que mantém a sidebar recolhendo sem engasgo numa tela com tabela de 200 linhas aberta.</div>
+    </section>
+
+    <!-- ===================== TIPOGRAFIA ===================== -->
+    <section class="section" id="tipografia">
+      <h2>Tipografia</h2>
+      <p class="lede">O manual define Inter para toda a comunicação e uma escala institucional de referência (48/30/20/14/10 pt) pensada para materiais de marca — capas, apresentações, telas de login. O produto Thermo é uma ferramenta operacional de alta densidade, então usa uma <b>escala compacta própria</b>, derivada da institucional, não idêntica a ela.</p>
+
+      <h3>Escala operacional (produto)</h3>
+      <div class="demo">
+        <div class="type-row"><div class="type-meta"><div class="n">Display</div><div class="s">40 / 44 · 800 · -0.02em</div></div><div class="type-sample ts-display">Fluxo inteligente</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Título 1</div><div class="s">28 / 33 · 700 · -0.01em</div></div><div class="type-sample ts-t1">Ordens de produção</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Título 2 · tela</div><div class="s">20 / 25 · 700</div></div><div class="type-sample ts-t2">Estoque</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Título 3 · painel</div><div class="s">15 / 20 · 700</div></div><div class="type-sample ts-t3">Fluxo mensal de solicitações</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Corpo</div><div class="s">13 / 19 · 400</div></div><div class="type-sample ts-body">Informação operacional e instrução de tarefa — o padrão de 90% do produto.</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Tabela</div><div class="s">12,5 / 18 · 400/500</div></div><div class="type-sample ts-table">Produto, quantidade e situação</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Legenda / rótulo</div><div class="s">11 / 16 · 600 caps</div></div><div class="type-sample ts-caption">Atualizado há 3 min</div></div>
+        <div class="type-row"><div class="type-meta"><div class="n">Número · mono</div><div class="s">IBM Plex Mono 600</div></div><div class="type-sample ts-mono">1.248,50 · OP-1187</div></div>
+      </div>
+      <div class="note-box"><b>Regra fixa:</b> números tabulares, códigos (SKU, OP, romaneio) e valores monetários usam a face mono — não é decoração, é o que permite comparar colunas de números de relance numa tabela de estoque.</div>
+
+      <h3>Escala institucional (manual — materiais de marca)</h3>
+      <div class="intro-grid">
+        <div class="intro-card"><div class="t">Título principal</div><div class="v">48 pt</div></div>
+        <div class="intro-card"><div class="t">Subtítulo</div><div class="v">30 pt</div></div>
+        <div class="intro-card"><div class="t">Texto corrido</div><div class="v">20 pt</div></div>
+        <div class="intro-card"><div class="t">Rótulo</div><div class="v">14 pt</div></div>
+      </div>
+      <div class="note-box">Usar em: capa de relatório, apresentação institucional, tela de login. <b>Não usar</b> dentro do produto — nessa escala, uma tabela de estoque ocuparia 3 telas por rolagem.</div>
+    </section>
+
+    <!-- ===================== ICONOGRAFIA ===================== -->
+    <section class="section" id="iconografia">
+      <h2>Iconografia</h2>
+      <p class="lede">Traço 1,8px, cantos e pontas arredondados, sem preenchimento — a mesma gramática do símbolo Thermo (duas setas de traço contínuo). Não misturar com ícones sólidos, emoji ou glifos de fonte.</p>
+      <h3>Biblioteca em uso</h3>
+      <div class="icon-grid">
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/></svg><span class="lbl">Produtos</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M3 7 12 2l9 5v10l-9 5-9-5Z"/><path d="M3 7l9 5 9-5"/></svg><span class="lbl">Estoque</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h2l2.6 12.6a2 2 0 0 0 2 1.6h8.8a2 2 0 0 0 2-1.6L21 8H6"/></svg><span class="lbl">Compras</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><rect x="1" y="7" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v4h-7Z"/></svg><span class="lbl">Expedição</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M2 21V9l6 4V9l6 4V9l6 4v8Z"/></svg><span class="lbl">Produção</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="m9 12 2 2 4-4"/><path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5Z"/></svg><span class="lbl">Qualidade</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M3 18v-2a4 4 0 0 1 4-4h1"/><rect x="4" y="3" width="16" height="10" rx="5"/></svg><span class="lbl">SAC</span></div>
+        <div class="icon-tile"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><span class="lbl">Prazo</span></div>
+      </div>
+      <h3>Tamanhos e alvo de toque</h3>
+      <div class="icon-size-row">
+        <div class="grp"><svg class="icon s16" viewBox="0 0 24 24" stroke="var(--navy)"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><span>16px · tabela, badge</span></div>
+        <div class="grp"><svg class="icon" viewBox="0 0 24 24" stroke="var(--navy)"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><span>20px · botão, campo</span></div>
+        <div class="grp"><svg class="icon s24" viewBox="0 0 24 24" stroke="var(--navy)"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><span>24px · estado vazio</span></div>
+      </div>
+      <div class="note-box">Ícone isolado (sem texto ao lado) exige <code>aria-label</code> e alvo mínimo de 40×40px clicável, mesmo que o glifo visual seja menor. Ícone não muda de tamanho entre estado normal e hover — só a cor de fundo do botão muda.</div>
+    </section>
+
+    <!-- ===================== COMPONENTES ===================== -->
+    <section class="section" id="componentes">
+      <h2>Componentes</h2>
+      <p class="lede">Altura padrão de controle: 36px. Todo componente interativo tem foco visível e nome acessível. Os três últimos desta lista (KPI crítico, card de kanban, orbit-stepper) não existem em bibliotecas genéricas — são assinatura do Thermo, derivados da lógica de fluxo/órbita do símbolo.</p>
+
+      <h3>Botões</h3>
+      <div class="demo demo-row">
+        <button class="btn navy"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Ação principal</button>
+        <button class="btn">Secundário</button>
+        <button class="btn ghost">Discreto</button>
+        <button class="btn primary"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg>Excluir</button>
+        <button class="btn navy" disabled>Desabilitado</button>
+      </div>
+      <div class="note-box">Vermelho sólido é reservado a "Excluir"/destrutivo. Ação principal positiva ("Salvar", "Nova solicitação") é sempre navy — o manual proíbe vermelho como cor dominante de interface; aqui ele fica só no ponto de maior risco da tela.</div>
+
+      <h3>Busca, campos e validação</h3>
+      <div class="demo demo-row">
+        <div class="search-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input placeholder="Buscar SKU ou item"></div>
+        <div class="field"><label>Categoria</label><select><option>Selecione</option></select></div>
+        <div class="field err"><label>Quantidade</label><input value="-4"><div class="hint">Informe uma quantidade válida.</div></div>
+        <button class="filter-chip on">Todos</button>
+        <button class="filter-chip">Abaixo do mínimo</button>
+      </div>
+
+      <h3>Badges de status</h3>
+      <div class="demo demo-row">
+        <span class="status-pill neu">Neutro</span>
+        <span class="status-pill ok">Concluído</span>
+        <span class="status-pill warn">Atenção</span>
+        <span class="status-pill crit">Crítico</span>
+      </div>
+      <div class="note-box">Cor nunca é o único sinal — texto e um ponto sólido acompanham sempre, para não depender de percepção de cor.</div>
+
+      <h3>Alertas</h3>
+      <div class="demo demo-row">
+        <div class="alert info"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v4h1"/></svg><div><b>Registro sincronizado</b>Última atualização há 3 minutos.</div></div>
+        <div class="alert crit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg><div><b>Ação bloqueada</b>Revise os campos indicados.<span class="a">Revisar</span></div></div>
+      </div>
+
+      <h3>Cartão de indicador (KPI)</h3>
+      <div class="demo demo-row">
+        <div class="card-kpi"><div class="l">Solicitações</div><div class="v">128</div></div>
+        <div class="card-kpi crit"><div class="l">Atrasos críticos</div><div class="v">9</div></div>
+      </div>
+
+      <h3>Tabela de dados</h3>
+      <div class="demo" style="padding:0; overflow:hidden;">
+        <table class="data">
+          <thead><tr><th>SKU</th><th>Item</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">COMP-4TR-01</td><td>Compressor scroll 4TR</td><td><span class="status-pill crit">Abaixo do mínimo</span></td></tr>
+            <tr><td class="mono">THX-014</td><td>Bomba de calor THX-14</td><td><span class="status-pill ok">Normal</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h3>Modal e notificação</h3>
+      <div class="demo demo-row" style="align-items:flex-start;">
+        <div class="modal-mini">
+          <div class="mh">Confirmar exclusão<svg width="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></div>
+          <div class="mb">Use modal para decisões curtas e contextualizadas. Esta ação não pode ser desfeita.</div>
+          <div class="mf"><button class="btn ghost">Cancelar</button><button class="btn primary">Excluir</button></div>
+        </div>
+        <div class="toast-demo"><svg width="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>Produto THX-014 atualizado.</div>
+      </div>
+
+      <h3>Assinatura — card de kanban</h3>
+      <p class="lede" style="margin-bottom:10px;">Usado no pipeline de Compras. Borda esquerda muda de cor conforme urgência; "avançar etapa" é a única ação primária do cartão, deliberadamente redundante com arrastar.</p>
+      <div class="demo demo-row">
+        <div class="kcard urgent">
+          <div class="kcard-id">#SC-1042</div>
+          <div class="kcard-title">Placa eletrônica de controle</div>
+          <div class="kcard-meta"><b>TermoParts Ltda</b><br>Qtd. 40 · R$ 18.800</div>
+          <div class="kcard-foot"><button class="kcard-adv">Avançar etapa <svg width="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button></div>
+        </div>
+      </div>
+
+      <h3>Assinatura — orbit-stepper</h3>
+      <p class="lede" style="margin-bottom:10px;">Substitui a barra de progresso genérica em Produção. O ponto vermelho é sempre a etapa atual — mesma leitura de "energia em movimento" do símbolo da marca, aplicada a um dado funcional.</p>
+      <div class="demo">
+        <div class="orbit-stepper">
+          <div class="ostep done"><div class="dot"></div><div class="t">Planejada</div></div>
+          <div class="oline done"></div>
+          <div class="ostep now"><div class="dot"></div><div class="t">Produção</div></div>
+          <div class="oline"></div>
+          <div class="ostep"><div class="dot"></div><div class="t">Qualidade</div></div>
+          <div class="oline"></div>
+          <div class="ostep"><div class="dot"></div><div class="t">Concluída</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== NAVEGAÇÃO ===================== -->
+    <section class="section" id="navegacao">
+      <h2>Navegação</h2>
+      <p class="lede">Desktop mantém contexto permanente (sidebar fixa, recolhível). Abaixo de 1024px o padrão muda de estrutura, não é a mesma sidebar espremida.</p>
+      <div class="bp-strip">
+        <div class="bp-card"><div class="t">Desktop · 1024px+</div><ul><li>Sidebar fixa 224px, recolhível a 62px</li><li>Topbar com busca global permanente</li><li>Módulo ativo com barra vermelha de 3px à esquerda</li></ul></div>
+        <div class="bp-card"><div class="t">Tablet · 600–1023px</div><ul><li>Sidebar vira trilho de ícones (62px fixo)</li><li>Rótulo do módulo aparece em painel ao tocar</li></ul></div>
+        <div class="bp-card"><div class="t">Celular · até 599px</div><ul><li>Sidebar vira drawer inferior</li><li>Até 4 destinos fixos + "mais"</li></ul></div>
+      </div>
+    </section>
+
+    <!-- ===================== ESTADOS ===================== -->
+    <section class="section" id="estados">
+      <h2>Estados</h2>
+      <p class="lede">Reservar o espaço do conteúdo final, explicar a situação em uma frase, e só oferecer uma ação quando ela resolve o problema — nunca um botão de "tentar novamente" genérico num estado de permissão.</p>
+      <div class="demo demo-row">
+        <div class="state-box"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg><div class="t">Carregando</div><div class="s">Reserva o layout final — sem salto.</div></div>
+        <div class="state-box"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/></svg><div class="t">Sem registros</div><div class="s">Nenhum item neste filtro. Ajuste a busca.</div></div>
+        <div class="state-box"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><path d="M12 9v4M12 17h.01"/><circle cx="12" cy="12" r="9"/></svg><div class="t">Erro ao carregar</div><div class="s">Falha de rede. Verifique a conexão.</div></div>
+        <div class="state-box"><svg class="icon" viewBox="0 0 24 24" stroke="currentColor"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg><div class="t">Sem permissão</div><div class="s">Fale com seu supervisor para liberar acesso.</div></div>
+      </div>
+    </section>
+
+    <!-- ===================== RESPONSIVIDADE ===================== -->
+    <section class="section" id="responsividade">
+      <h2>Responsividade</h2>
+      <p class="lede">Muda por prioridade de informação, não por redução proporcional do desktop.</p>
+      <h3>Matriz de comportamento</h3>
+      <table class="spec">
+        <thead><tr><th>Componente</th><th>Desktop</th><th>Tablet</th><th>Celular</th></tr></thead>
+        <tbody>
+          <tr><td><b>Tabela</b></td><td>Colunas completas</td><td>Oculta colunas secundárias</td><td>Vira lista; sem rolagem da página</td></tr>
+          <tr><td><b>Modal</b></td><td>520–720px, centralizado</td><td>Até 80% da viewport</td><td>Tela cheia</td></tr>
+          <tr><td><b>Kanban (Compras)</b></td><td>5 colunas lado a lado</td><td>Scroll horizontal</td><td>Uma coluna por vez, com abas de etapa</td></tr>
+          <tr><td><b>Filtros</b></td><td>Barra horizontal</td><td>Barra curta + drawer</td><td>Drawer com resumo aplicado</td></tr>
+          <tr><td><b>Menu</b></td><td>Sidebar 224px</td><td>Trilho 62px</td><td>Drawer inferior</td></tr>
+          <tr><td><b>Indicadores KPI</b></td><td>Até 5 por linha</td><td>2–3 por linha</td><td>1 por linha, empilhado</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- ===================== ACESSIBILIDADE ===================== -->
+    <section class="section" id="acessibilidade" style="border-bottom:none;">
+      <h2>Acessibilidade</h2>
+      <p class="lede">Critérios obrigatórios antes de qualquer componente entrar em produção — não é revisão opcional de polimento.</p>
+      <div class="a11y-grid">
+        <div class="a11y-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><div><b>Contraste</b><span>4,5:1 para texto normal, 3:1 para texto grande e ícones — o vermelho da marca sobre navy só é usado em elementos grandes, nunca em texto corrido pequeno (regra do próprio manual).</span></div></div>
+        <div class="a11y-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><div><b>Foco visível</b><span>Contorno de 3px em todo elemento interativo; ordem de tabulação segue a ordem visual, sem exceção para "componentes bonitos".</span></div></div>
+        <div class="a11y-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><div><b>Alvo de toque</b><span>40px no desktop, 44px em telas de toque — vale para ícone isolado, não só para botão com texto.</span></div></div>
+        <div class="a11y-item"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><div><b>Validação de formulário</b><span>Erro aparece junto ao campo, em texto, nunca só por borda vermelha — mensagem persistente até o campo ser corrigido.</span></div></div>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+  const links = document.querySelectorAll('.side a');
+  const sections = document.querySelectorAll('.section, .hero');
+  window.addEventListener('scroll', ()=>{
+    let current = links[0];
+    sections.forEach(s=>{
+      if(window.scrollY >= s.offsetTop - 120) current = document.querySelector('.side a[href="#'+s.id+'"]') || current;
+    });
+    links.forEach(l=>l.classList.remove('on'));
+    if(current) current.classList.add('on');
+  });
+</script>
+</body>
+</html>

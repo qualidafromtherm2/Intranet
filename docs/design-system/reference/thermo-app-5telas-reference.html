@@ -1,0 +1,1047 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<title>Thermo — Sistema de Gestão</title>
+<meta name="viewport" content="width=1920, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --navy:#0B1D34;
+    --navy-2:#0F2338;
+    --navy-3:#16304C;
+    --red:#E31837;
+    --red-dark:#c81430;
+    --red-50:#FDEBEE;
+    --red-100:#FBD7DD;
+    --white:#FFFFFF;
+    --gray-100:#E6E8EB;
+    --gray-50:#F5F6F8;
+    --gray-300:#D6DADF;
+    --gray-400:#8C8C8C;
+    --gray-600:#5B6470;
+    --gray-800:#2B333D;
+    --ink:#101418;
+    --green:#1E8E5A;
+    --green-50:#E5F4EC;
+    --amber:#B4790C;
+    --amber-50:#FBF1DF;
+    --radius-s:6px;
+    --radius-m:10px;
+    --radius-l:14px;
+    --shadow-1: 0 1px 2px rgba(11,29,52,0.06);
+    --shadow-2: 0 6px 20px rgba(11,29,52,0.12);
+    --border: 1px solid var(--gray-100);
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Inter',system-ui,sans-serif;
+    background:var(--gray-50);
+    color:var(--ink);
+    font-size:13px;
+    line-height:1.4;
+    -webkit-font-smoothing:antialiased;
+    overflow:hidden;
+  }
+  a{color:inherit; text-decoration:none;}
+  button{font-family:inherit; cursor:pointer;}
+  input,select,textarea{font-family:inherit;}
+  ::selection{background:var(--red-100);}
+
+  /* ============ SHELL ============ */
+  .shell{
+    display:grid;
+    grid-template-columns:auto 1fr;
+    grid-template-rows:56px 1fr;
+    grid-template-areas:"topbar topbar" "sidebar main";
+    height:100vh; width:100vw;
+  }
+
+  /* ============ TOPBAR ============ */
+  .topbar{
+    grid-area:topbar; background:var(--navy); display:flex; align-items:center;
+    padding:0 16px 0 14px; gap:18px; border-bottom:1px solid rgba(255,255,255,0.06); z-index:30;
+  }
+  .brand-lockup{display:flex; align-items:center; gap:9px; padding-right:14px; border-right:1px solid rgba(255,255,255,0.12); height:34px;}
+  .brand-lockup .wordmark{display:flex; flex-direction:column; line-height:1;}
+  .brand-lockup .wordmark .name{font-weight:800; font-size:17px; color:var(--white); letter-spacing:-0.2px;}
+  .brand-lockup .wordmark .desc{font-weight:600; font-size:7.5px; letter-spacing:1.6px; color:#9AA6B4; margin-top:2px;}
+  .global-search{
+    flex:1; max-width:440px; display:flex; align-items:center; gap:8px;
+    background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.10);
+    border-radius:var(--radius-s); height:32px; padding:0 10px 0 9px; color:#C7CEDA;
+  }
+  .global-search:focus-within{background:rgba(255,255,255,0.12); border-color:rgba(255,255,255,0.22);}
+  .global-search input{background:transparent; border:none; outline:none; color:var(--white); font-size:12.5px; flex:1; font-family:inherit;}
+  .global-search input::placeholder{color:#8592A3;}
+  .global-search kbd{font-size:10px; color:#8592A3; border:1px solid rgba(255,255,255,0.18); border-radius:4px; padding:1px 5px;}
+  .topbar-spacer{flex:1;}
+  .topbar-actions{display:flex; align-items:center; gap:4px;}
+  .icon-btn{width:32px; height:32px; border-radius:var(--radius-s); display:flex; align-items:center; justify-content:center; background:transparent; border:none; color:#B9C2CF; position:relative; transition:background .12s;}
+  .icon-btn:hover{background:rgba(255,255,255,0.09); color:var(--white);}
+  .icon-btn svg{width:17px; height:17px;}
+  .badge-dot{position:absolute; top:5px; right:5px; min-width:14px; height:14px; padding:0 3px; background:var(--red); border-radius:20px; font-size:8.5px; font-weight:700; color:var(--white); display:flex; align-items:center; justify-content:center; border:1.5px solid var(--navy);}
+  .divider-v{width:1px; height:24px; background:rgba(255,255,255,0.12); margin:0 8px;}
+  .user-pill{display:flex; align-items:center; gap:8px; padding:4px 8px 4px 4px; border-radius:var(--radius-s);}
+  .user-pill:hover{background:rgba(255,255,255,0.08);}
+  .avatar{width:26px; height:26px; border-radius:7px; background:var(--red); color:var(--white); font-weight:700; font-size:11px; display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  .user-meta{display:flex; flex-direction:column; line-height:1.2;}
+  .user-meta .u-name{font-size:12px; font-weight:600; color:var(--white);}
+  .user-meta .u-role{font-size:10px; color:#8FA0B5;}
+  .user-pill .chev{color:#8FA0B5; width:12px; height:12px;}
+
+  /* ============ SIDEBAR ============ */
+  .sidebar{grid-area:sidebar; background:var(--navy); width:224px; display:flex; flex-direction:column; border-right:1px solid rgba(255,255,255,0.06); transition:width .16s ease; overflow:hidden;}
+  .sidebar.collapsed{width:62px;}
+  .sidebar.collapsed .label, .sidebar.collapsed .sec-title, .sidebar.collapsed .nav-count, .sidebar.collapsed .sidebar-foot-text{display:none;}
+  .sidebar.collapsed .nav-item{justify-content:center;}
+  .sidebar-top{display:flex; align-items:center; justify-content:space-between; padding:12px 14px 8px 14px;}
+  .collapse-btn{width:26px; height:26px; border-radius:6px; border:none; background:rgba(255,255,255,0.06); color:#A9B4C2; display:flex; align-items:center; justify-content:center;}
+  .collapse-btn:hover{background:rgba(255,255,255,0.12); color:var(--white);}
+  .collapse-btn svg{width:14px; height:14px;}
+  .nav-scroll{flex:1; overflow-y:auto; padding:4px 10px 10px 10px;}
+  .nav-scroll::-webkit-scrollbar{width:4px;}
+  .nav-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.14); border-radius:4px;}
+  .sec-title{font-size:9.5px; font-weight:700; letter-spacing:1.1px; color:#66748A; text-transform:uppercase; padding:14px 8px 6px 8px;}
+  .nav-item{display:flex; align-items:center; gap:10px; padding:8px 8px; border-radius:var(--radius-s); color:#C2CAD6; font-size:12.5px; font-weight:500; margin-bottom:2px; position:relative; border:none; background:transparent; width:100%; text-align:left;}
+  .nav-item svg{width:16px; height:16px; flex-shrink:0; opacity:.92;}
+  .nav-item:hover{background:rgba(255,255,255,0.06); color:var(--white);}
+  .nav-item.active{background:rgba(227,24,55,0.14); color:var(--white);}
+  .nav-item.active::before{content:""; position:absolute; left:-10px; top:6px; bottom:6px; width:3px; background:var(--red); border-radius:0 3px 3px 0;}
+  .nav-item .label{flex:1; white-space:nowrap;}
+  .nav-count{font-size:10px; font-weight:700; padding:1px 6px; border-radius:20px; background:rgba(255,255,255,0.10); color:#D5DBE3; flex-shrink:0;}
+  .nav-count.crit{background:var(--red); color:var(--white);}
+  .sidebar-foot{padding:12px 16px; border-top:1px solid rgba(255,255,255,0.07); display:flex; align-items:center; gap:9px;}
+  .sidebar-foot-text{line-height:1.25;}
+  .sidebar-foot-text .v{font-size:10.5px; font-weight:600; color:#B9C2CF;}
+  .sidebar-foot-text .env{font-size:9.5px; color:#66748A;}
+
+  /* ============ MAIN / SCREENS ============ */
+  .main{grid-area:main; overflow-y:auto; position:relative;}
+  .screen{display:none; padding:20px 26px 32px 26px; animation:fade .15s ease;}
+  .screen.active{display:block;}
+  @keyframes fade{from{opacity:0; transform:translateY(3px);} to{opacity:1; transform:translateY(0);}}
+
+  /* signature header: número técnico + regua vermelha (linguagem do próprio manual da marca) */
+  .screen-head{position:relative; margin-bottom:18px; padding-bottom:14px; overflow:hidden;}
+  .screen-head::after{content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:linear-gradient(90deg, var(--red) 0 64px, var(--gray-100) 64px 100%);}
+  .screen-head-row{display:flex; align-items:flex-end; justify-content:space-between; gap:16px;}
+  .screen-eyebrow{display:flex; align-items:baseline; gap:10px;}
+  .screen-num{font-size:34px; font-weight:900; color:var(--gray-100); letter-spacing:-1px; line-height:1;}
+  .screen-titles h1{font-size:20px; font-weight:800; color:var(--navy); letter-spacing:-0.3px;}
+  .screen-titles .sub{font-size:11.5px; color:var(--gray-600); margin-top:3px; font-weight:500;}
+  .screen-head-right{display:flex; align-items:center; gap:8px;}
+  .orbit-mark{position:absolute; right:-18px; top:-30px; width:150px; height:150px; opacity:0.05; pointer-events:none;}
+
+  .chip{font-size:11px; font-weight:700; padding:6px 11px; border-radius:20px; background:var(--red-50); color:var(--red); border:1px solid var(--red-100); display:flex; align-items:center; gap:6px;}
+  .chip svg{width:12px; height:12px;}
+  .btn{display:flex; align-items:center; gap:7px; font-size:12px; font-weight:600; padding:8px 13px; border-radius:var(--radius-s); border:1px solid var(--gray-300); background:var(--white); color:var(--navy); transition:all .12s;}
+  .btn:hover{border-color:var(--navy); background:var(--gray-50);}
+  .btn svg{width:14px; height:14px;}
+  .btn.primary{background:var(--red); border-color:var(--red); color:var(--white);}
+  .btn.primary:hover{background:var(--red-dark); border-color:var(--red-dark);}
+  .btn.navy{background:var(--navy); border-color:var(--navy); color:var(--white);}
+  .btn.navy:hover{background:#132a45;}
+  .btn.sm{padding:5px 9px; font-size:11px;}
+  .btn.ghost{border-color:transparent; background:transparent;}
+  .btn.ghost:hover{background:var(--gray-50); border-color:var(--gray-300);}
+  .btn:disabled{opacity:.45; cursor:not-allowed;}
+  .btn:disabled:hover{border-color:var(--gray-300); background:var(--white);}
+
+  .toolbar{display:flex; align-items:center; gap:10px; margin-bottom:12px;}
+  .search-mini{display:flex; align-items:center; gap:7px; background:var(--white); border:1px solid var(--gray-300); border-radius:var(--radius-s); padding:7px 10px; width:280px;}
+  .search-mini svg{width:14px; height:14px; color:var(--gray-400); flex-shrink:0;}
+  .search-mini input{border:none; outline:none; font-size:12px; flex:1;}
+  .filter-chip{font-size:11px; font-weight:600; padding:6px 11px; border-radius:20px; background:var(--white); border:1px solid var(--gray-300); color:var(--gray-600);}
+  .filter-chip.on{background:var(--navy); border-color:var(--navy); color:var(--white);}
+  .toolbar-spacer{flex:1;}
+
+  .panel{background:var(--white); border:var(--border); border-radius:var(--radius-m); box-shadow:var(--shadow-1); overflow:hidden;}
+  .panel-head{display:flex; align-items:center; justify-content:space-between; padding:12px 14px; border-bottom:var(--border);}
+  .panel-head h2{font-size:13px; font-weight:700; color:var(--navy);}
+
+  /* ---------- table ---------- */
+  table.data{width:100%; border-collapse:collapse;}
+  table.data thead th{
+    text-align:left; font-size:10px; font-weight:700; letter-spacing:.5px; text-transform:uppercase;
+    color:var(--gray-400); background:var(--gray-50); padding:9px 12px; border-bottom:1px solid var(--gray-100); white-space:nowrap;
+  }
+  table.data tbody td{padding:10px 12px; border-bottom:1px solid var(--gray-100); font-size:12.5px; color:var(--ink); vertical-align:middle;}
+  table.data tbody tr:last-child td{border-bottom:none;}
+  table.data tbody tr:hover{background:var(--gray-50);}
+  .cell-code{font-weight:700; color:var(--navy); font-variant-numeric:tabular-nums; letter-spacing:.2px;}
+  .cell-sub{font-size:10.5px; color:var(--gray-400); margin-top:1px;}
+  .row-actions{display:flex; gap:4px; justify-content:flex-end;}
+  .row-actions button{width:26px; height:26px; border-radius:6px; border:1px solid transparent; background:transparent; color:var(--gray-600); display:flex; align-items:center; justify-content:center;}
+  .row-actions button svg{width:14px; height:14px;}
+  .row-actions button:hover{background:var(--gray-100); color:var(--navy);}
+  .row-actions button.danger:hover{background:var(--red-50); color:var(--red);}
+
+  .status-pill{font-size:10px; font-weight:800; padding:3px 8px; border-radius:20px; display:inline-flex; align-items:center; gap:4px; white-space:nowrap;}
+  .status-pill.ok{background:var(--green-50); color:var(--green);}
+  .status-pill.warn{background:var(--amber-50); color:var(--amber);}
+  .status-pill.crit{background:var(--red-50); color:var(--red);}
+  .status-pill.neu{background:var(--gray-100); color:var(--gray-800);}
+  .status-pill::before{content:""; width:5px; height:5px; border-radius:50%; background:currentColor;}
+
+  /* mini stock bar - assinatura de densidade de dados */
+  .stock-bar{display:flex; align-items:center; gap:8px; min-width:150px;}
+  .stock-bar .track{flex:1; height:6px; border-radius:6px; background:var(--gray-100); overflow:hidden;}
+  .stock-bar .fill{height:100%; border-radius:6px;}
+  .stock-bar .num{font-size:11px; font-weight:700; color:var(--navy); font-variant-numeric:tabular-nums; width:64px; text-align:right;}
+
+  /* ---------- kanban (compras) ---------- */
+  .kanban{display:grid; grid-template-columns:repeat(5,1fr); gap:10px; align-items:start;}
+  .kcol{background:var(--gray-50); border:var(--border); border-radius:var(--radius-m); overflow:hidden; min-height:120px;}
+  .kcol-head{display:flex; align-items:center; justify-content:space-between; padding:10px 12px; background:var(--navy); color:var(--white);}
+  .kcol-head span.t{font-size:11px; font-weight:700; letter-spacing:.3px;}
+  .kcol-head span.c{font-size:10px; font-weight:800; background:rgba(255,255,255,0.14); padding:1px 7px; border-radius:20px;}
+  .kcol.stage-4 .kcol-head{background:var(--green);}
+  .kcol-body{padding:8px; display:flex; flex-direction:column; gap:8px; min-height:60px;}
+  .kcard{background:var(--white); border:var(--border); border-left:3px solid var(--gray-300); border-radius:var(--radius-s); padding:9px 10px; box-shadow:var(--shadow-1);}
+  .kcard.urgent{border-left-color:var(--red);}
+  .kcard-top{display:flex; align-items:flex-start; justify-content:space-between; gap:6px;}
+  .kcard-id{font-size:9.5px; font-weight:800; color:var(--gray-400); font-variant-numeric:tabular-nums;}
+  .kcard-title{font-size:12px; font-weight:700; color:var(--ink); margin-top:3px; line-height:1.3;}
+  .kcard-meta{font-size:10.5px; color:var(--gray-600); margin-top:5px;}
+  .kcard-meta b{color:var(--navy); font-weight:700;}
+  .kcard-foot{display:flex; align-items:center; justify-content:space-between; margin-top:8px; padding-top:8px; border-top:1px dashed var(--gray-100);}
+  .kcard-adv{display:flex; align-items:center; gap:4px; font-size:10px; font-weight:700; color:var(--red); background:transparent; border:none;}
+  .kcard-adv svg{width:11px; height:11px;}
+  .kcard-adv:hover{text-decoration:underline;}
+  .kcard-del{width:20px; height:20px; border-radius:5px; border:none; background:transparent; color:var(--gray-400); display:flex; align-items:center; justify-content:center;}
+  .kcard-del:hover{background:var(--red-50); color:var(--red);}
+  .kcard-del svg{width:12px; height:12px;}
+  .kcol-empty{padding:16px 10px; text-align:center; font-size:10.5px; color:var(--gray-400); font-weight:500;}
+
+  /* ---------- orbit stepper (produção) — assinatura visual derivada do símbolo da marca ---------- */
+  .orbit-stepper{display:flex; align-items:center; gap:0;}
+  .ostep{display:flex; flex-direction:column; align-items:center; gap:5px; width:74px; flex-shrink:0;}
+  .ostep .dot{width:11px; height:11px; border-radius:50%; background:var(--gray-300); border:2px solid var(--white); box-shadow:0 0 0 1px var(--gray-300); flex-shrink:0;}
+  .ostep.done .dot{background:var(--navy); box-shadow:0 0 0 1px var(--navy);}
+  .ostep.now .dot{background:var(--red); box-shadow:0 0 0 3px var(--red-100);}
+  .ostep .t{font-size:9px; font-weight:700; color:var(--gray-400); text-align:center; text-transform:uppercase; letter-spacing:.3px;}
+  .ostep.done .t{color:var(--navy);}
+  .ostep.now .t{color:var(--red);}
+  .oline{flex:1; height:2px; background:var(--gray-300); margin:0 -2px 15px -2px; min-width:16px;}
+  .oline.done{background:var(--navy);}
+
+  /* ---------- forms / cadastro ---------- */
+  .form-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:12px 14px;}
+  .form-grid .span2{grid-column:span 2;}
+  .form-grid .span4{grid-column:span 4;}
+  .field label{display:block; font-size:10.5px; font-weight:700; color:var(--gray-600); text-transform:uppercase; letter-spacing:.4px; margin-bottom:6px;}
+  .field input, .field select, .field textarea{
+    width:100%; border:1px solid var(--gray-300); border-radius:var(--radius-s); padding:8px 10px;
+    font-size:12.5px; color:var(--ink); background:var(--white); outline:none; transition:border-color .12s;
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{border-color:var(--navy); box-shadow:0 0 0 3px rgba(11,29,52,0.08);}
+  .field .hint{font-size:10px; color:var(--gray-400); margin-top:4px;}
+  .form-section-title{font-size:11px; font-weight:800; color:var(--navy); text-transform:uppercase; letter-spacing:.5px; margin:18px 0 10px 0; display:flex; align-items:center; gap:8px;}
+  .form-section-title:first-child{margin-top:0;}
+  .form-section-title::after{content:""; flex:1; height:1px; background:var(--gray-100);}
+  .form-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:18px; padding-top:14px; border-top:var(--border);}
+  .edit-banner{display:flex; align-items:center; justify-content:space-between; background:var(--red-50); border:1px solid var(--red-100); border-radius:var(--radius-s); padding:9px 12px; margin-bottom:14px; font-size:12px; font-weight:600; color:var(--red);}
+
+  /* ---------- modal ---------- */
+  .overlay{position:fixed; inset:0; background:rgba(11,20,34,0.5); display:none; align-items:center; justify-content:center; z-index:100; backdrop-filter:blur(1px);}
+  .overlay.show{display:flex;}
+  .modal{background:var(--white); border-radius:var(--radius-l); width:520px; max-width:92vw; box-shadow:0 20px 60px rgba(11,20,34,0.35); overflow:hidden; animation:pop .14s ease;}
+  @keyframes pop{from{opacity:0; transform:scale(.97) translateY(4px);} to{opacity:1; transform:scale(1) translateY(0);}}
+  .modal-head{display:flex; align-items:center; justify-content:space-between; padding:16px 18px; border-bottom:var(--border); background:var(--navy);}
+  .modal-head h3{font-size:14px; font-weight:700; color:var(--white);}
+  .modal-close{width:26px; height:26px; border-radius:6px; border:none; background:rgba(255,255,255,0.1); color:var(--white); display:flex; align-items:center; justify-content:center;}
+  .modal-close svg{width:14px; height:14px;}
+  .modal-body{padding:18px;}
+  .modal-foot{display:flex; justify-content:flex-end; gap:8px; padding:14px 18px; border-top:var(--border); background:var(--gray-50);}
+  .modal.confirm .modal-body{display:flex; gap:12px; align-items:flex-start;}
+  .confirm-icon{width:38px; height:38px; border-radius:10px; background:var(--red-50); color:var(--red); display:flex; align-items:center; justify-content:center; flex-shrink:0;}
+  .confirm-icon svg{width:19px; height:19px;}
+  .confirm-text b{color:var(--ink); font-size:13px; display:block; margin-bottom:3px;}
+  .confirm-text span{font-size:12px; color:var(--gray-600);}
+
+  /* ---------- toast ---------- */
+  .toast-wrap{position:fixed; bottom:20px; right:20px; z-index:200; display:flex; flex-direction:column; gap:8px;}
+  .toast{background:var(--navy); color:var(--white); padding:11px 16px; border-radius:var(--radius-s); font-size:12px; font-weight:600; box-shadow:var(--shadow-2); display:flex; align-items:center; gap:8px; animation:slidein .18s ease; min-width:220px;}
+  .toast.err{background:var(--red);}
+  .toast svg{width:14px; height:14px; flex-shrink:0;}
+  @keyframes slidein{from{opacity:0; transform:translateX(20px);} to{opacity:1; transform:translateX(0);}}
+
+  .grid-2{display:grid; grid-template-columns:1.6fr 1fr; gap:14px; align-items:start;}
+  .empty-note{padding:26px; text-align:center; color:var(--gray-400); font-size:12px; font-weight:500;}
+</style>
+</head>
+<body>
+
+<div class="shell">
+
+  <!-- TOPBAR -->
+  <header class="topbar">
+    <div class="brand-lockup">
+      <svg viewBox="0 0 100 100" width="26" height="26" fill="none">
+        <path d="M22,58 A30,30 0 1 1 66,26" stroke="#E31837" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,17 L70,20 L60,37 Z" fill="#E31837"/>
+        <path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,83 L30,80 L40,63 Z" fill="#0B1D34"/>
+      </svg>
+      <div class="wordmark"><span class="name">Thermo</span><span class="desc">SISTEMA&nbsp;DE&nbsp;GESTÃO</span></div>
+    </div>
+    <div class="global-search">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+      <input type="text" placeholder="Pesquisar pedidos, OPs, itens, pessoas…">
+      <kbd>Ctrl K</kbd>
+    </div>
+    <div class="topbar-spacer"></div>
+    <div class="topbar-actions">
+      <button class="icon-btn" title="Atalhos" onclick="toast('Atalhos operacionais em breve por aqui também.')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 11-14h-7l1-6Z"/></svg>
+      </button>
+      <button class="icon-btn" title="Notificações" onclick="toast('7 notificações novas.')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/></svg>
+        <span class="badge-dot">7</span>
+      </button>
+      <div class="divider-v"></div>
+      <div class="user-pill">
+        <div class="avatar">GS</div>
+        <div class="user-meta"><span class="u-name">Giuliano Silveira</span><span class="u-role">Controladoria</span></div>
+        <svg class="chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </div>
+    </div>
+  </header>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-top">
+      <span class="sec-title" style="padding:0; font-size:9.5px;">NAVEGAÇÃO</span>
+      <button class="collapse-btn" onclick="document.getElementById('sidebar').classList.toggle('collapsed')" title="Recolher menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg>
+      </button>
+    </div>
+    <nav class="nav-scroll">
+      <button class="nav-item active" data-screen="geral" onclick="goTo('geral')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        <span class="label">Visão geral</span>
+      </button>
+      <div class="sec-title">OPERAÇÃO</div>
+      <button class="nav-item" data-screen="produtos" onclick="goTo('produtos')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8 12 3 3 8l9 5 9-5Z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/></svg>
+        <span class="label">Produtos</span><span class="nav-count" id="cnt-produtos">4</span>
+      </button>
+      <button class="nav-item" data-screen="estoque" onclick="goTo('estoque')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7 12 2l9 5v10l-9 5-9-5Z"/><path d="M3 7l9 5 9-5"/><path d="M12 12v10"/></svg>
+        <span class="label">Estoque</span><span class="nav-count crit" id="cnt-estoque">3</span>
+      </button>
+      <button class="nav-item" data-screen="compras" onclick="goTo('compras')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2 3h2l2.6 12.6a2 2 0 0 0 2 1.6h8.8a2 2 0 0 0 2-1.6L21 8H6"/></svg>
+        <span class="label">Compras</span><span class="nav-count" id="cnt-compras">7</span>
+      </button>
+      <button class="nav-item" data-screen="expedicao" onclick="soon('Expedição')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="1" y="7" width="14" height="10" rx="1"/><path d="M15 10h4l3 3v4h-7Z"/><circle cx="6" cy="19" r="1.6"/><circle cx="18" cy="19" r="1.6"/></svg>
+        <span class="label">Expedição</span><span class="nav-count crit">9</span>
+      </button>
+      <button class="nav-item" data-screen="producao" onclick="goTo('producao')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 21V9l6 4V9l6 4V9l6 4v8Z"/><path d="M6 21v-4M12 21v-4M18 21v-4"/></svg>
+        <span class="label">Produção</span><span class="nav-count" id="cnt-producao">5</span>
+      </button>
+      <button class="nav-item" data-screen="qualidade" onclick="soon('Qualidade')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><path d="M12 2 4 5v6c0 5 3.4 8.4 8 11 4.6-2.6 8-6 8-11V5Z"/></svg>
+        <span class="label">Qualidade</span><span class="nav-count">5</span>
+      </button>
+      <div class="sec-title">RELACIONAMENTO</div>
+      <button class="nav-item" data-screen="sac" onclick="soon('SAC')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-2a4 4 0 0 1 4-4h1"/><path d="M21 18v-2a4 4 0 0 0-4-4h-1"/><rect x="4" y="3" width="16" height="10" rx="5"/><path d="M9 21h6"/></svg>
+        <span class="label">SAC</span><span class="nav-count crit">18</span>
+      </button>
+      <div class="sec-title">GESTÃO</div>
+      <button class="nav-item" data-screen="rh" onclick="soon('Recursos Humanos')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2"/><circle cx="10" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+        <span class="label">Recursos Humanos</span><span class="nav-count">4</span>
+      </button>
+      <button class="nav-item" data-screen="admin" onclick="soon('Administração')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 9 19.4a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09A1.7 1.7 0 0 0 15 4.6a1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1Z"/></svg>
+        <span class="label">Administração</span><span class="nav-count">11</span>
+      </button>
+    </nav>
+    <div class="sidebar-foot">
+      <svg width="26" height="26" viewBox="0 0 100 100" fill="none">
+        <path d="M22,58 A30,30 0 1 1 66,26" stroke="#E31837" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,17 L70,20 L60,37 Z" fill="#E31837"/>
+        <path d="M78,42 A30,30 0 1 1 34,74" stroke="#FFFFFF" stroke-width="11" stroke-linecap="round" fill="none"/>
+        <path d="M50,83 L30,80 L40,63 Z" fill="#FFFFFF"/>
+      </svg>
+      <div class="sidebar-foot-text"><div class="v">Thermo v2.4</div><div class="env">Fromtherm · Produção</div></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- =================== 1. VISÃO GERAL =================== -->
+    <section class="screen active" id="screen-geral">
+      <div class="screen-head">
+        <svg class="orbit-mark" viewBox="0 0 100 100" fill="none"><path d="M22,58 A30,30 0 1 1 66,26" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/></svg>
+        <div class="screen-head-row">
+          <div class="screen-eyebrow">
+            <span class="screen-num">00</span>
+            <div class="screen-titles"><h1>Visão geral</h1><div class="sub">Quinta-feira, 20 de agosto de 2026 · Atualizado há 3 min</div></div>
+          </div>
+          <div class="screen-head-right">
+            <span class="chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 9v4M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>9 pendências críticas</span>
+            <button class="btn navy" onclick="goTo('compras')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nova solicitação</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="kpi-row" style="display:grid; grid-template-columns:repeat(5,1fr); gap:10px; margin-bottom:14px;">
+        <div class="panel" style="padding:12px 14px; box-shadow:var(--shadow-1);">
+          <div style="font-size:11px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Solicitações</div>
+          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-size:24px; font-weight:800; color:var(--navy);">128</span><span style="font-size:11px; font-weight:700; color:var(--green);">+12%</span></div>
+        </div>
+        <div class="panel" style="padding:12px 14px; box-shadow:var(--shadow-1);">
+          <div style="font-size:11px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Em separação</div>
+          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-size:24px; font-weight:800; color:var(--navy);">36</span><span style="font-size:11px; font-weight:700; color:var(--red);">-4%</span></div>
+        </div>
+        <div class="panel" style="padding:12px 14px; box-shadow:var(--shadow-1);">
+          <div style="font-size:11px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Concluídas hoje</div>
+          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-size:24px; font-weight:800; color:var(--navy);">92</span><span style="font-size:11px; font-weight:700; color:var(--green);">+18%</span></div>
+        </div>
+        <div class="panel" style="padding:12px 14px; box-shadow:var(--shadow-1); border-color:var(--red-100); background:linear-gradient(180deg,var(--red-50) 0%, var(--white) 60%);">
+          <div style="font-size:11px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Atrasos críticos</div>
+          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-size:24px; font-weight:800; color:var(--red);">9</span><span style="font-size:11px; font-weight:700; color:var(--red);">+3</span></div>
+        </div>
+        <div class="panel" style="padding:12px 14px; box-shadow:var(--shadow-1);">
+          <div style="font-size:11px; font-weight:600; color:var(--gray-600); margin-bottom:6px;">Chamados SAC</div>
+          <div style="display:flex; align-items:baseline; gap:8px;"><span style="font-size:24px; font-weight:800; color:var(--navy);">18</span><span style="font-size:11px; font-weight:700; color:var(--green);">+2</span></div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h2>Fluxo mensal de solicitações</h2><a class="btn ghost sm" href="#">Ver relatório completo</a></div>
+          <div style="padding:14px; display:flex; gap:16px; align-items:center;">
+            <svg viewBox="0 0 560 120" preserveAspectRatio="none" style="flex:1; height:120px;">
+              <line x1="0" y1="20" x2="560" y2="20" stroke="#E6E8EB" stroke-width="1"/>
+              <line x1="0" y1="60" x2="560" y2="60" stroke="#E6E8EB" stroke-width="1"/>
+              <line x1="0" y1="100" x2="560" y2="100" stroke="#E6E8EB" stroke-width="1"/>
+              <polyline points="10,90 70,72 130,80 190,55 250,64 310,40 370,48 430,26 490,32 550,14" fill="none" stroke="#E31837" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+              <circle cx="550" cy="14" r="4" fill="#E31837"/>
+            </svg>
+            <div style="display:flex; flex-direction:column; gap:10px; width:150px;">
+              <div style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:var(--gray-600);">Solicitações</span><b style="color:var(--navy);">1.284</b></div>
+              <div style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:var(--gray-600);">Aprovadas</span><b style="color:var(--navy);">1.109</b></div>
+              <div style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:var(--gray-600);">Tempo médio</span><b style="color:var(--navy);">2,4 dias</b></div>
+              <div style="display:flex; justify-content:space-between; font-size:11px;"><span style="color:var(--gray-600);">Taxa de atraso</span><b style="color:var(--red);">7,1%</b></div>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="panel-head"><h2>Atividades recentes</h2></div>
+          <div>
+            <div style="display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--gray-100);"><div style="width:7px;height:7px;border-radius:50%;background:var(--red);margin-top:5px;flex-shrink:0;"></div><div><div style="font-size:12px; font-weight:600;">Pedido 004582 aguarda aprovação há 2 dias</div><div style="font-size:10.5px; color:var(--gray-400); margin-top:2px;">Compras · há 18 min</div></div></div>
+            <div style="display:flex; gap:10px; padding:10px 14px; border-bottom:1px solid var(--gray-100);"><div style="width:7px;height:7px;border-radius:50%;background:var(--green);margin-top:5px;flex-shrink:0;"></div><div><div style="font-size:12px; font-weight:600;">OP 1187 finalizada — lote de 40 unidades</div><div style="font-size:10.5px; color:var(--gray-400); margin-top:2px;">Produção · há 41 min</div></div></div>
+            <div style="display:flex; gap:10px; padding:10px 14px;"><div style="width:7px;height:7px;border-radius:50%;background:var(--navy);margin-top:5px;flex-shrink:0;"></div><div><div style="font-size:12px; font-weight:600;">Contagem cíclica concluída no depósito 02</div><div style="font-size:10.5px; color:var(--gray-400); margin-top:2px;">Estoque · há 3 h</div></div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- =================== 2. PRODUTOS (CADASTRO) =================== -->
+    <section class="screen" id="screen-produtos">
+      <div class="screen-head">
+        <svg class="orbit-mark" viewBox="0 0 100 100" fill="none"><path d="M22,58 A30,30 0 1 1 66,26" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/></svg>
+        <div class="screen-head-row">
+          <div class="screen-eyebrow">
+            <span class="screen-num">01</span>
+            <div class="screen-titles"><h1>Produtos</h1><div class="sub">Cadastro técnico e comercial das bombas de calor</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid-2">
+        <div class="panel">
+          <div class="panel-head"><h2 id="prod-form-title">Novo produto</h2></div>
+          <div style="padding:16px;">
+            <div id="prod-edit-banner" style="display:none;" class="edit-banner">
+              <span id="prod-edit-text">Editando produto</span>
+              <button class="btn sm ghost" onclick="prodCancelEdit()">Cancelar edição</button>
+            </div>
+
+            <div class="form-section-title">Dados gerais</div>
+            <div class="form-grid">
+              <div class="field span2"><label>Nome do produto</label><input id="p-nome" placeholder="Ex.: Bomba de calor THX-14"></div>
+              <div class="field"><label>SKU</label><input id="p-sku" placeholder="THX-014"></div>
+              <div class="field"><label>Categoria</label>
+                <select id="p-categoria"><option>Residencial</option><option>Comercial</option><option>Industrial</option><option>Piscina</option></select>
+              </div>
+            </div>
+
+            <div class="form-section-title">Especificações técnicas</div>
+            <div class="form-grid">
+              <div class="field"><label>Potência (kW)</label><input id="p-potencia" type="number" placeholder="14"></div>
+              <div class="field"><label>Refrigerante</label>
+                <select id="p-refrig"><option>R32</option><option>R410A</option><option>R290</option></select>
+              </div>
+              <div class="field"><label>Unidade</label>
+                <select id="p-unidade"><option>UN</option><option>KIT</option></select>
+              </div>
+              <div class="field"><label>Garantia (meses)</label><input id="p-garantia" type="number" placeholder="24"></div>
+            </div>
+
+            <div class="form-section-title">Comercial</div>
+            <div class="form-grid">
+              <div class="field"><label>Custo (R$)</label><input id="p-custo" type="number" placeholder="4200"></div>
+              <div class="field"><label>Preço de venda (R$)</label><input id="p-preco" type="number" placeholder="6890"></div>
+              <div class="field span2"><label>Status</label>
+                <select id="p-status"><option>Ativo</option><option>Em homologação</option><option>Descontinuado</option></select>
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button class="btn ghost" onclick="prodClearForm()">Limpar</button>
+              <button class="btn primary" onclick="prodSave()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z"/><path d="M17 21v-8H7v8M7 3v5h8"/></svg>
+                <span id="prod-save-label">Salvar produto</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><h2>Boas práticas</h2></div>
+          <div style="padding:14px; display:flex; flex-direction:column; gap:12px; font-size:11.5px; color:var(--gray-600); line-height:1.5;">
+            <div><b style="color:var(--navy); display:block; margin-bottom:2px;">SKU único</b>Use o padrão THX-0xx para manter a rastreabilidade entre produção, estoque e SAC.</div>
+            <div><b style="color:var(--navy); display:block; margin-bottom:2px;">Margem</b>Produtos com margem abaixo de 30% exigem aprovação da Administração antes de ativar.</div>
+            <div><b style="color:var(--navy); display:block; margin-bottom:2px;">Homologação</b>Novos refrigerantes passam por Qualidade antes do status "Ativo".</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-top:14px;">
+        <div class="panel-head">
+          <h2>Produtos cadastrados</h2>
+          <div class="search-mini" style="width:220px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+            <input id="prod-search" oninput="renderProdutos()" placeholder="Buscar produto ou SKU">
+          </div>
+        </div>
+        <table class="data">
+          <thead><tr><th>SKU</th><th>Produto</th><th>Categoria</th><th>Potência</th><th>Preço</th><th>Status</th><th></th></tr></thead>
+          <tbody id="prod-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- =================== 3. ESTOQUE =================== -->
+    <section class="screen" id="screen-estoque">
+      <div class="screen-head">
+        <svg class="orbit-mark" viewBox="0 0 100 100" fill="none"><path d="M22,58 A30,30 0 1 1 66,26" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/></svg>
+        <div class="screen-head-row">
+          <div class="screen-eyebrow">
+            <span class="screen-num">02</span>
+            <div class="screen-titles"><h1>Estoque</h1><div class="sub">Saldos, mínimos e localização por depósito</div></div>
+          </div>
+          <div class="screen-head-right">
+            <button class="btn navy" onclick="openModal('modal-estoque')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Novo item
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="search-mini"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg><input id="est-search" oninput="renderEstoque()" placeholder="Buscar item ou SKU"></div>
+        <button class="filter-chip" id="filt-todos" onclick="setFiltroEstoque('todos')">Todos</button>
+        <button class="filter-chip" id="filt-critico" onclick="setFiltroEstoque('critico')">Abaixo do mínimo</button>
+        <div class="toolbar-spacer"></div>
+        <span style="font-size:11px; color:var(--gray-400); font-weight:600;" id="est-count"></span>
+      </div>
+
+      <div class="panel">
+        <table class="data">
+          <thead><tr><th>SKU</th><th>Item</th><th>Depósito</th><th style="min-width:190px;">Saldo vs. mínimo</th><th>Status</th><th></th></tr></thead>
+          <tbody id="est-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- =================== 4. COMPRAS =================== -->
+    <section class="screen" id="screen-compras">
+      <div class="screen-head">
+        <svg class="orbit-mark" viewBox="0 0 100 100" fill="none"><path d="M22,58 A30,30 0 1 1 66,26" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/></svg>
+        <div class="screen-head-row">
+          <div class="screen-eyebrow">
+            <span class="screen-num">03</span>
+            <div class="screen-titles"><h1>Compras</h1><div class="sub">Pipeline de solicitações — arraste o fluxo com "Avançar etapa"</div></div>
+          </div>
+          <div class="screen-head-right">
+            <button class="btn navy" onclick="openModal('modal-compra')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nova solicitação
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="kanban" id="kanban-compras"></div>
+    </section>
+
+    <!-- =================== 5. PRODUÇÃO =================== -->
+    <section class="screen" id="screen-producao">
+      <div class="screen-head">
+        <svg class="orbit-mark" viewBox="0 0 100 100" fill="none"><path d="M22,58 A30,30 0 1 1 66,26" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/><path d="M78,42 A30,30 0 1 1 34,74" stroke="#0B1D34" stroke-width="9" stroke-linecap="round" fill="none"/></svg>
+        <div class="screen-head-row">
+          <div class="screen-eyebrow">
+            <span class="screen-num">04</span>
+            <div class="screen-titles"><h1>Produção</h1><div class="sub">Ordens de produção e progresso por etapa</div></div>
+          </div>
+          <div class="screen-head-right">
+            <button class="btn navy" onclick="openModal('modal-op')">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>Nova OP
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <table class="data">
+          <thead><tr><th>OP</th><th>Produto</th><th>Linha</th><th>Prazo</th><th style="min-width:340px;">Etapa</th><th></th></tr></thead>
+          <tbody id="op-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ============ MODAL: novo item de estoque ============ -->
+<div class="overlay" id="modal-estoque">
+  <div class="modal">
+    <div class="modal-head"><h3>Novo item de estoque</h3><button class="modal-close" onclick="closeModal('modal-estoque')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span2"><label>Nome do item</label><input id="e-nome" placeholder="Ex.: Compressor scroll 4TR"></div>
+        <div class="field span2"><label>SKU</label><input id="e-sku" placeholder="COMP-4TR-01"></div>
+        <div class="field span2"><label>Depósito</label>
+          <select id="e-deposito"><option>Depósito 01 — Insumos</option><option>Depósito 02 — Acabados</option><option>Depósito 03 — Devoluções</option></select>
+        </div>
+        <div class="field"><label>Saldo atual</label><input id="e-saldo" type="number" placeholder="0"></div>
+        <div class="field"><label>Estoque mínimo</label><input id="e-min" type="number" placeholder="0"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal('modal-estoque')">Cancelar</button>
+      <button class="btn primary" onclick="estSave()">Adicionar item</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: nova solicitação de compra ============ -->
+<div class="overlay" id="modal-compra">
+  <div class="modal">
+    <div class="modal-head"><h3>Nova solicitação de compra</h3><button class="modal-close" onclick="closeModal('modal-compra')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span4"><label>Item / descrição</label><input id="c-item" placeholder="Ex.: Placa eletrônica de controle"></div>
+        <div class="field span2"><label>Fornecedor</label><input id="c-fornecedor" placeholder="Ex.: TermoParts Ltda"></div>
+        <div class="field"><label>Quantidade</label><input id="c-qtd" type="number" placeholder="1"></div>
+        <div class="field"><label>Valor est. (R$)</label><input id="c-valor" type="number" placeholder="0"></div>
+        <div class="field span2"><label>Urgência</label>
+          <select id="c-urgencia"><option value="0">Normal</option><option value="1">Urgente</option></select>
+        </div>
+        <div class="field span2"><label>Necessário até</label><input id="c-prazo" type="date"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal('modal-compra')">Cancelar</button>
+      <button class="btn primary" onclick="compraSave()">Criar solicitação</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: nova OP ============ -->
+<div class="overlay" id="modal-op">
+  <div class="modal">
+    <div class="modal-head"><h3>Nova ordem de produção</h3><button class="modal-close" onclick="closeModal('modal-op')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field span2"><label>Produto</label><input id="o-produto" placeholder="Ex.: THX-014"></div>
+        <div class="field"><label>Quantidade</label><input id="o-qtd" type="number" placeholder="10"></div>
+        <div class="field"><label>Linha</label>
+          <select id="o-linha"><option>Linha 1</option><option>Linha 2</option><option>Linha 3</option></select>
+        </div>
+        <div class="field span2"><label>Prazo de entrega</label><input id="o-prazo" type="date"></div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal('modal-op')">Cancelar</button>
+      <button class="btn primary" onclick="opSave()">Abrir OP</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============ MODAL: confirmação de exclusão (genérico) ============ -->
+<div class="overlay" id="modal-confirm">
+  <div class="modal confirm" style="width:420px;">
+    <div class="modal-head"><h3>Confirmar exclusão</h3><button class="modal-close" onclick="closeModal('modal-confirm')"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button></div>
+    <div class="modal-body">
+      <div class="confirm-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></div>
+      <div class="confirm-text"><b id="confirm-title">Excluir este registro?</b><span id="confirm-msg">Esta ação não pode ser desfeita.</span></div>
+    </div>
+    <div class="modal-foot">
+      <button class="btn ghost" onclick="closeModal('modal-confirm')">Cancelar</button>
+      <button class="btn primary" id="confirm-btn">Excluir</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast-wrap" id="toast-wrap"></div>
+
+<script>
+/* ===================== NAVEGAÇÃO ===================== */
+function goTo(id){
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+id).classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n=>n.classList.remove('active'));
+  const item = document.querySelector('.nav-item[data-screen="'+id+'"]');
+  if(item) item.classList.add('active');
+  document.querySelector('.main').scrollTop = 0;
+}
+function soon(nome){ toast(nome+' ainda não está disponível nesta versão de demonstração.', true); }
+
+/* ===================== TOAST ===================== */
+function toast(msg, isErr){
+  const wrap = document.getElementById('toast-wrap');
+  const t = document.createElement('div');
+  t.className = 'toast'+(isErr?' err':'');
+  t.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m9 12 2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg><span>'+msg+'</span>';
+  wrap.appendChild(t);
+  setTimeout(()=>{ t.style.opacity='0'; t.style.transform='translateX(20px)'; t.style.transition='all .25s'; setTimeout(()=>t.remove(),250); }, 2600);
+}
+
+/* ===================== MODAL HELPERS ===================== */
+function openModal(id){ document.getElementById(id).classList.add('show'); }
+function closeModal(id){ document.getElementById(id).classList.remove('show'); }
+function askConfirm(title, msg, onYes){
+  document.getElementById('confirm-title').textContent = title;
+  document.getElementById('confirm-msg').textContent = msg;
+  const btn = document.getElementById('confirm-btn');
+  const newBtn = btn.cloneNode(true);
+  btn.parentNode.replaceChild(newBtn, btn);
+  newBtn.addEventListener('click', ()=>{ onYes(); closeModal('modal-confirm'); });
+  openModal('modal-confirm');
+}
+document.querySelectorAll('.overlay').forEach(ov=>{
+  ov.addEventListener('click', e=>{ if(e.target===ov) ov.classList.remove('show'); });
+});
+
+let uid = 1000;
+
+/* ===================== PRODUTOS ===================== */
+let produtos = [
+  {id:uid++, sku:'THX-014', nome:'Bomba de calor THX-14', categoria:'Residencial', potencia:14, refrig:'R32', unidade:'UN', garantia:24, custo:4200, preco:6890, status:'Ativo'},
+  {id:uid++, sku:'THX-028', nome:'Bomba de calor THX-28', categoria:'Comercial', potencia:28, refrig:'R410A', unidade:'UN', garantia:24, custo:8900, preco:13990, status:'Ativo'},
+  {id:uid++, sku:'THX-060', nome:'Bomba de calor THX-60 Industrial', categoria:'Industrial', potencia:60, refrig:'R410A', unidade:'UN', garantia:36, custo:24500, preco:37900, status:'Em homologação'},
+  {id:uid++, sku:'THX-P08', nome:'Bomba de calor Piscina P8', categoria:'Piscina', potencia:8, refrig:'R32', unidade:'UN', garantia:18, custo:2600, preco:4390, status:'Ativo'},
+];
+let prodEditingId = null;
+
+function renderProdutos(){
+  const q = (document.getElementById('prod-search').value||'').toLowerCase();
+  const tbody = document.getElementById('prod-tbody');
+  const list = produtos.filter(p => p.nome.toLowerCase().includes(q) || p.sku.toLowerCase().includes(q));
+  tbody.innerHTML = list.length ? list.map(p=>{
+    const statusClass = p.status==='Ativo'?'ok':(p.status==='Em homologação'?'warn':'neu');
+    return `<tr>
+      <td class="cell-code">${p.sku}</td>
+      <td>${p.nome}<div class="cell-sub">${p.refrig} · garantia ${p.garantia}m</div></td>
+      <td>${p.categoria}</td>
+      <td>${p.potencia} kW</td>
+      <td>${fmtMoney(p.preco)}</td>
+      <td><span class="status-pill ${statusClass}">${p.status}</span></td>
+      <td><div class="row-actions">
+        <button onclick="prodEdit(${p.id})" title="Editar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg></button>
+        <button class="danger" onclick="prodDelete(${p.id})" title="Excluir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" class="empty-note">Nenhum produto encontrado.</td></tr>`;
+  document.getElementById('cnt-produtos').textContent = produtos.length;
+}
+function prodClearForm(){
+  ['p-nome','p-sku','p-potencia','p-garantia','p-custo','p-preco'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('p-categoria').selectedIndex=0;
+  document.getElementById('p-refrig').selectedIndex=0;
+  document.getElementById('p-unidade').selectedIndex=0;
+  document.getElementById('p-status').selectedIndex=0;
+}
+function prodCancelEdit(){
+  prodEditingId = null;
+  document.getElementById('prod-edit-banner').style.display='none';
+  document.getElementById('prod-form-title').textContent='Novo produto';
+  document.getElementById('prod-save-label').textContent='Salvar produto';
+  prodClearForm();
+}
+function prodEdit(id){
+  const p = produtos.find(x=>x.id===id); if(!p) return;
+  prodEditingId = id;
+  document.getElementById('p-nome').value=p.nome;
+  document.getElementById('p-sku').value=p.sku;
+  document.getElementById('p-categoria').value=p.categoria;
+  document.getElementById('p-potencia').value=p.potencia;
+  document.getElementById('p-refrig').value=p.refrig;
+  document.getElementById('p-unidade').value=p.unidade;
+  document.getElementById('p-garantia').value=p.garantia;
+  document.getElementById('p-custo').value=p.custo;
+  document.getElementById('p-preco').value=p.preco;
+  document.getElementById('p-status').value=p.status;
+  document.getElementById('prod-edit-banner').style.display='flex';
+  document.getElementById('prod-edit-text').textContent='Editando: '+p.sku+' — '+p.nome;
+  document.getElementById('prod-form-title').textContent='Editar produto';
+  document.getElementById('prod-save-label').textContent='Salvar alterações';
+  document.querySelector('.main').scrollTop = 0;
+}
+function prodSave(){
+  const nome = document.getElementById('p-nome').value.trim();
+  const sku = document.getElementById('p-sku').value.trim();
+  if(!nome || !sku){ toast('Preencha nome e SKU antes de salvar.', true); return; }
+  const data = {
+    nome, sku,
+    categoria: document.getElementById('p-categoria').value,
+    potencia: Number(document.getElementById('p-potencia').value)||0,
+    refrig: document.getElementById('p-refrig').value,
+    unidade: document.getElementById('p-unidade').value,
+    garantia: Number(document.getElementById('p-garantia').value)||0,
+    custo: Number(document.getElementById('p-custo').value)||0,
+    preco: Number(document.getElementById('p-preco').value)||0,
+    status: document.getElementById('p-status').value,
+  };
+  if(prodEditingId){
+    const p = produtos.find(x=>x.id===prodEditingId);
+    Object.assign(p, data);
+    toast('Produto '+sku+' atualizado.');
+    prodCancelEdit();
+  } else {
+    produtos.unshift({id:uid++, ...data});
+    toast('Produto '+sku+' cadastrado.');
+    prodClearForm();
+  }
+  renderProdutos();
+}
+function prodDelete(id){
+  const p = produtos.find(x=>x.id===id);
+  askConfirm('Excluir produto?', 'O produto '+p.sku+' — '+p.nome+' será removido do catálogo.', ()=>{
+    produtos = produtos.filter(x=>x.id!==id);
+    renderProdutos();
+    toast('Produto excluído.');
+    if(prodEditingId===id) prodCancelEdit();
+  });
+}
+
+/* ===================== ESTOQUE ===================== */
+let estoque = [
+  {id:uid++, sku:'COMP-4TR-01', nome:'Compressor scroll 4TR', deposito:'Depósito 01 — Insumos', saldo:6, min:20},
+  {id:uid++, sku:'TRC-COBRE-15', nome:'Trocador de calor cobre 15mm', deposito:'Depósito 01 — Insumos', saldo:48, min:30},
+  {id:uid++, sku:'PLC-CTRL-02', nome:'Placa eletrônica de controle', deposito:'Depósito 01 — Insumos', saldo:3, min:15},
+  {id:uid++, sku:'THX-014', nome:'Bomba de calor THX-14 (acabado)', deposito:'Depósito 02 — Acabados', saldo:52, min:20},
+  {id:uid++, sku:'GAS-R32-10', nome:'Gás refrigerante R32 — cilindro 10kg', deposito:'Depósito 01 — Insumos', saldo:9, min:10},
+  {id:uid++, sku:'ISOL-TERM-50', nome:'Isolamento térmico rolo 50m', deposito:'Depósito 01 — Insumos', saldo:31, min:12},
+];
+let estFiltro = 'todos';
+function setFiltroEstoque(f){
+  estFiltro = f;
+  document.getElementById('filt-todos').classList.toggle('on', f==='todos');
+  document.getElementById('filt-critico').classList.toggle('on', f==='critico');
+  renderEstoque();
+}
+function renderEstoque(){
+  const q = (document.getElementById('est-search').value||'').toLowerCase();
+  let list = estoque.filter(e => e.nome.toLowerCase().includes(q) || e.sku.toLowerCase().includes(q));
+  if(estFiltro==='critico') list = list.filter(e => e.saldo < e.min);
+  const tbody = document.getElementById('est-tbody');
+  tbody.innerHTML = list.length ? list.map(e=>{
+    const ratio = Math.min(100, Math.round((e.saldo/(e.min*1.6))*100));
+    const crit = e.saldo < e.min;
+    const barColor = crit ? 'var(--red)' : (e.saldo < e.min*1.3 ? 'var(--amber)' : 'var(--navy)');
+    return `<tr>
+      <td class="cell-code">${e.sku}</td>
+      <td>${e.nome}</td>
+      <td>${e.deposito}</td>
+      <td><div class="stock-bar"><div class="track"><div class="fill" style="width:${ratio}%; background:${barColor};"></div></div><div class="num">${e.saldo} / min ${e.min}</div></div></td>
+      <td>${crit ? '<span class="status-pill crit">Abaixo do mínimo</span>' : '<span class="status-pill ok">Normal</span>'}</td>
+      <td><div class="row-actions">
+        <button onclick="toast('Movimentação de ${e.sku} em breve.')" title="Movimentar"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg></button>
+        <button class="danger" onclick="estDelete(${e.id})" title="Excluir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="6" class="empty-note">Nenhum item encontrado para este filtro.</td></tr>`;
+  document.getElementById('est-count').textContent = list.length + ' de ' + estoque.length + ' itens';
+  document.getElementById('cnt-estoque').textContent = estoque.filter(e=>e.saldo<e.min).length;
+}
+function estSave(){
+  const nome = document.getElementById('e-nome').value.trim();
+  const sku = document.getElementById('e-sku').value.trim();
+  if(!nome || !sku){ toast('Preencha nome e SKU.', true); return; }
+  estoque.unshift({
+    id:uid++, nome, sku,
+    deposito: document.getElementById('e-deposito').value,
+    saldo: Number(document.getElementById('e-saldo').value)||0,
+    min: Number(document.getElementById('e-min').value)||0,
+  });
+  ['e-nome','e-sku','e-saldo','e-min'].forEach(id=>document.getElementById(id).value='');
+  closeModal('modal-estoque');
+  renderEstoque();
+  toast('Item '+sku+' adicionado ao estoque.');
+}
+function estDelete(id){
+  const e = estoque.find(x=>x.id===id);
+  askConfirm('Excluir item de estoque?', 'O item '+e.sku+' — '+e.nome+' será removido permanentemente.', ()=>{
+    estoque = estoque.filter(x=>x.id!==id);
+    renderEstoque();
+    toast('Item excluído do estoque.');
+  });
+}
+
+/* ===================== COMPRAS (KANBAN) ===================== */
+const stagesCompras = ['Rascunho','Em cotação','Aprovação','Emitido','Recebido'];
+let compras = [
+  {id:uid++, item:'Placa eletrônica de controle', fornecedor:'TermoParts Ltda', qtd:40, valor:18800, urgente:true, stage:2},
+  {id:uid++, item:'Compressor scroll 4TR', fornecedor:'CoolTech Componentes', qtd:20, valor:64000, urgente:true, stage:1},
+  {id:uid++, item:'Gás refrigerante R32', fornecedor:'GasFrio Distribuidora', qtd:30, valor:9600, urgente:false, stage:0},
+  {id:uid++, item:'Isolamento térmico', fornecedor:'IsoBrasil', qtd:60, valor:5400, urgente:false, stage:3},
+  {id:uid++, item:'Trocador de calor cobre', fornecedor:'MetalCore Ind.', qtd:100, valor:22000, urgente:false, stage:0},
+  {id:uid++, item:'Embalagens reforçadas', fornecedor:'PackLog', qtd:200, valor:7200, urgente:false, stage:4},
+  {id:uid++, item:'Sensores de pressão', fornecedor:'SensorTech', qtd:80, valor:11200, urgente:true, stage:2},
+];
+function renderCompras(){
+  const board = document.getElementById('kanban-compras');
+  board.innerHTML = stagesCompras.map((label, idx)=>{
+    const items = compras.filter(c=>c.stage===idx);
+    const cards = items.map(c=>`
+      <div class="kcard ${c.urgente?'urgent':''}">
+        <div class="kcard-top">
+          <div><div class="kcard-id">#SC-${c.id}</div><div class="kcard-title">${c.item}</div></div>
+          <button class="kcard-del" onclick="compraDelete(${c.id})" title="Excluir"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg></button>
+        </div>
+        <div class="kcard-meta"><b>${c.fornecedor}</b><br>Qtd. ${c.qtd} · ${fmtMoney(c.valor)}</div>
+        <div class="kcard-foot">
+          ${idx < stagesCompras.length-1
+            ? `<button class="kcard-adv" onclick="compraAvancar(${c.id})">Avançar etapa <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>`
+            : `<span class="status-pill ok">Concluído</span>`}
+        </div>
+      </div>`).join('');
+    return `<div class="kcol ${idx===4?'stage-4':''}">
+      <div class="kcol-head"><span class="t">${label}</span><span class="c">${items.length}</span></div>
+      <div class="kcol-body">${cards || '<div class="kcol-empty">Sem itens nesta etapa</div>'}</div>
+    </div>`;
+  }).join('');
+  document.getElementById('cnt-compras').textContent = compras.filter(c=>c.stage<4).length;
+}
+function compraAvancar(id){
+  const c = compras.find(x=>x.id===id); if(!c) return;
+  c.stage = Math.min(c.stage+1, stagesCompras.length-1);
+  renderCompras();
+  toast('Solicitação movida para "'+stagesCompras[c.stage]+'".');
+}
+function compraDelete(id){
+  const c = compras.find(x=>x.id===id);
+  askConfirm('Excluir solicitação?', 'A solicitação de "'+c.item+'" será removida do pipeline.', ()=>{
+    compras = compras.filter(x=>x.id!==id);
+    renderCompras();
+    toast('Solicitação excluída.');
+  });
+}
+function compraSave(){
+  const item = document.getElementById('c-item').value.trim();
+  const fornecedor = document.getElementById('c-fornecedor').value.trim();
+  if(!item || !fornecedor){ toast('Preencha item e fornecedor.', true); return; }
+  compras.unshift({
+    id:uid++, item, fornecedor,
+    qtd: Number(document.getElementById('c-qtd').value)||1,
+    valor: Number(document.getElementById('c-valor').value)||0,
+    urgente: document.getElementById('c-urgencia').value==='1',
+    stage:0
+  });
+  ['c-item','c-fornecedor','c-qtd','c-valor','c-prazo'].forEach(id=>document.getElementById(id).value='');
+  document.getElementById('c-urgencia').selectedIndex=0;
+  closeModal('modal-compra');
+  renderCompras();
+  toast('Solicitação criada em "Rascunho".');
+}
+
+/* ===================== PRODUÇÃO ===================== */
+const stagesOP = ['Planejada','Em produção','Qualidade','Concluída'];
+let ops = [
+  {id:uid++, op:'OP-1183', produto:'THX-014', qtd:40, linha:'Linha 1', prazo:'24/08', stage:2},
+  {id:uid++, op:'OP-1185', produto:'THX-028', qtd:12, linha:'Linha 2', prazo:'26/08', stage:1},
+  {id:uid++, op:'OP-1186', produto:'THX-P08', qtd:25, linha:'Linha 3', prazo:'22/08', stage:3},
+  {id:uid++, op:'OP-1188', produto:'THX-060', qtd:4, linha:'Linha 1', prazo:'02/09', stage:0},
+  {id:uid++, op:'OP-1189', produto:'THX-014', qtd:60, linha:'Linha 2', prazo:'29/08', stage:1},
+];
+function renderOps(){
+  const tbody = document.getElementById('op-tbody');
+  tbody.innerHTML = ops.map(o=>{
+    const stepper = stagesOP.map((label, idx)=>{
+      const cls = idx < o.stage ? 'done' : (idx===o.stage ? 'now' : '');
+      const lineBefore = idx>0 ? `<div class="oline ${idx<=o.stage?'done':''}"></div>` : '';
+      return lineBefore + `<div class="ostep ${cls}"><div class="dot"></div><div class="t">${label}</div></div>`;
+    }).join('');
+    const finished = o.stage >= stagesOP.length-1;
+    return `<tr>
+      <td class="cell-code">${o.op}</td>
+      <td>${o.produto}<div class="cell-sub">${o.qtd} unidades</div></td>
+      <td>${o.linha}</td>
+      <td>${o.prazo}</td>
+      <td><div class="orbit-stepper">${stepper}</div></td>
+      <td><div class="row-actions">
+        ${finished
+          ? `<span class="status-pill ok" style="margin-right:2px;">Concluída</span>`
+          : `<button onclick="opAvancar(${o.id})" title="Avançar etapa"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>`}
+        <button class="danger" onclick="opDelete(${o.id})" title="Cancelar OP"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2L4 6"/></svg></button>
+      </div></td>
+    </tr>`;
+  }).join('');
+  document.getElementById('cnt-producao').textContent = ops.filter(o=>o.stage<3).length;
+}
+function opAvancar(id){
+  const o = ops.find(x=>x.id===id); if(!o) return;
+  o.stage = Math.min(o.stage+1, stagesOP.length-1);
+  renderOps();
+  toast(o.op+' avançou para "'+stagesOP[o.stage]+'".');
+}
+function opDelete(id){
+  const o = ops.find(x=>x.id===id);
+  askConfirm('Cancelar ordem de produção?', 'A '+o.op+' ('+o.produto+') será removida da lista.', ()=>{
+    ops = ops.filter(x=>x.id!==id);
+    renderOps();
+    toast('Ordem de produção cancelada.');
+  });
+}
+function opSave(){
+  const produto = document.getElementById('o-produto').value.trim();
+  if(!produto){ toast('Informe o produto.', true); return; }
+  const nextNum = 1190 + ops.length;
+  ops.unshift({
+    id:uid++, op:'OP-'+nextNum, produto,
+    qtd: Number(document.getElementById('o-qtd').value)||1,
+    linha: document.getElementById('o-linha').value,
+    prazo: document.getElementById('o-prazo').value ? formatDateBR(document.getElementById('o-prazo').value) : '—',
+    stage:0
+  });
+  ['o-produto','o-qtd','o-prazo'].forEach(id=>document.getElementById(id).value='');
+  closeModal('modal-op');
+  renderOps();
+  toast('Ordem de produção aberta.');
+}
+
+/* ===================== UTIL ===================== */
+function fmtMoney(v){ return 'R$ ' + Number(v).toLocaleString('pt-BR', {minimumFractionDigits:0}); }
+function formatDateBR(iso){ const [y,m,d]=iso.split('-'); return d+'/'+m; }
+
+/* ===================== INIT ===================== */
+renderProdutos();
+renderEstoque();
+renderCompras();
+renderOps();
+</script>
+</body>
+</html>
