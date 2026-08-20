@@ -4,7 +4,7 @@
 
   const PREF_CHAVE = 'engenharia_gerador_graficos';
   const GG_API = '/api/engenharia/gerador-graficos';
-  const PANE_VERSION = '10';
+  const PANE_VERSION = '12';
   const MAX_GRUPOS = 5;
   const CORES = ['#ef4444', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4'];
   const DEFAULTS = {
@@ -30,6 +30,7 @@
   let dragLinha = null;
   let skipClickLinha = false;
   let overlayTeste = null;
+  let vista = null;
   let ggLeiturasCache = [];
   let ggRelatorioAtual = null;
   let ggColunasCache = null;
@@ -125,7 +126,6 @@
       paTick: num('ggPaTick', DEFAULTS.paTick),
       grupos,
       pontosLinha,
-      registros: loadRegs(),
     };
   }
 
@@ -157,12 +157,13 @@
     set('ggPaMin', c.paMin);
     set('ggPaMax', c.paMax);
     set('ggPaTick', c.paTick);
-    set('ggRegsJson', JSON.stringify(Array.isArray(c.registros) ? c.registros : []));
+    set('ggRegsJson', '[]');
     grupos = migrarGrupos(c);
     pontosLinha = Array.isArray(c.pontosLinha) ? c.pontosLinha.map((p) => ({
       x: Number(p.x), y: Number(p.y), curva: curvaDoPonto(p),
     })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
     overlayTeste = null;
+    vista = null;
     renderGrupos();
     preencherSelectsEixos();
     atualizarRotulos();
@@ -322,23 +323,200 @@
     return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  function fmtNum(v, casas) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return '—';
+    const c = casas == null ? (Math.abs(n) >= 100 ? 1 : 2) : casas;
+    return String(Number(n.toFixed(c)));
+  }
+
+  function padRange(min, max) {
+    let a = Number(min);
+    let b = Number(max);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return { min: 0, max: 1 };
+    if (b < a) { const t = a; a = b; b = t; }
+    if (b === a) {
+      const p = Math.abs(a) * 0.1 || 1;
+      return { min: a - p, max: b + p };
+    }
+    const m = (b - a) * 0.08;
+    return { min: a - m, max: b + m };
+  }
+
+  function vistaDaConfig() {
+    grupos = lerGruposDoDom();
+    const g = {};
+    grupos.forEach((gr) => { g[gr.id] = { min: gr.min, max: gr.max }; });
+    return {
+      xMin: num('ggPaMin', DEFAULTS.paMin),
+      xMax: num('ggPaMax', DEFAULTS.paMax),
+      yMin: num('ggAguaMin', DEFAULTS.aguaMin),
+      yMax: num('ggAguaMax', DEFAULTS.aguaMax),
+      grupos: g,
+    };
+  }
+
+  function zoomAoRedor(min, max, centro, fator) {
+    const left = centro - (centro - min) * fator;
+    const right = centro + (max - centro) * fator;
+    if (!Number.isFinite(left) || !Number.isFinite(right) || right === left) return { min, max };
+    return { min: left, max: right };
+  }
+
+  function aplicarVistaIncluindoRecs(recs) {
+    const base = vistaDaConfig();
+    if (!recs?.length) {
+      vista = null;
+      return;
+    }
+    let xMin = base.xMin;
+    let xMax = base.xMax;
+    let yMin = base.yMin;
+    let yMax = base.yMax;
+    recs.forEach((r) => {
+      if (Number.isFinite(r.pressao)) { xMin = Math.min(xMin, r.pressao); xMax = Math.max(xMax, r.pressao); }
+      if (Number.isFinite(r.temp)) { yMin = Math.min(yMin, r.temp); yMax = Math.max(yMax, r.temp); }
+    });
+    const gVista = {};
+    grupos.forEach((gr) => {
+      let gmin = gr.min;
+      let gmax = gr.max;
+      recs.forEach((r) => {
+        if (r.modelo === gr.id && Number.isFinite(r.valor)) {
+          gmin = Math.min(gmin, r.valor);
+          gmax = Math.max(gmax, r.valor);
+        }
+      });
+      gVista[gr.id] = padRange(gmin, gmax);
+    });
+    const px = padRange(xMin, xMax);
+    const py = padRange(yMin, yMax);
+    vista = {
+      xMin: px.min,
+      xMax: px.max,
+      yMin: py.min,
+      yMax: py.max,
+      grupos: gVista,
+    };
+  }
+
+  function recNoParametro(r) {
+    const paMin = num('ggPaMin', DEFAULTS.paMin);
+    const paMax = num('ggPaMax', DEFAULTS.paMax);
+    const tMin = num('ggAguaMin', DEFAULTS.aguaMin);
+    const tMax = num('ggAguaMax', DEFAULTS.aguaMax);
+    const g = grupos.find((x) => x.id === r.modelo);
+    const pressaoOk = r.pressao >= Math.min(paMin, paMax) && r.pressao <= Math.max(paMin, paMax);
+    const tempOk = r.temp >= Math.min(tMin, tMax) && r.temp <= Math.max(tMin, tMax);
+    let valorOk = true;
+    if (g && Number.isFinite(r.valor)) {
+      valorOk = r.valor >= Math.min(g.min, g.max) && r.valor <= Math.max(g.min, g.max);
+    }
+    return pressaoOk && tempOk && valorOk;
+  }
+
+  function onZoomRoda(e) {
+    if (!chartAlta?.scales?.x || !chartAlta.scales.yTemp) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const sx = chartAlta.scales.x;
+    const sy = chartAlta.scales.yTemp;
+    const rect = chartAlta.canvas.getBoundingClientRect();
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const cx = sx.getValueForPixel(px);
+    const cy = sy.getValueForPixel(py);
+    const fator = e.deltaY > 0 ? 1.16 : 1 / 1.16;
+    if (!vista) vista = vistaDaConfig();
+    const nx = zoomAoRedor(vista.xMin, vista.xMax, cx, fator);
+    const ny = zoomAoRedor(vista.yMin, vista.yMax, cy, fator);
+    vista.xMin = nx.min;
+    vista.xMax = nx.max;
+    vista.yMin = ny.min;
+    vista.yMax = ny.max;
+    grupos.forEach((gr) => {
+      const sc = chartAlta.scales[`yG_${gr.id}`];
+      const cur = vista.grupos?.[gr.id] || { min: gr.min, max: gr.max };
+      const centro = sc ? sc.getValueForPixel(py) : (cur.min + cur.max) / 2;
+      vista.grupos = vista.grupos || {};
+      vista.grupos[gr.id] = zoomAoRedor(cur.min, cur.max, centro, fator);
+    });
+    desenhar();
+  }
+
+  function ligarZoomRoda() {
+    const box = document.querySelector('#engenhariaGeradorGraficosPane .gg-chart-box');
+    if (!box || box.dataset.ggZoom === '1') return;
+    box.dataset.ggZoom = '1';
+    box.addEventListener('wheel', onZoomRoda, { passive: false });
+  }
+
   function atualizarOverlayInfo() {
     const el = $('ggOverlayInfo');
     if (!el) return;
     if (!overlayTeste?.relatorio) {
       el.style.display = 'none';
       el.innerHTML = '';
+      atualizarTabelaTeste([]);
       return;
     }
     const r = overlayTeste.relatorio;
+    const recs = overlayTeste.pontos || [];
+    const fora = recs.filter((p) => !recNoParametro(p)).length;
+    const cols = overlayTeste.colX
+      ? `Campos: ${nomeColuna(overlayTeste.colY)} × ${nomeColuna(overlayTeste.colX)}`
+      : '';
     el.style.display = 'flex';
-    el.innerHTML = `<span>Teste real sobreposto: OP <b>${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')} · ${escHtml(overlayTeste.pontos?.length || 0)} pontos</span>
+    el.innerHTML = `<span>Teste real: OP <b>${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')} · ${escHtml(recs.length)} pontos${fora ? ` · <b>${fora} fora da escala configurada</b> (a vista foi ampliada)` : ''}${cols ? `<br><small>${escHtml(cols)}</small>` : ''}</span>
+      <button type="button" id="ggBtnEscalaOrig" class="content-button" style="background:#334155;color:#fff;">Escala original</button>
       <button type="button" id="ggBtnLimparOverlay" class="content-button" style="background:#7c2d12;color:#fff;">Remover teste</button>`;
+    $('ggBtnEscalaOrig')?.addEventListener('click', () => { vista = null; desenhar(); });
     $('ggBtnLimparOverlay')?.addEventListener('click', () => {
       overlayTeste = null;
+      vista = null;
+      saveRegs(loadRegs().filter((x) => x.origem !== 'teste'));
       atualizarOverlayInfo();
       desenhar();
     });
+    atualizarTabelaTeste(recs);
+  }
+
+  function atualizarTabelaTeste(recs) {
+    const wrap = $('ggTabelaTesteWrap');
+    if (!wrap) return;
+    const lista = recs || [];
+    if (!lista.length) {
+      wrap.style.display = 'none';
+      wrap.innerHTML = '';
+      return;
+    }
+    grupos = lerGruposDoDom();
+    wrap.style.display = 'block';
+    wrap.innerHTML = `<div class="gg-dica" style="margin:0 0 8px;">Valores do teste usados neste gráfico (confira se batem com a máquina). Scroll do mouse no gráfico faz zoom.</div>
+      <div class="gg-tabela-teste-scroll">
+        <table class="gg-tabela-teste">
+          <thead><tr>
+            <th>#</th>
+            <th>${escHtml(nomeColuna(overlayTeste?.colX || 'pressao'))}</th>
+            <th>${escHtml(nomeColuna(overlayTeste?.colY || 'temp'))}</th>
+            <th>Eixo direita</th>
+            <th>Valor</th>
+            <th>Na escala configurada?</th>
+          </tr></thead>
+          <tbody>${lista.map((p, i) => {
+            const g = grupos.find((x) => x.id === p.modelo);
+            const ok = recNoParametro(p);
+            return `<tr class="${ok ? '' : 'is-fora'}">
+              <td>${i + 1}</td>
+              <td>${escHtml(fmtNum(p.pressao))}</td>
+              <td>${escHtml(fmtNum(p.temp))}</td>
+              <td>${escHtml(g ? rotuloEixo(g.nome, g.nome) : '—')}</td>
+              <td>${escHtml(Number.isFinite(p.valor) ? fmtNum(p.valor) : '—')}</td>
+              <td>${ok ? 'Sim' : 'Não — fora'}</td>
+            </tr>`;
+          }).join('')}</tbody>
+        </table>
+      </div>`;
   }
 
   function optionsColunas(colunas, selecionada) {
@@ -396,23 +574,36 @@
     document.querySelectorAll('.gg-gerador-modal').forEach((el) => el.classList.remove('is-open'));
   }
 
-  function amostrarLeituras(leituras, n, colX, colY, mapGrupos) {
-    const valid = (leituras || []).filter((l) => Number.isFinite(Number(l[colX])) && Number.isFinite(Number(l[colY])));
-    if (!valid.length) return [];
-    const nUse = Math.max(1, Math.min(Number(n) || 1, valid.length, 400));
-    const idxs = linspace(0, valid.length - 1, nUse).map((i) => Math.round(i));
-    const uniq = [];
-    idxs.forEach((i) => { if (!uniq.length || uniq[uniq.length - 1] !== i) uniq.push(i); });
-    return uniq.map((i) => {
-      const l = valid[i];
-      const gruposVals = {};
-      Object.keys(mapGrupos || {}).forEach((id) => {
-        const col = mapGrupos[id];
-        const v = Number(l[col]);
-        if (col && Number.isFinite(v)) gruposVals[id] = v;
-      });
-      return { x: Number(l[colX]), y: Number(l[colY]), grupos: gruposVals };
+  function colunasDoGrafico() {
+    grupos = lerGruposDoDom();
+    const colY = valorParaColuna($('ggNomeAgua')?.value, '');
+    const colX = valorParaColuna($('ggNomePressao')?.value, '');
+    const mapGrupos = {};
+    grupos.forEach((g) => {
+      const col = valorParaColuna(g.nome, '');
+      if (col) mapGrupos[g.id] = col;
     });
+    return { colX, colY, mapGrupos };
+  }
+
+  function leiturasParaRegistros(leituras, colX, colY, mapGrupos) {
+    const ids = Object.keys(mapGrupos || {});
+    const out = [];
+    (leituras || []).forEach((l) => {
+      const x = Number(l[colX]);
+      const y = Number(l[colY]);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      if (!ids.length) {
+        out.push({ temp: y, pressao: x, origem: 'teste' });
+        return;
+      }
+      ids.forEach((gid) => {
+        const v = Number(l[mapGrupos[gid]]);
+        if (!Number.isFinite(v)) return;
+        out.push({ temp: y, pressao: x, modelo: gid, valor: v, origem: 'teste' });
+      });
+    });
+    return out.slice(0, 400);
   }
 
   async function abrirTestesRegistrados() {
@@ -452,7 +643,11 @@
       </tr>`).join('')}</tbody>
     </table>`;
     lista.querySelectorAll('[data-gg-rel]').forEach((tr) => {
-      tr.addEventListener('click', () => abrirMapaTeste(tr.getAttribute('data-gg-rel')));
+      tr.addEventListener('click', () => {
+        aplicarTesteEscolhido(tr.getAttribute('data-gg-rel')).catch((err) => {
+          alert(err.message || 'Não foi possível marcar o teste no gráfico.');
+        });
+      });
     });
   }
 
@@ -467,78 +662,31 @@
     }
   }
 
-  async function abrirMapaTeste(id) {
-    try {
-      await carregarColunasTeste();
-      const leit = await ggApi(`/testes/${encodeURIComponent(id)}/leituras`);
-      ggLeiturasCache = leit.leituras || [];
-      ggRelatorioAtual = leit.relatorio || null;
-      grupos = lerGruposDoDom();
-      const r = ggRelatorioAtual || {};
-      const resumo = $('ggMapaResumo');
-      if (resumo) {
-        resumo.innerHTML = `<b>OP ${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')}<br>
-          ${escHtml(r.operador || '')} · ${escHtml(ggLeiturasCache.length)} leituras`;
-      }
-      const colunas = ggColunasCache || [];
-      const colY = valorParaColuna($('ggNomeAgua')?.value, 'temp_ambiente');
-      const colX = valorParaColuna($('ggNomePressao')?.value, 'pressao_alta');
-      const selY = $('ggMapaColY');
-      const selX = $('ggMapaColX');
-      if (selY) selY.innerHTML = htmlOptionsColunas(colY || 'temp_ambiente', false);
-      if (selX) selX.innerHTML = htmlOptionsColunas(colX || 'pressao_alta', false);
-      garantirPontosNaGrade();
-      const qtdEl = $('ggMapaQtd');
-      if (qtdEl) {
-        qtdEl.value = String(pontosLinha.length || 1);
-        qtdEl.max = String(Math.max(1, ggLeiturasCache.length));
-      }
-      const wrapG = $('ggMapaGrupos');
-      if (wrapG) {
-        wrapG.innerHTML = grupos.map((g) => {
-          const def = valorParaColuna(g.nome, '');
-          return `<label>${escHtml(rotuloEixo(g.nome, g.nome))}
-            <select data-gg-mapa-grupo="${escAttr(g.id)}">
-              <option value="">— não plotar —</option>
-              ${optionsColunas(colunas, def)}
-            </select>
-          </label>`;
-        }).join('');
-      }
-      fecharModais();
-      abrirModal('ggModalMapa');
-    } catch (err) {
-      alert(err.message || 'Não foi possível abrir o teste.');
-    }
-  }
-
-  function aplicarTesteNoGrafico() {
-    const colY = $('ggMapaColY')?.value;
-    const colX = $('ggMapaColX')?.value;
-    if (!colY || !colX) {
-      alert('Escolha o campo da esquerda e o da parte de baixo.');
+  async function aplicarTesteEscolhido(id) {
+    await carregarColunasTeste();
+    const { colX, colY, mapGrupos } = colunasDoGrafico();
+    if (!colX || !colY) {
+      alert('Configure no gráfico o campo da esquerda e o da parte de baixo antes de escolher o teste.');
       return;
     }
-    const qtd = Math.max(1, Number($('ggMapaQtd')?.value) || pontosLinha.length || 1);
-    const mapGrupos = {};
-    document.querySelectorAll('[data-gg-mapa-grupo]').forEach((sel) => {
-      if (sel.value) mapGrupos[sel.getAttribute('data-gg-mapa-grupo')] = sel.value;
-    });
-    const sampled = amostrarLeituras(ggLeiturasCache, qtd, colX, colY, mapGrupos);
-    if (!sampled.length) {
-      alert('Esse teste não tem números nessas colunas.');
+    const leit = await ggApi(`/testes/${encodeURIComponent(id)}/leituras`);
+    ggLeiturasCache = leit.leituras || [];
+    ggRelatorioAtual = leit.relatorio || null;
+    const novos = leiturasParaRegistros(ggLeiturasCache, colX, colY, mapGrupos);
+    if (!novos.length) {
+      alert('Esse teste não tem números nos campos já configurados neste gráfico (esquerda, baixo e grupos da direita).');
       return;
     }
-    const gruposPts = {};
-    Object.keys(mapGrupos).forEach((gid) => {
-      gruposPts[gid] = sampled.filter((p) => Number.isFinite(p.grupos[gid])).map((p) => ({ x: p.x, y: p.grupos[gid] }));
-    });
+    const manuais = loadRegs().filter((r) => r.origem !== 'teste');
+    saveRegs(manuais.concat(novos));
     overlayTeste = {
-      colX, colY, qtd,
-      pontos: sampled.map((p) => ({ x: p.x, y: p.y })),
-      grupos: gruposPts,
       relatorio: ggRelatorioAtual,
+      pontos: novos,
+      colX,
+      colY,
+      mapGrupos,
     };
+    aplicarVistaIncluindoRecs(novos);
     fecharModais();
     atualizarOverlayInfo();
     desenhar();
@@ -683,6 +831,22 @@
         margin: 10px 0 0; padding: 8px 10px; border-radius: 8px;
         background: rgba(234,88,12,.15); color: #fdba74; font-size: 13px;
       }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste-wrap {
+        margin-top: 10px; padding: 10px; border-radius: 10px;
+        border: 1px solid #334155; background: rgba(15,23,42,.45);
+      }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste-scroll {
+        max-height: 220px; overflow: auto;
+      }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste {
+        width: 100%; border-collapse: collapse; font-size: 12px; color: #e2e8f0;
+      }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste th,
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td {
+        padding: 6px 8px; border-bottom: 1px solid #334155; text-align: left; white-space: nowrap;
+      }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste tr.is-fora td { color: #fca5a5; }
+      #engenhariaGeradorGraficosPane .gg-chart-box { cursor: crosshair; }
       #engenhariaGeradorGraficosPane .gg-select-eixo { cursor: pointer; width: 100%; }
       .gg-gerador-modal {
         display: none; position: fixed; inset: 0; z-index: 99999;
@@ -969,7 +1133,7 @@
       const { ctx, scales } = chart;
       recs.forEach((reg) => {
         const scaleId = `yG_${reg.modelo}`;
-        if (!scales.x || !scales.yTemp || !scales[scaleId]) return;
+        if (!reg.modelo || !Number.isFinite(reg.valor) || !scales.x || !scales.yTemp || !scales[scaleId]) return;
         const x = scales.x.getPixelForValue(reg.pressao);
         const y1 = scales.yTemp.getPixelForValue(reg.temp);
         const y2 = scales[scaleId].getPixelForValue(reg.valor);
@@ -1015,23 +1179,32 @@
     grupos = lerGruposDoDom();
     const nomeAgua = rotuloEixo(txt('ggNomeAgua', DEFAULTS.nomeAgua), DEFAULTS.nomeAgua);
     const nomePressao = rotuloEixo(txt('ggNomePressao', DEFAULTS.nomePressao), DEFAULTS.nomePressao);
-    const titulo = txt('ggTituloGrafico', tituloAutomatico());
-    const paMin = num('ggPaMin', DEFAULTS.paMin);
-    const paMax = num('ggPaMax', DEFAULTS.paMax);
     const paTick = num('ggPaTick', DEFAULTS.paTick);
-    const tMin = num('ggAguaMin', DEFAULTS.aguaMin);
-    const tMax = num('ggAguaMax', DEFAULTS.aguaMax);
     const tTick = num('ggAguaTick', DEFAULTS.aguaTick);
     garantirPontosNaGrade();
-    const idsOk = new Set(grupos.map((g) => g.id));
-    const recs = loadRegs().map((r) => Object.assign({}, r, { modelo: normalizarModelo(r.modelo) }))
-      .filter((r) => idsOk.has(r.modelo));
+    const recs = loadRegs().map((r) => Object.assign({}, r, {
+      modelo: r.modelo ? normalizarModelo(r.modelo) : '',
+      pressao: Number(r.pressao),
+      temp: Number(r.temp),
+      valor: Number(r.valor),
+    })).filter((r) => Number.isFinite(r.pressao) && Number.isFinite(r.temp));
+
+    const vis = vista || vistaDaConfig();
+    const paMin = vis.xMin;
+    const paMax = vis.xMax;
+    const tMin = vis.yMin;
+    const tMax = vis.yMax;
 
     const datasets = [
       {
         type: 'scatter', label: 'Pontos',
         data: recs.map((r) => ({ x: r.pressao, y: r.temp })),
-        backgroundColor: '#2563eb', pointRadius: 6, yAxisID: 'yTemp',
+        backgroundColor: '#2563eb',
+        borderColor: '#ffffff',
+        borderWidth: 1,
+        pointRadius: 7,
+        yAxisID: 'yTemp',
+        clip: false,
       },
     ];
     const scales = {
@@ -1044,47 +1217,23 @@
     };
     grupos.forEach((g, i) => {
       const axisId = `yG_${g.id}`;
+      const gVis = vis.grupos?.[g.id] || { min: g.min, max: g.max };
       datasets.push({
         type: 'scatter', label: g.nome,
-        data: recs.filter((r) => r.modelo === g.id).map((r) => ({ x: r.pressao, y: r.valor })),
-        backgroundColor: CORES[i % CORES.length], pointRadius: 6, yAxisID: axisId,
+        data: recs.filter((r) => r.modelo === g.id && Number.isFinite(r.valor)).map((r) => ({ x: r.pressao, y: r.valor })),
+        backgroundColor: CORES[i % CORES.length],
+        borderColor: '#ffffff',
+        borderWidth: 1,
+        pointRadius: 7,
+        yAxisID: axisId,
+        clip: false,
       });
-      scales[axisId] = eixoY(axisId, rotuloEixo(g.nome, g.nome), CORES[i % CORES.length], g.min, g.max, g.tick, {
+      scales[axisId] = eixoY(axisId, rotuloEixo(g.nome, g.nome), CORES[i % CORES.length], gVis.min, gVis.max, g.tick, {
         position: 'right',
         offset: i > 0,
         grid: { drawOnChartArea: false },
       });
     });
-
-    if (overlayTeste?.pontos?.length) {
-      datasets.push({
-        type: 'scatter',
-        label: 'Teste real',
-        data: overlayTeste.pontos,
-        backgroundColor: '#ea580c',
-        borderColor: '#ea580c',
-        pointRadius: 5,
-        pointStyle: 'rectRot',
-        showLine: true,
-        tension: 0.15,
-        yAxisID: 'yTemp',
-      });
-      grupos.forEach((g, i) => {
-        const pts = overlayTeste.grupos?.[g.id];
-        if (!pts?.length) return;
-        datasets.push({
-          type: 'scatter',
-          label: `Teste ${g.nome}`,
-          data: pts,
-          backgroundColor: CORES[i % CORES.length],
-          borderColor: CORES[i % CORES.length],
-          pointRadius: 5,
-          pointStyle: 'triangle',
-          showLine: true,
-          yAxisID: `yG_${g.id}`,
-        });
-      });
-    }
 
     if (chartAlta) chartAlta.destroy();
     chartAlta = new Chart(canvas, {
@@ -1094,7 +1243,8 @@
         responsive: true,
         maintainAspectRatio: false,
         parsing: false,
-        events: ['mousemove', 'mouseout', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchmove', 'touchend'],
+        animation: false,
+        events: ['mousemove', 'mouseout', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchmove', 'touchend', 'wheel'],
         plugins: {
           legend: { display: false },
           title: { display: false },
@@ -1105,6 +1255,7 @@
       plugins: [pluginTituloCentro, pluginLinhaAzul, pluginConectores],
     });
     chartAlta.$ggRecs = recs;
+    if (overlayTeste?.pontos?.length) atualizarTabelaTeste(overlayTeste.pontos);
   }
 
   function canvasDoGrafico() { return chartAlta?.canvas || $('ggChartAlta'); }
@@ -1202,11 +1353,12 @@
             </button>
           </div>
           <div style="font-weight:700;margin:12px 0;">Novo Registro</div>
+          <p class="gg-dica" style="margin-top:0;">Marca um resultado neste gráfico (não fica salvo sozinho). Preencha os valores reais — os campos começam vazios.</p>
           <div class="gg-form-grid">
-            <label>Temperatura <input id="ggTemp" type="number" step="0.1" value="30"></label>
-            <label>Pressão <input id="ggPressao" type="number" step="1" value="250"></label>
+            <label>Temperatura <input id="ggTemp" type="number" step="0.1" placeholder="valor do teste"></label>
+            <label>Pressão <input id="ggPressao" type="number" step="1" placeholder="valor do teste"></label>
             <label>Modelo <select id="ggModelo"></select></label>
-            <label>Valor <input id="ggValor" type="number" step="0.1" value="12.4"></label>
+            <label>Valor <input id="ggValor" type="number" step="0.1" placeholder="valor do eixo da direita"></label>
           </div>
           <button type="button" id="ggBtnEnviar" class="content-button" style="margin-top:12px;background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;">Enviar Registro</button>
         </div>
@@ -1236,7 +1388,8 @@
                 </button>
               </div>
               <div id="ggOverlayInfo" class="gg-overlay-info"></div>
-              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta.</p>
+              <div id="ggTabelaTesteWrap" class="gg-tabela-teste-wrap" style="display:none;"></div>
+              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll do mouse no gráfico = zoom.</p>
             </div>
             <div class="gg-side">
               <input id="ggNomeParametros" class="gg-nome" value="Parâmetros" title="Clique para mudar o nome">
@@ -1262,7 +1415,7 @@
             <h3 style="margin:0;">Testes registrados</h3>
             <button type="button" class="content-button gg-fechar-modal" style="background:#334155;color:#fff;">Fechar</button>
           </div>
-          <p class="gg-dica" style="margin-top:0;">Digite a OP ou escolha o modelo, clique no teste e escolha os campos de cada eixo.</p>
+          <p class="gg-dica" style="margin-top:0;">Digite a OP ou escolha o modelo e clique no teste. Os resultados entram no gráfico já configurado (mesmo jeito do Novo Registro: ponto da esquerda ligado ao ponto da direita).</p>
           <div class="gg-form-grid">
             <label>OP
               <input id="ggTesteOp" type="text" placeholder="Ex.: 12345">
@@ -1273,42 +1426,6 @@
           </div>
           <button type="button" id="ggBtnBuscarOp" class="content-button" style="margin-top:12px;background:#0369a1;color:#fff;">Buscar OP</button>
           <div id="ggTesteLista" style="margin-top:14px;"></div>
-        </div>
-      </div>
-      <div id="ggModalMapa" class="gg-gerador-modal">
-        <div class="gg-modal-box">
-          <div class="gg-modal-head">
-            <h3 style="margin:0;">Como plotar no gráfico</h3>
-            <button type="button" class="content-button gg-fechar-modal" style="background:#334155;color:#fff;">Fechar</button>
-          </div>
-          <div class="gg-mapa-grid">
-            <div>
-              <div style="font-weight:700;margin-bottom:8px;">Eixo da esquerda</div>
-              <label>Campo (temp. ambiente em diante)
-                <select id="ggMapaColY"></select>
-              </label>
-            </div>
-            <div>
-              <div id="ggMapaResumo" style="font-size:13px;color:#cbd5e1;margin-bottom:10px;"></div>
-              <p class="gg-dica">A linha azul do gerador fica. Os pontos laranja são o teste real.</p>
-            </div>
-            <div>
-              <div style="font-weight:700;margin-bottom:8px;">Eixos da direita (grupos)</div>
-              <div id="ggMapaGrupos" class="gg-form-grid" style="grid-template-columns:1fr;"></div>
-            </div>
-          </div>
-          <div class="gg-pressao-row" style="margin-top:16px;">
-            <label>Campo da parte de baixo (pressão)
-              <select id="ggMapaColX"></select>
-            </label>
-            <label>Quantidade de pontos (igual ao gerador)
-              <input id="ggMapaQtd" type="number" min="1" step="1" value="12">
-            </label>
-          </div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
-            <button type="button" id="ggBtnVoltarTestes" class="content-button" style="background:#334155;color:#fff;">Voltar à lista</button>
-            <button type="button" id="ggBtnAplicarTeste" class="content-button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;">Mostrar no gráfico</button>
-          </div>
         </div>
       </div>`;
   }
@@ -1359,8 +1476,9 @@
     garantirUi();
     injectCss();
     renderGrupos();
+    ligarZoomRoda();
     ['ggAguaMax', 'ggAguaMin', 'ggAguaTick', 'ggPaMin', 'ggPaMax', 'ggPaTick'].forEach((id) => {
-      $(id)?.addEventListener('change', () => { salvarPrefs(); desenhar(); });
+      $(id)?.addEventListener('change', () => { vista = null; salvarPrefs(); desenhar(); });
     });
     ['ggNomeAgua', 'ggNomeParametros', 'ggNomePressao', 'ggTituloGrafico'].forEach((id) => {
       const fn = () => { atualizarRotulos(); salvarPrefs(); desenhar(); };
@@ -1397,11 +1515,6 @@
       const q = String($('ggTesteModelo')?.value || '').trim();
       if (q) buscarTestes('modelo', q);
     });
-    $('ggBtnVoltarTestes')?.addEventListener('click', () => {
-      fecharModais();
-      abrirModal('ggModalTestes');
-    });
-    $('ggBtnAplicarTeste')?.addEventListener('click', aplicarTesteNoGrafico);
     document.querySelectorAll('.gg-gerador-modal .gg-fechar-modal').forEach((btn) => {
       btn.addEventListener('click', fecharModais);
     });
@@ -1410,12 +1523,20 @@
     });
     $('ggBtnEnviar')?.addEventListener('click', () => {
       grupos = lerGruposDoDom();
+      const temp = Number(String($('ggTemp')?.value || '').trim());
+      const pressao = Number(String($('ggPressao')?.value || '').trim());
+      const valor = Number(String($('ggValor')?.value || '').trim());
+      if (!Number.isFinite(temp) || !Number.isFinite(pressao) || !Number.isFinite(valor)) {
+        alert('Preencha temperatura, pressão e valor do eixo da direita.');
+        return;
+      }
       const regs = loadRegs();
       regs.push({
-        temp: num('ggTemp', 30),
-        pressao: num('ggPressao', 250),
+        temp,
+        pressao,
         modelo: $('ggModelo')?.value || grupos[0]?.id || 'e1',
-        valor: num('ggValor', 12.4),
+        valor,
+        origem: 'manual',
       });
       saveRegs(regs);
       desenhar();
@@ -1423,6 +1544,7 @@
     $('ggBtnLimpar')?.addEventListener('click', () => {
       if (!confirm('Apagar todos os pontos marcados?')) return;
       overlayTeste = null;
+      vista = null;
       atualizarOverlayInfo();
       saveRegs([]);
       desenhar();

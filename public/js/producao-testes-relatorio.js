@@ -8,6 +8,9 @@
   let _view = 'lista';
   let _filtroModelo = '';
   let _searchTimer = null;
+  /** Contexto do detalhe para redesenhar a evolução ao mudar o configurável */
+  let _detalheEvo = null;
+  let _evoCfg = { principal: 'cop', series: ['temp_dif', 'temp_saida'] };
 
   const CORES = {
     cop: '#34d399',
@@ -80,6 +83,31 @@
     { k: 'hz_compressor', label: 'Hz comp.', dig: 1 },
     { k: 'corrente_compressor', label: 'A comp.', dig: 1 },
   ];
+
+  /** Colunas numéricas disponíveis no configurável (mesma lógica do Gerador de gráficos) */
+  const COLS_EVO = COLS_LEITURAS.filter((c) => c.k !== 'id' && c.k !== 'data_hora');
+
+  const COR_POR_COL = {
+    cop: '#34d399',
+    temp_dif: '#a78bfa',
+    temp_saida: '#f472b6',
+    temp_ambiente: '#94a3b8',
+    temp_entrada: '#60a5fa',
+    tensao: '#f59e0b',
+    corrente: '#fb7185',
+    vazao: '#2dd4bf',
+    kcal_h: '#a3e635',
+    kw_aquecimento: '#38bdf8',
+    kw_consumo: '#f59e0b',
+    pressao_alta: '#ef4444',
+    pressao_baixa: '#22d3ee',
+    rpm_ventilador: '#c084fc',
+    abertura_valvula: '#67e8f9',
+    hz_compressor: '#fdba74',
+    corrente_compressor: '#f9a8d4',
+  };
+
+  const PALETA_EVO = ['#34d399', '#a78bfa', '#f472b6', '#38bdf8', '#f59e0b', '#ef4444', '#22d3ee', '#2dd4bf', '#94a3b8', '#60a5fa'];
 
   const COLS_FTIBR = [
     { k: 'id', label: 'ID', dig: 0 },
@@ -212,9 +240,12 @@
   }
 
   function ensureStyles() {
-    if ($('prodTestesStyles')) return;
+    const VER = '20260819a';
+    const existing = $('prodTestesStyles');
+    if (existing?.getAttribute('data-ver') === VER) return;
     const style = document.createElement('style');
     style.id = 'prodTestesStyles';
+    style.setAttribute('data-ver', VER);
     style.textContent = `
       #producaoTestesPane .pt-shell { display:flex; flex-direction:column; gap:14px; }
       #producaoTestesPane .pt-hero {
@@ -303,6 +334,41 @@
       #producaoTestesPane .pt-chart-card .pt-chart-box { height:260px; position:relative; }
       #producaoTestesPane .pt-chart-card.wide .pt-chart-box { height:300px; }
       #producaoTestesPane .pt-chart-card canvas { width:100% !important; height:100% !important; }
+      #producaoTestesPane .pt-evo-config {
+        display:grid; grid-template-columns:minmax(160px,220px) 1fr minmax(180px,260px); gap:12px;
+        margin:0 0 12px; padding:12px; border-radius:10px;
+        border:1px solid rgba(52,211,153,.22); background:rgba(6,78,59,.18);
+      }
+      #producaoTestesPane .pt-evo-side { display:flex; flex-direction:column; gap:8px; min-width:0; }
+      #producaoTestesPane .pt-evo-side-title {
+        font-size:11px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; color:#94a3b8;
+      }
+      #producaoTestesPane .pt-evo-mid {
+        display:flex; align-items:center; justify-content:center; text-align:center;
+        color:#64748b; font-size:12px; padding:8px; border-radius:8px;
+        border:1px dashed rgba(148,163,184,.2); background:rgba(15,23,42,.35);
+      }
+      #producaoTestesPane .pt-evo-select,
+      #producaoTestesPane .pt-evo-serie-card select {
+        width:100%; height:36px; border-radius:8px; padding:0 10px;
+        border:1px solid rgba(148,163,184,.28); background:#0f172a; color:#e2e8f0; font-size:13px; cursor:pointer;
+      }
+      #producaoTestesPane .pt-evo-serie-card {
+        display:flex; align-items:center; gap:6px; padding:8px; border-radius:8px;
+        border:1px solid rgba(148,163,184,.18); background:rgba(15,23,42,.55);
+      }
+      #producaoTestesPane .pt-evo-serie-card select { flex:1; min-width:0; }
+      #producaoTestesPane .pt-evo-serie-del {
+        width:32px; height:32px; border-radius:8px; border:1px solid rgba(248,113,113,.35);
+        background:rgba(239,68,68,.12); color:#f87171; cursor:pointer; flex-shrink:0;
+        display:inline-flex; align-items:center; justify-content:center;
+      }
+      #producaoTestesPane .pt-evo-add {
+        height:34px; border-radius:8px; border:1px solid rgba(56,189,248,.35);
+        background:rgba(14,165,233,.12); color:#7dd3fc; font-size:12px; font-weight:600; cursor:pointer;
+        display:inline-flex; align-items:center; justify-content:center; gap:6px;
+      }
+      #producaoTestesPane .pt-evo-series { display:flex; flex-direction:column; gap:6px; max-height:180px; overflow:auto; }
       #producaoTestesPane .pt-compare-grid {
         display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:12px;
       }
@@ -381,9 +447,198 @@
       @media (max-width: 960px) {
         #producaoTestesPane .pt-charts { grid-template-columns:1fr; }
         #producaoTestesPane .pt-chart-card.wide { grid-column:auto; }
+        #producaoTestesPane .pt-evo-config { grid-template-columns:1fr; }
       }
     `;
-    document.head.appendChild(style);
+    if (existing) existing.replaceWith(style);
+    else document.head.appendChild(style);
+  }
+
+  function labelColEvo(k) {
+    const col = COLS_EVO.find((c) => c.k === k);
+    return col ? col.label : String(k || '').replace(/_/g, ' ');
+  }
+
+  function corColEvo(k, idx) {
+    return COR_POR_COL[k] || PALETA_EVO[idx % PALETA_EVO.length];
+  }
+
+  function optionsColsEvo(selecionada, usados) {
+    return COLS_EVO.map((c) => {
+      const ocupada = usados.has(c.k) && c.k !== selecionada;
+      return `<option value="${esc(c.k)}"${c.k === selecionada ? ' selected' : ''}${ocupada ? ' disabled' : ''}>${esc(labelColEvo(c.k))}</option>`;
+    }).join('');
+  }
+
+  function tituloEvolucao() {
+    const nomes = [labelColEvo(_evoCfg.principal), ...(_evoCfg.series || []).map(labelColEvo)];
+    return `Evolução das leituras (${nomes.join(' × ')})`;
+  }
+
+  function htmlEvoConfig() {
+    const usados = new Set([_evoCfg.principal, ...(_evoCfg.series || [])]);
+    return `
+      <div class="pt-evo-config" id="ptEvoConfig">
+        <div class="pt-evo-side">
+          <div class="pt-evo-side-title"><i class="fa-solid fa-arrow-left"></i> Eixo esquerdo</div>
+          <select id="ptEvoPrincipal" class="pt-evo-select" title="Grandeza do eixo esquerdo (como no Gerador de gráficos)">
+            ${optionsColsEvo(_evoCfg.principal, usados)}
+          </select>
+          <div class="pt-muted" style="font-size:11px;line-height:1.35;">Clique e escolha a grandeza principal (ex.: COP, temp ambiente, tensão…).</div>
+        </div>
+        <div class="pt-evo-mid">
+          <div>
+            <strong style="color:#94a3b8;display:block;margin-bottom:4px;">Eixo de baixo = horário</strong>
+            O gráfico acompanha a evolução no tempo, no mesmo estilo de linha de hoje.
+          </div>
+        </div>
+        <div class="pt-evo-side">
+          <div class="pt-evo-side-title"><i class="fa-solid fa-sliders"></i> Séries (direita)</div>
+          <button type="button" class="pt-evo-add" id="ptEvoAddSerie"><i class="fa-solid fa-plus"></i> Adicionar série</button>
+          <div class="pt-evo-series" id="ptEvoSeries">
+            ${(_evoCfg.series || []).map((k, i) => `
+              <div class="pt-evo-serie-card" data-idx="${i}">
+                <select data-evo-serie="${i}" title="Coluna do teste">
+                  ${optionsColsEvo(k, usados)}
+                </select>
+                <button type="button" class="pt-evo-serie-del" data-evo-del="${i}" title="Remover"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function proximaColLivre() {
+    const usados = new Set([_evoCfg.principal, ...(_evoCfg.series || [])]);
+    return COLS_EVO.find((c) => !usados.has(c.k))?.k || null;
+  }
+
+  function syncEvoConfigDom() {
+    const titulo = $('ptEvoTitulo');
+    if (titulo) {
+      titulo.innerHTML = `<i class="fa-solid fa-timeline" style="color:#34d399;"></i> ${esc(tituloEvolucao())}`;
+    }
+    const wrap = $('ptEvoConfigWrap');
+    if (wrap) wrap.innerHTML = htmlEvoConfig();
+    bindEvoConfig();
+  }
+
+  function bindEvoConfig() {
+    $('ptEvoPrincipal')?.addEventListener('change', (e) => {
+      const v = e.target.value;
+      if (!v) return;
+      _evoCfg.principal = v;
+      _evoCfg.series = (_evoCfg.series || []).filter((s) => s !== v);
+      syncEvoConfigDom();
+      renderEvolucaoChart();
+    });
+    $('ptEvoAddSerie')?.addEventListener('click', () => {
+      if ((_evoCfg.series || []).length >= 6) {
+        alert('Máximo de 6 séries à direita.');
+        return;
+      }
+      const next = proximaColLivre();
+      if (!next) {
+        alert('Todas as grandezas já estão no gráfico.');
+        return;
+      }
+      _evoCfg.series = [...(_evoCfg.series || []), next];
+      syncEvoConfigDom();
+      renderEvolucaoChart();
+    });
+    document.querySelectorAll('[data-evo-serie]').forEach((sel) => {
+      sel.addEventListener('change', (e) => {
+        const idx = Number(e.target.getAttribute('data-evo-serie'));
+        const v = e.target.value;
+        if (!v || Number.isNaN(idx)) return;
+        const series = [...(_evoCfg.series || [])];
+        series[idx] = v;
+        _evoCfg.series = series.filter((s, i) => s && s !== _evoCfg.principal && series.indexOf(s) === i);
+        syncEvoConfigDom();
+        renderEvolucaoChart();
+      });
+    });
+    document.querySelectorAll('[data-evo-del]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const idx = Number(btn.getAttribute('data-evo-del'));
+        if (Number.isNaN(idx)) return;
+        _evoCfg.series = (_evoCfg.series || []).filter((_, i) => i !== idx);
+        syncEvoConfigDom();
+        renderEvolucaoChart();
+      });
+    });
+  }
+
+  function renderEvolucaoChart() {
+    if (!_detalheEvo) return;
+    const { leituras, labels, annIndices } = _detalheEvo;
+    const principal = _evoCfg.principal || 'cop';
+    const series = (_evoCfg.series || []).filter((k) => k && k !== principal);
+    const pointRadius = leituras.map((_, i) => (
+      i === annIndices.inicio || i === annIndices.pico || i === annIndices.fim ? 6 : (leituras.length > 40 ? 0 : 2)
+    ));
+
+    const datasets = [
+      ds(labelColEvo(principal), leituras.map((l) => l[principal]), corColEvo(principal, 0), {
+        yAxisID: 'y', pointRadius, pointHoverRadius: 7,
+      }),
+    ];
+    const scales = {
+      x: { ticks: { maxTicksLimit: 10, font: { size: 10 } } },
+      y: {
+        title: { display: true, text: labelColEvo(principal), color: corColEvo(principal, 0) },
+        beginAtZero: true,
+        ticks: { font: { size: 10 } },
+      },
+    };
+
+    series.forEach((k, i) => {
+      const axisId = series.length === 1 ? 'y1' : `yR${i}`;
+      const color = corColEvo(k, i + 1);
+      datasets.push(ds(labelColEvo(k), leituras.map((l) => l[k]), color, {
+        yAxisID: axisId,
+        pointRadius: 0,
+        borderDash: i === 1 ? [4, 3] : undefined,
+      }));
+      scales[axisId] = {
+        position: 'right',
+        title: { display: true, text: labelColEvo(k), color },
+        grid: { drawOnChartArea: false },
+        offset: i > 0,
+        ticks: { font: { size: 10 } },
+      };
+    });
+
+    makeChart('ptChartEvolucao', {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+          tooltip: {
+            callbacks: {
+              afterBody(items) {
+                const i = items?.[0]?.dataIndex;
+                if (i == null) return '';
+                const tags = [];
+                if (i === annIndices.inicio) tags.push('→ INÍCIO');
+                if (i === annIndices.pico) tags.push('→ PICO COP');
+                if (i === annIndices.fim) tags.push('→ FIM REGIME');
+                const fase = leituras[i]?.fase;
+                if (fase) tags.push(`Fase: ${FASE_META[fase]?.label || fase}`);
+                return tags;
+              },
+            },
+          },
+        },
+        scales,
+      },
+    });
   }
 
   function setStatus(msg, isErr) {
@@ -622,6 +877,8 @@
     const root = $('prodTestesRoot');
     if (!root) return;
     _view = 'detalhe';
+    _detalheEvo = null;
+    _evoCfg = { principal: 'cop', series: ['temp_dif', 'temp_saida'] };
     destroyCharts();
     root.innerHTML = `<div class="pt-empty"><i class="fa-solid fa-spinner fa-spin"></i> Analisando leituras do relatório #${esc(id)}...</div>`;
     setStatus('');
@@ -738,7 +995,8 @@
           <div class="pt-section-title"><i class="fa-solid fa-chart-column" style="color:#38bdf8;"></i> Gráficos — evolução e comparação</div>
           <div class="pt-charts">
             <div class="pt-chart-card wide">
-              <h4><i class="fa-solid fa-timeline" style="color:#34d399;"></i> Evolução das leituras (COP × ΔT × T saída)</h4>
+              <h4 id="ptEvoTitulo"><i class="fa-solid fa-timeline" style="color:#34d399;"></i> ${esc(tituloEvolucao())}</h4>
+              <div id="ptEvoConfigWrap">${htmlEvoConfig()}</div>
               <div class="pt-chart-box"><canvas id="ptChartEvolucao"></canvas></div>
             </div>
             <div class="pt-chart-card">
@@ -835,55 +1093,11 @@
       });
 
       chartDefaults();
+      _detalheEvo = { leituras, labels, annIndices };
+      bindEvoConfig();
       requestAnimationFrame(() => {
-        // 1) Evolução principal com pontos-chave maiores
-        const pointRadius = leituras.map((_, i) => (
-          i === annIndices.inicio || i === annIndices.pico || i === annIndices.fim ? 6 : (leituras.length > 40 ? 0 : 2)
-        ));
-        makeChart('ptChartEvolucao', {
-          type: 'line',
-          data: {
-            labels,
-            datasets: [
-              ds('COP', leituras.map((l) => l.cop), CORES.cop, { yAxisID: 'y', pointRadius, pointHoverRadius: 7 }),
-              ds('ΔT (°C)', leituras.map((l) => l.temp_dif), CORES.delta, { yAxisID: 'y1', pointRadius: 0 }),
-              ds('T saída (°C)', leituras.map((l) => l.temp_saida), CORES.saida, { yAxisID: 'y1', pointRadius: 0, borderDash: [4, 3] }),
-            ],
-          },
-          options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            interaction: { mode: 'index', intersect: false },
-            plugins: {
-              legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
-              tooltip: {
-                callbacks: {
-                  afterBody(items) {
-                    const i = items?.[0]?.dataIndex;
-                    if (i == null) return '';
-                    const tags = [];
-                    if (i === annIndices.inicio) tags.push('→ INÍCIO');
-                    if (i === annIndices.pico) tags.push('→ PICO COP');
-                    if (i === annIndices.fim) tags.push('→ FIM REGIME');
-                    const fase = leituras[i]?.fase;
-                    if (fase) tags.push(`Fase: ${FASE_META[fase]?.label || fase}`);
-                    return tags;
-                  },
-                },
-              },
-            },
-            scales: {
-              x: { ticks: { maxTicksLimit: 10, font: { size: 10 } } },
-              y: { title: { display: true, text: 'COP', color: CORES.cop }, beginAtZero: true, ticks: { font: { size: 10 } } },
-              y1: {
-                position: 'right',
-                title: { display: true, text: '°C', color: CORES.delta },
-                grid: { drawOnChartArea: false },
-                ticks: { font: { size: 10 } },
-              },
-            },
-          },
-        });
+        // 1) Evolução configurável (padrão COP × ΔT × T saída)
+        renderEvolucaoChart();
 
         // 2) Barras comparativas início/pico/fim
         if (barras.labels?.length) {
