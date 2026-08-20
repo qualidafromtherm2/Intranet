@@ -10360,10 +10360,18 @@ table.tabela td.num {
 }
 
 .links-rapidos-anchor {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--content-title-color);
+  font: inherit;
   font-weight: 600;
+  text-align: left;
   text-decoration: none;
   word-break: break-all;
+  cursor: pointer;
 }
 
 .links-rapidos-anchor:hover {
@@ -10373,6 +10381,50 @@ table.tabela td.num {
 .links-rapidos-meta {
   margin-top: 4px;
   font-size: 11px;
+  color: var(--inactive-color);
+}
+
+.links-rapidos-qr-card {
+  max-width: 360px;
+  text-align: center;
+}
+
+.links-rapidos-qr-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.links-rapidos-qr-abrir {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 180px;
+  padding: 10px 18px;
+  background: #2563eb;
+  color: #fff !important;
+  border: none;
+  border-radius: 8px;
+  text-decoration: none !important;
+  font-weight: 600;
+}
+
+.links-rapidos-qr-abrir:hover {
+  filter: brightness(1.08);
+}
+
+.links-rapidos-qr-img {
+  width: 220px;
+  height: 220px;
+  border-radius: 10px;
+  background: #fff;
+  padding: 10px;
+  box-sizing: border-box;
+}
+
+.links-rapidos-qr-hint {
+  font-size: 12px;
   color: var(--inactive-color);
 }
 
