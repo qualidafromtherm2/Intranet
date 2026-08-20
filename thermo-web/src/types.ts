@@ -51,6 +51,33 @@ export interface ProductPurchaseResponse {
   itens: ProductPurchaseFlag[]
 }
 
+export interface ProductPurchaseDetailItem {
+  id: number
+  produto_codigo: string
+  produto_descricao: string | null
+  quantidade: number | null
+  status: string | null
+  solicitante: string | null
+  responsavel_pela_compra: string | null
+  fornecedor_nome: string | null
+  numero_pedido: string | null
+  c_numero: string | null
+  grupo_requisicao: string | null
+  prazo_solicitado: string | null
+  previsao_chegada: string | null
+  departamento: string | null
+  objetivo_compra: string | null
+  observacao: string | null
+  created_at: string | null
+}
+
+export interface ProductPurchaseDetailResponse {
+  ok: boolean
+  codigo: string
+  total: number
+  compras: ProductPurchaseDetailItem[]
+}
+
 export interface CartItem {
   id: number
   produto_codigo: string

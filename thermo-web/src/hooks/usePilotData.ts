@@ -17,6 +17,8 @@ type PilotCacheState = {
   viewMode: ViewMode
 }
 
+type PilotSnapshot = Pick<PilotCacheState, 'products' | 'filtersMeta' | 'cartCount' | 'warnings' | 'fetchedAt'>
+
 const initialCacheState = (): PilotCacheState => ({
   products: [],
   filtersMeta: { families: [], typeItems: [], locations: [] },
@@ -29,6 +31,7 @@ const initialCacheState = (): PilotCacheState => ({
 })
 
 let pilotCache = initialCacheState()
+let inFlightPrefetch: Promise<PilotSnapshot> | null = null
 
 const hasUsableCache = () => pilotCache.products.length > 0
 const cacheExpired = () => !pilotCache.fetchedAt || Date.now() - pilotCache.fetchedAt > cacheTtlMs
@@ -39,6 +42,71 @@ const saveCache = (next: Partial<PilotCacheState>) => {
     ...next,
     filters: next.filters ? { ...next.filters } : pilotCache.filters,
   }
+}
+
+async function fetchPilotSnapshot(): Promise<PilotSnapshot> {
+  const productsResponse = await loadProducts()
+  const [purchasesResult, locationsResult, cartResult] = await Promise.allSettled([loadPurchases(), loadLocations(), loadCart()])
+
+  const nextWarnings: string[] = []
+  const purchasesResponse =
+    purchasesResult.status === 'fulfilled'
+      ? purchasesResult.value
+      : (nextWarnings.push('Situação de compra indisponível no momento.'), { ok: false, total: 0, itens: [] })
+
+  const locationsResponse =
+    locationsResult.status === 'fulfilled'
+      ? locationsResult.value
+      : (nextWarnings.push('Locais de inventário indisponíveis no momento.'), { ok: false, locais: [] })
+
+  const cartResponse =
+    cartResult.status === 'fulfilled'
+      ? cartResult.value
+      : (nextWarnings.push('Carrinho indisponível no momento.'), { ok: false, itens: [] })
+
+  const merged = mergePilotData(productsResponse, purchasesResponse, locationsResponse)
+  const nextFiltersMeta = buildFilterMeta(merged, locationsResponse)
+  const nextCartCount = Array.isArray(cartResponse.itens) ? cartResponse.itens.length : 0
+
+  const snapshot = {
+    products: merged,
+    filtersMeta: nextFiltersMeta,
+    cartCount: nextCartCount,
+    warnings: nextWarnings,
+    fetchedAt: Date.now(),
+  }
+
+  saveCache(snapshot)
+  return snapshot
+}
+
+export async function prefetchPilotData({ force = false }: { force?: boolean } = {}) {
+  if (!force && hasUsableCache() && !cacheExpired()) {
+    return {
+      products: pilotCache.products,
+      filtersMeta: pilotCache.filtersMeta,
+      cartCount: pilotCache.cartCount,
+      warnings: pilotCache.warnings,
+      fetchedAt: pilotCache.fetchedAt,
+    }
+  }
+  if (!force && inFlightPrefetch) return inFlightPrefetch
+
+  const task = fetchPilotSnapshot()
+    .catch((error) => {
+      throw error
+    })
+    .finally(() => {
+      if (inFlightPrefetch === task) inFlightPrefetch = null
+    })
+
+  inFlightPrefetch = task
+  return task
+}
+
+export function resetPilotDataCache() {
+  pilotCache = initialCacheState()
+  inFlightPrefetch = null
 }
 
 export function usePilotData() {
@@ -88,41 +156,11 @@ export function usePilotData() {
     setError(null)
 
     try {
-      const productsResponse = await loadProducts()
-      const [purchasesResult, locationsResult, cartResult] = await Promise.allSettled([loadPurchases(), loadLocations(), loadCart()])
-
-      const nextWarnings: string[] = []
-      const purchasesResponse =
-        purchasesResult.status === 'fulfilled'
-          ? purchasesResult.value
-          : (nextWarnings.push('Situação de compra indisponível no momento.'), { ok: false, total: 0, itens: [] })
-
-      const locationsResponse =
-        locationsResult.status === 'fulfilled'
-          ? locationsResult.value
-          : (nextWarnings.push('Locais de inventário indisponíveis no momento.'), { ok: false, locais: [] })
-
-      const cartResponse =
-        cartResult.status === 'fulfilled'
-          ? cartResult.value
-          : (nextWarnings.push('Carrinho indisponível no momento.'), { ok: false, itens: [] })
-
-      const merged = mergePilotData(productsResponse, purchasesResponse, locationsResponse)
-      const nextFiltersMeta = buildFilterMeta(merged, locationsResponse)
-      const nextCartCount = Array.isArray(cartResponse.itens) ? cartResponse.itens.length : 0
-
-      setProducts(merged)
-      setFiltersMeta(nextFiltersMeta)
-      setCartCount(nextCartCount)
-      setWarnings(nextWarnings)
-
-      saveCache({
-        products: merged,
-        filtersMeta: nextFiltersMeta,
-        cartCount: nextCartCount,
-        warnings: nextWarnings,
-        fetchedAt: Date.now(),
-      })
+      const snapshot = await prefetchPilotData({ force })
+      setProducts(snapshot.products)
+      setFiltersMeta(snapshot.filtersMeta)
+      setCartCount(snapshot.cartCount)
+      setWarnings(snapshot.warnings)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Falha ao carregar a Lista de Produtos real.')
       setWarnings([])

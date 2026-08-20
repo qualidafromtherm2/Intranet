@@ -4,6 +4,7 @@ import type {
   DataMode,
   InventoryLocationsResponse,
   ProductListResponse,
+  ProductPurchaseDetailResponse,
   ProductPurchaseResponse,
   ProductStreamEvent,
 } from '../types'
@@ -70,6 +71,19 @@ export async function loadProducts(): Promise<ProductListResponse> {
 export async function loadPurchases(): Promise<ProductPurchaseResponse> {
   if (dataMode === 'demo') return demoSnapshot.purchases
   return getJson<ProductPurchaseResponse>('/api/compras/produtos-em-compra')
+}
+
+export async function loadPurchaseDetail(codigo: string): Promise<ProductPurchaseDetailResponse> {
+  if (dataMode === 'demo') {
+    return {
+      ok: true,
+      codigo,
+      total: 0,
+      compras: [],
+    }
+  }
+
+  return getJson<ProductPurchaseDetailResponse>(`/api/compras/produtos-em-compra/${encodeURIComponent(codigo)}`)
 }
 
 export async function loadLocations(): Promise<InventoryLocationsResponse> {

@@ -3,6 +3,7 @@ import { Boxes, ExternalLink, Home, LogOut, Menu, ShieldCheck, X } from 'lucide-
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
+import { prefetchPilotData } from './hooks/usePilotData'
 import { buildAllowedAreas } from './lib/navigation'
 import { buildLegacyUrl, getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
 import type { AppView, AuthUser, ShellAction } from './types'
@@ -55,7 +56,7 @@ function LoginScreen({
           <div className="w-full rounded-[28px] border border-thermo-border bg-white p-6 shadow-sm md:p-8">
             <div className="mb-6 flex items-center justify-between gap-4">
               <img src="/branding/thermo-logo-principal.png" alt="Thermo" className="h-9 w-auto" />
-              <img src="/branding/thermo-app-icon.png" alt="" className="size-10 rounded-2xl" />
+              <img src="/branding/thermo-simbolo.png" alt="" className="size-10 rounded-2xl object-cover" />
             </div>
             <div className="mb-6">
               <h1 className="text-2xl font-bold text-thermo-navy">Entrar</h1>
@@ -309,6 +310,7 @@ function App() {
           const nextAreas = buildAllowedAreas(tree.nodes)
           setAllowedAreas(nextAreas)
           setAreaId(nextAreas[0]?.id || null)
+          void prefetchPilotData()
         } catch (error) {
           setPermissionError(error instanceof Error ? error.message : 'Falha ao carregar permissões reais.')
           setAllowedAreas([])
@@ -336,6 +338,7 @@ function App() {
       setAllowedAreas(nextAreas)
       setAreaId(nextAreas[0]?.id || null)
       setActiveView('home')
+      void prefetchPilotData()
     } catch (error) {
       setAuthError(error instanceof Error ? error.message : 'Falha no login.')
     } finally {
