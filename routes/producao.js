@@ -3413,5 +3413,100 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
   }
 });
 
+/** Destinos permitidos no Aloca (Registro de produção / correção de posto). */
+const ALOCAR_OP_DESTINOS = {
+  programado: { status: null, label: 'Programado' },
+  solicitado: { status: 'Montagem hermetica', label: 'Montagem hermetica' },
+  produzindo: { status: 'Montagem eletrica', label: 'Montagem eletrica' },
+  teste: { status: 'Teste', label: 'Teste' },
+  inspecao_final: { status: 'Inspeção final', label: 'Inspeção final' },
+};
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/alocar-op — move OP para um kanban escolhido
+ * (correção manual: posto errado ou voltar do armazém)
+ * --------------------------------------------------------------- */
+router.post('/alocar-op', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    const kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || 0;
+    const opProducaoId = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || '').trim();
+    const colKey = String(req.body?.col_key || '').trim();
+    const usuario = String(req.body?.usuario || '').trim() || getOperador(req);
+
+    const destino = ALOCAR_OP_DESTINOS[colKey];
+    if (!destino) {
+      return res.status(400).json({
+        success: false,
+        error: 'Kanban inválido. Escolha Programado, Montagem hermetica, Montagem eletrica, Teste ou Inspeção final.',
+      });
+    }
+
+    let id = kanbanProgramacaoId;
+    if (!id) {
+      if (!numeroOp && opProducaoId <= 0) {
+        return res.status(400).json({ success: false, error: 'Informe kanban_programacao_id, numero_op ou op_producao_id.' });
+      }
+      const { rows } = await dbQuery(
+        `SELECT id FROM producao."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND id = $1)
+             OR ($2::bigint > 0 AND op_producao_id = $2)
+             OR ($3::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [kanbanProgramacaoId || 0, opProducaoId || 0, numeroOp || '']
+      );
+      id = rows[0]?.id || null;
+    }
+    if (!id) {
+      return res.status(404).json({ success: false, error: 'OP não encontrada no kanban de programação.' });
+    }
+
+    const { rows: atualRows } = await dbQuery(
+      `SELECT id, numero_op, status, op_producao_id, estoque_maq_entrada_em
+         FROM producao."Kanban_programacao" WHERE id = $1`,
+      [id]
+    );
+    const atual = atualRows[0];
+    if (!atual) {
+      return res.status(404).json({ success: false, error: 'OP não encontrada no kanban de programação.' });
+    }
+
+    const statusAnterior = String(atual.status || '').trim() || 'Programado';
+    const estavaNoArmazem = !!atual.estoque_maq_entrada_em;
+
+    await dbQuery(
+      `UPDATE producao."Kanban_programacao"
+          SET status = $1,
+              estoque_maq_entrada_em = NULL
+        WHERE id = $2`,
+      [destino.status, id]
+    );
+
+    const numeroOpLog = String(atual.numero_op || numeroOp || '').trim();
+    await registrarControleOperacaoImpressaoOp({
+      kanbanProgramacaoId: id,
+      opProducaoId: Number(atual.op_producao_id) || opProducaoId || 0,
+      numeroOp: numeroOpLog,
+      usuario,
+      operacao: `Alocar OP → ${destino.label}${estavaNoArmazem ? ' (saiu do armazém)' : ''} (antes: ${statusAnterior})`,
+    });
+
+    return res.json({
+      success: true,
+      kanban_programacao_id: id,
+      status: destino.status,
+      status_label: destino.label,
+      col_key: colKey,
+      saiu_do_armazem: estavaNoArmazem,
+      status_anterior: statusAnterior,
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao alocar OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 module.exports = router;
 

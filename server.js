@@ -12238,6 +12238,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       VALUES
         ('recebimento',      'Etiqueta de recebimento (preview NF-e)', 50, 30, 20, 4, 0, 0),
         ('impressao',        'Etiqueta impressão (Identificação)',      102, 23, 20, 4, 0, 0),
+        ('separacao',        'Etiqueta de saída SEP',                   102, 30, 20, 4, 0, 0),
         ('produto',          'Produto grande (impressão rápida)',       70, 110, 20, 4, 0, 0),
         ('produto_pequena',  'Produto pequena (impressão rápida)',      50, 30, 20, 4, 0, 0),
         ('contagem',         'Contagem (impressão rápida)',             50, 30, 20, 4, 0, 0),
@@ -12249,6 +12250,7 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
       UPDATE etiqueta."ETQ_layout_config" SET nome = CASE chave
         WHEN 'recebimento' THEN 'Etiqueta de recebimento (preview NF-e)'
         WHEN 'impressao' THEN 'Etiqueta impressão (Identificação)'
+        WHEN 'separacao' THEN 'Etiqueta de saída SEP'
         WHEN 'produto' THEN 'Produto grande (impressão rápida)'
         WHEN 'produto_pequena' THEN 'Produto pequena (impressão rápida)'
         WHEN 'contagem' THEN 'Contagem (impressão rápida)'
@@ -12256,12 +12258,12 @@ app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRo
         WHEN 'endereco_caixa' THEN 'Endereço de caixa 50x30'
         ELSE nome
       END
-      WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco','endereco_caixa')
+      WHERE chave IN ('recebimento','impressao','separacao','produto','produto_pequena','contagem','endereco','endereco_caixa')
     `).catch(() => {});
     await pool.query(`
       UPDATE etiqueta."ETQ_layout_config"
          SET tipo_base = chave, perfil = false
-       WHERE chave IN ('recebimento','impressao','produto','produto_pequena','contagem','endereco','endereco_caixa')
+       WHERE chave IN ('recebimento','impressao','separacao','produto','produto_pequena','contagem','endereco','endereco_caixa')
          AND (tipo_base IS NULL OR tipo_base = '')
     `).catch(() => {});
     // Preferências de impressora do usuário (antes ficava em localStorage)
@@ -13441,6 +13443,7 @@ const ETQ_LAYOUT_SAMPLE_DEFAULT = {
   lote: '3030-000776823',
   data: '03/08/2026',
   id: '12345',
+  sep: 'SEP-1234',
   quantidade: '100',
   unidade: 'UN',
   seq: '1',
@@ -13451,6 +13454,7 @@ const ETQ_LAYOUT_SAMPLE_DEFAULT = {
 const ETQ_LAYOUT_TIPOS = [
   { chave: 'recebimento', nome: 'Recebimento — preview NF-e', vinculoImpressora: false },
   { chave: 'impressao', nome: 'Identificação do produto', vinculoImpressora: true },
+  { chave: 'separacao', nome: 'Etiqueta de saída SEP', vinculoImpressora: true },
   { chave: 'produto', nome: 'Impressão rápida — produto grande', vinculoImpressora: true },
   { chave: 'produto_pequena', nome: 'Impressão rápida — produto pequeno', vinculoImpressora: true },
   { chave: 'contagem', nome: 'Impressão rápida — contagem', vinculoImpressora: true },
@@ -13475,6 +13479,13 @@ const ETQ_LAYOUT_CAMPOS_DEFAULT = {
     { id: 'lote', tipo: 'texto', x: 150, y: 70, fonteH: 20, fonteW: 20, conteudo: 'Lote: {{lote}}' },
     { id: 'data', tipo: 'texto', x: 150, y: 94, fonteH: 20, fonteW: 20, conteudo: 'Emissao: {{data}}' },
     { id: 'desc', tipo: 'texto', x: 10, y: 158, fonteH: 18, fonteW: 18, conteudo: '{{descricao}}' },
+  ],
+  separacao: [
+    { id: 'qr', tipo: 'qr', x: 10, y: 10, magnificacao: 4, conteudo: '{{qr}}' },
+    { id: 'codigo', tipo: 'texto', x: 150, y: 18, fonteH: 20, fonteW: 20, conteudo: 'Cod.: {{codigo}}' },
+    { id: 'id', tipo: 'texto', x: 150, y: 42, fonteH: 20, fonteW: 20, conteudo: 'ID: {{id}}' },
+    { id: 'sep', tipo: 'texto', x: 150, y: 66, fonteH: 22, fonteW: 22, conteudo: 'SEP: {{sep}}' },
+    { id: 'desc', tipo: 'bloco', x: 10, y: 120, fonteH: 18, fonteW: 18, largura: 480, maxLinhas: 3, conteudo: '{{descricao}}' },
   ],
   produto: [
     { id: 'codigo', tipo: 'texto_rot', x: 25, y: 70, fonteH: 90, fonteW: 90, conteudo: '{{codigo}}' },
@@ -13687,7 +13698,7 @@ function _etqLayoutRowToClient(r) {
     tipoBase: r.tipo_base || r.chave,
     isProfile: r.perfil === true,
     ativo: r.ativo !== false,
-    placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'qr', 'quantidade', 'unidade', 'seq', 'endereco', 'vao'],
+    placeholders: ['codigo', 'descricao', 'lote', 'data', 'id', 'sep', 'qr', 'quantidade', 'unidade', 'seq', 'endereco', 'vao'],
     atualizadoEm: r.atualizado_em,
     atualizadoPor: r.atualizado_por || null,
   };
@@ -14066,6 +14077,48 @@ function _gerarZplParaImpressao({ codProd, descProd, idImpresso, idExibir, loteT
     `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${vars.id}^FS`,
     `^FO${dadosX},${dadosY + 48}^A0N,20,20^FDLote: ${vars.lote}^FS`,
     `^FO${dadosX},${dadosY + 72}^A0N,20,20^FDEmissao: ${vars.data}^FS`,
+    `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
+    '^XZ',
+  ].join('\n');
+}
+
+/** ZPL da etiqueta de saída da SEP (rastreio: código + ID + nº SEP). Não altera estoque. */
+function _gerarZplSeparacaoSaida({ codProd, descProd, idImpresso, idExibir, nSolic, layout }) {
+  const lay = layout || (_etqLayoutCache && _etqLayoutCache.separacao) || null;
+  const idQr = String(idImpresso || '').trim();
+  const idShow = String(idExibir != null && String(idExibir).trim() !== '' ? idExibir : (idImpresso || '—'));
+  const sep = String(nSolic || '').trim();
+  const vars = {
+    codigo: String(codProd || ''),
+    descricao: String(descProd || '').slice(0, 160).replace(/[\\^~]/g, ' '),
+    id: idShow,
+    sep,
+    lote: sep,
+    data: '',
+  };
+  vars.qr = idQr
+    ? `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${sep}|ID${idQr}`
+    : `${vars.codigo}|${String(descProd || '').slice(0, 40)}|${sep}|SEP`;
+
+  const fromLayout = lay ? _etqGerarZplDoLayout(lay, vars) : null;
+  if (fromLayout) return fromLayout;
+
+  const { texto: descTxt, linhas: numLinhasDesc } = _descricaoParaZpl(descProd);
+  const dadosX = 150;
+  const dadosY = 18;
+  const descX = 10;
+  const descY = 120;
+  const alturaLinhaDesc = 22;
+  const labelLen = Math.max(200, descY + numLinhasDesc * alturaLinhaDesc + 6);
+  return [
+    '^XA',
+    '^CI28',
+    '^PW812',
+    `^LL${labelLen}`,
+    `^FO10,10^BQN,2,4^FDLA,${vars.qr}^FS`,
+    `^FO${dadosX},${dadosY}^A0N,20,20^FDCod.: ${vars.codigo}^FS`,
+    `^FO${dadosX},${dadosY + 24}^A0N,20,20^FDID: ${vars.id}^FS`,
+    `^FO${dadosX},${dadosY + 48}^A0N,22,22^FDSEP: ${vars.sep}^FS`,
     `^FO${descX},${descY}^A0N,18,18^FD${descTxt}^FS`,
     '^XZ',
   ].join('\n');
@@ -25586,6 +25639,228 @@ app.delete('/api/logistica/itens_solicitados/:id/sep', async (req, res) => {
   }
 });
 
+const SEP_STATUS_ETIQUETA_SAIDA = new Set(['Separado', 'Aguardando retirada', 'Concluído']);
+
+function _sepParseEtqIdsDetalhes(raw) {
+  try {
+    const dets = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    if (!Array.isArray(dets)) return [];
+    return [...new Set(dets.map(d => parseInt(d?.etq_id ?? d?.id, 10)).filter(n => Number.isFinite(n) && n > 0))];
+  } catch (_) {
+    return [];
+  }
+}
+
+async function _sepCarregarItensEtiquetaSaida(nSolic) {
+  const { rows } = await pool.query(`
+    SELECT i.id AS solic_id, i.n_solic, i.status,
+           i.quantidade_separada::numeric AS quantidade_separada,
+           i.omie_sep_qtd::numeric AS omie_sep_qtd,
+           i.etq_sep_detalhes,
+           c.id_user::text AS id_user,
+           c.codigo_produto, c.descricao, c.unidade,
+           c.quantidade::numeric AS quantidade,
+           c.cod_omie,
+           COALESCE(c.retirada_por, c.nome_user) AS nome_user
+      FROM logistica.itens_solicitados i
+      JOIN logistica.carrinho c ON c.id = i.id_carr
+     WHERE i.n_solic = $1
+     ORDER BY i.id ASC
+  `, [nSolic]);
+  return rows;
+}
+
+async function _sepAutorizarImpressaoEtiqueta(req, rows) {
+  const id_user = req.session?.user?.id;
+  if (!id_user) return { ok: false, status: 401, error: 'Não autenticado.' };
+  if (!rows.length) return { ok: false, status: 404, error: 'SEP não encontrada.' };
+
+  const uid = String(id_user);
+  const isSolicitante = rows.some(r => String(r.id_user || '') === uid);
+  if (isSolicitante) return { ok: true, papel: 'solicitante' };
+
+  const regra = await obterPermissaoSeparacao(id_user);
+  if (regra?.restringir_destinos) {
+    // Quem não é solicitante e tem destino restrito: precisa conseguir ver a SEP no kanban.
+    // Aqui liberamos se ainda restou algum item (a listagem do kanban já filtra na prática).
+    return { ok: true, papel: 'logistica' };
+  }
+  return { ok: true, papel: 'logistica' };
+}
+
+function _sepQtdDefaultEtiqueta(row) {
+  const qSep = parseFloat(row.quantidade_separada);
+  if (Number.isFinite(qSep) && qSep > 0) return qSep;
+  const qOmie = parseFloat(row.omie_sep_qtd);
+  if (Number.isFinite(qOmie) && qOmie > 0) return qOmie;
+  const q = parseFloat(row.quantidade);
+  return Number.isFinite(q) && q > 0 ? q : 1;
+}
+
+// GET /api/logistica/sep/:nSolic/etiquetas-saida — itens elegíveis p/ etiqueta (sem mexer estoque)
+app.get('/api/logistica/sep/:nSolic/etiquetas-saida', async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const nSolic = String(req.params.nSolic || '').trim();
+    if (!nSolic) return res.status(400).json({ ok: false, error: 'n_solic inválido.' });
+
+    const rows = await _sepCarregarItensEtiquetaSaida(nSolic);
+    const auth = await _sepAutorizarImpressaoEtiqueta(req, rows);
+    if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.error });
+
+    const elegiveis = rows.filter(r => SEP_STATUS_ETIQUETA_SAIDA.has(String(r.status || '')));
+    if (!elegiveis.length) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Nenhum item Separado/Aguardando retirada/Concluído nesta SEP para imprimir.'
+      });
+    }
+
+    const itens = [];
+    for (const r of elegiveis) {
+      const codigoTexto = await _resolveProdutoOmieCodigoTexto(pool, r.codigo_produto) || r.codigo_produto;
+      const etqIds = _sepParseEtqIdsDetalhes(r.etq_sep_detalhes);
+      itens.push({
+        solic_id: r.solic_id,
+        n_solic: r.n_solic,
+        status: r.status,
+        codigo_produto: codigoTexto || r.codigo_produto,
+        descricao: r.descricao,
+        unidade: r.unidade || 'UN',
+        quantidade_default: _sepQtdDefaultEtiqueta(r),
+        etq_ids: etqIds,
+        nome_user: r.nome_user
+      });
+    }
+
+    res.json({ ok: true, n_solic: nSolic, papel: auth.papel, itens });
+  } catch (err) {
+    console.error('[logistica/sep/etiquetas-saida GET]', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
+// POST /api/logistica/sep/:nSolic/imprimir-etiquetas-saida
+// Body: { itens: [{ solic_id, quantidade }], usuario?, destino_agente?, impressora?, via_fila? }
+// Só enfileira ZPL — não altera ETQ_rec_impresso / Omie / saldo.
+app.post('/api/logistica/sep/:nSolic/imprimir-etiquetas-saida', express.json(), async (req, res) => {
+  try {
+    await ensureSchemaMigrated();
+    const nSolic = String(req.params.nSolic || '').trim();
+    if (!nSolic) return res.status(400).json({ ok: false, error: 'n_solic inválido.' });
+
+    const pedidos = Array.isArray(req.body?.itens) ? req.body.itens : [];
+    if (!pedidos.length) return res.status(400).json({ ok: false, error: 'Nenhum item para imprimir.' });
+
+    const rows = await _sepCarregarItensEtiquetaSaida(nSolic);
+    const auth = await _sepAutorizarImpressaoEtiqueta(req, rows);
+    if (!auth.ok) return res.status(auth.status).json({ ok: false, error: auth.error });
+
+    const byId = new Map(rows.map(r => [String(r.solic_id), r]));
+    const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+    const usuario = String(req.body?.usuario || req.session?.user?.login || req.session?.user?.fullName || '').trim();
+    const destiAg = String(req.body?.destino_agente || '').trim() || null;
+    const impres = String(req.body?.impressora || '').trim() || null;
+
+    await _carregarLayoutEtiqueta('separacao');
+    const layoutSep = await _etqResolverLayoutDaImpressora(destiAg, impres, 'separacao');
+
+    const zplBlocks = [];
+    const resumo = [];
+
+    for (const ped of pedidos) {
+      const solicId = parseInt(ped.solic_id, 10);
+      if (!solicId) continue;
+      const row = byId.get(String(solicId));
+      if (!row) {
+        return res.status(400).json({ ok: false, error: `Item ${solicId} não pertence à SEP ${nSolic}.` });
+      }
+      if (!SEP_STATUS_ETIQUETA_SAIDA.has(String(row.status || ''))) {
+        return res.status(400).json({
+          ok: false,
+          error: `Item ${row.codigo_produto || solicId} ainda não está Separado (status: ${row.status}).`
+        });
+      }
+      let qtd = Math.round(parseFloat(ped.quantidade));
+      if (!Number.isFinite(qtd) || qtd < 1) {
+        return res.status(400).json({ ok: false, error: `Quantidade inválida no item ${row.codigo_produto || solicId}.` });
+      }
+      if (qtd > 500) {
+        return res.status(400).json({ ok: false, error: 'Quantidade máxima por item: 500 etiquetas.' });
+      }
+
+      const codigoTexto = await _resolveProdutoOmieCodigoTexto(pool, row.codigo_produto) || row.codigo_produto;
+      const codProd = sanitize(codigoTexto, 40);
+      const descProd = sanitize(row.descricao, 160);
+      const etqIds = _sepParseEtqIdsDetalhes(row.etq_sep_detalhes);
+
+      let idRotulos = {};
+      if (etqIds.length) {
+        const { rows: rotRows } = await pool.query(
+          `SELECT id, NULLIF(TRIM(id_rotulo), '') AS id_rotulo
+             FROM etiqueta."ETQ_rec_impresso"
+            WHERE id = ANY($1::int[])`,
+          [etqIds]
+        );
+        for (const rr of rotRows) idRotulos[rr.id] = rr.id_rotulo || String(rr.id);
+      }
+
+      for (let i = 0; i < qtd; i++) {
+        const etqId = etqIds.length ? (etqIds[i] != null ? etqIds[i] : etqIds[0]) : null;
+        const idExibir = etqId ? (idRotulos[etqId] || String(etqId)) : '—';
+        const zpl = _gerarZplSeparacaoSaida({
+          codProd,
+          descProd,
+          idImpresso: etqId || '',
+          idExibir,
+          nSolic,
+          layout: layoutSep,
+        });
+        zplBlocks.push(zpl);
+      }
+      resumo.push({ solic_id: solicId, codigo: codProd, quantidade: qtd, etq_ids: etqIds });
+    }
+
+    if (!zplBlocks.length) {
+      return res.status(400).json({ ok: false, error: 'Nenhuma etiqueta gerada.' });
+    }
+
+    const filaIns = await pool.query(
+      `INSERT INTO etiqueta."ETQ_fila_impressao" (etq_ids, multiplo, usuario, zpl, quantidade, destino_agente, impressora)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [[], 0, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
+    );
+    const filaId = filaIns.rows[0].id;
+
+    try {
+      await _etqHistoricoInserir({
+        filaId,
+        zpl: zplBlocks.join('\n'),
+        quantidade: zplBlocks.length,
+        ok: true,
+        pcName: destiAg,
+        impressora: impres,
+        usuario,
+        origem: 'sep_saida',
+      });
+    } catch (histErr) {
+      console.warn('[sep/imprimir-etiquetas-saida] historico:', histErr.message);
+    }
+
+    res.json({
+      ok: true,
+      fila_id: filaId,
+      quantidade: zplBlocks.length,
+      n_solic: nSolic,
+      itens: resumo,
+      via: 'fila'
+    });
+  } catch (err) {
+    console.error('[logistica/sep/imprimir-etiquetas-saida]', err);
+    res.status(500).json({ ok: false, error: String(err?.message || err) });
+  }
+});
+
 // DELETE /api/logistica/sep/:n_solic — Remove SEP inteira (só o autor, só se todos os itens forem pendente)
 app.delete('/api/logistica/sep/:n_solic', async (req, res) => {
   const client = await pool.connect();
@@ -28451,7 +28726,14 @@ function sendStorageHtml(res, filename) {
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   const filePath = path.join(__dirname, filename);
-  const html = injectStoragePublicUrls(fs.readFileSync(filePath, 'utf8'));
+  let html = injectStoragePublicUrls(fs.readFileSync(filePath, 'utf8'));
+  // Etiquetas de saída SEP — script externo (evita conflito de edição em menu_produto.*)
+  if (filename === 'menu_produto.html' && !html.includes('sep-etiquetas-saida.js')) {
+    html = html.replace(
+      /(<script[^>]*src=["'][^"']*bipagem-contagem\.js[^"']*["'][^>]*><\/script>)/i,
+      '$1\n  <script src="/public/js/sep-etiquetas-saida.js?v=20260820a" defer></script>'
+    );
+  }
   res.type('html').send(html);
 }
 
