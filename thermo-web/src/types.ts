@@ -104,28 +104,54 @@ export interface PilotUserContext {
   permissions: PilotPermissions
 }
 
-export type InventoryHealth =
-  | 'normal'
-  | 'abaixo-minimo'
-  | 'estoque-negativo'
-  | 'expedicao-negativa'
-  | 'divergente'
+export interface ProductLocationRef {
+  codigo: string
+  nome: string
+}
 
 export interface ProductRecord extends ProductListItem {
   compraStatus: string | null
-  locaisPositivos: string[]
-  health: InventoryHealth
+  purchaseState: 'sem_compra' | 'em_compra'
+  origemCodigo: 'N' | 'I' | null
+  tipoCodigo: string | null
   imageUrl: string | null
+  locaisPositivos: ProductLocationRef[]
+  isInactive: boolean
+  isObsolete: boolean
+  isEngineering: boolean
+}
+
+export interface ProductFilterOption {
+  value: string
+  label: string
+  count: number
 }
 
 export interface FiltersState {
   search: string
-  family: string[]
+  families: string[]
+  typeItems: string[]
+  origins: Array<'N' | 'I'>
   purchaseStatus: Array<'sem_compra' | 'em_compra'>
-  locations: string[]
-  health: InventoryHealth[]
-  limitedOnly: boolean
-  inactiveVisible: boolean
+  locationCodes: string[]
+  showInactive: boolean
+  hideObsolete: boolean
+  hideEngineering: boolean
+  semEstoqueMin: boolean
+  abaixoEstoqueMin: boolean
+  acimaEstoqueMin: boolean
+  proximoEstoqueMin: boolean
+  proximoPercent: number
+  estoqueNegativo: boolean
+  expedicaoNegativa: boolean
+  saldoEnderecoSemOmie: boolean
+  saldoDivergenteEndereco: boolean
+}
+
+export interface ProductFiltersMeta {
+  families: ProductFilterOption[]
+  typeItems: ProductFilterOption[]
+  locations: ProductFilterOption[]
 }
 
 export type ViewMode = 'grid' | 'list'

@@ -8,13 +8,13 @@ describe('product pilot filters', () => {
   it('marks purchase status and health from merged sources', () => {
     const compressor = merged.find((product) => product.codigo === 'COMP-4TR-01')
     expect(compressor?.compraStatus).toBe('Pedido aguardando aprovação')
-    expect(compressor?.health).toBe('abaixo-minimo')
+    expect(compressor?.abaixo_minimo).toBe(true)
   })
 
   it('filters by purchase and location together', () => {
-    const filtered = filterProducts(merged, { ...defaultFilters, purchaseStatus: ['em_compra'], locations: ['Depósito 01 - Almoxarifado'] })
+    const filtered = filterProducts(merged, { ...defaultFilters, purchaseStatus: ['em_compra'], locationCodes: ['10717096386'] })
     expect(filtered.length).toBeGreaterThan(0)
-    expect(filtered.every((product) => product.compraStatus)).toBe(true)
+    expect(filtered.every((product) => product.compraStatus && product.locaisPositivos.some((location) => location.codigo === '10717096386'))).toBe(true)
   })
 
   it('paginates deterministically', () => {

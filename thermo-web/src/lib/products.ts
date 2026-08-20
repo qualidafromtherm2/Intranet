@@ -1,7 +1,8 @@
 import type {
   FiltersState,
   InventoryLocationsResponse,
-  InventoryHealth,
+  ProductFilterOption,
+  ProductFiltersMeta,
   ProductListResponse,
   ProductPurchaseResponse,
   ProductRecord,
@@ -9,20 +10,70 @@ import type {
 
 export const defaultFilters: FiltersState = {
   search: '',
-  family: [],
+  families: [],
+  typeItems: [],
+  origins: [],
   purchaseStatus: [],
-  locations: [],
-  health: [],
-  limitedOnly: false,
-  inactiveVisible: false,
+  locationCodes: [],
+  showInactive: false,
+  hideObsolete: false,
+  hideEngineering: false,
+  semEstoqueMin: false,
+  abaixoEstoqueMin: false,
+  acimaEstoqueMin: false,
+  proximoEstoqueMin: false,
+  proximoPercent: 10,
+  estoqueNegativo: false,
+  expedicaoNegativa: false,
+  saldoEnderecoSemOmie: false,
+  saldoDivergenteEndereco: false,
 }
 
-const computeHealth = (product: ProductRecord): InventoryHealth => {
-  if (product.estoque_negativo) return 'estoque-negativo'
-  if (product.expedicao_negativa) return 'expedicao-negativa'
-  if (product.saldo_divergente_endereco || product.saldo_endereco_sem_omie) return 'divergente'
-  if (product.abaixo_minimo) return 'abaixo-minimo'
-  return 'normal'
+export function extractTipoFromCodigo(codigo: string | null | undefined) {
+  if (!codigo) return null
+  const parts = String(codigo).split('.')
+  if (parts.length >= 2 && /^[A-Za-z]{2}$/.test(parts[1] ?? '')) return parts[1]!.toUpperCase()
+  return null
+}
+
+export function extractOrigemFromCodigo(codigo: string | null | undefined) {
+  const parts = String(codigo || '').split('.')
+  const origem = String(parts[2] || '').toUpperCase()
+  return origem === 'N' || origem === 'I' ? origem : null
+}
+
+const parseNumber = (value: number | string | null | undefined) => {
+  if (typeof value === 'number') return value
+  const normalized = String(value ?? '').trim().replace(',', '.')
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : Number.NaN
+}
+
+const isInactive = (value: string | null | undefined) => String(value || '').toUpperCase() === 'S'
+const isObsolete = (descricao: string | null | undefined) => String(descricao || '').toUpperCase().startsWith('OBSOLETO')
+const isEngineering = (descricao: string | null | undefined) => String(descricao || '').toUpperCase().startsWith('ENGENHARIA')
+
+const buildLocationMaps = (locations: InventoryLocationsResponse) => {
+  const byProduct = new Map<string, Array<{ codigo: string; nome: string }>>()
+  const locationOptions = locations.locais.map((location) => ({
+    value: location.local_codigo,
+    label: location.local_nome,
+    count: Number(location.total || 0),
+  }))
+
+  for (const location of locations.locais) {
+    for (const code of location.codigos) {
+      const key = code.trim().toUpperCase()
+      const current = byProduct.get(key) ?? []
+      current.push({ codigo: location.local_codigo, nome: location.local_nome })
+      byProduct.set(key, current)
+    }
+  }
+
+  return {
+    byProduct,
+    locationOptions: locationOptions.sort((a, b) => a.label.localeCompare(b.label, 'pt-BR')),
+  }
 }
 
 export const mergePilotData = (
@@ -31,76 +82,93 @@ export const mergePilotData = (
   locations: InventoryLocationsResponse,
 ): ProductRecord[] => {
   const purchaseMap = new Map(purchases.itens.map((entry) => [entry.codigo.trim().toUpperCase(), entry.status]))
-  const locationMap = new Map<string, string[]>()
-
-  for (const location of locations.locais) {
-    for (const code of location.codigos) {
-      const key = code.trim().toUpperCase()
-      const current = locationMap.get(key) ?? []
-      current.push(location.local_nome)
-      locationMap.set(key, current)
-    }
-  }
+  const { byProduct } = buildLocationMaps(locations)
 
   return products.itens.map((product) => {
     const code = product.codigo.trim().toUpperCase()
-    const record: ProductRecord = {
-      ...product,
-      compraStatus: purchaseMap.get(code) ?? null,
-      locaisPositivos: locationMap.get(code) ?? [],
-      health: 'normal',
-      imageUrl: product.primeira_imagem,
-    }
+    const compraStatus = purchaseMap.get(code) ?? null
 
-    record.health = computeHealth(record)
-    return record
+    return {
+      ...product,
+      compraStatus,
+      purchaseState: compraStatus ? 'em_compra' : 'sem_compra',
+      origemCodigo: extractOrigemFromCodigo(product.codigo),
+      tipoCodigo: extractTipoFromCodigo(product.codigo),
+      imageUrl: product.primeira_imagem,
+      locaisPositivos: byProduct.get(code) ?? [],
+      isInactive: isInactive(product.inativo),
+      isObsolete: isObsolete(product.descricao),
+      isEngineering: isEngineering(product.descricao),
+    }
   })
 }
 
 export const filterProducts = (products: ProductRecord[], filters: FiltersState) => {
   const search = filters.search.trim().toLowerCase()
+  const terms = search.split(/\s+/).filter(Boolean)
 
   return products.filter((product) => {
-    if (!filters.inactiveVisible && String(product.inativo || '').toUpperCase() === 'S') {
-      return false
+    if (!filters.showInactive && product.isInactive) return false
+    if (filters.hideObsolete && product.isObsolete) return false
+    if (filters.hideEngineering && product.isEngineering) return false
+
+    if (terms.length > 0) {
+      const hay = `${product.codigo || ''} ${product.descricao || ''}`.toLowerCase()
+      const matched = terms.every((term) => {
+        const base = term.includes('-----') ? term.split('-----')[0] ?? term : term
+        if (hay.includes(term) || hay.includes(base)) return true
+        const code = String(product.codigo || '').toLowerCase()
+        return code.length >= 4 && (term.includes(code) || base.includes(code))
+      })
+      if (!matched) return false
     }
 
-    if (filters.limitedOnly && !product.item_limitado) {
-      return false
+    if (filters.families.length > 0) {
+      const family = (product.descricao_familia || '').trim()
+      if (!filters.families.includes(family)) return false
     }
 
-    if (
-      search &&
-      ![
-        product.codigo,
-        product.descricao,
-        product.descricao_familia ?? '',
-        product.codigo_produto_integracao ?? '',
-        product.marca ?? '',
-      ]
-        .join(' ')
-        .toLowerCase()
-        .includes(search)
-    ) {
-      return false
+    if (filters.typeItems.length > 0) {
+      const typeValue = product.tipoCodigo ?? '__outros__'
+      if (!filters.typeItems.includes(typeValue)) return false
     }
 
-    if (filters.family.length && !filters.family.includes(product.descricao_familia ?? 'Sem família')) {
-      return false
+    if (filters.origins.length > 0) {
+      if (!product.origemCodigo || !filters.origins.includes(product.origemCodigo)) return false
     }
 
-    if (filters.locations.length) {
-      const matchedLocation = product.locaisPositivos.some((location) => filters.locations.includes(location))
-      if (!matchedLocation) return false
+    if (filters.locationCodes.length > 0) {
+      const hasLocation = product.locaisPositivos.some((location) => filters.locationCodes.includes(location.codigo))
+      if (!hasLocation) return false
     }
 
-    if (filters.purchaseStatus.length) {
-      const purchaseState = product.compraStatus ? 'em_compra' : 'sem_compra'
-      if (!filters.purchaseStatus.includes(purchaseState)) return false
+    if (filters.purchaseStatus.length === 1 && !filters.purchaseStatus.includes(product.purchaseState)) return false
+
+    if (filters.semEstoqueMin) {
+      const minimo = parseNumber(product.estoque_minimo)
+      if ((Number.isFinite(minimo) && minimo > 0) || product.item_limitado) return false
     }
 
-    if (filters.health.length && !filters.health.includes(product.health)) {
-      return false
+    if (filters.estoqueNegativo && !product.estoque_negativo) return false
+    if (filters.expedicaoNegativa && !product.expedicao_negativa) return false
+    if (filters.saldoEnderecoSemOmie && !product.saldo_endereco_sem_omie) return false
+    if (filters.saldoDivergenteEndereco && !product.saldo_divergente_endereco) return false
+
+    if (filters.abaixoEstoqueMin || filters.acimaEstoqueMin || filters.proximoEstoqueMin) {
+      const minimo = parseNumber(product.estoque_minimo)
+      const saldoAlmox = parseNumber(product.saldo_almox)
+      if (!Number.isFinite(minimo) || minimo <= 0 || !Number.isFinite(saldoAlmox)) return false
+
+      const abaixo = saldoAlmox < minimo
+      const acima = saldoAlmox >= minimo
+      const limiteProximo = minimo * (1 + Math.max(1, filters.proximoPercent) / 100)
+      const proximo = saldoAlmox >= minimo && saldoAlmox <= limiteProximo
+      const atende =
+        (filters.abaixoEstoqueMin && abaixo) ||
+        (filters.acimaEstoqueMin && acima) ||
+        (filters.proximoEstoqueMin && proximo)
+
+      if (!atende) return false
     }
 
     return true
@@ -113,10 +181,39 @@ export const paginateProducts = (products: ProductRecord[], page: number, pageSi
   return products.slice(start, start + pageSize)
 }
 
-export const collectFamilies = (products: ProductRecord[]) =>
-  [...new Set(products.map((product) => product.descricao_familia ?? 'Sem família'))].sort((a, b) =>
-    a.localeCompare(b, 'pt-BR'),
-  )
+const buildCountOptions = (entries: string[]) => {
+  const counts = new Map<string, number>()
+  for (const value of entries) {
+    if (!value) continue
+    counts.set(value, (counts.get(value) ?? 0) + 1)
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'pt-BR'))
+    .map(([value, count]) => ({ value, label: value, count }))
+}
 
-export const collectLocations = (locations: InventoryLocationsResponse) =>
-  locations.locais.map((location) => location.local_nome).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+export const buildFilterMeta = (products: ProductRecord[], locations: InventoryLocationsResponse): ProductFiltersMeta => {
+  const families = buildCountOptions(products.map((product) => (product.descricao_familia || '').trim()).filter(Boolean))
+  const typeCounts = new Map<string, number>()
+
+  for (const product of products) {
+    const key = product.tipoCodigo ?? '__outros__'
+    typeCounts.set(key, (typeCounts.get(key) ?? 0) + 1)
+  }
+
+  const typeItems: ProductFilterOption[] = [...typeCounts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right, 'pt-BR'))
+    .map(([value, count]) => ({
+      value,
+      label: value === '__outros__' ? 'Outros' : value,
+      count,
+    }))
+
+  const { locationOptions } = buildLocationMaps(locations)
+
+  return {
+    families,
+    typeItems,
+    locations: locationOptions,
+  }
+}

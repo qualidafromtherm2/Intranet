@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 127.0.0.1 --port 4173 --mode demo",
+    "dev": "vite --host 127.0.0.1 --port 4173 --mode proxy",
     "dev:demo": "vite --host 127.0.0.1 --port 4173 --mode demo",
     "dev:proxy": "vite --host 127.0.0.1 --port 4173 --mode proxy",
     "build": "tsc -b && vite build",
