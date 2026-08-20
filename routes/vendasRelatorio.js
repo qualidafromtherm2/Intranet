@@ -407,6 +407,7 @@ const ITENS_CTE = `
       ON TRIM(po.codigo) = TRIM(COALESCE(d->'prod'->>'cProd', ''))
     WHERE b.tem_itens_payload IS TRUE
       AND ${NF_ITEM_CFOP_INCLUIDO_SQL}
+      __ITEM_SQL__
   ),
   itens_de_pedido AS (
     SELECT
@@ -448,6 +449,7 @@ const ITENS_CTE = `
          WHERE i.codigo_pedido = b.codigo_pedido
            AND b.codigo_pedido > 0
       )
+      __FALLBACK_GUARD__
   ),
   itens AS (
     SELECT * FROM itens_de_nf
@@ -459,11 +461,26 @@ const ITENS_CTE = `
 `;
 
 function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
-  const itensBlock = ITENS_CTE.replace('__ITEM_SQL__', itemSql || '');
+  const sqlItem = itemSql || '';
+  // Com filtro de família/tipo o fallback (pedido inteiro sem itens) distorce KPI/vendedores.
+  const fallbackGuard = sqlItem ? 'AND FALSE' : '';
+  const itensBlock = ITENS_CTE
+    .replace(/__ITEM_SQL__/g, sqlItem)
+    .replace(/__FALLBACK_GUARD__/g, fallbackGuard);
   return `
     ${buildBaseCte(etapaSql, pedidoSql).replace(/\s+$/, '')},
     ${itensBlock}
   `;
+}
+
+function temFiltroItemRelatorio(filtros = {}) {
+  const famLista = Array.isArray(filtros.familia) ? filtros.familia : [];
+  return !!(
+    famLista.length
+    || filtros.familia
+    || String(filtros.familia_nome || '').trim()
+    || String(filtros.tipo || '').trim()
+  );
 }
 
 function labelMes(yyyymm, nomesMes) {
@@ -650,9 +667,51 @@ router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
     const periodoCfg = calcPeriodoComFiltros(filtros);
     const etapaCfg = buildEtapaFilter(filtros.etapa);
     const rangeParams = [periodoCfg.inicio, periodoCfg.fimExclusive];
-    const { pedidoSql } = appendFiltrosSql(filtros, rangeParams);
+    const { pedidoSql, itemSql } = appendFiltrosSql(filtros, rangeParams);
     const LIMITE = 5000;
-    const sql = `
+    const comFiltroItem = temFiltroItemRelatorio(filtros);
+    const sql = comFiltroItem
+      ? `
+      ${buildItensCte(etapaCfg.sql, pedidoSql, itemSql)}
+      , base_filtrada AS (
+        SELECT
+          b.*,
+          COALESCE((
+            SELECT SUM(i.valor_total)::numeric(14,2)
+              FROM itens i
+             WHERE i.codigo_pedido = b.codigo_pedido
+          ), 0) AS valor_filtrado,
+          COALESCE((
+            SELECT SUM(i.quantidade)::float
+              FROM itens i
+             WHERE i.codigo_pedido = b.codigo_pedido
+          ), 0) AS qtd_filtrada
+        FROM base b
+        WHERE EXISTS (
+          SELECT 1 FROM itens i WHERE i.codigo_pedido = b.codigo_pedido
+        )
+      )
+      SELECT
+        b.codigo_pedido,
+        b.numero_pedido,
+        b.cliente,
+        b.data_ref AS data,
+        b.valor_filtrado::float AS valor_total,
+        b.numero_nf,
+        b.nf_id,
+        COALESCE(
+          NULLIF(TRIM(v.nome), ''),
+          NULLIF(TRIM(b.codigo_vendedor), ''),
+          '—'
+        ) AS vendedor,
+        b.qtd_filtrada AS qtd
+      FROM base_filtrada b
+      LEFT JOIN vendas.vendedores_omie v
+        ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
+      ORDER BY b.data_ref DESC NULLS LAST, b.valor_filtrado DESC, b.numero_pedido
+      LIMIT ${LIMITE}
+    `
+      : `
       ${buildBaseCte(etapaCfg.sql, pedidoSql)}
       SELECT
         b.codigo_pedido,
@@ -1074,6 +1133,25 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         ${itensCte}
         SELECT * FROM itens
       `, rangeParams);
+
+      // Com filtro de família/tipo: KPI e vendedores usam só o valor dos itens filtrados
+      // (senão o pedido inteiro entrava quando havia produto de outra família no mesmo pedido).
+      if (temFiltroItemRelatorio(filtros)) {
+        await client.query(`
+          DELETE FROM vend_rel_base b
+          WHERE NOT EXISTS (
+            SELECT 1 FROM vend_rel_itens i WHERE i.codigo_pedido = b.codigo_pedido
+          )
+        `);
+        await client.query(`
+          UPDATE vend_rel_base b
+             SET valor_total_pedido = COALESCE((
+               SELECT SUM(i.valor_total)::numeric(14,2)
+                 FROM vend_rel_itens i
+                WHERE i.codigo_pedido = b.codigo_pedido
+             ), 0)
+        `);
+      }
 
       rKpi = await client.query(`
         SELECT

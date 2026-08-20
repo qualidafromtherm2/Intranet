@@ -393,7 +393,7 @@ router.post(
 
 // PATCH /api/suporte/chamados/:id
 // - admin: prazo, status (incl. enviar p/ aguardando_aprovacao), observação
-// - autor: aprovar (fecha) quando status = aguardando_aprovacao
+// - autor: aprovar (fecha) quando status = aguardando_aprovacao ou necessario_revisao
 router.patch('/chamados/:id', requireAuth, async (req, res) => {
   try {
     await ensureSchema();
@@ -416,13 +416,16 @@ router.patch('/chamados/:id', requireAuth, async (req, res) => {
     const isAuthor = String(existing.criado_por || '') === usuario;
     const querAprovar = body.aprovar === true || body.aprovar === 'true';
 
-    // Solicitante aprova o fechamento
+    // Solicitante aprova o fechamento (aprovação da solução ou aceita a revisão sem alterar)
     if (querAprovar) {
       if (!isAuthor) {
         return res.status(403).json({ error: 'Somente quem abriu o chamado pode aprovar.' });
       }
-      if (normalizarStatusChamado(existing.status) !== 'aguardando_aprovacao') {
-        return res.status(400).json({ error: 'Chamado não está aguardando aprovação.' });
+      const stAprovar = normalizarStatusChamado(existing.status);
+      if (stAprovar !== 'aguardando_aprovacao' && stAprovar !== 'necessario_revisao') {
+        return res.status(400).json({
+          error: 'Chamado não está aguardando aprovação nem em Necessário revisão.',
+        });
       }
 
       const { rows } = await dbQuery(

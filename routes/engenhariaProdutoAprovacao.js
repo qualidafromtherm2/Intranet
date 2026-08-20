@@ -27,7 +27,8 @@ const STATUS_LABEL = {
 const NIQ_STATUS_LABEL = {
   registrado: 'Registrado',
   aguardando_aprovacao: 'Aguardando aprovação',
-  scrapado: 'Scrapado',
+  scrap: 'Scrap',
+  scrapado: 'Scrap', // legado
   retrabalho: 'Retrabalho',
   liberado: 'Liberado',
 };
@@ -87,6 +88,11 @@ async function ensureNiqAreaVermelhaTable() {
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_por TEXT`);
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_em TIMESTAMPTZ`);
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS omie_sai_codigo TEXT`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_motivo TEXT`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS referencia_tipo TEXT`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_foto_url TEXT`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_video_url TEXT`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_anexos JSONB NOT NULL DEFAULT '[]'::jsonb`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_niq_av_registrado_em
       ON qualidade.niq_area_vermelha (registrado_em DESC)
@@ -98,6 +104,12 @@ async function ensureNiqAreaVermelhaTable() {
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_niq_av_status
       ON qualidade.niq_area_vermelha (status)
+  `);
+  // Legado: "scrapado" → "scrap" (refugo/sucata)
+  await dbQuery(`
+    UPDATE qualidade.niq_area_vermelha
+       SET status = 'scrap'
+     WHERE LOWER(TRIM(status)) = 'scrapado'
   `);
 }
 
@@ -150,11 +162,27 @@ async function uploadNiqArquivos(niqId, files) {
   return { anexos, fotoUrl, videoUrl };
 }
 
+function formatarQtdExibicaoNiq(q) {
+  if (q == null || q === '') return '';
+  const n = Number(q);
+  if (!Number.isFinite(n)) return String(q);
+  if (Math.abs(n - Math.round(n)) < 1e-9) return String(Math.round(n));
+  return String(parseFloat(Number(n).toFixed(4)));
+}
+
 function mapearLinhaNiq(row) {
-  const qtd = row.quantidade != null && row.quantidade !== '' ? String(row.quantidade) : '';
+  const qtd = formatarQtdExibicaoNiq(row.quantidade);
   const falha = String(row.descricao_falha || '').trim();
-  const st = String(row.status || 'registrado').trim().toLowerCase() || 'registrado';
+  let st = String(row.status || 'registrado').trim().toLowerCase() || 'registrado';
+  if (st === 'scrapado') st = 'scrap';
   const destinoNome = String(row.local_destino_nome || NOME_AREA_VERMELHA).trim();
+  const refTipo = String(row.referencia_tipo || '').trim().toLowerCase();
+  const numeroRef = String(row.numero_op || '').trim();
+  let numeroNfe = '';
+  if (numeroRef) {
+    if (refTipo === 'os') numeroNfe = `OS ${numeroRef}`;
+    else numeroNfe = `OP ${numeroRef}`;
+  }
   return {
     id: row.id,
     codigo_produto: row.codigo,
@@ -165,7 +193,7 @@ function mapearLinhaNiq(row) {
     definido_em: row.registrado_em,
     etq_recebimento_id: null,
     descricao: row.descricao || '',
-    numero_nfe: row.numero_op ? `OP ${row.numero_op}` : '',
+    numero_nfe: numeroNfe,
     lote: falha,
     qtd_recebimento: row.quantidade,
     ids_armazem: [
@@ -175,6 +203,7 @@ function mapearLinhaNiq(row) {
     ].filter(Boolean).join(' · '),
     origem: 'niq',
     numero_op: row.numero_op || '',
+    referencia_tipo: refTipo || '',
     descricao_falha: falha,
     quantidade: row.quantidade,
     foto_url: row.foto_url,
@@ -187,8 +216,12 @@ function mapearLinhaNiq(row) {
     analise_em: row.analise_em || null,
     analise_foto_url: row.analise_foto_url || null,
     analise_video_url: row.analise_video_url || null,
+    analise_obs: row.analise_obs || '',
     decisao_por: row.decisao_por || '',
     decisao_em: row.decisao_em || null,
+    decisao_motivo: String(row.decisao_motivo || '').trim(),
+    decisao_foto_url: row.decisao_foto_url || null,
+    decisao_video_url: row.decisao_video_url || null,
     omie_trf_codigo: row.omie_trf_codigo || '',
     omie_sai_codigo: row.omie_sai_codigo || '',
   };
@@ -216,13 +249,14 @@ function usuarioEhAdminOuQualidade(req) {
 
 const NIQ_SELECT_COLS = `
   n.id, n.codigo, n.codigo_produto, n.descricao, n.quantidade, n.descricao_falha,
-  n.numero_op, n.op_producao_id, n.foto_url, n.video_url,
+  n.numero_op, n.op_producao_id, n.referencia_tipo, n.foto_url, n.video_url,
   n.registrado_por, n.registrado_em, n.status,
   n.local_origem_codigo, n.local_origem_nome,
   n.local_destino_codigo, n.local_destino_nome,
   n.omie_trf_codigo, n.analise_por, n.analise_em,
   n.analise_foto_url, n.analise_video_url, n.analise_obs,
-  n.decisao_por, n.decisao_em, n.omie_sai_codigo
+  n.decisao_por, n.decisao_em, n.decisao_motivo,
+  n.decisao_foto_url, n.decisao_video_url, n.omie_sai_codigo
 `;
 
 module.exports = function engenhariaProdutoAprovacaoRouter() {
@@ -304,6 +338,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
                OR COALESCE(n.descricao, '') ILIKE $1
                OR COALESCE(n.numero_op, '') ILIKE $1
                OR COALESCE(n.descricao_falha, '') ILIKE $1
+               OR COALESCE(n.decisao_motivo, '') ILIKE $1
                OR COALESCE(n.registrado_por, '') ILIKE $1
                OR COALESCE(n.status, '') ILIKE $1
                OR COALESCE(n.analise_por, '') ILIKE $1)
@@ -470,6 +505,11 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
 
       const numeroOp = String(req.body?.numero_op || '').trim();
       const opProducaoId = Number(req.body?.op_producao_id || 0) || null;
+      let referenciaTipo = String(req.body?.referencia_tipo || '').trim().toLowerCase();
+      if (!['op', 'os'].includes(referenciaTipo)) {
+        referenciaTipo = numeroOp || opProducaoId ? 'op' : null;
+      }
+      if (!numeroOp && !opProducaoId) referenciaTipo = null;
       const produtoGrupo = String(req.body?.produto_grupo || '').trim();
       const registradoPor = usuarioSessao(req);
       const localOrigemCodigo = String(req.body?.local_origem_codigo || LOCAL_ESTOQUE_PRODUCAO).trim()
@@ -478,9 +518,9 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
       const ins = await dbQuery(
         `INSERT INTO qualidade.niq_area_vermelha
            (codigo, codigo_produto, descricao, quantidade, descricao_falha,
-            numero_op, op_producao_id, produto_grupo, registrado_por, status,
+            numero_op, op_producao_id, referencia_tipo, produto_grupo, registrado_por, status,
             local_origem_codigo, local_destino_codigo, local_destino_nome)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'registrado', $10, $11, $12)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'registrado', $11, $12, $13)
          RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
         [
           prod.rows[0]?.codigo || codigo,
@@ -490,6 +530,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
           descricaoFalha,
           numeroOp || null,
           opProducaoId,
+          referenciaTipo,
           produtoGrupo || null,
           registradoPor,
           localOrigemCodigo,
@@ -635,14 +676,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
                 END,
                 analise_obs = NULLIF($6, '')
           WHERE id = $1
-          RETURNING id, codigo, codigo_produto, descricao, quantidade, descricao_falha,
-                    numero_op, op_producao_id, foto_url, video_url,
-                    registrado_por, registrado_em, status,
-                    local_origem_codigo, local_origem_nome,
-                    local_destino_codigo, local_destino_nome,
-                    omie_trf_codigo, analise_por, analise_em,
-                    analise_foto_url, analise_video_url, analise_obs,
-                    decisao_por, decisao_em, omie_sai_codigo`,
+          RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
         [id, analisePor, fotoUrl, videoUrl, JSON.stringify(anexos), analiseObs]
       );
 
@@ -653,7 +687,72 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
     }
   });
 
-  router.post('/niq-area-vermelha/:id/decisao', express.json(), async (req, res) => {
+  router.get('/niq-area-vermelha/busca-referencia', async (req, res) => {
+    try {
+      const tipo = String(req.query?.tipo || '').trim().toLowerCase();
+      const q = String(req.query?.q || '').trim();
+      if (!['op', 'os'].includes(tipo)) {
+        return res.status(400).json({ ok: false, error: 'Use tipo=op ou tipo=os.' });
+      }
+      if (q.length < 3) {
+        return res.json({ ok: true, itens: [] });
+      }
+      const like = `%${q}%`;
+      if (tipo === 'op') {
+        const { rows } = await dbQuery(
+          `SELECT id, n_op AS valor, codigo, codigo_produto::text AS codigo_produto
+             FROM producao."OP_producao"
+            WHERE COALESCE(n_op, '') ILIKE $1
+            ORDER BY created_at DESC NULLS LAST, id DESC
+            LIMIT 25`,
+          [like]
+        );
+        return res.json({
+          ok: true,
+          itens: (rows || []).map((r) => ({
+            id: r.id,
+            valor: String(r.valor || '').trim(),
+            label: `OP ${String(r.valor || '').trim()}`,
+            extra: String(r.codigo || r.codigo_produto || '').trim(),
+          })).filter((i) => i.valor),
+        });
+      }
+      const { rows } = await dbQuery(
+        `SELECT id,
+                COALESCE(nome_revenda_cliente, '') AS cliente,
+                COALESCE(modelo, '') AS modelo
+           FROM sac.at
+          WHERE id::text ILIKE $1
+          ORDER BY id DESC
+          LIMIT 25`,
+        [like]
+      );
+      return res.json({
+        ok: true,
+        itens: (rows || []).map((r) => ({
+          id: r.id,
+          valor: String(r.id),
+          label: `OS ${r.id}`,
+          extra: [r.cliente, r.modelo].filter(Boolean).join(' · '),
+        })),
+      });
+    } catch (err) {
+      console.error('[engenharia/niq-area-vermelha busca-referencia]', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Falha na busca.' });
+    }
+  });
+
+  router.post('/niq-area-vermelha/:id/decisao', (req, res, next) => {
+    const ct = String(req.headers['content-type'] || '');
+    if (ct.includes('multipart/form-data')) {
+      return uploadNiq.fields([
+        { name: 'foto', maxCount: 5 },
+        { name: 'video', maxCount: 5 },
+        { name: 'arquivos', maxCount: 10 },
+      ])(req, res, next);
+    }
+    return express.json()(req, res, next);
+  }, async (req, res) => {
     try {
       await ensureNiqAreaVermelhaTable();
       const id = Number(req.params.id) || 0;
@@ -661,6 +760,10 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
       const acao = String(req.body?.acao || '').trim().toLowerCase();
       if (!NIQ_DECISOES.has(acao)) {
         return res.status(400).json({ ok: false, error: 'Ação inválida. Use scrap, retrabalho ou liberar.' });
+      }
+      const decisaoMotivo = String(req.body?.decisao_motivo || req.body?.motivo || '').trim();
+      if (acao === 'scrap' && !decisaoMotivo) {
+        return res.status(400).json({ ok: false, error: 'Informe o que motivou a decisão de scrap.' });
       }
 
       const { rows: atualRows } = await dbQuery(
@@ -685,7 +788,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
       let statusNovo = 'liberado';
       let omieSai = null;
       if (acao === 'scrap') {
-        statusNovo = 'scrapado';
+        statusNovo = 'scrap';
         try {
           const sai = await saiScrapAreaVermelha({
             codigo: atual.codigo,
@@ -708,22 +811,48 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
         statusNovo = 'liberado';
       }
 
+      let fotoUrl = null;
+      let videoUrl = null;
+      let anexosJson = '[]';
+      if (acao === 'scrap') {
+        const files = coletarArquivosUpload(req);
+        if (files.length) {
+          try {
+            const up = await uploadNiqArquivos(`${id}/decisao`, files);
+            fotoUrl = up.fotoUrl;
+            videoUrl = up.videoUrl;
+            anexosJson = JSON.stringify(up.anexos || []);
+          } catch (upErr) {
+            console.warn('[engenharia/niq-area-vermelha decisao] upload falhou:', upErr?.message || upErr);
+          }
+        }
+      }
+
       const upd = await dbQuery(
         `UPDATE qualidade.niq_area_vermelha
             SET status = $2,
                 decisao_por = $3,
                 decisao_em = NOW(),
-                omie_sai_codigo = COALESCE($4, omie_sai_codigo)
+                omie_sai_codigo = COALESCE($4, omie_sai_codigo),
+                decisao_motivo = CASE WHEN $5::text IS NULL OR $5::text = '' THEN decisao_motivo ELSE $5 END,
+                decisao_foto_url = COALESCE($6, decisao_foto_url),
+                decisao_video_url = COALESCE($7, decisao_video_url),
+                decisao_anexos = CASE
+                  WHEN $8::text = '[]' THEN decisao_anexos
+                  ELSE $8::jsonb
+                END
           WHERE id = $1
-          RETURNING id, codigo, codigo_produto, descricao, quantidade, descricao_falha,
-                    numero_op, op_producao_id, foto_url, video_url,
-                    registrado_por, registrado_em, status,
-                    local_origem_codigo, local_origem_nome,
-                    local_destino_codigo, local_destino_nome,
-                    omie_trf_codigo, analise_por, analise_em,
-                    analise_foto_url, analise_video_url, analise_obs,
-                    decisao_por, decisao_em, omie_sai_codigo`,
-        [id, statusNovo, decisaoPor, omieSai]
+          RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
+        [
+          id,
+          statusNovo,
+          decisaoPor,
+          omieSai,
+          acao === 'scrap' ? decisaoMotivo : null,
+          fotoUrl,
+          videoUrl,
+          anexosJson,
+        ]
       );
 
       return res.json({ ok: true, niq: mapearLinhaNiq(upd.rows[0]) });

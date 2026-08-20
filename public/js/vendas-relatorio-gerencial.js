@@ -13,7 +13,8 @@
   const _charts = {};
   const _chartsRendered = new Set();
   let _dataB = null;
-  let _comparacao = null; // { mes1, ano1, mes2, ano2, label1, label2 }
+  // { tipo:'mes_ano'|'trimestre'|'periodo', label1, label2, mes1?, ano1?, mes2?, ano2?, tri1?, tri2?, data_inicio1?, data_fim1?, data_inicio2?, data_fim2? }
+  let _comparacao = null;
   let _carregarGeracao = 0;
   let _drillSnapshot = null;
   const _drillExtra = { cliente: '', etapa_pedido: '', familia_nome: '' };
@@ -55,12 +56,39 @@
     return `${nome}/${ano}`;
   }
 
+  function _labelTrimestre(tri, ano) {
+    return `${Number(tri)}º tri/${ano}`;
+  }
+
+  function _labelPeriodoDatas(ini, fim) {
+    const fmt = (ymd) => {
+      const m = String(ymd || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      if (!m) return String(ymd || '—');
+      return `${m[3]}/${m[2]}/${m[1]}`;
+    };
+    return `${fmt(ini)} a ${fmt(fim)}`;
+  }
+
   function _chaveYm(ano, mes) {
     return (Number(ano) * 12) + Number(mes);
   }
 
+  function _chaveYt(ano, tri) {
+    return (Number(ano) * 4) + Number(tri);
+  }
+
   function _ordenarCronologico(a, b) {
     if (_chaveYm(a.ano, a.mes) <= _chaveYm(b.ano, b.mes)) return [a, b];
+    return [b, a];
+  }
+
+  function _ordenarCronologicoTri(a, b) {
+    if (_chaveYt(a.ano, a.tri) <= _chaveYt(b.ano, b.tri)) return [a, b];
+    return [b, a];
+  }
+
+  function _ordenarCronologicoPeriodo(a, b) {
+    if (String(a.inicio) <= String(b.inicio)) return [a, b];
     return [b, a];
   }
 
@@ -69,6 +97,39 @@
       const v = String(i + 1);
       return `<option value="${v}"${String(sel) === v ? ' selected' : ''}>${nome}</option>`;
     }).join('');
+  }
+
+  function _opcoesTrimestreHtml(sel) {
+    return [1, 2, 3, 4].map((t) => {
+      const v = String(t);
+      return `<option value="${v}"${String(sel) === v ? ' selected' : ''}>${t}º</option>`;
+    }).join('');
+  }
+
+  function _unidadeComparacao() {
+    const t = _comparacao?.tipo || 'mes_ano';
+    if (t === 'trimestre') return 'trimestre';
+    if (t === 'periodo') return 'período';
+    return 'mês';
+  }
+
+  function _qsOverrideComparacao(lado) {
+    if (!_comparacao) return {};
+    const c = _comparacao;
+    const tipo = c.tipo || 'mes_ano';
+    if (tipo === 'trimestre') {
+      return lado === 2
+        ? { trimestre: c.tri2, ano: c.ano2 }
+        : { trimestre: c.tri1, ano: c.ano1 };
+    }
+    if (tipo === 'periodo') {
+      return lado === 2
+        ? { data_inicio: c.data_inicio2, data_fim: c.data_fim2 }
+        : { data_inicio: c.data_inicio1, data_fim: c.data_fim1 };
+    }
+    return lado === 2
+      ? { mes: c.mes2, ano: c.ano2 }
+      : { mes: c.mes1, ano: c.ano1 };
   }
 
   function _periodoTitulo(periodo, etapa) {
@@ -260,8 +321,9 @@
     const thPar = cmp
       ? `<th>Família</th><th class="r">${l1}</th><th class="r">${l2}</th><th class="r">Var.</th>`
       : `<th>Família</th><th class="r">Valor</th><th class="r">%</th><th class="r">% Acum.</th>`;
+    const und = _unidadeComparacao();
     const notaCmp = cmp
-      ? `<p class="vend-rel-cmp-nota">Comparando <strong>${l1}</strong> (azul, mais antigo) com <strong>${l2}</strong> (amarelo, mais recente), na ordem do calendário. A variação é o mês novo menos o mês antigo.</p>`
+      ? `<p class="vend-rel-cmp-nota">Comparando <strong>${l1}</strong> (azul, mais antigo) com <strong>${l2}</strong> (amarelo, mais recente), na ordem do calendário. A variação é o ${und} novo menos o ${und} antigo.</p>`
       : '';
 
     pagesWrap.innerHTML = `
@@ -400,7 +462,7 @@
         <div class="at-rel-ger-sec-title"><i class="fa-solid fa-list-check"></i> Plano de Ação</div>
         <div class="at-rel-ger-body">
           <div id="vendRelGerCmpResumoPlano" class="vend-rel-cmp-resumo" style="${cmp ? '' : 'display:none;'}"></div>
-          ${cmp ? `<p class="vend-rel-cmp-nota">O plano de ação fica gravado no Mês 1 (${l1}).</p>` : ''}
+          ${cmp ? `<p class="vend-rel-cmp-nota">O plano de ação fica gravado no período 1 (${l1}).</p>` : ''}
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;">
             <button type="button" id="vendRelGerPlanoAdd" class="at-rel-ger-btn"><i class="fa-solid fa-plus"></i> Adicionar ação</button>
             <button type="button" id="vendRelGerPlanoSalvar" class="at-rel-ger-btn primary"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
@@ -1230,8 +1292,8 @@
       let data;
       if (_comparacao) {
         const [dataA, dataB] = await Promise.all([
-          _fetchRelatorio(_filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 }), signal),
-          _fetchRelatorio(_filtrosQueryParams({ mes: _comparacao.mes2, ano: _comparacao.ano2 }), signal),
+          _fetchRelatorio(_filtrosQueryParams(_qsOverrideComparacao(1)), signal),
+          _fetchRelatorio(_filtrosQueryParams(_qsOverrideComparacao(2)), signal),
         ]);
         data = dataA;
         _dataB = dataB;
@@ -1641,11 +1703,15 @@
     const btn = document.getElementById('vendRelGerCompararBtn');
     if (!btn) return;
     const on = !!_comparacao;
+    const modo = _modoAtual();
+    const tituloOff = modo === 'trimestre'
+      ? 'Comparar dois trimestres'
+      : (modo === 'periodo' ? 'Comparar dois períodos' : 'Comparar dois meses');
     btn.classList.toggle('is-on', on);
     btn.innerHTML = on
       ? '<i class="fa-solid fa-arrow-right-arrow-left"></i> Comparando'
       : '<i class="fa-solid fa-arrow-right-arrow-left"></i> Comparar';
-    btn.title = on ? `${_comparacao.label1} × ${_comparacao.label2}` : 'Comparar dois meses';
+    btn.title = on ? `${_comparacao.label1} × ${_comparacao.label2}` : tituloOff;
   }
 
   function _anosDisponiveis() {
@@ -1657,14 +1723,119 @@
     return [...set].sort((a, b) => b - a);
   }
 
+  function _syncModalCompararUi() {
+    const modo = _modoAtual();
+    const titulo = document.getElementById('vendRelGerCmpTitulo');
+    const ajuda = document.getElementById('vendRelGerCmpAjuda');
+    const wrapMes = document.getElementById('vendRelGerCmpWrapMes');
+    const wrapTri = document.getElementById('vendRelGerCmpWrapTri');
+    const wrapPer = document.getElementById('vendRelGerCmpWrapPeriodo');
+    if (titulo) {
+      titulo.innerHTML = modo === 'trimestre'
+        ? '<i class="fa-solid fa-arrow-right-arrow-left" style="color:#f59e0b;"></i> Comparar trimestres'
+        : (modo === 'periodo'
+          ? '<i class="fa-solid fa-arrow-right-arrow-left" style="color:#f59e0b;"></i> Comparar períodos'
+          : '<i class="fa-solid fa-arrow-right-arrow-left" style="color:#f59e0b;"></i> Comparar meses');
+    }
+    if (ajuda) {
+      ajuda.textContent = modo === 'trimestre'
+        ? 'Escolha dois trimestres. Não importa a ordem: o relatório sempre mostra do mais antigo para o mais recente (como no calendário).'
+        : (modo === 'periodo'
+          ? 'Escolha dois intervalos de data. Não importa a ordem: o relatório sempre mostra do mais antigo para o mais recente.'
+          : 'Escolha dois meses. Não importa a ordem: o relatório sempre mostra do mais antigo para o mais recente (como no calendário).');
+    }
+    if (wrapMes) wrapMes.style.display = modo === 'mes_ano' ? 'flex' : 'none';
+    if (wrapTri) wrapTri.style.display = modo === 'trimestre' ? 'flex' : 'none';
+    if (wrapPer) wrapPer.style.display = modo === 'periodo' ? 'flex' : 'none';
+  }
+
   function _preencherSelectsComparar() {
+    const modo = _modoAtual();
+    _syncModalCompararUi();
     const now = new Date();
+    const anos = _anosDisponiveis();
+    const err = document.getElementById('vendRelGerCmpErro');
+    if (err) err.textContent = '';
+    const sair = document.getElementById('vendRelGerCmpSair');
+    if (sair) sair.style.display = _comparacao ? 'inline-flex' : 'none';
+
+    if (modo === 'trimestre') {
+      const triAtual = Number.parseInt(document.getElementById('vendRelGerTrimestre')?.value, 10) || _trimestreAtual();
+      const anoAtual = Number.parseInt(document.getElementById('vendRelGerAno')?.value, 10) || now.getFullYear();
+      let tri1 = _comparacao?.tipo === 'trimestre' ? _comparacao.tri1 : null;
+      let ano1 = _comparacao?.tipo === 'trimestre' ? _comparacao.ano1 : null;
+      let tri2 = _comparacao?.tipo === 'trimestre' ? _comparacao.tri2 : null;
+      let ano2 = _comparacao?.tipo === 'trimestre' ? _comparacao.ano2 : null;
+      if (!tri1 || !ano1 || !tri2 || !ano2) {
+        // Mesmo trimestre do ano anterior × trimestre atual (como no modo mês)
+        tri2 = triAtual;
+        ano2 = anoAtual;
+        tri1 = triAtual;
+        ano1 = anoAtual - 1;
+      } else {
+        const [antigo, novo] = _ordenarCronologicoTri(
+          { tri: tri1, ano: ano1 },
+          { tri: tri2, ano: ano2 }
+        );
+        tri1 = antigo.tri; ano1 = antigo.ano;
+        tri2 = novo.tri; ano2 = novo.ano;
+      }
+      if (!anos.includes(ano1)) anos.push(ano1);
+      if (!anos.includes(ano2)) anos.push(ano2);
+      anos.sort((a, b) => b - a);
+      const anosHtml = anos.map((y) => `<option value="${y}">${y}</option>`).join('');
+      const elT1 = document.getElementById('vendRelGerCmpTri1');
+      const elA1 = document.getElementById('vendRelGerCmpAnoTri1');
+      const elT2 = document.getElementById('vendRelGerCmpTri2');
+      const elA2 = document.getElementById('vendRelGerCmpAnoTri2');
+      if (elT1) elT1.innerHTML = _opcoesTrimestreHtml(tri1);
+      if (elT2) elT2.innerHTML = _opcoesTrimestreHtml(tri2);
+      if (elA1) { elA1.innerHTML = anosHtml; elA1.value = String(ano1); }
+      if (elA2) { elA2.innerHTML = anosHtml; elA2.value = String(ano2); }
+      return;
+    }
+
+    if (modo === 'periodo') {
+      const di = document.getElementById('vendRelGerDataInicio')?.value || '';
+      const df = document.getElementById('vendRelGerDataFim')?.value || '';
+      let ini1 = _comparacao?.tipo === 'periodo' ? _comparacao.data_inicio1 : '';
+      let fim1 = _comparacao?.tipo === 'periodo' ? _comparacao.data_fim1 : '';
+      let ini2 = _comparacao?.tipo === 'periodo' ? _comparacao.data_inicio2 : '';
+      let fim2 = _comparacao?.tipo === 'periodo' ? _comparacao.data_fim2 : '';
+      if (!ini1 || !fim1 || !ini2 || !fim2) {
+        ini2 = di;
+        fim2 = df;
+        if (ini2 && fim2) {
+          const a = new Date(`${ini2}T12:00:00`);
+          const b = new Date(`${fim2}T12:00:00`);
+          const dias = Math.max(0, Math.round((b - a) / 86400000));
+          const fimAnt = new Date(a);
+          fimAnt.setDate(fimAnt.getDate() - 1);
+          const iniAnt = new Date(fimAnt);
+          iniAnt.setDate(iniAnt.getDate() - dias);
+          const pad = (n) => String(n).padStart(2, '0');
+          const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+          ini1 = ymd(iniAnt);
+          fim1 = ymd(fimAnt);
+        }
+      }
+      const elI1 = document.getElementById('vendRelGerCmpDataIni1');
+      const elF1 = document.getElementById('vendRelGerCmpDataFim1');
+      const elI2 = document.getElementById('vendRelGerCmpDataIni2');
+      const elF2 = document.getElementById('vendRelGerCmpDataFim2');
+      if (elI1) elI1.value = ini1 || '';
+      if (elF1) elF1.value = fim1 || '';
+      if (elI2) elI2.value = ini2 || '';
+      if (elF2) elF2.value = fim2 || '';
+      return;
+    }
+
     const mesAtual = Number.parseInt(document.getElementById('vendRelGerMes')?.value, 10) || (now.getMonth() + 1);
     const anoAtual = Number.parseInt(document.getElementById('vendRelGerAno')?.value, 10) || now.getFullYear();
-    let mes1 = _comparacao?.mes1;
-    let ano1 = _comparacao?.ano1;
-    let mes2 = _comparacao?.mes2;
-    let ano2 = _comparacao?.ano2;
+    let mes1 = _comparacao?.tipo !== 'trimestre' && _comparacao?.tipo !== 'periodo' ? _comparacao?.mes1 : null;
+    let ano1 = _comparacao?.tipo !== 'trimestre' && _comparacao?.tipo !== 'periodo' ? _comparacao?.ano1 : null;
+    let mes2 = _comparacao?.tipo !== 'trimestre' && _comparacao?.tipo !== 'periodo' ? _comparacao?.mes2 : null;
+    let ano2 = _comparacao?.tipo !== 'trimestre' && _comparacao?.tipo !== 'periodo' ? _comparacao?.ano2 : null;
     if (!mes1 || !ano1 || !mes2 || !ano2) {
       mes2 = mesAtual;
       ano2 = anoAtual;
@@ -1679,7 +1850,6 @@
       mes1 = antigo.mes; ano1 = antigo.ano;
       mes2 = novo.mes; ano2 = novo.ano;
     }
-    const anos = _anosDisponiveis();
     if (!anos.includes(ano1)) anos.push(ano1);
     if (!anos.includes(ano2)) anos.push(ano2);
     anos.sort((a, b) => b - a);
@@ -1692,10 +1862,6 @@
     if (elM2) elM2.innerHTML = _opcoesMesHtml(mes2);
     if (elA1) { elA1.innerHTML = anosHtml; elA1.value = String(ano1); }
     if (elA2) { elA2.innerHTML = anosHtml; elA2.value = String(ano2); }
-    const sair = document.getElementById('vendRelGerCmpSair');
-    if (sair) sair.style.display = _comparacao ? 'inline-flex' : 'none';
-    const err = document.getElementById('vendRelGerCmpErro');
-    if (err) err.textContent = '';
   }
 
   function _abrirModalComparar() {
@@ -1710,11 +1876,78 @@
   }
 
   function _aplicarComparacao() {
+    const modo = _modoAtual();
+    const err = document.getElementById('vendRelGerCmpErro');
+
+    if (modo === 'trimestre') {
+      const tri1 = Number.parseInt(document.getElementById('vendRelGerCmpTri1')?.value, 10);
+      const ano1 = Number.parseInt(document.getElementById('vendRelGerCmpAnoTri1')?.value, 10);
+      const tri2 = Number.parseInt(document.getElementById('vendRelGerCmpTri2')?.value, 10);
+      const ano2 = Number.parseInt(document.getElementById('vendRelGerCmpAnoTri2')?.value, 10);
+      if (![tri1, ano1, tri2, ano2].every((n) => Number.isFinite(n))) {
+        if (err) err.textContent = 'Escolha os dois trimestres.';
+        return;
+      }
+      if (tri1 === tri2 && ano1 === ano2) {
+        if (err) err.textContent = 'Escolha dois trimestres diferentes.';
+        return;
+      }
+      const [antigo, novo] = _ordenarCronologicoTri(
+        { tri: tri1, ano: ano1 },
+        { tri: tri2, ano: ano2 }
+      );
+      _comparacao = {
+        tipo: 'trimestre',
+        tri1: antigo.tri,
+        ano1: antigo.ano,
+        tri2: novo.tri,
+        ano2: novo.ano,
+        label1: _labelTrimestre(antigo.tri, antigo.ano),
+        label2: _labelTrimestre(novo.tri, novo.ano),
+      };
+      _fecharModalComparar();
+      _atualizarBotaoComparar();
+      _carregar();
+      return;
+    }
+
+    if (modo === 'periodo') {
+      const ini1 = document.getElementById('vendRelGerCmpDataIni1')?.value?.trim() || '';
+      const fim1 = document.getElementById('vendRelGerCmpDataFim1')?.value?.trim() || '';
+      const ini2 = document.getElementById('vendRelGerCmpDataIni2')?.value?.trim() || '';
+      const fim2 = document.getElementById('vendRelGerCmpDataFim2')?.value?.trim() || '';
+      const okYmd = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v);
+      if (![ini1, fim1, ini2, fim2].every(okYmd)) {
+        if (err) err.textContent = 'Preencha as datas dos dois períodos.';
+        return;
+      }
+      const norm = (a, b) => (a <= b ? { inicio: a, fim: b } : { inicio: b, fim: a });
+      const p1 = norm(ini1, fim1);
+      const p2 = norm(ini2, fim2);
+      if (p1.inicio === p2.inicio && p1.fim === p2.fim) {
+        if (err) err.textContent = 'Escolha dois períodos diferentes.';
+        return;
+      }
+      const [antigo, novo] = _ordenarCronologicoPeriodo(p1, p2);
+      _comparacao = {
+        tipo: 'periodo',
+        data_inicio1: antigo.inicio,
+        data_fim1: antigo.fim,
+        data_inicio2: novo.inicio,
+        data_fim2: novo.fim,
+        label1: _labelPeriodoDatas(antigo.inicio, antigo.fim),
+        label2: _labelPeriodoDatas(novo.inicio, novo.fim),
+      };
+      _fecharModalComparar();
+      _atualizarBotaoComparar();
+      _carregar();
+      return;
+    }
+
     const mes1 = Number.parseInt(document.getElementById('vendRelGerCmpMes1')?.value, 10);
     const ano1 = Number.parseInt(document.getElementById('vendRelGerCmpAno1')?.value, 10);
     const mes2 = Number.parseInt(document.getElementById('vendRelGerCmpMes2')?.value, 10);
     const ano2 = Number.parseInt(document.getElementById('vendRelGerCmpAno2')?.value, 10);
-    const err = document.getElementById('vendRelGerCmpErro');
     if (![mes1, ano1, mes2, ano2].every((n) => Number.isFinite(n))) {
       if (err) err.textContent = 'Escolha os dois meses.';
       return;
@@ -1728,6 +1961,7 @@
       { mes: mes2, ano: ano2 }
     );
     _comparacao = {
+      tipo: 'mes_ano',
       mes1: antigo.mes,
       ano1: antigo.ano,
       mes2: novo.mes,
@@ -1753,18 +1987,18 @@
     const wrap = document.createElement('div');
     wrap.innerHTML = `
       <div id="vendRelGerCmpModal" class="modal-overlay" style="display:none;z-index:10070;" role="dialog" aria-modal="true">
-        <div class="modal-content" style="max-width:440px;width:92%;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:0;overflow:hidden;">
+        <div class="modal-content" style="max-width:480px;width:92%;background:#0f172a;border:1px solid #334155;border-radius:14px;padding:0;overflow:hidden;">
           <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px;border-bottom:1px solid #1e293b;">
-            <div style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
+            <div id="vendRelGerCmpTitulo" style="font-size:15px;font-weight:700;color:#e2e8f0;display:flex;align-items:center;gap:8px;">
               <i class="fa-solid fa-arrow-right-arrow-left" style="color:#f59e0b;"></i> Comparar meses
             </div>
             <button type="button" id="vendRelGerCmpFechar" style="background:none;border:none;color:#94a3b8;cursor:pointer;font-size:18px;" title="Fechar">&times;</button>
           </div>
           <div style="padding:16px;">
-            <p style="margin:0 0 14px;font-size:13px;color:#94a3b8;line-height:1.45;">
+            <p id="vendRelGerCmpAjuda" style="margin:0 0 14px;font-size:13px;color:#94a3b8;line-height:1.45;">
               Escolha dois meses. Não importa a ordem: o relatório sempre mostra do mais antigo para o mais recente (como no calendário).
             </p>
-            <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+            <div id="vendRelGerCmpWrapMes" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
               <div class="vend-rel-cmp-field">
                 <label>Mês 1</label>
                 <select id="vendRelGerCmpMes1"></select>
@@ -1774,6 +2008,30 @@
                 <label>Mês 2</label>
                 <select id="vendRelGerCmpMes2"></select>
                 <select id="vendRelGerCmpAno2"></select>
+              </div>
+            </div>
+            <div id="vendRelGerCmpWrapTri" style="display:none;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+              <div class="vend-rel-cmp-field">
+                <label>Trimestre 1</label>
+                <select id="vendRelGerCmpTri1"></select>
+                <select id="vendRelGerCmpAnoTri1"></select>
+              </div>
+              <div class="vend-rel-cmp-field">
+                <label>Trimestre 2</label>
+                <select id="vendRelGerCmpTri2"></select>
+                <select id="vendRelGerCmpAnoTri2"></select>
+              </div>
+            </div>
+            <div id="vendRelGerCmpWrapPeriodo" style="display:none;gap:12px;flex-wrap:wrap;margin-bottom:8px;">
+              <div class="vend-rel-cmp-field">
+                <label>Período 1</label>
+                <input type="date" id="vendRelGerCmpDataIni1" style="display:block;margin-top:4px;width:100%;">
+                <input type="date" id="vendRelGerCmpDataFim1" style="display:block;margin-top:4px;width:100%;">
+              </div>
+              <div class="vend-rel-cmp-field">
+                <label>Período 2</label>
+                <input type="date" id="vendRelGerCmpDataIni2" style="display:block;margin-top:4px;width:100%;">
+                <input type="date" id="vendRelGerCmpDataFim2" style="display:block;margin-top:4px;width:100%;">
               </div>
             </div>
             <div id="vendRelGerCmpErro"></div>
@@ -2049,10 +2307,28 @@
     return 'mes_ano';
   }
 
+  function _tipoComparacaoDoModo(modo) {
+    if (modo === 'trimestre') return 'trimestre';
+    if (modo === 'periodo') return 'periodo';
+    return 'mes_ano';
+  }
+
   function _setModoFiltro(modo) {
     const isMes = modo === 'mes_ano';
     const isTri = modo === 'trimestre';
     const isPeriodo = modo === 'periodo';
+    // Se estava comparando outro tipo (ex.: mês) e mudou para Trimestre/Período, sai da comparação
+    // para não mostrar "JAN × JAN" com o filtro de trimestre ativo.
+    if (_comparacao) {
+      const tipoEsperado = _tipoComparacaoDoModo(modo);
+      const tipoAtual = _comparacao.tipo || 'mes_ano';
+      if (tipoAtual !== tipoEsperado) {
+        _comparacao = null;
+        _dataB = null;
+        _atualizarBotaoComparar();
+        if (_data) _carregar();
+      }
+    }
     document.getElementById('vendRelGerModoMesAno')?.classList.toggle('is-active', isMes);
     document.getElementById('vendRelGerModoTrimestre')?.classList.toggle('is-active', isTri);
     document.getElementById('vendRelGerModoPeriodo')?.classList.toggle('is-active', isPeriodo);
@@ -2377,7 +2653,7 @@
     try {
       // Uma única chamada com todos os itens (leve). Depois filtra o que está na tela/busca.
       const qs = _comparacao
-        ? _filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 })
+        ? _filtrosQueryParams(_qsOverrideComparacao(1))
         : _filtrosQueryParams();
       qs.set('com_itens', '1');
       const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
@@ -2442,7 +2718,7 @@
     _registrosAbort = new AbortController();
     try {
       const qs = _comparacao
-        ? _filtrosQueryParams({ mes: _comparacao.mes1, ano: _comparacao.ano1 })
+        ? _filtrosQueryParams(_qsOverrideComparacao(1))
         : _filtrosQueryParams();
       const resp = await fetch(`/api/sac/vendas/relatorio-gerencial/registros?${qs}`, {
         credentials: 'include',
@@ -2469,9 +2745,16 @@
     const qs = new URLSearchParams();
     qs.set('modo', 'mes');
     qs.set('etapa', 'entregue');
-    if (override?.mes && override?.ano) {
-      qs.set('ano', String(override.ano));
-      qs.set('mes', String(override.mes));
+    const ov = override || {};
+    if (ov.data_inicio && ov.data_fim) {
+      qs.set('data_inicio', String(ov.data_inicio));
+      qs.set('data_fim', String(ov.data_fim));
+    } else if (ov.trimestre && ov.ano) {
+      qs.set('ano', String(ov.ano));
+      qs.set('trimestre', String(ov.trimestre));
+    } else if (ov.mes && ov.ano) {
+      qs.set('ano', String(ov.ano));
+      qs.set('mes', String(ov.mes));
     } else {
       const modo = _modoAtual();
       if (modo === 'periodo') {

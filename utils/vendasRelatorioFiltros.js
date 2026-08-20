@@ -272,6 +272,9 @@ function appendFiltrosSql(filtros, params) {
     );
   }
 
+  // Família/tipo: só no item (NF + itens do pedido). O relatório depois remove pedidos
+  // sem item batendo e recalcula o valor — assim não some pedido que só tem item na NF
+  // e não entra o valor cheio do pedido quando mistura famílias.
   if (Array.isArray(filtros.familia) ? filtros.familia.length : filtros.familia) {
     const familias = Array.isArray(filtros.familia)
       ? filtros.familia.map((v) => String(v || '').trim()).filter(Boolean)
@@ -279,14 +282,6 @@ function appendFiltrosSql(filtros, params) {
     if (familias.length) {
       params.push(familias);
       const idx = params.length;
-      const exists = `EXISTS (
-      SELECT 1
-        FROM vendas.pedidos_venda_itens ix
-        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
-       WHERE ix.codigo_pedido = p.codigo_pedido
-         AND TRIM(COALESCE(pox.codigo_familia::text, '')) = ANY($${idx}::text[])
-    )`;
-      clausesPedido.push(`AND ${exists}`);
       clausesItem.push(`AND TRIM(COALESCE(po.codigo_familia::text, '')) = ANY($${idx}::text[])`);
     }
   }
@@ -294,14 +289,6 @@ function appendFiltrosSql(filtros, params) {
   if (filtros.familia_nome) {
     params.push(filtros.familia_nome);
     const idx = params.length;
-    const existsNome = `EXISTS (
-      SELECT 1
-        FROM vendas.pedidos_venda_itens ix
-        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
-       WHERE ix.codigo_pedido = p.codigo_pedido
-         AND COALESCE(NULLIF(TRIM(pox.descricao_familia), ''), '(sem família)') = $${idx}
-    )`;
-    clausesPedido.push(`AND ${existsNome}`);
     clausesItem.push(`AND COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $${idx}`);
   }
 
@@ -309,14 +296,6 @@ function appendFiltrosSql(filtros, params) {
     const tipoNorm = String(filtros.tipo).padStart(2, '0');
     params.push(tipoNorm);
     const idx = params.length;
-    const exists = `EXISTS (
-      SELECT 1
-        FROM vendas.pedidos_venda_itens ix
-        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
-       WHERE ix.codigo_pedido = p.codigo_pedido
-         AND LPAD(TRIM(COALESCE(pox.tipoitem, '')), 2, '0') = $${idx}
-    )`;
-    clausesPedido.push(`AND ${exists}`);
     clausesItem.push(`AND LPAD(TRIM(COALESCE(po.tipoitem, '')), 2, '0') = $${idx}`);
   }
 
