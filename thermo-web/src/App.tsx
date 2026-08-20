@@ -61,7 +61,7 @@ function StatusBadge({ tone, children }: { tone: 'navy' | 'green' | 'amber' | 'r
   return <span className={clsx('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold', styles[tone])}>{children}</span>
 }
 
-function ModalShell({
+export function ModalShell({
   open,
   title,
   onClose,
@@ -79,14 +79,19 @@ function ModalShell({
   if (!open) return null
 
   return (
-    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/45" role="presentation" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end" role="presentation">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-950/45"
+        aria-label={`Fechar ${title} pelo fundo`}
+        onClick={onClose}
+      />
       <section
-        className={clsx('flex h-full w-full max-w-md flex-col bg-white shadow-2xl', panelClassName)}
+        className={clsx('relative z-10 flex h-full w-full max-w-md flex-col bg-white shadow-2xl', panelClassName)}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         aria-describedby={description ? `${title}-description` : undefined}
-        onClick={(event) => event.stopPropagation()}
       >
         <header className="flex items-start justify-between gap-3 border-b border-thermo-border px-5 py-4">
           <div>
