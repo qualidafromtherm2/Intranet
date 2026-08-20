@@ -36,8 +36,9 @@ const {
   detalheRegistroProducao,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
-const { dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
 const {
+  dispararNotificacaoRegistroTempo,
+  dispararNotificacaoOpDisponivelRi,
   obterConfigNotificacaoUsuario,
   salvarConfigNotificacaoUsuario,
 } = require('../utils/riCheckWhatsappNotificacao');
@@ -3262,6 +3263,14 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
     if (postoFechado?.id) {
       dispararNotificacaoRegistroTempo(postoFechado.id);
     }
+
+    dispararNotificacaoOpDisponivelRi({
+      numeroOp,
+      posto: statusGravar,
+      usuario,
+      kanbanProgramacaoId,
+      opProducaoId,
+    });
 
     const row = await registrarControleOperacaoImpressaoOp({
       kanbanProgramacaoId,

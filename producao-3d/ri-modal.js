@@ -460,7 +460,76 @@ export function openProducao3dRiModal(op, opts = {}) {
     if (isRiAvancar) {
       const postoLabel = kanbanLocal || 'atual';
       if (!confirm(`Confirmar registro do RI no posto ${postoLabel}?`)) return;
+
+      // Fecha na hora; salvar/liberar segue em segundo plano.
+      window.__riRegistroBgPending = window.__riRegistroBgPending || new Set();
+      const chaveBg = `${opId}|${String(kanbanLocal || '').trim()}`;
+      if (window.__riRegistroBgPending.has(chaveBg)) {
+        alert('Registro de RI desta OP já está em andamento em segundo plano.');
+        return;
+      }
+      const checkIdBg = riCheckId;
+      const codigoProdutoBg = op.codigo_produto || null;
+      window.__riRegistroBgPending.add(chaveBg);
+      close();
+
+      void (async () => {
+        let checkId = checkIdBg;
+        try {
+          if (!checkId) {
+            const respAbrir = await fetch('/api/qualidade/ri-check/abrir', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              credentials: 'include',
+              body: JSON.stringify({
+                op_producao_id: opId,
+                op_iapp_id: opId,
+                numero_op: opIdent,
+                codigo,
+                descricao,
+                codigo_produto: codigoProdutoBg,
+                kanban_local: kanbanLocal,
+              }),
+            });
+            const dataAbrir = await respAbrir.json();
+            if (!respAbrir.ok || !dataAbrir.ok) throw new Error(dataAbrir.error || `Erro ${respAbrir.status}`);
+            checkId = dataAbrir.check?.id || null;
+            if (!checkId) throw new Error('Falha ao criar registro RI.');
+          }
+
+          const respSalvar = await fetch(`/api/qualidade/ri-check/${checkId}/salvar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ kanban_local: kanbanLocal }),
+          });
+          const dataSalvar = await respSalvar.json();
+          if (!respSalvar.ok || !dataSalvar.ok) throw new Error(dataSalvar.error || `Erro ${respSalvar.status}`);
+
+          const respLib = await fetch(`/api/qualidade/ri-check/${checkId}/liberar`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({
+              kanban_origem: kanbanLocal,
+              op_producao_id: opId,
+              numero_op: opIdent,
+            }),
+          });
+          const dataLib = await respLib.json();
+          if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
+
+          if (typeof opts.onRegistered === 'function') opts.onRegistered();
+        } catch (err) {
+          alert(err.message || 'Falha ao registrar RI. O status da OP permanece como estava.');
+          if (typeof opts.onRegistered === 'function') opts.onRegistered();
+        } finally {
+          window.__riRegistroBgPending?.delete(chaveBg);
+        }
+      })();
+      return;
     }
+
     setRegistrandoRi(true);
     try {
       if (!riCheckId) {
@@ -495,37 +564,11 @@ export function openProducao3dRiModal(op, opts = {}) {
       const dataSalvar = await respSalvar.json();
       if (!respSalvar.ok || !dataSalvar.ok) throw new Error(dataSalvar.error || `Erro ${respSalvar.status}`);
 
-      if (isRiAvancar) {
-        const respLib = await fetch(`/api/qualidade/ri-check/${riCheckId}/liberar`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({
-            kanban_origem: kanbanLocal,
-            op_producao_id: opId,
-            numero_op: opIdent,
-          }),
-        });
-        const dataLib = await respLib.json();
-        if (!respLib.ok || !dataLib.ok) throw new Error(dataLib.error || `Erro ${respLib.status}`);
-        riAtivo = false;
-        riJaRegistrado = true;
-        renderInfo(dataLib.check);
-        renderLista(dataLib.verificacoes);
-        const postoRegistrado = dataLib.kanban_status || kanbanLocal || 'atual';
-        statusEl.textContent = dataLib.estoque_maq
-          ? 'RI concluída. Produto lançado no armazém 4. ESTOQUE MAQUINAS (Omie).'
-          : `RI registrado no posto ${postoRegistrado}.`;
-        statusEl.className = 'p3d-ri-status ok';
-        if (typeof opts.onRegistered === 'function') opts.onRegistered();
-        close();
-      } else {
-        renderInfo(dataSalvar.check);
-        renderLista(dataSalvar.verificacoes);
-        statusEl.textContent = 'Registro salvo.';
-        statusEl.className = 'p3d-ri-status ok';
-        setRegistrandoRi(false);
-      }
+      renderInfo(dataSalvar.check);
+      renderLista(dataSalvar.verificacoes);
+      statusEl.textContent = 'Registro salvo.';
+      statusEl.className = 'p3d-ri-status ok';
+      setRegistrandoRi(false);
     } catch (err) {
       statusEl.textContent = err.message || 'Falha ao registrar RI.';
       statusEl.className = 'p3d-ri-status err';

@@ -53,6 +53,12 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     canais: ['whatsapp'],
   },
   {
+    id: 'op_disponivel_ri',
+    rotulo: 'OP disponível para RI',
+    grupo: 'Qualidade / PIR',
+    canais: ['whatsapp'],
+  },
+  {
     id: 'op_tempo_posto',
     rotulo: 'OP — registro de tempo no posto',
     grupo: 'Produção / OP',

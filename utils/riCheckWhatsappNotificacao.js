@@ -84,6 +84,18 @@ function montarMensagemRiCheck(check) {
   ].join('\n');
 }
 
+function montarMensagemOpDisponivelRi({ numeroOp, codigo, posto, usuario, dataHora }) {
+  return [
+    '*OP disponível para RI*',
+    '',
+    `Número OP: ${numeroOp ?? '—'}`,
+    `Código: ${codigo || '—'}`,
+    `Posto: ${posto || '—'}`,
+    `Finalizado por: ${usuario || '—'}`,
+    `Data: ${formatarDataHoraBr(dataHora || new Date())}`,
+  ].join('\n');
+}
+
 function montarMensagemRegistroTempo(reg) {
   return [
     '*Registro de tempo — OP*',
@@ -218,6 +230,71 @@ async function notificarRiCheckWhatsappPorId(checkId) {
   await enviarParaDestinatarios(destinatarios, montarMensagemRiCheck(checks[0]));
 }
 
+async function notificarOpDisponivelRiWhatsapp({
+  numeroOp,
+  codigo,
+  posto,
+  usuario,
+  kanbanProgramacaoId,
+  opProducaoId,
+  dataHora,
+}) {
+  if (!whatsappConfigurado()) return;
+
+  await garantirSchemaWhatsConfig();
+
+  let numeroFinal = String(numeroOp || '').trim();
+  let codigoFinal = String(codigo || '').trim();
+  let postoFinal = String(posto || '').trim();
+  const kanbanId = Number(kanbanProgramacaoId) || 0;
+  const opRef = Number(opProducaoId) || 0;
+
+  if (kanbanId && (!numeroFinal || !codigoFinal || !postoFinal)) {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT numero_op, codigo, status
+           FROM producao."Kanban_programacao"
+          WHERE id = $1
+          LIMIT 1`,
+        [kanbanId]
+      );
+      if (rows[0]) {
+        if (!numeroFinal) numeroFinal = String(rows[0].numero_op || '').trim();
+        if (!codigoFinal) codigoFinal = String(rows[0].codigo || '').trim();
+        if (!postoFinal) postoFinal = String(rows[0].status || '').trim();
+      }
+    } catch (_) { /* silencioso */ }
+  }
+
+  if (opRef && (!numeroFinal || !codigoFinal)) {
+    try {
+      const { rows } = await dbQuery(
+        `SELECT n_op AS numero_op, codigo
+           FROM producao."OP_producao"
+          WHERE id = $1
+          LIMIT 1`,
+        [opRef]
+      );
+      if (rows[0]) {
+        if (!numeroFinal) numeroFinal = String(rows[0].numero_op || '').trim();
+        if (!codigoFinal) codigoFinal = String(rows[0].codigo || '').trim();
+      }
+    } catch (_) { /* silencioso */ }
+  }
+
+  if (!numeroFinal && !opRef && !kanbanId) return;
+
+  const destinatarios = await listarUsuariosHabilitados('op_disponivel_ri', 'whatsapp', { exigirTelefone: true });
+  const mensagem = montarMensagemOpDisponivelRi({
+    numeroOp: numeroFinal || numeroOp,
+    codigo: codigoFinal || codigo,
+    posto: postoFinal || posto,
+    usuario,
+    dataHora: dataHora || new Date(),
+  });
+  await enviarParaDestinatarios(destinatarios, mensagem);
+}
+
 async function notificarRegistroTempoWhatsappPorId(registroId) {
   const id = Number(registroId) || 0;
   if (!id || !whatsappConfigurado()) return;
@@ -333,6 +410,13 @@ function dispararNotificacaoRiCheck(checkId) {
   riCheckDebounceTimers.set(id, timer);
 }
 
+function dispararNotificacaoOpDisponivelRi(dados) {
+  if (!dados?.numeroOp && !dados?.kanbanProgramacaoId && !dados?.opProducaoId) return;
+  notificarOpDisponivelRiWhatsapp(dados).catch((err) => {
+    console.error(TAG, err?.message || err);
+  });
+}
+
 function dispararNotificacaoRegistroTempo(registroId) {
   if (!registroId) return;
   notificarRegistroTempoWhatsappPorId(registroId).catch((err) => {
@@ -443,10 +527,12 @@ module.exports = {
   garantirSchemaWhatsConfig,
   garantirSchemaRiWhatsConfig: garantirSchemaWhatsConfig,
   dispararNotificacaoRiCheck,
+  dispararNotificacaoOpDisponivelRi,
   dispararNotificacaoRegistroTempo,
   dispararNotificacaoTransicaoPosto,
   dispararNotificacaoOcorrencia,
   notificarRiCheckWhatsappPorId,
+  notificarOpDisponivelRiWhatsapp,
   notificarRegistroTempoWhatsappPorId,
   notificarTransicaoPostoWhatsapp,
   notificarOcorrenciaWhatsapp,
