@@ -156,6 +156,7 @@ async function garantirSchemaTempoProducao() {
     CREATE INDEX IF NOT EXISTS idx_mao_obra_hist_dia_posto
       ON producao.mao_obra_linha_hist (data_referencia, posto_key, inicio);
   `);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS operadores JSONB NOT NULL DEFAULT '[]'::jsonb`);
     schemaMigrado = true;
   }
 }
@@ -392,6 +393,39 @@ async function encerrarRegistrosAbertos({
   return rows;
 }
 
+async function buscarOperadoresMoAtuais(postoNome, postoKey = '') {
+  await garantirSchemaTempoProducao();
+  const dk = dateKeyInTz(new Date());
+  const nomeNorm = normalizarPostoMo(postoNome);
+  const key = String(postoKey || '').trim();
+  const { rows } = await dbQuery(
+    `SELECT operadores, posto_key, posto_nome
+       FROM producao.mao_obra_linha
+      WHERE data_referencia = $1::date
+        AND (
+          ($2::text <> '' AND posto_key = $2)
+          OR LOWER(TRIM(COALESCE(posto_nome, ''))) = LOWER(TRIM($3))
+        )
+      ORDER BY
+        CASE WHEN $2::text <> '' AND posto_key = $2 THEN 0 ELSE 1 END,
+        updated_at DESC
+      LIMIT 1`,
+    [dk, key, String(postoNome || '').trim()]
+  );
+  if (rows[0]) return normalizarOperadoresMo(rows[0].operadores);
+  if (nomeNorm) {
+    const { rows: byNorm } = await dbQuery(
+      `SELECT operadores, posto_nome
+         FROM producao.mao_obra_linha
+        WHERE data_referencia = $1::date`,
+      [dk]
+    );
+    const hit = byNorm.find((r) => normalizarPostoMo(r.posto_nome) === nomeNorm);
+    if (hit) return normalizarOperadoresMo(hit.operadores);
+  }
+  return [];
+}
+
 async function iniciarRegistroTempo({
   kanbanProgramacaoId = null,
   opProducaoId = 0,
@@ -402,6 +436,7 @@ async function iniciarRegistroTempo({
   riCheckId = null,
   usuario = '',
   skipNotificacao = false,
+  operadores = null,
 }) {
   await garantirSchemaTempoProducao();
   const posto = String(postoOrigem || '').trim();
@@ -418,13 +453,22 @@ async function iniciarRegistroTempo({
     skipNotificacao,
   });
 
+  let opsSnap = normalizarOperadoresMo(operadores);
+  if (tipo === 'posto' && !opsSnap.length) {
+    try {
+      opsSnap = await buscarOperadoresMoAtuais(posto);
+    } catch (_) {
+      opsSnap = [];
+    }
+  }
+
   const { rows } = await dbQuery(
     `INSERT INTO producao."Registro_tempo"
        (kanban_programacao_id, op_producao_id, numero_op, posto_origem,
-        tipo_registro, operacao, ri_check_id, usuario_inicio)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        tipo_registro, operacao, ri_check_id, usuario_inicio, operadores)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
      RETURNING id, tipo_registro, posto_origem, numero_op,
-               inicio::text AS inicio, fim::text AS fim, usuario_fim`,
+               inicio::text AS inicio, fim::text AS fim, usuario_fim, operadores`,
     [
       kanbanProgramacaoId || null,
       opProducaoId > 0 ? opProducaoId : null,
@@ -434,6 +478,7 @@ async function iniciarRegistroTempo({
       operacao || null,
       riCheckId || null,
       String(usuario || '').trim() || null,
+      JSON.stringify(opsSnap),
     ]
   );
   const reg = rows[0] || null;
@@ -507,7 +552,7 @@ async function buscarRegistroPostoAberto({ opProducaoId = 0, numeroOp = '', kanb
 async function buscarRegistrosPostoOp({ opProducaoId = 0, numeroOp = '', kanbanProgramacaoId = null }) {
   await garantirSchemaTempoProducao();
   const { rows } = await dbQuery(
-    `SELECT id, posto_origem, inicio::text AS inicio, fim::text AS fim
+    `SELECT id, posto_origem, inicio::text AS inicio, fim::text AS fim, operadores
        FROM producao."Registro_tempo"
       WHERE tipo_registro = 'posto'
         AND (
@@ -519,6 +564,44 @@ async function buscarRegistrosPostoOp({ opProducaoId = 0, numeroOp = '', kanbanP
     [opProducaoId || 0, numeroOp || '', kanbanProgramacaoId || null]
   );
   return rows;
+}
+
+/** Une operadores do snapshot do registro com os períodos de MO que cruzam o intervalo. */
+function operadoresDoRegistroPosto(reg, moPeriodos) {
+  const snap = normalizarOperadoresMo(reg?.operadores);
+  const periodos = periodosMoDoPosto(moPeriodos, reg?.posto_origem);
+  const t0 = new Date(reg?.inicio).getTime();
+  const t1 = new Date(reg?.fim || Date.now()).getTime();
+  const doHist = [];
+  for (const p of periodos) {
+    const a = new Date(p.inicio).getTime();
+    const b = new Date(p.fim || Date.now()).getTime();
+    if (!Number.isFinite(a) || !Number.isFinite(b) || !Number.isFinite(t0) || !Number.isFinite(t1)) continue;
+    if (b <= t0 || a >= t1) continue;
+    doHist.push(...(p.operadores || []));
+  }
+  return normalizarOperadoresMo([...snap, ...doHist]);
+}
+
+/**
+ * Se não houver MO na data pedida, devolve a última configuração salva (dia anterior ou mais antigo).
+ * Assim o modal abre já com os colaboradores do último input.
+ */
+async function buscarUltimaMaoObraAntes(dataRef) {
+  await garantirSchemaTempoProducao();
+  const dk = String(dataRef || dateKeyInTz(new Date())).slice(0, 10);
+  const { rows } = await dbQuery(
+    `SELECT data_referencia::text AS data_referencia
+       FROM producao.mao_obra_linha
+      WHERE data_referencia < $1::date
+      ORDER BY data_referencia DESC
+      LIMIT 1`,
+    [dk]
+  );
+  const ultima = String(rows[0]?.data_referencia || '').slice(0, 10);
+  if (!ultima) return { data_origem: null, itens: [] };
+  const itens = await buscarMaoObraPorData(ultima);
+  return { data_origem: ultima, itens };
 }
 
 function normalizarPostoMo(nome) {
@@ -782,6 +865,20 @@ async function salvarMaoObraDia(dataRef, itens, usuario) {
          VALUES ($1::date, $2, $3, $4, $5::jsonb, NOW(), $6)`,
         [dk, postoKey, postoNome, quantidade, JSON.stringify(operadores), usuario || null]
       );
+      // Atualiza snapshot nos tempos abertos deste posto (máquinas em andamento).
+      try {
+        await dbQuery(
+          `UPDATE producao."Registro_tempo"
+              SET operadores = $1::jsonb
+            WHERE fim IS NULL
+              AND tipo_registro = 'posto'
+              AND (
+                LOWER(TRIM(COALESCE(posto_origem, ''))) = LOWER(TRIM($2))
+                OR LOWER(TRIM(COALESCE(posto_origem, ''))) = LOWER(TRIM($3))
+              )`,
+          [JSON.stringify(operadores), postoNome, postoKey]
+        );
+      } catch (_) { /* coluna pode não existir em migração parcial */ }
     }
 
     if (rows[0]) {
@@ -1080,6 +1177,60 @@ async function registrarTurnosDiaAutomatico(dataRef) {
   return { data: dk, total };
 }
 
+/**
+ * Detalhe de uma máquina/OP: tempo útil por posto + colaboradores que passaram nela.
+ */
+async function detalheRegistroProducao(opRefs = {}) {
+  await garantirSchemaTempoProducao();
+  const regs = await buscarRegistrosPostoOp(opRefs);
+  if (!regs.length) {
+    return {
+      postos: [],
+      tempo_total_ms: 0,
+      tempo_total_formatado: '—',
+      colaboradores: [],
+    };
+  }
+  const agora = new Date();
+  const inicioGeral = regs[0].inicio;
+  const fimGeral = regs[regs.length - 1].fim || agora.toISOString();
+  const turnos = await buscarTurnosNoPeriodo(inicioGeral, fimGeral);
+  const moMap = await buscarMapaMoPeriodo(inicioGeral, fimGeral);
+  const moPeriodos = await buscarPeriodosMoPeriodo(inicioGeral, fimGeral);
+  const postos = [];
+  const todosOps = [];
+  let totalMs = 0;
+  for (const reg of regs) {
+    const fim = reg.fim || agora.toISOString();
+    const dia = dateKeyInTz(new Date(reg.inicio));
+    const ms = calcularTempoUtilComMo(
+      reg.inicio,
+      fim,
+      turnos,
+      periodosMoDoPosto(moPeriodos, reg.posto_origem),
+      lookupMo(moMap, dia, reg.posto_origem)
+    );
+    totalMs += ms;
+    const operadores = operadoresDoRegistroPosto(reg, moPeriodos);
+    todosOps.push(...operadores);
+    postos.push({
+      posto: String(reg.posto_origem || ''),
+      inicio: reg.inicio,
+      fim: reg.fim || null,
+      aberto: !reg.fim,
+      tempo_ms: ms,
+      tempo_formatado: formatarDuracao(ms),
+      operadores,
+    });
+  }
+  return {
+    postos,
+    tempo_total_ms: totalMs,
+    tempo_total_formatado: formatarDuracao(totalMs),
+    colaboradores: normalizarOperadoresMo(todosOps),
+  };
+}
+
 module.exports = {
   garantirSchemaTempoProducao,
   iniciarCicloPosto,
@@ -1107,10 +1258,13 @@ module.exports = {
   aplicarProporcaoMo,
   lookupMo,
   buscarMaoObraPorData,
+  buscarUltimaMaoObraAntes,
   salvarMaoObraDia,
   listarOperadoresSetorProducao,
   buscarMapaMoPeriodo,
   buscarPeriodosMoPeriodo,
   calcularTempoUtilComMo,
   periodosMoDoPosto,
+  operadoresDoRegistroPosto,
+  detalheRegistroProducao,
 };

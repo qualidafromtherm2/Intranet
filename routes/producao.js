@@ -30,8 +30,10 @@ const {
   dateKeyInTz,
   quantidadeMoValida,
   buscarMaoObraPorData,
+  buscarUltimaMaoObraAntes,
   salvarMaoObraDia,
   listarOperadoresSetorProducao,
+  detalheRegistroProducao,
 } = require('../utils/tempoProducao');
 const { registrarOpsGeradasNaPlanilha, buscarOrdensProducaoPorControladores } = require('../utils/googleSheetsOpProducao');
 const { dispararNotificacaoRegistroTempo } = require('../utils/riCheckWhatsappNotificacao');
@@ -2756,11 +2758,27 @@ router.post('/turno/dia', express.json(), async (req, res) => {
 router.get('/mao-obra', async (req, res) => {
   try {
     const dataRef = String(req.query?.data || dateKeyInTz(new Date())).slice(0, 10);
-    const itens = await buscarMaoObraPorData(dataRef);
+    let itens = await buscarMaoObraPorData(dataRef);
+    let origem = 'dia';
+    let dataOrigem = dataRef;
+    if (!itens.length) {
+      const ultima = await buscarUltimaMaoObraAntes(dataRef);
+      if (ultima.itens?.length) {
+        itens = ultima.itens.map((it) => ({
+          ...it,
+          historico: [],
+          data_referencia: dataRef,
+        }));
+        origem = 'ultimo';
+        dataOrigem = ultima.data_origem;
+      }
+    }
     return res.json({
       success: true,
       data: dataRef,
-      registrado: Array.isArray(itens) && itens.length > 0,
+      registrado: origem === 'dia' && Array.isArray(itens) && itens.length > 0,
+      origem,
+      data_origem: dataOrigem,
       itens,
     });
   } catch (err) {
@@ -2812,6 +2830,112 @@ router.post('/mao-obra', express.json(), async (req, res) => {
   } catch (err) {
     console.error('[producao] Erro ao salvar MO da linha:', err.message);
     return res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * Registro de produção — consulta de máquina/OP (tempo + colaboradores)
+ * --------------------------------------------------------------- */
+router.get('/registro-producao', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    const q = String(req.query?.q || '').trim();
+    const limit = Math.min(80, Math.max(1, parseInt(req.query?.limit, 10) || 40));
+    const like = q ? `%${escapeLikePattern(q)}%` : null;
+    const params = [];
+    let where = `WHERE COALESCE(TRIM(k.numero_op), '') <> ''
+      AND LOWER(TRIM(COALESCE(k.status, ''))) NOT IN ('programado', '')`;
+    if (like) {
+      params.push(like);
+      where += ` AND (
+        k.numero_op ILIKE $1 ESCAPE '\\'
+        OR k.codigo ILIKE $1 ESCAPE '\\'
+        OR COALESCE(k.descricao, '') ILIKE $1 ESCAPE '\\'
+        OR COALESCE(k.numero_pedido, '') ILIKE $1 ESCAPE '\\'
+      )`;
+    }
+    params.push(limit);
+    const { rows } = await dbQuery(
+      `SELECT k.id, k.numero_op, k.codigo, k.descricao, k.status, k.ri,
+              k.op_producao_id, k.op_iapp_id, k.created_at::text AS created_at,
+              k.estoque_maq_entrada_em::text AS estoque_maq_entrada_em
+         FROM producao."Kanban_programacao" k
+        ${where}
+        ORDER BY k.created_at DESC NULLS LAST, k.id DESC
+        LIMIT $${params.length}`,
+      params
+    );
+    return res.json({
+      success: true,
+      q,
+      itens: rows.map((r) => ({
+        id: Number(r.id),
+        numero_op: r.numero_op || '',
+        codigo: r.codigo || '',
+        descricao: r.descricao || '',
+        status: r.status || '',
+        ri: isRiFlagAtivo(r.ri),
+        op_producao_id: Number(r.op_producao_id) || null,
+        op_iapp_id: Number(r.op_iapp_id) || null,
+        created_at: r.created_at || null,
+        estoque_maq: !!r.estoque_maq_entrada_em,
+      })),
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao listar registro de produção:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/registro-producao/detalhe', async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    const id = Number(req.query?.id) || 0;
+    const numeroOp = String(req.query?.numero_op || '').trim();
+    if (!id && !numeroOp) {
+      return res.status(400).json({ success: false, error: 'Informe id ou numero_op.' });
+    }
+    const { rows } = await dbQuery(
+      `SELECT k.id, k.numero_op, k.codigo, k.descricao, k.status, k.ri,
+              k.op_producao_id, k.op_iapp_id, k.created_at::text AS created_at,
+              k.estoque_maq_entrada_em::text AS estoque_maq_entrada_em,
+              k.observacao
+         FROM producao."Kanban_programacao" k
+        WHERE ($1::bigint > 0 AND k.id = $1)
+           OR ($2::text <> '' AND UPPER(TRIM(COALESCE(k.numero_op, ''))) = UPPER(TRIM($2)))
+        ORDER BY k.created_at DESC, k.id DESC
+        LIMIT 1`,
+      [id, numeroOp]
+    );
+    const k = rows[0];
+    if (!k) return res.status(404).json({ success: false, error: 'Máquina/OP não encontrada.' });
+
+    const detalhe = await detalheRegistroProducao({
+      kanbanProgramacaoId: Number(k.id) || null,
+      opProducaoId: Number(k.op_producao_id) || 0,
+      numeroOp: String(k.numero_op || '').trim(),
+    });
+
+    return res.json({
+      success: true,
+      maquina: {
+        id: Number(k.id),
+        numero_op: k.numero_op || '',
+        codigo: k.codigo || '',
+        descricao: k.descricao || '',
+        status: k.status || '',
+        ri: isRiFlagAtivo(k.ri),
+        op_producao_id: Number(k.op_producao_id) || null,
+        op_iapp_id: Number(k.op_iapp_id) || null,
+        created_at: k.created_at || null,
+        estoque_maq: !!k.estoque_maq_entrada_em,
+        observacao: k.observacao || '',
+      },
+      ...detalhe,
+    });
+  } catch (err) {
+    console.error('[producao] Erro ao detalhar registro de produção:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
   }
 });
 

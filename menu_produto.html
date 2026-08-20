@@ -319,6 +319,17 @@
       Registrar produção
     </a>
     <a href="#"
+       id="menu-registro-producao"
+       class="menu-link"
+       data-nav-key="side:producao:registro-producao"
+       data-nav-parent="side:producao"
+       data-nav-pos="side"
+       data-nav-label="Registro de produção"
+       data-nav-selector="#menu-registro-producao">
+      <i class="fa-solid fa-clipboard-list" style="margin-right:8px;"></i>
+      Registro de produção
+    </a>
+    <a href="#"
        id="menu-producao-3d"
        class="menu-link"
        data-nav-key="side:producao:producao-3d"
@@ -13388,6 +13399,7 @@
                     <i class="fa-solid fa-eye"></i> Ver RI
                   </button>
                   <button id="montaRecarregarBtn" type="button"
+                    title="Atualizar as OPs nos kanbans sem sair desta página"
                     style="display:inline-flex;align-items:center;gap:8px;padding:7px 16px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;">
                     <i class="fa-solid fa-rotate-right"></i> Atualizar
                   </button>
@@ -13404,7 +13416,7 @@
             <div id="montaErro" style="display:none;padding:16px;background:#450a0a;border:1px solid #dc2626;border-radius:10px;color:#fca5a5;font-size:13px;margin-bottom:12px;"></div>
 
             <div id="montaPesquisaBar" style="margin-bottom:12px;">
-              <div style="display:flex;align-items:center;gap:8px;max-width:480px;">
+              <div style="display:flex;align-items:center;gap:8px;max-width:560px;">
                 <div style="position:relative;flex:1;">
                   <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
                   <input type="search" id="montaPesquisaInput" autocomplete="off"
@@ -13415,6 +13427,10 @@
                     <i class="fa-solid fa-xmark" style="font-size:11px;"></i>
                   </button>
                 </div>
+                <button type="button" id="montaAtualizarBarBtn" title="Atualizar as OPs nos kanbans sem sair desta página"
+                  style="flex-shrink:0;height:38px;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:linear-gradient(135deg,#10b981 0%,#059669 100%);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:600;cursor:pointer;">
+                  <i class="fa-solid fa-rotate-right"></i> Atualizar
+                </button>
                 <button type="button" id="montaQrOpBtn" title="Ler QR Code da etiqueta OP"
                   style="flex-shrink:0;width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#93c5fd;font-size:16px;cursor:pointer;">
                   <i class="fa-solid fa-qrcode"></i>
@@ -13656,6 +13672,40 @@
             <div class="content-wrapper-header" style="display:none;"></div>
             <div id="prodTestesStatus" style="display:none;margin:0 0 10px;font-size:13px;color:#94a3b8;"></div>
             <div id="prodTestesRoot"></div>
+          </div>
+        </div>
+
+        <!-- Painel Produção: Registro de produção (consulta por máquina/OP) -->
+        <div id="registroProducaoPane" class="tab-pane" style="display:none;">
+          <div class="content-wrapper">
+            <div class="content-section" style="margin-top:0;">
+              <div class="title-wrapper" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:0;">
+                <div>
+                  <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-clipboard-list" style="color:#38bdf8;"></i>
+                    Registro de produção
+                  </div>
+                  <div class="content-text" style="margin-top:4px;">Consulte máquina/OP: tempo por posto, colaboradores e status atual.</div>
+                </div>
+              </div>
+
+              <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+                <div style="flex:1;min-width:220px;position:relative;">
+                  <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;"></i>
+                  <input type="search" id="regProdBusca" autocomplete="off"
+                    placeholder="Pesquisar OP, código ou descrição..."
+                    style="width:100%;padding:10px 12px 10px 36px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);color:#e2e8f0;font-size:13px;outline:none;">
+                </div>
+                <button type="button" id="regProdBuscarBtn"
+                  style="padding:10px 16px;border-radius:10px;border:1px solid rgba(56,189,248,.4);background:rgba(56,189,248,.15);color:#7dd3fc;font-weight:600;cursor:pointer;display:inline-flex;align-items:center;gap:8px;font-size:13px;">
+                  <i class="fa-solid fa-magnifying-glass"></i> Buscar
+                </button>
+              </div>
+
+              <div id="regProdStatus" style="margin-top:12px;font-size:13px;color:#94a3b8;min-height:18px;"></div>
+              <div id="regProdLista" style="margin-top:12px;display:flex;flex-direction:column;gap:8px;"></div>
+              <div id="regProdDetalhe" style="display:none;margin-top:18px;"></div>
+            </div>
           </div>
         </div>
 
@@ -21612,7 +21662,8 @@ function attachDropZone(ul) {
     relatorio_at: ['menu-sac-at-relatorio'],
     relatorio_vendas: ['menu-vendas-relatorio'],
     relatorio_logistica: ['menu-log-relatorio'],
-    relatorio_producao: ['menu-producao-relatorio']
+    relatorio_producao: ['menu-producao-relatorio'],
+    registro_producao: ['menu-registro-producao']
   };
   const PURCHASE_MODE = {
     OMIE: 'omie',

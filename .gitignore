@@ -179,3 +179,6 @@ scripts/restaurar-postgres-local.sh
 scripts/iniciar-api-local.sh
 scripts/parar-api-local.sh
 
+# propostas de logo locais (rascunho, não usadas pelo site)
+img/Fotos logo/propostas-thermis/
+
