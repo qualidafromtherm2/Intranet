@@ -15,11 +15,13 @@ import {
   RefreshCw,
   Search,
   ShieldAlert,
+  SlidersHorizontal,
   ShoppingCart,
   Warehouse,
+  X,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
-import { useMemo } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { ThermoLogo } from './components/ThermoLogo'
 import { usePilotData } from './hooks/usePilotData'
 import { currency, quantity, relativeLabel } from './lib/format'
@@ -59,7 +61,57 @@ function StatusBadge({ tone, children }: { tone: 'navy' | 'green' | 'amber' | 'r
   return <span className={clsx('inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold', styles[tone])}>{children}</span>
 }
 
-function ProductCard({ product, canRequestPurchase, canEditCatalog }: { product: ProductRecord; canRequestPurchase: boolean; canEditCatalog: boolean }) {
+function ModalShell({
+  open,
+  title,
+  onClose,
+  children,
+  description,
+}: {
+  open: boolean
+  title: string
+  onClose: () => void
+  children: ReactNode
+  description?: string
+}) {
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-stretch justify-end bg-slate-950/45" role="presentation" onClick={onClose}>
+      <section
+        className="flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        aria-describedby={description ? `${title}-description` : undefined}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className="flex items-start justify-between gap-3 border-b border-thermo-border px-5 py-4">
+          <div>
+            <h2 className="text-lg font-bold text-thermo-navy">{title}</h2>
+            {description ? <p id={`${title}-description`} className="mt-1 text-sm text-slate-500">{description}</p> : null}
+          </div>
+          <button className="thermo-icon-button" type="button" onClick={onClose} aria-label={`Fechar ${title.toLowerCase()}`}>
+            <X className="size-4" />
+          </button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">{children}</div>
+      </section>
+    </div>
+  )
+}
+
+function ProductCard({
+  product,
+  canRequestPurchase,
+  canEditCatalog,
+  onRequestPurchase,
+}: {
+  product: ProductRecord
+  canRequestPurchase: boolean
+  canEditCatalog: boolean
+  onRequestPurchase: (product: ProductRecord) => void
+}) {
   const healthTone = product.health === 'normal' ? 'green' : product.health === 'divergente' ? 'amber' : 'red'
 
   return (
@@ -112,7 +164,13 @@ function ProductCard({ product, canRequestPurchase, canEditCatalog }: { product:
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
-        <button className="thermo-button thermo-button-primary" type="button" disabled={!canRequestPurchase} title={canRequestPurchase ? 'Ação demonstrativa do piloto.' : 'Permissão depende do backend legado.'}>
+        <button
+          className="thermo-button thermo-button-primary"
+          type="button"
+          disabled={!canRequestPurchase}
+          title={canRequestPurchase ? 'Ação demonstrativa do piloto.' : 'Permissão depende do backend legado.'}
+          onClick={() => onRequestPurchase(product)}
+        >
           <ShoppingCart className="size-4" />
           Solicitar compra
         </button>
@@ -125,7 +183,15 @@ function ProductCard({ product, canRequestPurchase, canEditCatalog }: { product:
   )
 }
 
-function ProductTable({ rows, canRequestPurchase }: { rows: ProductRecord[]; canRequestPurchase: boolean }) {
+function ProductTable({
+  rows,
+  canRequestPurchase,
+  onRequestPurchase,
+}: {
+  rows: ProductRecord[]
+  canRequestPurchase: boolean
+  onRequestPurchase: (product: ProductRecord) => void
+}) {
   return (
     <div className="overflow-hidden rounded-2xl border border-thermo-border bg-white shadow-sm">
       <div className="overflow-x-auto">
@@ -168,7 +234,7 @@ function ProductTable({ rows, canRequestPurchase }: { rows: ProductRecord[]; can
                 <td className="px-4 py-4">
                   <div className="flex justify-end gap-2">
                     <button className="thermo-button thermo-button-secondary" type="button">Detalhes</button>
-                    <button className="thermo-button thermo-button-primary" type="button" disabled={!canRequestPurchase}>Compra</button>
+                    <button className="thermo-button thermo-button-primary" type="button" disabled={!canRequestPurchase} onClick={() => onRequestPurchase(product)}>Compra</button>
                   </div>
                 </td>
               </tr>
@@ -238,12 +304,74 @@ function applyToggle<T extends string>(current: T[], value: T) {
   return current.includes(value) ? current.filter((entry) => entry !== value) : [...current, value]
 }
 
+function countAppliedFilters(filters: FiltersState) {
+  return filters.family.length
+    + filters.purchaseStatus.length
+    + filters.health.length
+    + filters.locations.length
+    + Number(filters.limitedOnly)
+    + Number(filters.inactiveVisible)
+}
+
+function describeAppliedFilters(filters: FiltersState) {
+  const segments: string[] = []
+
+  if (filters.family.length) segments.push(`${filters.family.length} família(s)`)
+  if (filters.purchaseStatus.length) segments.push(`${filters.purchaseStatus.length} status de compra`)
+  if (filters.health.length) segments.push(`${filters.health.length} saúde(s)`)
+  if (filters.locations.length) segments.push(`${filters.locations.length} local(is)`)
+  if (filters.limitedOnly) segments.push('somente limitados')
+  if (filters.inactiveVisible) segments.push('inclui inativos')
+
+  return segments.length > 0 ? segments.join(' · ') : 'Nenhum filtro adicional aplicado'
+}
+
 function App() {
   const { paginated, filtered, loading, error, filters, setFilters, page, setPage, pageCount, viewMode, setViewMode, cartCount, streamEvents, locationNames, familyNames, dataMode, user } = usePilotData()
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false)
+  const [purchaseFeedback, setPurchaseFeedback] = useState<ProductRecord | null>(null)
 
   const totalCritical = useMemo(() => filtered.filter((product) => product.health !== 'normal').length, [filtered])
+  const appliedFilterCount = useMemo(() => countAppliedFilters(filters), [filters])
+  const appliedFilterSummary = useMemo(() => describeAppliedFilters(filters), [filters])
 
   const updateFilters = (patch: Partial<FiltersState>) => setFilters((current) => ({ ...current, ...patch }))
+  const closeOverlays = () => {
+    setMobileNavOpen(false)
+    setMobileFiltersOpen(false)
+    setPurchaseFeedback(null)
+  }
+  const handlePurchaseBridge = (product: ProductRecord) => {
+    if (!user.permissions.canRequestPurchase) return
+
+    setPurchaseFeedback(product)
+  }
+
+  useEffect(() => {
+    if (!mobileNavOpen && !mobileFiltersOpen && !purchaseFeedback) return
+
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeOverlays()
+    }
+
+    window.addEventListener('keydown', handleEscape)
+
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [mobileFiltersOpen, mobileNavOpen, purchaseFeedback])
+
+  useEffect(() => {
+    const shouldLockScroll = mobileNavOpen || mobileFiltersOpen || Boolean(purchaseFeedback)
+
+    if (!shouldLockScroll) return
+
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    return () => {
+      document.body.style.overflow = previousOverflow
+    }
+  }, [mobileFiltersOpen, mobileNavOpen, purchaseFeedback])
 
   return (
     <div className="min-h-screen bg-thermo-bg text-thermo-ink">
@@ -270,7 +398,10 @@ function App() {
         <main className="min-w-0">
           <header className="sticky top-0 z-20 border-b border-thermo-border bg-thermo-navy px-4 py-3 text-white shadow-sm md:px-6">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="lg:hidden">
+              <div className="flex items-center gap-2 lg:hidden">
+                <button className="thermo-icon-button border-white/15 bg-white/8 text-white hover:border-white/25 hover:bg-white/12" type="button" onClick={() => setMobileNavOpen(true)} aria-label="Abrir navegação operacional" aria-expanded={mobileNavOpen} aria-controls="mobile-operational-nav">
+                  <Layers3 className="size-4" />
+                </button>
                 <ThermoLogo compact />
               </div>
               <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-white/15 bg-white/6 px-3 py-2">
@@ -283,6 +414,17 @@ function App() {
                   aria-label="Pesquisar produtos"
                 />
               </label>
+              <button
+                className="thermo-button thermo-button-secondary border-white/15 bg-white/8 text-white hover:border-white/25 hover:bg-white/12 lg:hidden"
+                type="button"
+                onClick={() => setMobileFiltersOpen(true)}
+                aria-label="Abrir filtros"
+                aria-expanded={mobileFiltersOpen}
+                aria-controls="mobile-product-filters"
+              >
+                <SlidersHorizontal className="size-4" />
+                Filtros
+              </button>
               <div className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/6 px-3 py-2 text-sm font-semibold">
                 <ShoppingCart className="size-4 text-amber-300" />
                 Carrinho {cartCount}
@@ -346,7 +488,20 @@ function App() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-5 xl:grid-cols-[1.4fr_1fr]">
+              <div className="mt-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 xl:hidden">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Resumo aplicado</div>
+                    <div className="mt-1 text-sm text-slate-600">{appliedFilterSummary}</div>
+                  </div>
+                  <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setMobileFiltersOpen(true)} aria-label="Abrir painel de filtros">
+                    <SlidersHorizontal className="size-4" />
+                    {appliedFilterCount > 0 ? `Filtros (${appliedFilterCount})` : 'Abrir filtros'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-5 hidden gap-5 xl:grid xl:grid-cols-[1.4fr_1fr]">
                 <div className="space-y-4">
                   <div>
                     <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Famílias</div>
@@ -420,11 +575,11 @@ function App() {
                   {viewMode === 'grid' ? (
                     <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                       {paginated.map((product) => (
-                        <ProductCard key={product.codigo} product={product} canRequestPurchase={user.permissions.canRequestPurchase} canEditCatalog={user.permissions.canEditCatalog} />
+                        <ProductCard key={product.codigo} product={product} canRequestPurchase={user.permissions.canRequestPurchase} canEditCatalog={user.permissions.canEditCatalog} onRequestPurchase={handlePurchaseBridge} />
                       ))}
                     </div>
                   ) : (
-                    <ProductTable rows={paginated} canRequestPurchase={user.permissions.canRequestPurchase} />
+                    <ProductTable rows={paginated} canRequestPurchase={user.permissions.canRequestPurchase} onRequestPurchase={handlePurchaseBridge} />
                   )}
                   <Pagination page={page} pageCount={pageCount} onChange={setPage} />
                 </>
@@ -483,6 +638,120 @@ function App() {
           </div>
         </main>
       </div>
+      <ModalShell open={mobileNavOpen} title="Navegação operacional" description="Substituto acessível para o menu lateral nas larguras mobile e tablet." onClose={() => setMobileNavOpen(false)}>
+        <nav id="mobile-operational-nav" className="space-y-2" aria-label="Navegação operacional mobile">
+          {navItems.map(({ label, icon: Icon, active }) => (
+            <button key={label} type="button" className={clsx('flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left text-sm font-semibold', active ? 'border-thermo-navy bg-thermo-navy text-white' : 'border-thermo-border bg-thermo-bg text-thermo-navy')}>
+              <Icon className="size-4" />
+              <span>{label}</span>
+              {active ? <span className="ml-auto text-[11px] font-bold uppercase tracking-[0.14em] text-white/75">Disponível</span> : <span className="ml-auto text-[11px] font-bold uppercase tracking-[0.14em] text-slate-400">Ponte</span>}
+            </button>
+          ))}
+        </nav>
+        <div className="mt-5 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
+          <div className="text-sm font-semibold text-thermo-navy">{user.displayName}</div>
+          <div className="mt-1 text-xs text-slate-500">{user.roleLabel}</div>
+        </div>
+      </ModalShell>
+
+      <ModalShell open={mobileFiltersOpen} title="Filtros de produtos" description="Ajuste filtros no mobile/tablet mantendo o resumo do estado aplicado." onClose={() => setMobileFiltersOpen(false)}>
+        <div id="mobile-product-filters" className="space-y-5">
+          <div className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
+            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Resumo aplicado</div>
+            <div className="mt-1 text-sm text-slate-600">{appliedFilterSummary}</div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Famílias</div>
+            <div className="flex flex-wrap gap-2">
+              {familyNames.map((family) => (
+                <button key={family} className={clsx('thermo-chip', filters.family.includes(family) && 'thermo-chip-active')} type="button" onClick={() => updateFilters({ family: applyToggle(filters.family, family) })}>
+                  {family}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Situação de compra</div>
+            <div className="flex flex-wrap gap-2">
+              {[
+                ['sem_compra', 'Sem compra'],
+                ['em_compra', 'Em compra'],
+              ].map(([value, label]) => (
+                <button key={value} className={clsx('thermo-chip', filters.purchaseStatus.includes(value as 'sem_compra' | 'em_compra') && 'thermo-chip-active')} type="button" onClick={() => updateFilters({ purchaseStatus: applyToggle(filters.purchaseStatus, value as 'sem_compra' | 'em_compra') })}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Saúde do estoque</div>
+            <div className="flex flex-wrap gap-2">
+              {(Object.keys(healthLabels) as InventoryHealth[]).map((health) => (
+                <button key={health} className={clsx('thermo-chip', filters.health.includes(health) && 'thermo-chip-active')} type="button" onClick={() => updateFilters({ health: applyToggle(filters.health, health) })}>
+                  {healthLabels[health]}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Locais com saldo positivo</div>
+            <div className="flex flex-wrap gap-2">
+              {locationNames.map((location) => (
+                <button key={location} className={clsx('thermo-chip', filters.locations.includes(location) && 'thermo-chip-active')} type="button" onClick={() => updateFilters({ locations: applyToggle(filters.locations, location) })}>
+                  <MapPin className="size-3.5" />
+                  {location}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="flex items-start gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-600">
+            <input type="checkbox" checked={filters.limitedOnly} onChange={(event) => updateFilters({ limitedOnly: event.target.checked })} className="mt-0.5 size-4 accent-thermo-navy" />
+            Mostrar somente itens limitados
+          </label>
+          <label className="flex items-start gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-600">
+            <input type="checkbox" checked={filters.inactiveVisible} onChange={(event) => updateFilters({ inactiveVisible: event.target.checked })} className="mt-0.5 size-4 accent-thermo-navy" />
+            Incluir produtos inativos no piloto
+          </label>
+
+          <div className="flex flex-wrap gap-2 border-t border-thermo-border pt-4">
+            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setFilters(defaultFilters)}>
+              <Filter className="size-4" />
+              Limpar filtros
+            </button>
+            <button className="thermo-button thermo-button-primary" type="button" onClick={() => setMobileFiltersOpen(false)}>
+              Aplicar e voltar
+            </button>
+          </div>
+        </div>
+      </ModalShell>
+
+      <ModalShell
+        open={Boolean(purchaseFeedback)}
+        title="Solicitação de compra em modo demonstração"
+        description="A CTA foi preservada como ponte visual do piloto, sem disparar fluxo real."
+        onClose={() => setPurchaseFeedback(null)}
+      >
+        {purchaseFeedback ? (
+          <div className="space-y-4">
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+              Nenhuma compra foi criada. Este botão existe apenas para validar posicionamento, texto, estado e feedback da ação durante a migração.
+            </div>
+            <div className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
+              <div className="font-mono text-xs font-semibold text-slate-500">{purchaseFeedback.codigo}</div>
+              <div className="mt-1 text-base font-bold text-thermo-navy">{purchaseFeedback.descricao}</div>
+              <div className="mt-2 text-sm text-slate-600">Para concluir a operação real, a equipe ainda precisa seguir pela tela legada de compras com autorização backend existente.</div>
+            </div>
+            <button className="thermo-button thermo-button-primary" type="button" onClick={() => setPurchaseFeedback(null)}>
+              Entendi, continuar no piloto
+            </button>
+          </div>
+        ) : null}
+      </ModalShell>
     </div>
   )
 }
