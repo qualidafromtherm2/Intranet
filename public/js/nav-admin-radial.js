@@ -1275,6 +1275,15 @@
 
   window.__navAdminHtmlSelectBotoes = htmlSelectBotoesAgrupado;
 
+  /** Abre o menu flutuante (botão direito) a partir de outro módulo — ex.: gráfico. */
+  window.__abrirNavRadialPagina = (x, y, targetEl) => {
+    if (!usuarioLogado() || visaoClienteAtiva) return false;
+    if (reorderState || document.body.classList.contains('nav-admin-reorder-mode')) return false;
+    const ctx = contextoPaginaFromTarget(targetEl || document.body);
+    abrirRadial(ctx, Number(x) || 0, Number(y) || 0, 'pagina');
+    return true;
+  };
+
   if (!document.querySelector('script[data-chamado-aviso-diario]')) {
     const s = document.createElement('script');
     s.src = '/public/js/chamado-aviso-diario.js?v=20260819a';

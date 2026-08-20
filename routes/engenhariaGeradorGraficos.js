@@ -94,10 +94,12 @@ module.exports = function engenhariaGeradorGraficosRouter(pool) {
   router.post('/salvos', express.json({ limit: '2mb' }), async (req, res) => {
     try {
       await ensureSchema();
-      const titulo = String(req.body?.titulo || '').trim() || 'grafico';
+      const nomeLivre = String(req.body?.nome || '').trim();
+      const titulo = nomeLivre || String(req.body?.titulo || '').trim() || 'grafico';
       const config = req.body?.config && typeof req.body.config === 'object' ? req.body.config : {};
       const agora = new Date();
-      const nome = `${req.loginUsuario}_${slugTitulo(titulo)}_${stampNome(agora)}`;
+      const baseSlug = slugTitulo(nomeLivre || titulo);
+      const nome = `${req.loginUsuario}_${baseSlug}_${stampNome(agora)}`;
       const { rows } = await pool.query(
         `INSERT INTO engenharia.gerador_graficos_salvos (nome, usuario, titulo, config)
          VALUES ($1, $2, $3, $4::jsonb)

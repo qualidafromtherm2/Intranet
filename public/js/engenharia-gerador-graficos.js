@@ -4,7 +4,7 @@
 
   const PREF_CHAVE = 'engenharia_gerador_graficos';
   const GG_API = '/api/engenharia/gerador-graficos';
-  const PANE_VERSION = '12';
+  const PANE_VERSION = '13';
   const MAX_GRUPOS = 5;
   const CORES = ['#ef4444', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4'];
   const DEFAULTS = {
@@ -28,9 +28,13 @@
   let grupos = gruposPadrao();
   let pontosLinha = [];
   let dragLinha = null;
+  let dragPan = null;
   let skipClickLinha = false;
   let overlayTeste = null;
   let vista = null;
+  let vistaDinamica = null;
+  let escalaModo = 'original';
+  let salvosCache = [];
   let ggLeiturasCache = [];
   let ggRelatorioAtual = null;
   let ggColunasCache = null;
@@ -164,6 +168,9 @@
     })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
     overlayTeste = null;
     vista = null;
+    vistaDinamica = null;
+    escalaModo = 'original';
+    dragPan = null;
     renderGrupos();
     preencherSelectsEixos();
     atualizarRotulos();
@@ -356,6 +363,74 @@
     };
   }
 
+  function cloneVista(v) {
+    if (!v) return null;
+    const gruposClone = {};
+    Object.entries(v.grupos || {}).forEach(([k, g]) => {
+      gruposClone[k] = { min: g.min, max: g.max };
+    });
+    return {
+      xMin: v.xMin, xMax: v.xMax, yMin: v.yMin, yMax: v.yMax,
+      grupos: gruposClone,
+    };
+  }
+
+  function vistasIguais(a, b) {
+    if (!a || !b) return false;
+    const near = (x, y) => Math.abs(Number(x) - Number(y)) <= 1e-4 * (1 + Math.abs(Number(x)) + Math.abs(Number(y)));
+    if (!near(a.xMin, b.xMin) || !near(a.xMax, b.xMax) || !near(a.yMin, b.yMin) || !near(a.yMax, b.yMax)) return false;
+    const keys = new Set([...Object.keys(a.grupos || {}), ...Object.keys(b.grupos || {})]);
+    for (const k of keys) {
+      const ga = a.grupos?.[k];
+      const gb = b.grupos?.[k];
+      if (!ga || !gb || !near(ga.min, gb.min) || !near(ga.max, gb.max)) return false;
+    }
+    return true;
+  }
+
+  function vistaPadrao() {
+    if (escalaModo === 'dinamica' && vistaDinamica) return cloneVista(vistaDinamica);
+    return vistaDaConfig();
+  }
+
+  function vistaFoiAlterada() {
+    const padrao = vistaPadrao();
+    const atual = vista || (escalaModo === 'original' ? vistaDaConfig() : padrao);
+    return !vistasIguais(atual, padrao);
+  }
+
+  function restaurarVistaPadrao() {
+    if (escalaModo === 'dinamica' && vistaDinamica) vista = cloneVista(vistaDinamica);
+    else vista = null;
+    dragPan = null;
+    desenhar();
+    atualizarBotoesVista();
+  }
+
+  function atualizarBotoesVista() {
+    const btn = $('ggBtnRestaurar');
+    if (btn) btn.style.display = vistaFoiAlterada() ? '' : 'none';
+    const btnEsc = $('ggBtnEscalaOrig');
+    if (btnEsc) {
+      btnEsc.textContent = escalaModo === 'original' ? 'Escala dinâmica' : 'Escala original';
+      btnEsc.style.display = vistaDinamica ? '' : 'none';
+    }
+  }
+
+  function aplicarVistaNoChart(chart) {
+    if (!chart?.options?.scales || !vista) return;
+    const sc = chart.options.scales;
+    if (sc.x) { sc.x.min = vista.xMin; sc.x.max = vista.xMax; }
+    if (sc.yTemp) { sc.yTemp.min = vista.yMin; sc.yTemp.max = vista.yMax; }
+    grupos.forEach((gr) => {
+      const axis = sc[`yG_${gr.id}`];
+      const g = vista.grupos?.[gr.id];
+      if (axis && g) { axis.min = g.min; axis.max = g.max; }
+    });
+    chart.update('none');
+    atualizarBotoesVista();
+  }
+
   function zoomAoRedor(min, max, centro, fator) {
     const left = centro - (centro - min) * fator;
     const right = centro + (max - centro) * fator;
@@ -367,6 +442,8 @@
     const base = vistaDaConfig();
     if (!recs?.length) {
       vista = null;
+      vistaDinamica = null;
+      escalaModo = 'original';
       return;
     }
     let xMin = base.xMin;
@@ -391,13 +468,15 @@
     });
     const px = padRange(xMin, xMax);
     const py = padRange(yMin, yMax);
-    vista = {
+    vistaDinamica = {
       xMin: px.min,
       xMax: px.max,
       yMin: py.min,
       yMax: py.max,
       grupos: gVista,
     };
+    vista = cloneVista(vistaDinamica);
+    escalaModo = 'dinamica';
   }
 
   function recNoParametro(r) {
@@ -427,7 +506,7 @@
     const cx = sx.getValueForPixel(px);
     const cy = sy.getValueForPixel(py);
     const fator = e.deltaY > 0 ? 1.16 : 1 / 1.16;
-    if (!vista) vista = vistaDaConfig();
+    if (!vista) vista = cloneVista(vistaPadrao());
     const nx = zoomAoRedor(vista.xMin, vista.xMax, cx, fator);
     const ny = zoomAoRedor(vista.yMin, vista.yMax, cy, fator);
     vista.xMin = nx.min;
@@ -441,7 +520,15 @@
       vista.grupos = vista.grupos || {};
       vista.grupos[gr.id] = zoomAoRedor(cur.min, cur.max, centro, fator);
     });
-    desenhar();
+    aplicarVistaNoChart(chartAlta);
+  }
+
+  function onContextMenuGrafico(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof window.__abrirNavRadialPagina === 'function') {
+      window.__abrirNavRadialPagina(e.clientX, e.clientY, e.target);
+    }
   }
 
   function ligarZoomRoda() {
@@ -449,6 +536,21 @@
     if (!box || box.dataset.ggZoom === '1') return;
     box.dataset.ggZoom = '1';
     box.addEventListener('wheel', onZoomRoda, { passive: false });
+    box.addEventListener('contextmenu', onContextMenuGrafico, true);
+    box.addEventListener('dragstart', (ev) => ev.preventDefault());
+  }
+
+  function alternarEscalaOriginalDinamica() {
+    if (!vistaDinamica) return;
+    if (escalaModo === 'dinamica') {
+      escalaModo = 'original';
+      vista = null;
+    } else {
+      escalaModo = 'dinamica';
+      vista = cloneVista(vistaDinamica);
+    }
+    desenhar();
+    atualizarOverlayInfo();
   }
 
   function atualizarOverlayInfo() {
@@ -458,6 +560,7 @@
       el.style.display = 'none';
       el.innerHTML = '';
       atualizarTabelaTeste([]);
+      atualizarBotoesVista();
       return;
     }
     const r = overlayTeste.relatorio;
@@ -466,19 +569,32 @@
     const cols = overlayTeste.colX
       ? `Campos: ${nomeColuna(overlayTeste.colY)} × ${nomeColuna(overlayTeste.colX)}`
       : '';
+    const labelEscala = escalaModo === 'original' ? 'Escala dinâmica' : 'Escala original';
+    const btnEscala = vistaDinamica
+      ? `<button type="button" id="ggBtnEscalaOrig" class="content-button" style="background:#334155;color:#fff;">${escHtml(labelEscala)}</button>`
+      : '';
     el.style.display = 'flex';
     el.innerHTML = `<span>Teste real: OP <b>${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')} · ${escHtml(recs.length)} pontos${fora ? ` · <b>${fora} fora da escala configurada</b> (a vista foi ampliada)` : ''}${cols ? `<br><small>${escHtml(cols)}</small>` : ''}</span>
-      <button type="button" id="ggBtnEscalaOrig" class="content-button" style="background:#334155;color:#fff;">Escala original</button>
+      ${btnEscala}
       <button type="button" id="ggBtnLimparOverlay" class="content-button" style="background:#7c2d12;color:#fff;">Remover teste</button>`;
-    $('ggBtnEscalaOrig')?.addEventListener('click', () => { vista = null; desenhar(); });
+    $('ggBtnEscalaOrig')?.addEventListener('click', alternarEscalaOriginalDinamica);
     $('ggBtnLimparOverlay')?.addEventListener('click', () => {
       overlayTeste = null;
       vista = null;
+      vistaDinamica = null;
+      escalaModo = 'original';
       saveRegs(loadRegs().filter((x) => x.origem !== 'teste'));
       atualizarOverlayInfo();
       desenhar();
     });
     atualizarTabelaTeste(recs);
+    atualizarBotoesVista();
+  }
+
+  function corValorGrupo(modeloId) {
+    const idx = grupos.findIndex((x) => x.id === modeloId);
+    if (idx < 0) return CORES[0];
+    return CORES[idx % CORES.length];
   }
 
   function atualizarTabelaTeste(recs) {
@@ -492,7 +608,7 @@
     }
     grupos = lerGruposDoDom();
     wrap.style.display = 'block';
-    wrap.innerHTML = `<div class="gg-dica" style="margin:0 0 8px;">Valores do teste usados neste gráfico (confira se batem com a máquina). Scroll do mouse no gráfico faz zoom.</div>
+    wrap.innerHTML = `<div class="gg-dica" style="margin:0 0 8px;">Valores do teste usados neste gráfico (confira se batem com a máquina). Scroll = zoom · arraste com a mãozinha para mover.</div>
       <div class="gg-tabela-teste-scroll">
         <table class="gg-tabela-teste">
           <thead><tr>
@@ -506,13 +622,14 @@
           <tbody>${lista.map((p, i) => {
             const g = grupos.find((x) => x.id === p.modelo);
             const ok = recNoParametro(p);
-            return `<tr class="${ok ? '' : 'is-fora'}">
+            const corV = corValorGrupo(p.modelo);
+            return `<tr>
               <td>${i + 1}</td>
-              <td>${escHtml(fmtNum(p.pressao))}</td>
-              <td>${escHtml(fmtNum(p.temp))}</td>
+              <td class="gg-cor-x">${escHtml(fmtNum(p.pressao))}</td>
+              <td class="gg-cor-y">${escHtml(fmtNum(p.temp))}</td>
               <td>${escHtml(g ? rotuloEixo(g.nome, g.nome) : '—')}</td>
-              <td>${escHtml(Number.isFinite(p.valor) ? fmtNum(p.valor) : '—')}</td>
-              <td>${ok ? 'Sim' : 'Não — fora'}</td>
+              <td class="gg-cor-v" style="color:${escAttr(corV)};">${escHtml(Number.isFinite(p.valor) ? fmtNum(p.valor) : '—')}</td>
+              <td class="${ok ? '' : 'is-fora'}">${ok ? 'Sim' : 'Não — fora'}</td>
             </tr>`;
           }).join('')}</tbody>
         </table>
@@ -525,29 +642,60 @@
     ).join('');
   }
 
+  function preencherFiltroUsuariosSalvos() {
+    const sel = $('ggSalvosUserSelect');
+    if (!sel) return;
+    const users = [...new Set(salvosCache.map((it) => String(it.usuario || '').trim()).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    const atual = sel.value;
+    sel.innerHTML = '<option value="">— todos os usuários —</option>' + users.map((u) =>
+      `<option value="${escAttr(u)}">${escHtml(u)}</option>`
+    ).join('');
+    if (atual && users.includes(atual)) sel.value = atual;
+  }
+
+  function renderSalvosSelect(selecionarId) {
+    const sel = $('ggSalvosSelect');
+    if (!sel) return;
+    const user = String($('ggSalvosUserSelect')?.value || '').trim();
+    const itens = user
+      ? salvosCache.filter((it) => String(it.usuario || '') === user)
+      : salvosCache;
+    const atual = selecionarId != null ? String(selecionarId) : sel.value;
+    sel.innerHTML = '<option value="">— gráficos gerados —</option>' + itens.map((it) =>
+      `<option value="${escAttr(it.id)}">${escHtml(it.nome)}</option>`
+    ).join('');
+    if (atual && itens.some((it) => String(it.id) === String(atual))) sel.value = String(atual);
+    else sel.value = '';
+  }
+
   async function recarregarSalvos(selecionarId) {
     const sel = $('ggSalvosSelect');
     if (!sel) return;
     try {
       const d = await ggApi('/salvos');
-      const itens = d.itens || [];
-      const atual = selecionarId != null ? String(selecionarId) : sel.value;
-      sel.innerHTML = '<option value="">— gráficos gerados —</option>' + itens.map((it) =>
-        `<option value="${escAttr(it.id)}">${escHtml(it.nome)}</option>`
-      ).join('');
-      if (atual && itens.some((it) => String(it.id) === String(atual))) sel.value = String(atual);
+      salvosCache = d.itens || [];
+      preencherFiltroUsuariosSalvos();
+      renderSalvosSelect(selecionarId);
     } catch (_) {
+      salvosCache = [];
       sel.innerHTML = '<option value="">— não foi possível listar —</option>';
+      const u = $('ggSalvosUserSelect');
+      if (u) u.innerHTML = '<option value="">— todos os usuários —</option>';
     }
   }
 
-  async function gravarSnapshot() {
+  async function gravarSnapshot(opts) {
     const cfg = estadoAtual();
-    const titulo = cfg.tituloGrafico || tituloAutomatico();
+    const nomeLivre = String(opts?.nome || '').trim();
+    const titulo = nomeLivre || cfg.tituloGrafico || tituloAutomatico();
+    if (nomeLivre && $('ggTituloGrafico')) $('ggTituloGrafico').value = nomeLivre;
+    const body = { titulo, config: nomeLivre ? Object.assign({}, cfg, { tituloGrafico: nomeLivre }) : cfg };
+    if (nomeLivre) body.nome = nomeLivre;
     const d = await ggApi('/salvos', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ titulo, config: cfg }),
+      body: JSON.stringify(body),
     });
     await recarregarSalvos(d.item?.id);
     return d.item;
@@ -805,6 +953,11 @@
       }
       #engenhariaGeradorGraficosPane .gg-chart-box {
         background: #fff; border-radius: 12px; padding: 16px 10px 10px; min-height: 420px;
+        cursor: grab; user-select: none; -webkit-user-select: none;
+      }
+      #engenhariaGeradorGraficosPane .gg-chart-box:active { cursor: grabbing; }
+      #engenhariaGeradorGraficosPane .gg-chart-box canvas {
+        -webkit-user-drag: none; user-select: none;
       }
       #engenhariaGeradorGraficosPane .gg-grupos-scroll {
         max-height: none; overflow: visible; padding-right: 6px; margin-top: 8px;
@@ -845,8 +998,14 @@
       #engenhariaGeradorGraficosPane .gg-tabela-teste td {
         padding: 6px 8px; border-bottom: 1px solid #334155; text-align: left; white-space: nowrap;
       }
-      #engenhariaGeradorGraficosPane .gg-tabela-teste tr.is-fora td { color: #fca5a5; }
-      #engenhariaGeradorGraficosPane .gg-chart-box { cursor: crosshair; }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.gg-cor-x,
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.gg-cor-y,
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.gg-cor-v {
+        background: #f8fafc; font-weight: 700;
+      }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.gg-cor-x { color: #0f172a; }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.gg-cor-y { color: #2563eb; }
+      #engenhariaGeradorGraficosPane .gg-tabela-teste td.is-fora { color: #fca5a5; }
       #engenhariaGeradorGraficosPane .gg-select-eixo { cursor: pointer; width: 100%; }
       .gg-gerador-modal {
         display: none; position: fixed; inset: 0; z-index: 99999;
@@ -1069,9 +1228,14 @@
         const idx = hitPontoLinha(chart, px, py);
         if (idx >= 0) {
           dragLinha = { idx, moved: false };
+          dragPan = null;
           chart.canvas.style.cursor = 'grabbing';
           args.changed = true;
+          return;
         }
+        dragPan = { lastX: px, lastY: py, moved: false };
+        chart.canvas.style.cursor = 'grabbing';
+        args.changed = true;
         return;
       }
       if (tipo === 'mousemove' && dragLinha) {
@@ -1093,22 +1257,54 @@
         args.changed = true;
         return;
       }
+      if (tipo === 'mousemove' && dragPan) {
+        const sx = chart.scales.x;
+        const sy = chart.scales.yTemp;
+        const dx = sx.getValueForPixel(dragPan.lastX) - sx.getValueForPixel(px);
+        const dy = sy.getValueForPixel(dragPan.lastY) - sy.getValueForPixel(py);
+        if (!vista) vista = cloneVista(vistaPadrao());
+        vista.xMin += dx;
+        vista.xMax += dx;
+        vista.yMin += dy;
+        vista.yMax += dy;
+        grupos.forEach((gr) => {
+          const sc = chart.scales[`yG_${gr.id}`];
+          const cur = vista.grupos?.[gr.id] || { min: gr.min, max: gr.max };
+          const dyg = sc
+            ? sc.getValueForPixel(dragPan.lastY) - sc.getValueForPixel(py)
+            : dy;
+          vista.grupos = vista.grupos || {};
+          vista.grupos[gr.id] = { min: cur.min + dyg, max: cur.max + dyg };
+        });
+        dragPan.lastX = px;
+        dragPan.lastY = py;
+        dragPan.moved = true;
+        aplicarVistaNoChart(chart);
+        return;
+      }
       if (tipo === 'mouseup') {
         if (dragLinha) {
           skipClickLinha = !!dragLinha.moved;
           dragLinha = null;
           salvarPrefs();
-          chart.canvas.style.cursor = 'default';
+          chart.canvas.style.cursor = 'grab';
+          args.changed = true;
+        }
+        if (dragPan) {
+          skipClickLinha = skipClickLinha || !!dragPan.moved;
+          dragPan = null;
+          chart.canvas.style.cursor = 'grab';
+          atualizarBotoesVista();
           args.changed = true;
         }
         return;
       }
-      if (tipo === 'mousemove' && !dragLinha) {
+      if (tipo === 'mousemove' && !dragLinha && !dragPan) {
         const sobrePonto = hitPontoLinha(chart, px, py) >= 0;
         const sobreTrecho = hitTrechoLinha(chart, px, py) >= 0;
-        chart.canvas.style.cursor = sobrePonto ? 'grab' : (sobreTrecho ? 'pointer' : 'default');
+        chart.canvas.style.cursor = sobrePonto ? 'grab' : (sobreTrecho ? 'pointer' : 'grab');
       }
-      if (tipo === 'click' && !dragLinha) {
+      if (tipo === 'click' && !dragLinha && !dragPan) {
         if (skipClickLinha) {
           skipClickLinha = false;
           return;
@@ -1189,7 +1385,7 @@
       valor: Number(r.valor),
     })).filter((r) => Number.isFinite(r.pressao) && Number.isFinite(r.temp));
 
-    const vis = vista || vistaDaConfig();
+    const vis = vista || vistaPadrao();
     const paMin = vis.xMin;
     const paMax = vis.xMax;
     const tMin = vis.yMin;
@@ -1255,7 +1451,9 @@
       plugins: [pluginTituloCentro, pluginLinhaAzul, pluginConectores],
     });
     chartAlta.$ggRecs = recs;
+    chartAlta.canvas.style.cursor = 'grab';
     if (overlayTeste?.pontos?.length) atualizarTabelaTeste(overlayTeste.pontos);
+    atualizarBotoesVista();
   }
 
   function canvasDoGrafico() { return chartAlta?.canvas || $('ggChartAlta'); }
@@ -1275,11 +1473,17 @@
     });
   }
 
-  function baixarPng(blob) {
+  function baixarPng(blob, nomeArquivo) {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'gerador-graficos.png';
+    const base = String(nomeArquivo || 'gerador-graficos')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9_-]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 60) || 'gerador-graficos';
+    a.download = `${base}.png`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1324,6 +1528,30 @@
     }
   }
 
+  async function salvarGraficoComNome() {
+    const nome = window.prompt('Nome do gráfico (como quer gravar):', String($('ggTituloGrafico')?.value || '').trim());
+    if (nome == null) return;
+    const nomeLimpo = String(nome).trim();
+    if (!nomeLimpo) {
+      alert('Informe um nome para o gráfico.');
+      return;
+    }
+    try {
+      let avisoSave = '';
+      try {
+        const item = await gravarSnapshot({ nome: nomeLimpo });
+        if (item?.nome) avisoSave = ` Gravado como ${item.nome}.`;
+      } catch (err) {
+        avisoSave = ` Não gravou no banco: ${err.message}.`;
+      }
+      baixarPng(await blobDoGrafico(), nomeLimpo);
+      desenhar();
+      alert(`Gráfico salvo com o nome informado.${avisoSave}`);
+    } catch (err) {
+      alert(err?.message || 'Não foi possível salvar o gráfico.');
+    }
+  }
+
   function htmlPainel() {
     return `
       <div class="content-wrapper">
@@ -1347,6 +1575,9 @@
           <div class="gg-param-topo">
             <label>Gráficos gerados
               <select id="ggSalvosSelect"></select>
+            </label>
+            <label>Gerados por usuário
+              <select id="ggSalvosUserSelect"></select>
             </label>
             <button type="button" id="ggBtnTestes" class="content-button" style="background:linear-gradient(135deg,#f59e0b 0%,#b45309 100%);color:#fff;">
               <i class="fa-solid fa-flask"></i> Testes registrados
@@ -1380,16 +1611,22 @@
                 <canvas id="ggChartAlta"></canvas>
               </div>
               <div class="gg-chart-actions">
+                <button type="button" id="ggBtnRestaurar" class="content-button" style="display:none;background:#475569;color:#fff;">
+                  <i class="fa-solid fa-rotate-left"></i> Restaurar
+                </button>
                 <button type="button" id="ggBtnCopiar" class="content-button" style="background:#1d4ed8;color:#fff;">
                   <i class="fa-regular fa-copy"></i> Copiar gráfico
                 </button>
                 <button type="button" id="ggBtnExportar" class="content-button" style="background:linear-gradient(135deg,#22c55e 0%,#15803d 100%);color:#fff;">
                   <i class="fa-solid fa-image"></i> Exportar gráfico
                 </button>
+                <button type="button" id="ggBtnSalvar" class="content-button" style="background:linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%);color:#fff;">
+                  <i class="fa-solid fa-floppy-disk"></i> Salvar gráfico
+                </button>
               </div>
               <div id="ggOverlayInfo" class="gg-overlay-info"></div>
               <div id="ggTabelaTesteWrap" class="gg-tabela-teste-wrap" style="display:none;"></div>
-              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll do mouse no gráfico = zoom.</p>
+              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll = zoom · arraste com a mãozinha para mover o gráfico. Botão direito abre o menu flutuante (não copia a imagem).</p>
             </div>
             <div class="gg-side">
               <input id="ggNomeParametros" class="gg-nome" value="Parâmetros" title="Clique para mudar o nome">
@@ -1497,6 +1734,9 @@
       if (!id) return;
       aplicarSalvo(id).catch((err) => alert(err.message || 'Não carregou o gráfico salvo.'));
     });
+    $('ggSalvosUserSelect')?.addEventListener('change', () => {
+      renderSalvosSelect('');
+    });
     $('ggBtnTestes')?.addEventListener('click', () => {
       abrirTestesRegistrados().catch((err) => alert(err.message || 'Não abriu os testes.'));
     });
@@ -1545,12 +1785,16 @@
       if (!confirm('Apagar todos os pontos marcados?')) return;
       overlayTeste = null;
       vista = null;
+      vistaDinamica = null;
+      escalaModo = 'original';
       atualizarOverlayInfo();
       saveRegs([]);
       desenhar();
     });
+    $('ggBtnRestaurar')?.addEventListener('click', restaurarVistaPadrao);
     $('ggBtnCopiar')?.addEventListener('click', copiarGrafico);
     $('ggBtnExportar')?.addEventListener('click', exportarGrafico);
+    $('ggBtnSalvar')?.addEventListener('click', salvarGraficoComNome);
   }
 
   async function abrir() {
