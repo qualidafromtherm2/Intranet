@@ -1,23 +1,66 @@
 import { clsx } from 'clsx'
 import {
+  ContactRound,
+  ArrowLeftRight,
+  Ban,
+  BadgeCheck,
+  Bell,
+  Binoculars,
+  BookOpen,
   Bot,
   Boxes,
+  BriefcaseMedical,
+  Bug,
+  Building2,
+  Calculator,
   ChartColumn,
+  ChartLine,
+  Check,
+  ChevronLeft,
   ChevronRight,
+  ClipboardCheck,
+  ClipboardList,
+  Coffee,
+  Cog,
+  Cpu,
+  DraftingCompass,
   ExternalLink,
   Factory,
+  FileChartColumn,
+  FilePen,
+  FileSignature,
+  FlaskConical,
   Folder,
-  Headset,
+  Hand,
+  History,
   Home,
+  IdCard,
+  Landmark,
   Lock,
   LogOut,
+  Map as MapIcon,
   Menu,
+  Monitor,
+  PackageCheck,
+  PackageSearch,
+  Palmtree,
   PanelLeftClose,
   PanelLeftOpen,
+  Printer,
+  Receipt,
   RefreshCw,
+  ScanSearch,
+  SearchCheck,
+  Send,
   Settings2,
-  ShoppingCart,
+  Shield,
   ShieldCheck,
+  ShoppingCart,
+  SlidersHorizontal,
+  Sparkles,
+  SquarePlus,
+  TriangleAlert,
+  Truck,
   Users,
   Warehouse,
   Wrench,
@@ -29,7 +72,7 @@ import { ProductListScreen } from './features/ProductListScreen'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
 import { buildNavigationCatalog, isSelectorAllowed } from './lib/navigation'
 import { buildLegacyUrl, getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
-import { loadRecentActivity, loadRemindersMonth, loadReservationsMonth } from './services/homeGateway'
+import { loadActiveUsers, loadRecentActivity, loadRemindersMonth, loadReservationsMonth } from './services/homeGateway'
 import type {
   ActivityEvent,
   AppView,
@@ -39,31 +82,92 @@ import type {
   ReservationItem,
   ShellNavItem,
   ShellNavigationCatalog,
+  ShellNavSection,
 } from './types'
 
 const sidebarStateKey = 'thermo.shell.sidebar.collapsed'
-const todayIso = () => new Date().toISOString().slice(0, 10)
+const todayIso = new Date().toISOString().slice(0, 10)
 
 const iconMap = {
   home: Home,
-  boxes: Boxes,
-  warehouse: Warehouse,
-  'shopping-cart': ShoppingCart,
-  factory: Factory,
-  'badge-check': ShieldCheck,
-  headset: Headset,
-  chart: ChartColumn,
-  users: Users,
-  drafting: Wrench,
-  refresh: RefreshCw,
-  settings: Settings2,
-  bot: Bot,
   layout: Folder,
+  boxes: Boxes,
+  'square-plus': SquarePlus,
+  settings: Settings2,
+  warehouse: Warehouse,
+  'arrow-left-right': ArrowLeftRight,
+  'file-pen': FilePen,
+  calculator: Calculator,
+  'file-chart-column': FileChartColumn,
+  'truck-ramp': Truck,
+  'package-check': PackageCheck,
+  hand: Hand,
+  printer: Printer,
+  truck: Truck,
+  cog: Cog,
+  'shopping-cart': ShoppingCart,
+  landmark: Landmark,
+  factory: Factory,
+  'badge-check': BadgeCheck,
+  'clipboard-list': ClipboardList,
+  'scan-search': ScanSearch,
+  wrench: Wrench,
+  binoculars: Binoculars,
+  'triangle-alert': TriangleAlert,
+  'package-search': PackageSearch,
+  'clipboard-check': ClipboardCheck,
+  'flask-conical': FlaskConical,
+  'book-open': BookOpen,
+  ban: Ban,
+  send: Send,
+  'briefcase-medical': BriefcaseMedical,
+  chart: ChartColumn,
+  'chart-column': ChartColumn,
+  receipt: Receipt,
+  map: MapIcon,
+  users: Users,
+  'id-card': IdCard,
+  'address-book': ContactRound,
+  'palm-tree': Palmtree,
+  shield: Shield,
+  'file-signature': FileSignature,
+  bug: Bug,
+  cpu: Cpu,
+  history: History,
+  drafting: DraftingCompass,
+  'chart-line': ChartLine,
+  refresh: RefreshCw,
+  'search-check': SearchCheck,
+  bot: Bot,
+  'sliders-horizontal': SlidersHorizontal,
   dot: ChevronRight,
 } as const
 
+const legendItems = [
+  { icon: ClipboardList, label: 'Auditório', tone: 'text-violet-700' },
+  { icon: Users, label: 'Sala de reunião', tone: 'text-emerald-700' },
+  { icon: Bell, label: 'Lembrete', tone: 'text-amber-700' },
+  { icon: Coffee, label: 'Com café', tone: 'text-amber-700' },
+  { icon: ContactRound, label: 'Você é participante', tone: 'text-emerald-700' },
+  { icon: Monitor, label: 'Reunião online', tone: 'text-sky-700' },
+  { icon: Building2, label: 'Visita', tone: 'text-orange-700' },
+  { icon: Sparkles, label: 'Evento', tone: 'text-pink-700' },
+] as const
+
+function getIconComponent(icon: string) {
+  return iconMap[icon as keyof typeof iconMap] ?? iconMap.dot
+}
+
 function formatDateLabel(value: string) {
-  return new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' })
+  return new Date(`${value}T00:00:00`).toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
+function formatMonthLabel(date: Date) {
+  return date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 }
 
 function formatTime(value: string | null | undefined) {
@@ -71,21 +175,30 @@ function formatTime(value: string | null | undefined) {
   return trimmed ? trimmed.slice(0, 5) : '--:--'
 }
 
-function statusTone(item: ReservationItem) {
-  if (item.cancelada) return 'border-red-200 bg-red-50 text-red-700'
-  if (item.realizada) return 'border-emerald-200 bg-emerald-50 text-emerald-700'
-  return 'border-slate-200 bg-slate-100 text-slate-700'
+function getReservationTypeTone(item: ReservationItem) {
+  const type = String(item.tipo || '').toLowerCase()
+  if (type.includes('audit')) return 'border-violet-200 bg-violet-50 text-violet-800'
+  if (type.includes('online')) return 'border-sky-200 bg-sky-50 text-sky-800'
+  if (type.includes('visita')) return 'border-orange-200 bg-orange-50 text-orange-800'
+  if (type.includes('evento')) return 'border-pink-200 bg-pink-50 text-pink-800'
+  return 'border-emerald-200 bg-emerald-50 text-emerald-800'
 }
 
-function getIconComponent(icon: string) {
-  return iconMap[icon as keyof typeof iconMap] ?? iconMap.dot
+function getReservationTypeLabel(item: ReservationItem) {
+  const type = String(item.tipo || '').trim()
+  return type || 'Sala de reunião'
 }
 
-function useShellHomeData(user: AuthUser | null) {
+function flattenItems(items: ShellNavItem[]): ShellNavItem[] {
+  return items.flatMap((item) => [item, ...flattenItems(item.children)])
+}
+
+function useHomeData(user: AuthUser | null) {
   const [monthRef, setMonthRef] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1))
   const [reservations, setReservations] = useState<ReservationItem[]>([])
   const [reminders, setReminders] = useState<ReminderItem[]>([])
   const [activities, setActivities] = useState<ActivityEvent[]>([])
+  const [activeUsers, setActiveUsers] = useState<string[]>([])
   const [calendarError, setCalendarError] = useState<string | null>(null)
   const [activityError, setActivityError] = useState<string | null>(null)
   const [loadingCalendar, setLoadingCalendar] = useState(false)
@@ -99,20 +212,17 @@ function useShellHomeData(user: AuthUser | null) {
 
   useEffect(() => {
     let cancelled = false
-
     const syncProductMetrics = async () => {
       const cached = getPilotDataCacheState()
-      if (cached.products.length > 0) {
-        if (!cancelled) {
-          setKpi({
-            belowMin: cached.products.filter((product) => product.abaixo_minimo).length,
-            negative: cached.products.filter((product) => product.estoque_negativo || product.expedicao_negativa).length,
-            inPurchase: cached.warnings.some((warning) => warning.includes('Situação de compra indisponível'))
-              ? null
-              : cached.products.filter((product) => product.purchaseState === 'em_compra').length,
-            purchaseUnavailable: cached.warnings.some((warning) => warning.includes('Situação de compra indisponível')),
-          })
-        }
+      if (!cancelled && cached.products.length > 0) {
+        setKpi({
+          belowMin: cached.products.filter((product) => product.abaixo_minimo).length,
+          negative: cached.products.filter((product) => product.estoque_negativo || product.expedicao_negativa).length,
+          inPurchase: cached.warnings.some((warning) => warning.includes('Situação de compra indisponível'))
+            ? null
+            : cached.products.filter((product) => product.purchaseState === 'em_compra').length,
+          purchaseUnavailable: cached.warnings.some((warning) => warning.includes('Situação de compra indisponível')),
+        })
       }
 
       try {
@@ -127,9 +237,7 @@ function useShellHomeData(user: AuthUser | null) {
           purchaseUnavailable: snapshot.warnings.some((warning) => warning.includes('Situação de compra indisponível')),
         })
       } catch {
-        if (!cancelled) {
-          setKpi((current) => ({ ...current, inPurchase: null, purchaseUnavailable: true }))
-        }
+        if (!cancelled) setKpi((current) => ({ ...current, inPurchase: null, purchaseUnavailable: true }))
       }
     }
 
@@ -148,15 +256,16 @@ function useShellHomeData(user: AuthUser | null) {
     Promise.all([
       loadReservationsMonth(monthRef.getFullYear(), monthRef.getMonth() + 1),
       loadRemindersMonth(monthRef.getFullYear(), monthRef.getMonth() + 1, user.username),
+      loadActiveUsers(),
     ])
-      .then(([reservationResponse, reminderResponse]) => {
+      .then(([reservationResponse, reminderResponse, users]) => {
         if (cancelled) return
         setReservations(Array.isArray(reservationResponse.reservas) ? reservationResponse.reservas : [])
         setReminders(Array.isArray(reminderResponse.lembretes) ? reminderResponse.lembretes : [])
+        setActiveUsers(users.sort((left, right) => left.localeCompare(right, 'pt-BR')))
       })
       .catch((error) => {
-        if (cancelled) return
-        setCalendarError(error instanceof Error ? error.message : 'Falha ao carregar o calendário operacional.')
+        if (!cancelled) setCalendarError(error instanceof Error ? error.message : 'Falha ao carregar o calendário operacional.')
       })
       .finally(() => {
         if (!cancelled) setLoadingCalendar(false)
@@ -195,6 +304,7 @@ function useShellHomeData(user: AuthUser | null) {
     reservations,
     reminders,
     activities,
+    activeUsers,
     calendarError,
     activityError,
     loadingCalendar,
@@ -226,16 +336,16 @@ function LoginScreen({
         <section className="hidden rounded-[32px] border border-thermo-border bg-thermo-navy px-8 py-10 text-white shadow-xl lg:flex lg:flex-col lg:justify-between">
           <div>
             <img src="/branding/thermo-logo-fundo-escuro.png" alt="Thermo" className="h-10 w-auto" />
-            <div className="mt-8 max-w-xl text-4xl font-bold">Thermo sobre a base real da Intranet, sem trocar backend nem regras operacionais.</div>
+            <div className="mt-8 max-w-xl text-4xl font-bold">Thermo usando backend, sessão e dados reais da Intranet atual.</div>
           </div>
           <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-2">
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-              <div className="font-semibold text-white">Sessão real</div>
-              <div className="mt-1">Login, permissões e logout continuam no backend atual.</div>
+              <div className="font-semibold text-white">Catálogo real</div>
+              <div className="mt-1">Menu e permissões vêm da árvore atual do sistema.</div>
             </div>
             <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-              <div className="font-semibold text-white">Migração incremental</div>
-              <div className="mt-1">Só a Lista de Produtos está clicável como tela migrada neste piloto.</div>
+              <div className="font-semibold text-white">Migração limitada</div>
+              <div className="mt-1">Só a Lista de Produtos está navegável como tela migrada.</div>
             </div>
           </div>
         </section>
@@ -288,7 +398,7 @@ function LoginScreen({
   )
 }
 
-function SidebarItemButton({
+function SidebarItem({
   item,
   collapsed,
   activeView,
@@ -300,25 +410,25 @@ function SidebarItemButton({
   onNavigate: (view: AppView) => void
 }) {
   const Icon = getIconComponent(item.icon)
-  const isActive = item.view === activeView && item.status === 'migrated'
-  const isClickable = item.status === 'migrated' && item.view !== null
-  const statusLabel = item.status === 'migrated' ? 'Migrado' : 'Ainda não migrado'
+  const isActive = item.view === activeView && item.migrationStatus === 'migrated'
+  const isClickable = item.migrationStatus === 'migrated' && item.view !== null
+  const statusText = item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Ainda não migrado'
 
   return (
     <button
       type="button"
-      aria-disabled={!isClickable}
-      disabled={!isClickable}
       onClick={() => {
         if (isClickable && item.view) onNavigate(item.view)
       }}
+      disabled={!isClickable}
+      aria-disabled={!isClickable}
+      title={collapsed ? `${item.label} · ${statusText}` : undefined}
       className={clsx(
         'group relative flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition',
-        isClickable ? 'border-transparent text-slate-200 hover:border-white/10 hover:bg-white/8 hover:text-white' : 'border-transparent text-slate-500 opacity-90',
-        isActive && 'border-red-400/40 bg-red-500/15 text-white',
         collapsed && 'justify-center px-2',
+        isActive ? 'border-red-400/40 bg-red-500/15 text-white' : 'border-transparent',
+        isClickable ? 'text-slate-200 hover:border-white/10 hover:bg-white/8 hover:text-white' : 'cursor-not-allowed text-slate-500 opacity-95',
       )}
-      title={!collapsed ? undefined : `${item.label} · ${statusLabel}`}
     >
       <Icon className="size-4 shrink-0" />
       {!collapsed ? (
@@ -327,16 +437,16 @@ function SidebarItemButton({
           <span
             className={clsx(
               'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]',
-              item.status === 'migrated' ? 'bg-emerald-50 text-emerald-700' : 'bg-white/8 text-slate-300',
+              item.migrationStatus === 'migrated' ? 'bg-emerald-50 text-emerald-700' : item.migrationStatus === 'in_progress' ? 'bg-amber-50 text-amber-800' : 'bg-white/8 text-slate-300',
             )}
           >
-            {item.status === 'migrated' ? 'Migrado' : 'Pendente'}
+            {item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Pendente'}
           </span>
-          {item.status !== 'migrated' ? <Lock className="size-3.5 text-slate-400" /> : null}
+          {item.migrationStatus !== 'migrated' ? <Lock className="size-3.5 text-slate-400" /> : null}
         </>
       ) : (
         <span className="pointer-events-none absolute left-full z-20 ml-3 hidden whitespace-nowrap rounded-lg border border-thermo-border bg-white px-3 py-2 text-xs font-semibold text-thermo-ink shadow-lg group-hover:block group-focus-visible:block">
-          {item.label} · {statusLabel}
+          {item.label} · {statusText}
         </span>
       )}
     </button>
@@ -349,7 +459,7 @@ function SidebarSection({
   activeView,
   onNavigate,
 }: {
-  section: ShellNavigationCatalog['sections'][number]
+  section: ShellNavSection
   collapsed: boolean
   activeView: AppView
   onNavigate: (view: AppView) => void
@@ -365,11 +475,11 @@ function SidebarSection({
       <div className="space-y-1">
         {section.children.map((item) => (
           <div key={item.id} className="space-y-1">
-            <SidebarItemButton item={item} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
+            <SidebarItem item={item} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
             {!collapsed && item.children.length > 0 ? (
               <div className="ml-4 space-y-1 border-l border-white/10 pl-3">
                 {item.children.map((child) => (
-                  <SidebarItemButton key={child.id} item={child} collapsed={false} activeView={activeView} onNavigate={onNavigate} />
+                  <SidebarItem key={child.id} item={child} collapsed={false} activeView={activeView} onNavigate={onNavigate} />
                 ))}
               </div>
             ) : null}
@@ -428,10 +538,10 @@ function Sidebar({
           }}
           className={clsx(
             'group relative flex w-full items-center gap-3 rounded-xl border px-3 py-2.5 text-left text-sm transition',
-            activeView === 'home' ? 'border-red-400/40 bg-red-500/15 text-white' : 'border-transparent text-slate-200 hover:border-white/10 hover:bg-white/8 hover:text-white',
             collapsed && 'justify-center px-2',
+            activeView === 'home' ? 'border-red-400/40 bg-red-500/15 text-white' : 'border-transparent text-slate-200 hover:border-white/10 hover:bg-white/8 hover:text-white',
           )}
-          title={!collapsed ? undefined : 'Página inicial'}
+          title={collapsed ? 'Página inicial' : undefined}
         >
           <Home className="size-4 shrink-0" />
           {!collapsed ? <span className="flex-1 truncate">Página inicial</span> : <span className="pointer-events-none absolute left-full z-20 ml-3 hidden whitespace-nowrap rounded-lg border border-thermo-border bg-white px-3 py-2 text-xs font-semibold text-thermo-ink shadow-lg group-hover:block group-focus-visible:block">Página inicial</span>}
@@ -439,7 +549,7 @@ function Sidebar({
       </div>
 
       <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-6">
-        {navigation.sections.map((section) => (
+        {navigation.sections.filter((section) => section.key !== 'top').map((section) => (
           <SidebarSection key={section.id} section={section} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
         ))}
       </div>
@@ -455,36 +565,142 @@ function Sidebar({
   )
 }
 
+function ModulesSection({
+  sections,
+  activeView,
+  onNavigate,
+}: {
+  sections: ShellNavSection[]
+  activeView: AppView
+  onNavigate: (view: AppView) => void
+}) {
+  const [openSection, setOpenSection] = useState<string | null>(null)
+
+  return (
+    <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Módulos</div>
+          <h3 className="mt-1 text-base font-bold text-thermo-navy">Áreas permitidas nesta sessão</h3>
+        </div>
+      </div>
+      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+        {sections.map((section) => {
+          const Icon = getIconComponent(section.icon)
+          const opened = openSection === section.id
+          const entries = flattenItems(section.children)
+          return (
+            <article key={section.id} className="rounded-2xl border border-thermo-border bg-thermo-bg">
+              <button
+                type="button"
+                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                aria-expanded={opened}
+                onClick={() => setOpenSection((current) => (current === section.id ? null : section.id))}
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex size-9 items-center justify-center rounded-xl border border-thermo-border bg-white text-thermo-navy">
+                    <Icon className="size-4" />
+                  </span>
+                  <div>
+                    <div className="font-semibold text-thermo-navy">{section.label}</div>
+                    <div className="text-xs text-slate-500">{entries.length} página(s)</div>
+                  </div>
+                </div>
+                <ChevronRight className={clsx('size-4 text-slate-400 transition-transform', opened && 'rotate-90')} />
+              </button>
+              {opened ? (
+                <div className="space-y-2 border-t border-thermo-border px-3 py-3">
+                  {entries.map((item) => {
+                    const ItemIcon = getIconComponent(item.icon)
+                    const clickable = item.migrationStatus === 'migrated' && item.view !== null
+                    const active = clickable && item.view === activeView
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        className={clsx(
+                          'flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm',
+                          clickable ? 'border-transparent bg-white text-thermo-ink hover:border-thermo-border' : 'cursor-not-allowed border-transparent bg-slate-100 text-slate-500',
+                          active && 'border-red-200 bg-red-50 text-red-700',
+                        )}
+                        disabled={!clickable}
+                        aria-disabled={!clickable}
+                        onClick={() => {
+                          if (clickable && item.view) onNavigate(item.view)
+                        }}
+                      >
+                        <ItemIcon className="size-4 shrink-0" />
+                        <span className="flex-1 truncate">{item.label}</span>
+                        <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]', item.migrationStatus === 'migrated' ? 'bg-emerald-50 text-emerald-700' : item.migrationStatus === 'in_progress' ? 'bg-amber-50 text-amber-800' : 'bg-slate-200 text-slate-600')}>
+                          {item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Pendente'}
+                        </span>
+                      </button>
+                    )
+                  })}
+                </div>
+              ) : null}
+            </article>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
 function HomeScreen({
   user,
-  onOpenProducts,
+  sections,
+  onNavigate,
 }: {
   user: AuthUser
-  onOpenProducts: () => void
+  sections: ShellNavSection[]
+  onNavigate: (view: AppView) => void
 }) {
-  const { monthRef, setMonthRef, reservations, reminders, activities, calendarError, activityError, loadingCalendar, loadingActivity, kpi } = useShellHomeData(user)
-  const [selectedDate, setSelectedDate] = useState(todayIso())
-  const selectedDateReservations = useMemo(() => reservations.filter((item) => item.data.slice(0, 10) === selectedDate), [reservations, selectedDate])
-  const selectedDateReminders = useMemo(() => reminders.filter((item) => item.data.slice(0, 10) === selectedDate), [reminders, selectedDate])
+  const { monthRef, setMonthRef, reservations, reminders, activities, activeUsers, calendarError, activityError, loadingCalendar, loadingActivity, kpi } = useHomeData(user)
+  const [selectedDate, setSelectedDate] = useState(todayIso)
+  const [onlyMine, setOnlyMine] = useState(false)
+  const [selectedUser, setSelectedUser] = useState('')
+  const [detailDay, setDetailDay] = useState<string | null>(null)
+  const [bridgeDay, setBridgeDay] = useState<string | null>(null)
 
-  useEffect(() => {
-    const monthIso = `${monthRef.getFullYear()}-${String(monthRef.getMonth() + 1).padStart(2, '0')}`
-    if (!selectedDate.startsWith(monthIso)) {
-      const firstReservation = reservations[0]?.data?.slice(0, 10)
-      setSelectedDate(firstReservation ?? `${monthIso}-01`)
-    }
-  }, [monthRef, reservations, selectedDate])
-
-  const meetingsToday = useMemo(() => reservations.filter((item) => item.data.slice(0, 10) === todayIso()).length, [reservations])
-  const upcomingWeek = useMemo(() => {
-    const now = new Date()
-    const limit = new Date(now)
-    limit.setDate(now.getDate() + 7)
+  const filteredReservations = useMemo(() => {
+    const currentUser = user.username.toLowerCase()
     return reservations.filter((item) => {
-      const date = new Date(`${item.data.slice(0, 10)}T00:00:00`)
-      return date >= new Date(now.getFullYear(), now.getMonth(), now.getDate()) && date <= limit
-    }).length
-  }, [reservations])
+      if (selectedUser) {
+        const normalized = selectedUser.toLowerCase()
+        const participant = item.participantes.some((name) => name.toLowerCase() === normalized)
+        const creator = String(item.criadoPor || '').toLowerCase() === normalized
+        if (!participant && !creator) return false
+      }
+      if (onlyMine) {
+        const mine = item.participantes.some((name) => name.toLowerCase() === currentUser) || String(item.criadoPor || '').toLowerCase() === currentUser
+        if (!mine) return false
+      }
+      return true
+    })
+  }, [onlyMine, reservations, selectedUser, user.username])
+
+  const filteredReminders = useMemo(() => {
+    if (!selectedUser || selectedUser.toLowerCase() === user.username.toLowerCase()) return reminders
+    return []
+  }, [reminders, selectedUser, user.username])
+
+  const countsByDay = useMemo(() => {
+    const map = new Map<string, { reservations: ReservationItem[]; reminders: ReminderItem[] }>()
+    for (const item of filteredReservations) {
+      const key = item.data.slice(0, 10)
+      const current = map.get(key) ?? { reservations: [], reminders: [] }
+      current.reservations.push(item)
+      map.set(key, current)
+    }
+    for (const item of filteredReminders) {
+      const key = item.data.slice(0, 10)
+      const current = map.get(key) ?? { reservations: [], reminders: [] }
+      current.reminders.push(item)
+      map.set(key, current)
+    }
+    return map
+  }, [filteredReminders, filteredReservations])
 
   const monthDays = useMemo(() => {
     const first = new Date(monthRef.getFullYear(), monthRef.getMonth(), 1)
@@ -503,225 +719,299 @@ function HomeScreen({
     }
 
     while (days.length % 7 !== 0) {
-      const nextDate = new Date(monthRef.getFullYear(), monthRef.getMonth(), totalDays + (days.length % 7) + 1)
+      const last = days.length - startOffset - totalDays + 1
+      const nextDate = new Date(monthRef.getFullYear(), monthRef.getMonth() + 1, last)
       days.push({ iso: nextDate.toISOString().slice(0, 10), day: nextDate.getDate(), out: true })
     }
 
     return days
   }, [monthRef])
 
-  const countsByDay = useMemo(() => {
-    const counts = new Map<string, { reservations: number; reminders: number; mine: number }>()
+  const meetingsToday = useMemo(() => filteredReservations.filter((item) => item.data.slice(0, 10) === todayIso).length, [filteredReservations])
+  const upcomingWeek = useMemo(() => {
+    const now = new Date(`${todayIso}T00:00:00`)
+    const limit = new Date(now)
+    limit.setDate(limit.getDate() + 7)
+    return filteredReservations.filter((item) => {
+      const date = new Date(`${item.data.slice(0, 10)}T00:00:00`)
+      return date >= now && date <= limit
+    }).length
+  }, [filteredReservations])
 
-    for (const item of reservations) {
-      const key = item.data.slice(0, 10)
-      const current = counts.get(key) ?? { reservations: 0, reminders: 0, mine: 0 }
-      current.reservations += 1
-      if (item.participantes.some((name) => name.toLowerCase() === user.username.toLowerCase()) || String(item.criadoPor || '').toLowerCase() === user.username.toLowerCase()) {
-        current.mine += 1
-      }
-      counts.set(key, current)
-    }
+  const dayDetails = detailDay ? countsByDay.get(detailDay) : null
 
-    for (const item of reminders) {
-      const key = item.data.slice(0, 10)
-      const current = counts.get(key) ?? { reservations: 0, reminders: 0, mine: 0 }
-      current.reminders += 1
-      counts.set(key, current)
-    }
-
-    return counts
-  }, [reminders, reservations, user.username])
+  useEffect(() => {
+    const monthKey = `${monthRef.getFullYear()}-${String(monthRef.getMonth() + 1).padStart(2, '0')}`
+    if (!selectedDate.startsWith(monthKey)) setSelectedDate(`${monthKey}-01`)
+  }, [monthRef, selectedDate])
 
   return (
-    <div className="space-y-6">
-      <section className="rounded-[28px] border border-thermo-border bg-white px-5 py-5 shadow-sm md:px-6">
-        <div className="flex flex-wrap items-start justify-between gap-4">
+    <div className="space-y-4">
+      <section className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm md:px-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-sm font-semibold text-slate-500">Home operacional</div>
-            <h1 className="mt-1 text-2xl font-bold text-thermo-navy">Calendário e rotina de {user.username}</h1>
-            <p className="mt-2 max-w-3xl text-sm text-slate-600">
-              Esta home preserva a agenda real da Intranet, resume indicadores sustentados por APIs existentes e mantém a Lista de Produtos como tela migrada.
-            </p>
+            <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Home operacional</div>
+            <h1 className="mt-1 text-xl font-bold text-thermo-navy">Calendário de reuniões e atalhos reais</h1>
           </div>
           <div className="flex flex-wrap gap-2">
-            <button className="thermo-button thermo-button-primary" type="button" onClick={onOpenProducts}>
+            <button className="thermo-button thermo-button-primary" type="button" onClick={() => onNavigate('products')}>
               <Boxes className="size-4" />
-              Abrir Lista de Produtos
+              Lista de Produtos
             </button>
             <a className="thermo-button thermo-button-secondary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              Abrir agenda legado
+              Agenda legado
             </a>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-4">
-        <article className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Reuniões hoje</div>
-          <div className="mt-3 text-3xl font-bold text-thermo-navy">{meetingsToday}</div>
-          <div className="mt-2 text-sm text-slate-500">Reservas retornadas por /api/rh/reservas para {formatDateLabel(todayIso())}.</div>
-        </article>
-        <article className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Próximos 7 dias</div>
-          <div className="mt-3 text-3xl font-bold text-thermo-navy">{upcomingWeek}</div>
-          <div className="mt-2 text-sm text-slate-500">Ocorrências visíveis na agenda mensal atual.</div>
-        </article>
-        <article className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Abaixo do mínimo</div>
-          <div className="mt-3 text-3xl font-bold text-thermo-navy">{kpi.belowMin}</div>
-          <div className="mt-2 text-sm text-slate-500">Contagem real da mesma cache usada pela Lista de Produtos.</div>
-        </article>
-        <article className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm">
-          <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Em compra</div>
-          <div className="mt-3 text-3xl font-bold text-thermo-navy">{kpi.inPurchase ?? '—'}</div>
-          <div className="mt-2 text-sm text-slate-500">{kpi.purchaseUnavailable ? 'Indisponível: endpoint auxiliar não respondeu para esta sessão.' : 'Produtos marcados por /api/compras/produtos-em-compra.'}</div>
-        </article>
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(22rem,0.85fr)]">
-        <article className="rounded-[28px] border border-thermo-border bg-white p-5 shadow-sm">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Calendário de reuniões</div>
-              <h2 className="mt-1 text-lg font-bold text-thermo-navy">
-                {monthRef.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
-              </h2>
+      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="space-y-4">
+          <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
+            <div className="mb-3 grid gap-3 md:grid-cols-4">
+              <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Reuniões hoje</div>
+                <div className="mt-2 text-2xl font-bold text-thermo-navy">{meetingsToday}</div>
+              </article>
+              <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Próximos 7 dias</div>
+                <div className="mt-2 text-2xl font-bold text-thermo-navy">{upcomingWeek}</div>
+              </article>
+              <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Abaixo do mínimo</div>
+                <div className="mt-2 text-2xl font-bold text-thermo-navy">{kpi.belowMin}</div>
+              </article>
+              <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
+                <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Em compra</div>
+                <div className="mt-2 text-2xl font-bold text-thermo-navy">{kpi.inPurchase ?? '—'}</div>
+                {kpi.purchaseUnavailable ? <div className="mt-1 text-[11px] text-amber-700">Endpoint auxiliar indisponível</div> : null}
+              </article>
             </div>
-            <div className="flex gap-2">
-              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setMonthRef(new Date(monthRef.getFullYear(), monthRef.getMonth() - 1, 1))}>
-                Anterior
+
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <button
+                type="button"
+                className={clsx('inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-semibold', onlyMine ? 'border-thermo-navy bg-thermo-navy text-white' : 'border-thermo-border bg-white text-thermo-navy')}
+                onClick={() => setOnlyMine((current) => !current)}
+                aria-pressed={onlyMine}
+              >
+                <Check className="size-4" />
+                Somente minhas
               </button>
-              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setMonthRef(new Date(monthRef.getFullYear(), monthRef.getMonth() + 1, 1))}>
-                Próximo
+
+              <label className="flex min-w-[16rem] items-center gap-2 rounded-xl border border-thermo-border bg-white px-3 py-2 text-sm text-slate-600">
+                <Users className="size-4 text-slate-400" />
+                <select value={selectedUser} onChange={(event) => setSelectedUser(event.target.value)} className="min-w-0 flex-1 bg-transparent outline-none">
+                  <option value="">Filtrar por usuário...</option>
+                  {activeUsers.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-600">
+              {legendItems.map((item) => {
+                const Icon = item.icon
+                return (
+                <span key={item.label} className="rounded-full border border-thermo-border bg-white px-3 py-1">
+                  <Icon className={clsx('mr-1 inline size-3.5', item.tone)} aria-hidden="true" />
+                  {item.label}
+                </span>
+                )
+              })}
+            </div>
+
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setMonthRef(new Date(monthRef.getFullYear(), monthRef.getMonth() - 1, 1))} aria-label="Mês anterior">
+                <ChevronLeft className="size-4" />
+              </button>
+              <div className="text-center">
+                <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Calendário de reuniões</div>
+                <h2 className="mt-1 text-lg font-bold capitalize text-thermo-navy">{formatMonthLabel(monthRef)}</h2>
+              </div>
+              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setMonthRef(new Date(monthRef.getFullYear(), monthRef.getMonth() + 1, 1))} aria-label="Próximo mês">
+                <ChevronRight className="size-4" />
               </button>
             </div>
-          </div>
 
-          {calendarError ? <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{calendarError}</div> : null}
-          {loadingCalendar ? <div className="mb-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-500">Carregando agenda real…</div> : null}
+            {calendarError ? <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{calendarError}</div> : null}
+            {loadingCalendar ? <div className="mb-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-500">Carregando agenda real…</div> : null}
 
-          <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
-            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
-              <div key={label} className="px-1 py-2">
-                {label}
-              </div>
-            ))}
-            {monthDays.map((day) => {
-              const counters = countsByDay.get(day.iso)
-              const selected = selectedDate === day.iso
-              const isToday = day.iso === todayIso()
-              return (
-                <button
-                  key={day.iso}
-                  type="button"
-                  onClick={() => setSelectedDate(day.iso)}
-                  className={clsx(
-                    'min-h-[96px] rounded-2xl border p-2 text-left transition',
-                    selected ? 'border-thermo-navy bg-slate-50' : 'border-thermo-border bg-thermo-bg hover:border-thermo-navy/30',
-                    day.out && 'opacity-45',
-                    isToday && 'ring-1 ring-thermo-red/50',
-                  )}
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm font-bold text-thermo-navy">{day.day}</span>
-                    {isToday ? <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">Hoje</span> : null}
-                  </div>
-                  <div className="mt-2 space-y-1 text-[11px]">
-                    <div className="rounded-lg bg-white px-2 py-1 text-slate-600">{counters?.reservations ?? 0} reunião(ões)</div>
-                    <div className="rounded-lg bg-white px-2 py-1 text-slate-500">{counters?.mine ?? 0} minha(s)</div>
-                    {counters?.reminders ? <div className="rounded-lg bg-amber-50 px-2 py-1 text-amber-800">{counters.reminders} lembrete(s)</div> : null}
-                  </div>
-                </button>
-              )
-            })}
-          </div>
-        </article>
-
-        <article className="space-y-4">
-          <section className="rounded-[28px] border border-thermo-border bg-white p-5 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Detalhes do dia</div>
-                <h3 className="mt-1 text-lg font-bold text-thermo-navy">{formatDateLabel(selectedDate)}</h3>
-              </div>
-              <a className="thermo-button thermo-button-secondary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
-                <ExternalLink className="size-4" />
-                Agenda legado
-              </a>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              {selectedDateReservations.length === 0 && selectedDateReminders.length === 0 ? (
-                <div className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4 text-sm text-slate-500">Nenhuma reunião ou lembrete visível nesta data.</div>
-              ) : null}
-
-              {selectedDateReservations.map((item) => (
-                <article key={`${item.id}-${item.data}`} className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-bold text-thermo-navy">{item.tema || 'Sem tema'}</div>
-                      <div className="mt-1 text-sm text-slate-500">
-                        {formatTime(item.inicio)}–{formatTime(item.fim)} · {item.tipo || 'Reserva'} · {item.criadoPor || 'Responsável não informado'}
-                      </div>
+            <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
+                <div key={label} className="px-1 py-2">
+                  {label}
+                </div>
+              ))}
+              {monthDays.map((day) => {
+                const dayData = countsByDay.get(day.iso)
+                const dayReservations = dayData?.reservations ?? []
+                const dayReminders = dayData?.reminders ?? []
+                const selected = selectedDate === day.iso
+                const isToday = day.iso === todayIso
+                return (
+                  <button
+                    key={day.iso}
+                    type="button"
+                    onClick={() => {
+                      setSelectedDate(day.iso)
+                      if (dayReservations.length > 0 || dayReminders.length > 0) setDetailDay(day.iso)
+                      else setBridgeDay(day.iso)
+                    }}
+                    className={clsx(
+                      'min-h-[132px] rounded-2xl border p-2 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40',
+                      selected ? 'border-thermo-navy bg-slate-50' : 'border-thermo-border bg-thermo-bg hover:border-thermo-navy/30',
+                      day.out && 'opacity-40',
+                      isToday && 'ring-1 ring-thermo-red/50',
+                    )}
+                  >
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-bold text-thermo-navy">{day.day}</span>
+                      {isToday ? <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">Hoje</span> : null}
                     </div>
-                    <span className={clsx('rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]', statusTone(item))}>
-                      {item.cancelada ? 'Cancelada' : item.realizada ? 'Realizada' : 'Programada'}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
-                    <span className="rounded-full border border-thermo-border bg-white px-3 py-1">{item.participantes.length} participante(s)</span>
-                    {item.participantes.some((name) => name.toLowerCase() === user.username.toLowerCase()) ? <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-sky-700">Você participa</span> : null}
-                    {item.cafe ? <span className="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-amber-800">Com café</span> : null}
-                    {item.avisoEmail ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">Aviso e-mail</span> : null}
-                    {item.avisoWhatsapp ? <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-emerald-700">Aviso WhatsApp</span> : null}
-                  </div>
-                </article>
-              ))}
 
-              {selectedDateReminders.map((item) => (
-                <article key={`reminder-${item.id}`} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
-                  <div className="text-sm font-bold text-amber-900">{item.texto}</div>
-                  <div className="mt-1 text-xs text-amber-800">Criado por {item.criadoPor || '—'} · {item.destinatarios.length} destinatário(s)</div>
-                </article>
-              ))}
+                    <div className="space-y-1">
+                      {dayReservations.slice(0, 3).map((item) => (
+                        <div key={`${item.id}-${item.data}`} className={clsx('rounded-lg border px-2 py-1 text-[11px] leading-tight', getReservationTypeTone(item))}>
+                          <div className="font-bold">{formatTime(item.inicio)} {item.tema || getReservationTypeLabel(item)}</div>
+                          <div className="truncate opacity-80">{getReservationTypeLabel(item)}</div>
+                        </div>
+                      ))}
+                      {dayReminders.slice(0, 1).map((item) => (
+                        <div key={`rem-${item.id}`} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                          Lembrete · {item.texto}
+                        </div>
+                      ))}
+                      {dayReservations.length + dayReminders.length === 0 ? <div className="pt-6 text-[11px] font-medium text-slate-400">Reservar</div> : null}
+                      {dayReservations.length + dayReminders.length > 3 ? <div className="text-[11px] font-semibold text-slate-500">+{dayReservations.length + dayReminders.length - 3}</div> : null}
+                    </div>
+                  </button>
+                )
+              })}
             </div>
           </section>
 
-          <section className="rounded-[28px] border border-thermo-border bg-white p-5 shadow-sm">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Minhas atividades recentes</div>
-                <h3 className="mt-1 text-lg font-bold text-thermo-navy">Cronologia operacional</h3>
-              </div>
-            </div>
+          <ModulesSection sections={sections.filter((section) => section.key !== 'top')} activeView="home" onNavigate={onNavigate} />
+        </div>
+
+        <aside className="space-y-4">
+          <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
+            <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Últimas coisas feitas</div>
+            <h3 className="mt-1 text-base font-bold text-thermo-navy">Cronologia operacional</h3>
             {activityError ? <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{activityError}</div> : null}
             {loadingActivity ? <div className="mt-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-500">Carregando cronologia…</div> : null}
             <div className="mt-4 space-y-3">
               {!loadingActivity && !activityError && activities.length === 0 ? <div className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4 text-sm text-slate-500">Nenhuma atividade recente disponível para esta sessão.</div> : null}
               {activities.map((event) => (
                 <article key={event.id} className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-sm font-bold text-thermo-navy">{event.acao}</div>
-                      <div className="mt-1 text-xs text-slate-500">
-                        {new Date(event.ocorrido_em).toLocaleString('pt-BR')} · {event.usuario_nome || user.username}
-                      </div>
+                      <div className="mt-1 text-xs text-slate-500">{new Date(event.ocorrido_em).toLocaleString('pt-BR')}</div>
                     </div>
                     <span className={clsx('rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]', event.sucesso === false ? 'bg-red-50 text-red-700' : 'bg-emerald-50 text-emerald-700')}>
                       {event.sucesso === false ? 'Erro' : 'Sucesso'}
                     </span>
                   </div>
-                  <div className="mt-2 text-sm text-slate-600">
-                    {[event.codigo_produto || event.codigo_produto_omie, event.n_solic, event.sessao_descricao, event.rota].filter(Boolean).join(' · ') || 'Sem contexto adicional'}
-                  </div>
+                  <div className="mt-2 text-sm text-slate-600">{[event.usuario_nome || user.username, event.codigo_produto || event.codigo_produto_omie, event.n_solic, event.sessao_descricao].filter(Boolean).join(' · ') || 'Sem contexto adicional'}</div>
                 </article>
               ))}
             </div>
           </section>
-        </article>
+        </aside>
       </section>
+
+      <ModalShell
+        open={Boolean(detailDay)}
+        title={detailDay ? `Detalhes do dia · ${formatDateLabel(detailDay)}` : 'Detalhes do dia'}
+        description="Dados reais de reuniões e lembretes para a data selecionada."
+        onClose={() => setDetailDay(null)}
+        panelStyle={{ width: 'min(96vw, 44rem)', maxWidth: '44rem', flexShrink: 0 }}
+      >
+        <div className="space-y-4">
+          {(dayDetails?.reservations ?? []).map((item) => (
+            <article key={`${item.id}-${item.data}`} className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="text-base font-bold text-thermo-navy">{item.tema || 'Sem tema'}</div>
+                  <div className="mt-1 text-sm text-slate-600">
+                    {formatTime(item.inicio)}–{formatTime(item.fim)} · {getReservationTypeLabel(item)}
+                  </div>
+                </div>
+                <span className={clsx('rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]', getReservationTypeTone(item))}>
+                  {item.cancelada ? 'Cancelada' : item.realizada ? 'Realizada' : 'Programada'}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-3 md:grid-cols-2">
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Organizador</div>
+                  <div className="mt-1 text-sm text-thermo-ink">{item.criadoPor || '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Participantes</div>
+                  <div className="mt-1 text-sm text-thermo-ink">{item.participantes.length ? item.participantes.join(', ') : '—'}</div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Avisos</div>
+                  <div className="mt-1 text-sm text-thermo-ink">
+                    {[item.avisoEmail ? 'E-mail' : null, item.avisoWhatsapp ? 'WhatsApp' : null].filter(Boolean).join(' · ') || '—'}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Participação</div>
+                  <div className="mt-1 text-sm text-thermo-ink">
+                    {item.participantes.some((name) => name.toLowerCase() === user.username.toLowerCase()) ? 'Você é participante' : 'Sem participação direta'}
+                  </div>
+                </div>
+              </div>
+            </article>
+          ))}
+
+          {(dayDetails?.reminders ?? []).map((item) => (
+            <article key={`rem-${item.id}`} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
+              <div className="text-base font-bold text-amber-900">{item.texto}</div>
+              <div className="mt-1 text-sm text-amber-800">Criado por {item.criadoPor || '—'} · {item.destinatarios.join(', ') || 'Sem destinatários'}</div>
+            </article>
+          ))}
+
+          <div className="flex flex-wrap gap-2">
+            <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              Abrir Agenda legado
+            </a>
+            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setDetailDay(null)}>
+              Fechar
+            </button>
+          </div>
+        </div>
+      </ModalShell>
+
+      <ModalShell
+        open={Boolean(bridgeDay)}
+        title={bridgeDay ? `Reservar · ${formatDateLabel(bridgeDay)}` : 'Reservar'}
+        description="Ponte explícita para o fluxo legado de agenda."
+        onClose={() => setBridgeDay(null)}
+        panelStyle={{ width: 'min(92vw, 32rem)', maxWidth: '32rem', flexShrink: 0 }}
+      >
+        <div className="space-y-4">
+          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
+            A criação e edição de reservas ainda não foram migradas com segurança. Continue no calendário legado para registrar a reserva desta data.
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
+              <ExternalLink className="size-4" />
+              Abrir Agenda legado
+            </a>
+            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setBridgeDay(null)}>
+              Fechar
+            </button>
+          </div>
+        </div>
+      </ModalShell>
     </div>
   )
 }
@@ -751,9 +1041,7 @@ function App() {
   })
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.sessionStorage.setItem(sidebarStateKey, collapsed ? '1' : '0')
-    }
+    if (typeof window !== 'undefined') window.sessionStorage.setItem(sidebarStateKey, collapsed ? '1' : '0')
   }, [collapsed])
 
   useEffect(() => {
@@ -776,8 +1064,7 @@ function App() {
         void prefetchPilotData()
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Falha ao validar a sessão atual.'
-        if (!user) setAuthError(message)
-        else setPermissionError(message)
+        setAuthError(message)
         setUser(null)
       } finally {
         setBusy(false)
@@ -849,16 +1136,12 @@ function App() {
 
         <div className="min-w-0 flex-1">
           <header className="border-b border-thermo-border bg-white">
-            <div className="mx-auto flex max-w-[1680px] items-center justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
+            <div className="mx-auto flex max-w-[1760px] items-center justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
               <div className="flex items-center gap-3">
                 <button className="rounded-xl border border-thermo-border p-2 md:hidden" type="button" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
                   <Menu className="size-4 text-thermo-navy" />
                 </button>
                 <img src="/branding/thermo-logo-principal.png" alt="Thermo" className="h-8 w-auto md:h-9" />
-                <span className="hidden items-center gap-2 rounded-full border border-thermo-border bg-thermo-bg px-3 py-1 text-xs font-bold uppercase tracking-[0.14em] text-slate-500 md:inline-flex">
-                  {activeView === 'home' ? <Home className="size-3.5 text-thermo-navy" /> : <Boxes className="size-3.5 text-thermo-navy" />}
-                  {activeView === 'home' ? 'Home operacional' : 'Lista de produtos'}
-                </span>
               </div>
 
               <div className="flex items-center gap-3">
@@ -874,12 +1157,8 @@ function App() {
             </div>
           </header>
 
-          <main className="mx-auto max-w-[1680px] px-4 py-5 md:px-6 xl:px-8">
-            {permissionError ? (
-              <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-                {permissionError}
-              </div>
-            ) : null}
+          <main className="mx-auto max-w-[1760px] px-4 py-5 md:px-6 xl:px-8">
+            {permissionError ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{permissionError}</div> : null}
 
             <div className="mb-5 flex flex-wrap items-center gap-2">
               <span className="thermo-chip">
@@ -888,12 +1167,16 @@ function App() {
               </span>
               <span className="thermo-chip">
                 <Lock className="size-4 text-slate-600" />
-                Itens não migrados ficam visíveis, mas bloqueados no shell
+                Itens não migrados ficam visíveis, mas bloqueados
               </span>
             </div>
 
             {activeView === 'home' ? (
-              <HomeScreen user={user} onOpenProducts={() => setActiveView('products')} />
+              <HomeScreen
+                user={user}
+                sections={navigation.sections}
+                onNavigate={(view) => setActiveView(view)}
+              />
             ) : (
               <ProductListScreen
                 permissions={{

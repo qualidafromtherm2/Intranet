@@ -41,3 +41,19 @@ export async function loadRecentActivity(user: string, limit = 12) {
   const params = new URLSearchParams({ usuario: user, limit: String(limit) })
   return getJson<ActivityResponse>(`/api/monitoramento/cronologia?${params.toString()}`)
 }
+
+export async function loadActiveUsers() {
+  try {
+    const response = await getJson<{ users?: string[] }>('/api/users/ativos')
+    return Array.isArray(response.users) ? response.users : []
+  } catch {
+    const fallback = await getJson<{ usuarios?: Array<{ username?: string } | string> }>('/api/usuarios/ativos')
+    if (Array.isArray(fallback.usuarios)) {
+      return fallback.usuarios
+        .map((entry) => (typeof entry === 'string' ? entry : entry?.username))
+        .map((value) => String(value || '').trim())
+        .filter(Boolean)
+    }
+    return []
+  }
+}

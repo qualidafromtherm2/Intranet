@@ -161,17 +161,23 @@ export interface PermissionTreeResponse {
 
 export type AppView = 'home' | 'products'
 
-export type ShellNavStatus = 'migrated' | 'pending'
+export type ShellNavStatus = 'migrated' | 'in_progress' | 'pending'
 
 export interface ShellNavItem {
   id: string
   key: string
   label: string
+  legacyLabel: string
+  moduleKey: string
+  moduleLabel: string
   pos: string | null
   selector: string | null
   icon: string
-  status: ShellNavStatus
+  migrationStatus: ShellNavStatus
   view: AppView | null
+  destination: string | null
+  order: number
+  permissionKey: string
   allowed: boolean
   children: ShellNavItem[]
 }
@@ -181,6 +187,7 @@ export interface ShellNavSection {
   key: string
   label: string
   icon: string
+  order: number
   children: ShellNavItem[]
 }
 
