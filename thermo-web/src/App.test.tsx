@@ -1,7 +1,7 @@
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
-import { ModalShell } from './App'
+import { ModalShell } from './components/ModalShell'
 
 describe('ModalShell', () => {
   it('fecha ao clicar no backdrop explícito e preserva painel estreito para drawer', async () => {

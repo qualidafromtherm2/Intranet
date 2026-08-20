@@ -92,6 +92,66 @@ export interface ProductStreamEvent {
   progress?: number
 }
 
+export interface AuthUser {
+  id: string
+  username: string
+  roles: string[]
+  setor: string | null
+  sector_id: number | null
+  foto_perfil_url?: string | null
+  conta_google?: string | null
+  email?: string | null
+  telefone?: string | null
+  funcao_nome?: string | null
+}
+
+export interface AuthStatusResponse {
+  loggedIn: boolean
+  user: AuthUser | null
+}
+
+export interface AuthLoginResponse {
+  ok: boolean
+  user: AuthUser
+}
+
+export interface PermissionNode {
+  id: number
+  parent_id: number | null
+  key: string
+  label: string
+  pos: string | null
+  sort: number | null
+  allowed: boolean
+  user_override: boolean | null
+  selector: string | null
+}
+
+export interface PermissionTreeResponse {
+  userId: string
+  nodes: PermissionNode[]
+}
+
+export type AppView = 'home' | 'products'
+
+export interface ShellAction {
+  id: string
+  title: string
+  description: string
+  selector?: string
+  view: 'products' | 'legacy'
+  legacyPath?: string
+  legacyHint?: string
+}
+
+export interface ShellArea {
+  id: string
+  title: string
+  description: string
+  accent: string
+  actions: ShellAction[]
+}
+
 export interface PilotPermissions {
   canRequestPurchase: boolean
   canViewPurchaseFlow: boolean

@@ -67,4 +67,12 @@ select {
   .thermo-icon-button-active {
     @apply border-thermo-navy bg-thermo-navy text-white hover:text-white;
   }
+
+  .thermo-sidebar-link {
+    @apply inline-flex w-full items-center gap-2 rounded-2xl px-3 py-3 text-left text-sm font-semibold text-slate-200 transition hover:bg-white/8 hover:text-white;
+  }
+
+  .thermo-sidebar-link-active {
+    @apply bg-white/10 text-white;
+  }
 }
