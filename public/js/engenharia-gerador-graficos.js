@@ -3,7 +3,8 @@
   'use strict';
 
   const PREF_CHAVE = 'engenharia_gerador_graficos';
-  const PANE_VERSION = '5';
+  const GG_API = '/api/engenharia/gerador-graficos';
+  const PANE_VERSION = '10';
   const MAX_GRUPOS = 5;
   const CORES = ['#ef4444', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4'];
   const DEFAULTS = {
@@ -28,6 +29,10 @@
   let pontosLinha = [];
   let dragLinha = null;
   let skipClickLinha = false;
+  let overlayTeste = null;
+  let ggLeiturasCache = [];
+  let ggRelatorioAtual = null;
+  let ggColunasCache = null;
 
   function gruposPadrao() {
     return [
@@ -155,10 +160,13 @@
     set('ggRegsJson', JSON.stringify(Array.isArray(c.registros) ? c.registros : []));
     grupos = migrarGrupos(c);
     pontosLinha = Array.isArray(c.pontosLinha) ? c.pontosLinha.map((p) => ({
-      x: Number(p.x), y: Number(p.y), curvo: !!p.curvo,
+      x: Number(p.x), y: Number(p.y), curva: curvaDoPonto(p),
     })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
+    overlayTeste = null;
     renderGrupos();
+    preencherSelectsEixos();
     atualizarRotulos();
+    atualizarOverlayInfo();
   }
 
   function salvarPrefs() {
@@ -186,9 +194,9 @@
 
   function tituloAutomatico() {
     const nomes = grupos.map((g) => g.nome).filter(Boolean);
-    const agua = txt('ggNomeAgua', DEFAULTS.nomeAgua);
+    const agua = rotuloEixo(txt('ggNomeAgua', DEFAULTS.nomeAgua), DEFAULTS.nomeAgua);
     if (!nomes.length) return agua;
-    return `${agua} com escalas para ${nomes.join(', ')}`;
+    return `${agua} com escalas para ${nomes.map((n) => rotuloEixo(n, n)).join(', ')}`;
   }
 
   function atualizarRotulos() {
@@ -196,12 +204,12 @@
     const sel = $('ggModelo');
     if (sel) {
       const atual = sel.value;
-      sel.innerHTML = grupos.map((g) => `<option value="${g.id}">${g.nome}</option>`).join('');
+      sel.innerHTML = grupos.map((g) => `<option value="${g.id}">${escHtml(rotuloEixo(g.nome, g.nome))}</option>`).join('');
       if (grupos.some((g) => g.id === atual)) sel.value = atual;
     }
     const sub = $('ggSubtitulo');
     if (sub) {
-      sub.textContent = `${txt('ggNomeAgua', DEFAULTS.nomeAgua)} × ${txt('ggNomePressao', DEFAULTS.nomePressao)}`;
+      sub.textContent = `${rotuloEixo(txt('ggNomeAgua', DEFAULTS.nomeAgua), DEFAULTS.nomeAgua)} × ${rotuloEixo(txt('ggNomePressao', DEFAULTS.nomePressao), DEFAULTS.nomePressao)}`;
     }
     const btnAdd = $('ggBtnAddGrupo');
     if (btnAdd) btnAdd.disabled = grupos.length >= MAX_GRUPOS;
@@ -214,13 +222,337 @@
       .replace(/</g, '&lt;');
   }
 
+  function escHtml(s) {
+    return String(s ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  function nomeColuna(c) {
+    return String(c || '').replace(/_/g, ' ');
+  }
+
+  function rotuloEixo(valor, fallback) {
+    const v = String(valor || '').trim() || fallback;
+    if ((ggColunasCache || []).includes(v)) return nomeColuna(v);
+    return v;
+  }
+
+  function valorParaColuna(valor, fallback) {
+    const cols = ggColunasCache || [];
+    const v = String(valor || '').trim();
+    if (!v) return fallback || '';
+    if (cols.includes(v)) return v;
+    const slug = v.replace(/\s+/g, '_');
+    if (cols.includes(slug)) return slug;
+    const porNome = cols.find((c) => nomeColuna(c).toLowerCase() === v.toLowerCase());
+    return porNome || fallback || '';
+  }
+
+  function htmlOptionsColunas(selecionada, incluirVazio, rotuloVazio) {
+    const cols = ggColunasCache || [];
+    let sel = String(selecionada || '').trim();
+    if (sel && !cols.includes(sel)) {
+      const resolved = valorParaColuna(sel, '');
+      if (resolved) sel = resolved;
+    }
+    if (sel && !cols.includes(sel)) sel = '';
+    let html = incluirVazio ? `<option value="">${escHtml(rotuloVazio || '— escolher —')}</option>` : '';
+    cols.forEach((c) => {
+      html += `<option value="${escAttr(c)}"${c === sel ? ' selected' : ''}>${escHtml(nomeColuna(c))}</option>`;
+    });
+    if (!html.replace(/<option[^>]*><\/option>/g, '').trim() && incluirVazio) {
+      html = `<option value="">${escHtml(rotuloVazio || 'Carregando colunas…')}</option>`;
+    }
+    return html;
+  }
+
+  function preencherSelectsEixos() {
+    const agua = $('ggNomeAgua');
+    const pressao = $('ggNomePressao');
+    if (agua) {
+      const v = agua.value || valorParaColuna(DEFAULTS.nomeAgua, 'temp_ambiente') || 'temp_ambiente';
+      agua.innerHTML = htmlOptionsColunas(v, false);
+    }
+    if (pressao) {
+      const v = pressao.value || valorParaColuna(DEFAULTS.nomePressao, 'pressao_alta') || 'pressao_alta';
+      pressao.innerHTML = htmlOptionsColunas(v, false);
+    }
+    document.querySelectorAll('[data-gg-nome]').forEach((sel) => {
+      const card = sel.closest('[data-gg-grupo]');
+      const v = sel.value || card?.getAttribute('data-gg-coluna') || '';
+      sel.innerHTML = htmlOptionsColunas(v, true, '— escolher coluna —');
+      const nome = rotuloEixo(sel.value, sel.value.trim() || 'Grupo');
+      const cap = (k, suf) => { const el = card?.querySelector(`[data-gg-cap="${k}"]`); if (el) el.textContent = `${nome} — ${suf}`; };
+      cap('max', 'Máximo');
+      cap('min', 'Mínimo');
+      cap('tick', 'Intervalo');
+    });
+  }
+
+  async function carregarColunasTeste() {
+    if (ggColunasCache && ggColunasCache.length) {
+      preencherSelectsEixos();
+      return;
+    }
+    try {
+      const d = await ggApi('/testes/colunas');
+      ggColunasCache = d.colunas || [];
+      preencherSelectsEixos();
+    } catch (err) {
+      console.warn('[gerador-graficos] colunas:', err);
+      ggColunasCache = ggColunasCache || [];
+      preencherSelectsEixos();
+    }
+  }
+
+  async function ggApi(path, opts) {
+    const r = await fetch(GG_API + path, Object.assign({ credentials: 'include' }, opts || {}));
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.error || d.message || `Erro ${r.status}`);
+    return d;
+  }
+
+  function fmtData(v) {
+    if (!v) return '';
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) return String(v);
+    const p = (n) => String(n).padStart(2, '0');
+    return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+
+  function atualizarOverlayInfo() {
+    const el = $('ggOverlayInfo');
+    if (!el) return;
+    if (!overlayTeste?.relatorio) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const r = overlayTeste.relatorio;
+    el.style.display = 'flex';
+    el.innerHTML = `<span>Teste real sobreposto: OP <b>${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')} · ${escHtml(overlayTeste.pontos?.length || 0)} pontos</span>
+      <button type="button" id="ggBtnLimparOverlay" class="content-button" style="background:#7c2d12;color:#fff;">Remover teste</button>`;
+    $('ggBtnLimparOverlay')?.addEventListener('click', () => {
+      overlayTeste = null;
+      atualizarOverlayInfo();
+      desenhar();
+    });
+  }
+
+  function optionsColunas(colunas, selecionada) {
+    return (colunas || []).map((c) =>
+      `<option value="${escAttr(c)}"${c === selecionada ? ' selected' : ''}>${escHtml(nomeColuna(c))}</option>`
+    ).join('');
+  }
+
+  async function recarregarSalvos(selecionarId) {
+    const sel = $('ggSalvosSelect');
+    if (!sel) return;
+    try {
+      const d = await ggApi('/salvos');
+      const itens = d.itens || [];
+      const atual = selecionarId != null ? String(selecionarId) : sel.value;
+      sel.innerHTML = '<option value="">— gráficos gerados —</option>' + itens.map((it) =>
+        `<option value="${escAttr(it.id)}">${escHtml(it.nome)}</option>`
+      ).join('');
+      if (atual && itens.some((it) => String(it.id) === String(atual))) sel.value = String(atual);
+    } catch (_) {
+      sel.innerHTML = '<option value="">— não foi possível listar —</option>';
+    }
+  }
+
+  async function gravarSnapshot() {
+    const cfg = estadoAtual();
+    const titulo = cfg.tituloGrafico || tituloAutomatico();
+    const d = await ggApi('/salvos', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ titulo, config: cfg }),
+    });
+    await recarregarSalvos(d.item?.id);
+    return d.item;
+  }
+
+  async function aplicarSalvo(id) {
+    if (!id) return;
+    const d = await ggApi(`/salvos/${encodeURIComponent(id)}`);
+    if (d.item?.config) aplicarEstado(d.item.config);
+    if (d.item?.titulo && $('ggTituloGrafico') && !String($('ggTituloGrafico').value || '').trim()) {
+      $('ggTituloGrafico').value = d.item.titulo;
+    }
+    desenhar();
+  }
+
+  function abrirModal(id) {
+    const el = $(id);
+    if (!el) return;
+    document.body.appendChild(el);
+    el.classList.add('is-open');
+  }
+
+  function fecharModais() {
+    document.querySelectorAll('.gg-gerador-modal').forEach((el) => el.classList.remove('is-open'));
+  }
+
+  function amostrarLeituras(leituras, n, colX, colY, mapGrupos) {
+    const valid = (leituras || []).filter((l) => Number.isFinite(Number(l[colX])) && Number.isFinite(Number(l[colY])));
+    if (!valid.length) return [];
+    const nUse = Math.max(1, Math.min(Number(n) || 1, valid.length, 400));
+    const idxs = linspace(0, valid.length - 1, nUse).map((i) => Math.round(i));
+    const uniq = [];
+    idxs.forEach((i) => { if (!uniq.length || uniq[uniq.length - 1] !== i) uniq.push(i); });
+    return uniq.map((i) => {
+      const l = valid[i];
+      const gruposVals = {};
+      Object.keys(mapGrupos || {}).forEach((id) => {
+        const col = mapGrupos[id];
+        const v = Number(l[col]);
+        if (col && Number.isFinite(v)) gruposVals[id] = v;
+      });
+      return { x: Number(l[colX]), y: Number(l[colY]), grupos: gruposVals };
+    });
+  }
+
+  async function abrirTestesRegistrados() {
+    abrirModal('ggModalTestes');
+    const sel = $('ggTesteModelo');
+    if (sel && sel.options.length <= 1) {
+      try {
+        const d = await ggApi('/testes/modelos');
+        sel.innerHTML = '<option value="">— escolher modelo —</option>' + (d.modelos || []).map((m) =>
+          `<option value="${escAttr(m.modelo)}">${escHtml(m.modelo)} (${m.qtd})</option>`
+        ).join('');
+      } catch (err) {
+        sel.innerHTML = `<option value="">${escHtml(err.message || 'Erro ao listar modelos')}</option>`;
+      }
+    }
+    const lista = $('ggTesteLista');
+    if (lista && !lista.innerHTML.trim()) {
+      lista.innerHTML = '<p class="gg-dica">Digite a OP e busque, ou escolha um modelo.</p>';
+    }
+  }
+
+  function renderListaTestes(relatorios) {
+    const lista = $('ggTesteLista');
+    if (!lista) return;
+    if (!relatorios.length) {
+      lista.innerHTML = '<p class="gg-dica">Nenhum teste encontrado.</p>';
+      return;
+    }
+    lista.innerHTML = `<table class="gg-table">
+      <thead><tr><th>Data</th><th>OP</th><th>Modelo</th><th>Operador</th><th>Leituras</th></tr></thead>
+      <tbody>${relatorios.map((r) => `<tr data-gg-rel="${escAttr(r.id)}">
+        <td>${escHtml(fmtData(r.criado_em))}</td>
+        <td>${escHtml(r.num_op || '')}</td>
+        <td>${escHtml(r.modelo || '')}</td>
+        <td>${escHtml(r.operador || '')}</td>
+        <td>${escHtml(r.total_registros ?? '')}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+    lista.querySelectorAll('[data-gg-rel]').forEach((tr) => {
+      tr.addEventListener('click', () => abrirMapaTeste(tr.getAttribute('data-gg-rel')));
+    });
+  }
+
+  async function buscarTestes(tipo, q) {
+    const lista = $('ggTesteLista');
+    if (lista) lista.innerHTML = '<p class="gg-dica">Buscando…</p>';
+    try {
+      const d = await ggApi(`/testes/buscar?tipo=${encodeURIComponent(tipo)}&q=${encodeURIComponent(q)}`);
+      renderListaTestes(d.relatorios || []);
+    } catch (err) {
+      if (lista) lista.innerHTML = `<p class="gg-dica">${escHtml(err.message)}</p>`;
+    }
+  }
+
+  async function abrirMapaTeste(id) {
+    try {
+      await carregarColunasTeste();
+      const leit = await ggApi(`/testes/${encodeURIComponent(id)}/leituras`);
+      ggLeiturasCache = leit.leituras || [];
+      ggRelatorioAtual = leit.relatorio || null;
+      grupos = lerGruposDoDom();
+      const r = ggRelatorioAtual || {};
+      const resumo = $('ggMapaResumo');
+      if (resumo) {
+        resumo.innerHTML = `<b>OP ${escHtml(r.num_op || '—')}</b> · ${escHtml(r.modelo || '')}<br>
+          ${escHtml(r.operador || '')} · ${escHtml(ggLeiturasCache.length)} leituras`;
+      }
+      const colunas = ggColunasCache || [];
+      const colY = valorParaColuna($('ggNomeAgua')?.value, 'temp_ambiente');
+      const colX = valorParaColuna($('ggNomePressao')?.value, 'pressao_alta');
+      const selY = $('ggMapaColY');
+      const selX = $('ggMapaColX');
+      if (selY) selY.innerHTML = htmlOptionsColunas(colY || 'temp_ambiente', false);
+      if (selX) selX.innerHTML = htmlOptionsColunas(colX || 'pressao_alta', false);
+      garantirPontosNaGrade();
+      const qtdEl = $('ggMapaQtd');
+      if (qtdEl) {
+        qtdEl.value = String(pontosLinha.length || 1);
+        qtdEl.max = String(Math.max(1, ggLeiturasCache.length));
+      }
+      const wrapG = $('ggMapaGrupos');
+      if (wrapG) {
+        wrapG.innerHTML = grupos.map((g) => {
+          const def = valorParaColuna(g.nome, '');
+          return `<label>${escHtml(rotuloEixo(g.nome, g.nome))}
+            <select data-gg-mapa-grupo="${escAttr(g.id)}">
+              <option value="">— não plotar —</option>
+              ${optionsColunas(colunas, def)}
+            </select>
+          </label>`;
+        }).join('');
+      }
+      fecharModais();
+      abrirModal('ggModalMapa');
+    } catch (err) {
+      alert(err.message || 'Não foi possível abrir o teste.');
+    }
+  }
+
+  function aplicarTesteNoGrafico() {
+    const colY = $('ggMapaColY')?.value;
+    const colX = $('ggMapaColX')?.value;
+    if (!colY || !colX) {
+      alert('Escolha o campo da esquerda e o da parte de baixo.');
+      return;
+    }
+    const qtd = Math.max(1, Number($('ggMapaQtd')?.value) || pontosLinha.length || 1);
+    const mapGrupos = {};
+    document.querySelectorAll('[data-gg-mapa-grupo]').forEach((sel) => {
+      if (sel.value) mapGrupos[sel.getAttribute('data-gg-mapa-grupo')] = sel.value;
+    });
+    const sampled = amostrarLeituras(ggLeiturasCache, qtd, colX, colY, mapGrupos);
+    if (!sampled.length) {
+      alert('Esse teste não tem números nessas colunas.');
+      return;
+    }
+    const gruposPts = {};
+    Object.keys(mapGrupos).forEach((gid) => {
+      gruposPts[gid] = sampled.filter((p) => Number.isFinite(p.grupos[gid])).map((p) => ({ x: p.x, y: p.grupos[gid] }));
+    });
+    overlayTeste = {
+      colX, colY, qtd,
+      pontos: sampled.map((p) => ({ x: p.x, y: p.y })),
+      grupos: gruposPts,
+      relatorio: ggRelatorioAtual,
+    };
+    fecharModais();
+    atualizarOverlayInfo();
+    desenhar();
+  }
+
   function renderGrupos() {
     const wrap = $('ggGrupos');
     if (!wrap) return;
     wrap.innerHTML = grupos.map((g) => `
-      <div class="gg-grupo" data-gg-grupo="${escAttr(g.id)}">
+      <div class="gg-grupo" data-gg-grupo="${escAttr(g.id)}" data-gg-coluna="${escAttr(g.nome)}">
         <div class="gg-grupo-topo">
-          <input class="gg-nome gg-eixo-nome" data-gg-nome value="${escAttr(g.nome)}" title="Nome do grupo">
+          <select class="gg-nome gg-eixo-nome gg-select-eixo" data-gg-nome title="Coluna do teste (eixo direito)">
+            ${htmlOptionsColunas(g.nome, true, '— escolher coluna —')}
+          </select>
           <button type="button" class="gg-btn-excluir" data-gg-excluir title="Excluir grupo" ${grupos.length <= 1 ? 'disabled' : ''}>
             <i class="fa-solid fa-trash"></i>
           </button>
@@ -230,17 +562,17 @@
         <label><span data-gg-cap="tick">${escAttr(g.nome)} — Intervalo</span> <input data-gg-tick type="number" step="0.1" value="${g.tick}"></label>
       </div>
     `).join('');
-    wrap.querySelectorAll('[data-gg-nome]').forEach((inp) => {
+    wrap.querySelectorAll('[data-gg-nome]').forEach((sel) => {
       const syncCaps = () => {
-        const card = inp.closest('[data-gg-grupo]');
-        const nome = inp.value.trim() || 'Grupo';
+        const card = sel.closest('[data-gg-grupo]');
+        const nome = rotuloEixo(sel.value, sel.value.trim() || 'Grupo');
         const cap = (k, suf) => { const el = card?.querySelector(`[data-gg-cap="${k}"]`); if (el) el.textContent = `${nome} — ${suf}`; };
         cap('max', 'Máximo');
         cap('min', 'Mínimo');
         cap('tick', 'Intervalo');
       };
-      inp.addEventListener('input', syncCaps);
-      inp.addEventListener('change', () => { atualizarRotulos(); salvarPrefs(); desenhar(); });
+      syncCaps();
+      sel.addEventListener('change', () => { syncCaps(); atualizarRotulos(); salvarPrefs(); desenhar(); });
     });
     wrap.querySelectorAll('[data-gg-max],[data-gg-min],[data-gg-tick]').forEach((inp) => {
       inp.addEventListener('change', () => { atualizarRotulos(); salvarPrefs(); desenhar(); });
@@ -257,13 +589,14 @@
         desenhar();
       });
     });
+    preencherSelectsEixos();
     atualizarRotulos();
   }
 
   function adicionarGrupo() {
     grupos = lerGruposDoDom();
     if (grupos.length >= MAX_GRUPOS) return;
-    grupos.push({ id: novoIdGrupo(), nome: `Grupo ${grupos.length + 1}`, max: 10, min: 0, tick: 0.5 });
+    grupos.push({ id: novoIdGrupo(), nome: '', max: 10, min: 0, tick: 0.5 });
     renderGrupos();
     atualizarRotulos();
     salvarPrefs();
@@ -315,12 +648,18 @@
         border-radius: 8px; padding: 8px 10px;
       }
       #engenhariaGeradorGraficosPane .gg-chart-wrap { display: flex; flex-direction: column; gap: 8px; }
-      #engenhariaGeradorGraficosPane .gg-chart-toolbar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+      #engenhariaGeradorGraficosPane .gg-chart-toolbar { display: flex; justify-content: center; }
+      #engenhariaGeradorGraficosPane .gg-titulo-edit {
+        text-align: center; font-size: 16px; max-width: 100%;
+      }
+      #engenhariaGeradorGraficosPane .gg-chart-actions {
+        display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 4px;
+      }
       #engenhariaGeradorGraficosPane .gg-chart-box {
         background: #fff; border-radius: 12px; padding: 16px 10px 10px; min-height: 420px;
       }
       #engenhariaGeradorGraficosPane .gg-grupos-scroll {
-        max-height: 380px; overflow-y: auto; padding-right: 6px; margin-top: 8px;
+        max-height: none; overflow: visible; padding-right: 6px; margin-top: 8px;
       }
       #engenhariaGeradorGraficosPane .gg-grupo {
         border: 1px solid #334155; border-radius: 10px;
@@ -335,8 +674,50 @@
       #engenhariaGeradorGraficosPane .gg-dica {
         margin: 8px 0 0; font-size: 12px; color: #64748b; line-height: 1.4;
       }
+      #engenhariaGeradorGraficosPane .gg-param-topo {
+        display:flex; gap:10px; flex-wrap:wrap; align-items:end; margin-bottom:14px;
+      }
+      #engenhariaGeradorGraficosPane .gg-param-topo label { min-width: 220px; flex: 1; }
+      #engenhariaGeradorGraficosPane .gg-overlay-info {
+        display:none; gap:10px; flex-wrap:wrap; align-items:center;
+        margin: 10px 0 0; padding: 8px 10px; border-radius: 8px;
+        background: rgba(234,88,12,.15); color: #fdba74; font-size: 13px;
+      }
+      #engenhariaGeradorGraficosPane .gg-select-eixo { cursor: pointer; width: 100%; }
+      .gg-gerador-modal {
+        display: none; position: fixed; inset: 0; z-index: 99999;
+        background: rgba(2,6,23,.72); align-items: center; justify-content: center; padding: 16px;
+      }
+      .gg-gerador-modal.is-open { display: flex; }
+      .gg-gerador-modal .gg-modal-box {
+        width: min(920px, 100%); max-height: 90vh; overflow: auto;
+        background: #0f172a; border: 1px solid #334155; border-radius: 14px; padding: 18px;
+        color: #e2e8f0;
+      }
+      .gg-gerador-modal .gg-modal-head {
+        display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px;
+      }
+      .gg-gerador-modal label {
+        display: flex; flex-direction: column; gap: 4px; font-size: 13px; color: #94a3b8;
+      }
+      .gg-gerador-modal input, .gg-gerador-modal select {
+        background: #0f172a; color: #e2e8f0;
+        border: 1px solid #334155; border-radius: 8px; padding: 8px 10px;
+      }
+      .gg-gerador-modal .gg-dica { margin: 8px 0 0; font-size: 12px; color: #64748b; line-height: 1.4; }
+      .gg-gerador-modal .gg-form-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+      .gg-gerador-modal .gg-table { width:100%; border-collapse:collapse; font-size:13px; }
+      .gg-gerador-modal .gg-table th, .gg-gerador-modal .gg-table td {
+        padding:8px; border-bottom:1px solid #334155; text-align:left;
+      }
+      .gg-gerador-modal .gg-table tbody tr { cursor:pointer; }
+      .gg-gerador-modal .gg-table tbody tr:hover { background: rgba(56,189,248,.12); }
+      .gg-gerador-modal .gg-mapa-grid {
+        display:grid; grid-template-columns: minmax(180px,1fr) minmax(180px,1.2fr) minmax(180px,1fr); gap:14px;
+      }
       @media (max-width: 1100px) {
         #engenhariaGeradorGraficosPane .gg-layout { grid-template-columns: 1fr; }
+        .gg-gerador-modal .gg-mapa-grid { grid-template-columns: 1fr; }
       }
     `;
   }
@@ -383,6 +764,29 @@
     return ord[ord.length - 1].y;
   }
 
+  function curvaDoPonto(p) {
+    if (!p) return 0;
+    const n = Number(p.curva);
+    if (n === 1 || n === -1) return n;
+    return p.curvo ? 1 : 0;
+  }
+
+  function ctrlCurva(a, b, dir) {
+    const dx = Math.abs(b.x - a.x);
+    return {
+      cpx: (a.x + b.x) / 2,
+      cpy: (a.y + b.y) / 2 - dir * dx * 0.22,
+    };
+  }
+
+  function proximaCurva(pEsq, pDir) {
+    const atual = curvaDoPonto(pEsq);
+    const inicial = Number(pDir.y) > Number(pEsq.y) ? -1 : 1;
+    if (!atual) return inicial;
+    if (atual === inicial) return -inicial;
+    return 0;
+  }
+
   function garantirPontosNaGrade() {
     const paMin = num('ggPaMin', DEFAULTS.paMin);
     const paMax = num('ggPaMax', DEFAULTS.paMax);
@@ -397,7 +801,7 @@
       return {
         x,
         y: Number.isFinite(yPrev) ? yPrev : yDiagonal(x, paMin, paMax, tMin, tMax),
-        curvo: old ? !!old.curvo : !!(prev[i] && prev[i].curvo),
+        curva: old ? curvaDoPonto(old) : (prev[i] ? curvaDoPonto(prev[i]) : 0),
       };
     });
   }
@@ -433,14 +837,14 @@
       const a = pixelDoPonto(chart, pontosLinha[i]);
       const b = pixelDoPonto(chart, pontosLinha[i + 1]);
       let d;
-      if (pontosLinha[i].curvo) {
+      const dir = curvaDoPonto(pontosLinha[i]);
+      if (dir) {
         d = Infinity;
-        const cpx = (a.x + b.x) / 2;
-        const cpy = (a.y + b.y) / 2 - (b.x - a.x) * 0.22;
+        const c = ctrlCurva(a, b, dir);
         for (let t = 0; t <= 1; t += 0.08) {
           const u = 1 - t;
-          const qx = u * u * a.x + 2 * u * t * cpx + t * t * b.x;
-          const qy = u * u * a.y + 2 * u * t * cpy + t * t * b.y;
+          const qx = u * u * a.x + 2 * u * t * c.cpx + t * t * b.x;
+          const qy = u * u * a.y + 2 * u * t * c.cpy + t * t * b.y;
           d = Math.min(d, Math.hypot(px - qx, py - qy));
         }
       } else {
@@ -464,10 +868,10 @@
     for (let i = 0; i < pontosLinha.length - 1; i++) {
       const a = pixelDoPonto(chart, pontosLinha[i]);
       const b = pixelDoPonto(chart, pontosLinha[i + 1]);
-      if (pontosLinha[i].curvo) {
-        const cpx = (a.x + b.x) / 2;
-        const cpy = (a.y + b.y) / 2 - (b.x - a.x) * 0.22;
-        ctx.quadraticCurveTo(cpx, cpy, b.x, b.y);
+      const dir = curvaDoPonto(pontosLinha[i]);
+      if (dir) {
+        const c = ctrlCurva(a, b, dir);
+        ctx.quadraticCurveTo(c.cpx, c.cpy, b.x, b.y);
       } else {
         ctx.lineTo(b.x, b.y);
       }
@@ -520,7 +924,7 @@
         const hi = next ? next.x - 0.01 : paMax;
         x = Math.max(lo, Math.min(hi, x));
         y = Math.max(Math.min(tMin, tMax), Math.min(Math.max(tMin, tMax), y));
-        pontosLinha[i] = { x, y, curvo: pontosLinha[i].curvo };
+        pontosLinha[i] = { x, y, curva: curvaDoPonto(pontosLinha[i]) };
         dragLinha.moved = true;
         args.changed = true;
         return;
@@ -549,7 +953,7 @@
         if (idx < 0) {
           const trecho = hitTrechoLinha(chart, px, py);
           if (trecho >= 0) {
-            pontosLinha[trecho].curvo = !pontosLinha[trecho].curvo;
+            pontosLinha[trecho].curva = proximaCurva(pontosLinha[trecho], pontosLinha[trecho + 1]);
             salvarPrefs();
             args.changed = true;
           }
@@ -588,12 +992,29 @@
     return modelo;
   }
 
+  const pluginTituloCentro = {
+    id: 'ggTituloCentro',
+    afterDraw(chart) {
+      const titulo = txt('ggTituloGrafico', tituloAutomatico());
+      const area = chart.chartArea;
+      if (!titulo || !area) return;
+      const ctx = chart.ctx;
+      ctx.save();
+      ctx.fillStyle = '#0f172a';
+      ctx.font = 'bold 16px system-ui, Segoe UI, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText(String(titulo), (area.left + area.right) / 2, Math.max(18, area.top - 8));
+      ctx.restore();
+    },
+  };
+
   function desenhar() {
     const canvas = $('ggChartAlta');
     if (!canvas || typeof Chart === 'undefined') return;
     grupos = lerGruposDoDom();
-    const nomeAgua = txt('ggNomeAgua', DEFAULTS.nomeAgua);
-    const nomePressao = txt('ggNomePressao', DEFAULTS.nomePressao);
+    const nomeAgua = rotuloEixo(txt('ggNomeAgua', DEFAULTS.nomeAgua), DEFAULTS.nomeAgua);
+    const nomePressao = rotuloEixo(txt('ggNomePressao', DEFAULTS.nomePressao), DEFAULTS.nomePressao);
     const titulo = txt('ggTituloGrafico', tituloAutomatico());
     const paMin = num('ggPaMin', DEFAULTS.paMin);
     const paMax = num('ggPaMax', DEFAULTS.paMax);
@@ -628,12 +1049,42 @@
         data: recs.filter((r) => r.modelo === g.id).map((r) => ({ x: r.pressao, y: r.valor })),
         backgroundColor: CORES[i % CORES.length], pointRadius: 6, yAxisID: axisId,
       });
-      scales[axisId] = eixoY(axisId, g.nome, CORES[i % CORES.length], g.min, g.max, g.tick, {
+      scales[axisId] = eixoY(axisId, rotuloEixo(g.nome, g.nome), CORES[i % CORES.length], g.min, g.max, g.tick, {
         position: 'right',
         offset: i > 0,
         grid: { drawOnChartArea: false },
       });
     });
+
+    if (overlayTeste?.pontos?.length) {
+      datasets.push({
+        type: 'scatter',
+        label: 'Teste real',
+        data: overlayTeste.pontos,
+        backgroundColor: '#ea580c',
+        borderColor: '#ea580c',
+        pointRadius: 5,
+        pointStyle: 'rectRot',
+        showLine: true,
+        tension: 0.15,
+        yAxisID: 'yTemp',
+      });
+      grupos.forEach((g, i) => {
+        const pts = overlayTeste.grupos?.[g.id];
+        if (!pts?.length) return;
+        datasets.push({
+          type: 'scatter',
+          label: `Teste ${g.nome}`,
+          data: pts,
+          backgroundColor: CORES[i % CORES.length],
+          borderColor: CORES[i % CORES.length],
+          pointRadius: 5,
+          pointStyle: 'triangle',
+          showLine: true,
+          yAxisID: `yG_${g.id}`,
+        });
+      });
+    }
 
     if (chartAlta) chartAlta.destroy();
     chartAlta = new Chart(canvas, {
@@ -646,12 +1097,12 @@
         events: ['mousemove', 'mouseout', 'click', 'mousedown', 'mouseup', 'touchstart', 'touchmove', 'touchend'],
         plugins: {
           legend: { display: false },
-          title: { display: true, text: titulo, color: '#0f172a' },
+          title: { display: false },
         },
         scales,
-        layout: { padding: { right: 8, top: 8 } },
+        layout: { padding: { right: 8, top: 32 } },
       },
-      plugins: [pluginLinhaAzul, pluginConectores],
+      plugins: [pluginTituloCentro, pluginLinhaAzul, pluginConectores],
     });
     chartAlta.$ggRecs = recs;
   }
@@ -686,22 +1137,40 @@
 
   async function copiarGrafico() {
     try {
+      let avisoSave = '';
+      try {
+        const item = await gravarSnapshot();
+        if (item?.nome) avisoSave = ` Gravado como ${item.nome}.`;
+      } catch (err) {
+        avisoSave = ` Não gravou no banco: ${err.message}.`;
+      }
       const blob = await blobDoGrafico();
       if (navigator.clipboard && window.ClipboardItem) {
         await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-        alert('Gráfico copiado. Cole no Word, e-mail ou WhatsApp.');
+        alert(`Gráfico copiado. Cole no Word, e-mail ou WhatsApp.${avisoSave}`);
         return;
       }
       baixarPng(blob);
-      alert('Este navegador não copia imagem. O arquivo foi baixado.');
+      alert(`Este navegador não copia imagem. O arquivo foi baixado.${avisoSave}`);
     } catch (err) {
       alert(err?.message || 'Não foi possível copiar o gráfico.');
     }
   }
 
   async function exportarGrafico() {
-    try { baixarPng(await blobDoGrafico()); }
-    catch (err) { alert(err?.message || 'Não foi possível exportar o gráfico.'); }
+    try {
+      let avisoSave = '';
+      try {
+        const item = await gravarSnapshot();
+        if (item?.nome) avisoSave = ` Gravado como ${item.nome}.`;
+      } catch (err) {
+        avisoSave = ` Não gravou no banco: ${err.message}.`;
+      }
+      baixarPng(await blobDoGrafico());
+      if (avisoSave) alert(avisoSave.trim());
+    } catch (err) {
+      alert(err?.message || 'Não foi possível exportar o gráfico.');
+    }
   }
 
   function htmlPainel() {
@@ -717,14 +1186,22 @@
           </div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button type="button" id="ggBtnRegistro" class="content-button" style="background:linear-gradient(135deg,#0ea5e9 0%,#0369a1 100%);color:#fff;">
-              <i class="fa-solid fa-plus"></i> Adicionar Registro
+              <i class="fa-solid fa-sliders"></i> Parâmetros
             </button>
             <button type="button" id="ggBtnLimpar" class="content-button" style="background:#334155;color:#fff;">Limpar pontos</button>
           </div>
         </div>
         <input type="hidden" id="ggRegsJson" value="[]">
         <div id="ggFormWrap" style="display:none;margin:28px 0 16px;padding:16px;border:1px solid var(--border-color);border-radius:12px;background:rgba(15,23,42,.35);">
-          <div style="font-weight:700;margin-bottom:12px;">Novo Registro</div>
+          <div class="gg-param-topo">
+            <label>Gráficos gerados
+              <select id="ggSalvosSelect"></select>
+            </label>
+            <button type="button" id="ggBtnTestes" class="content-button" style="background:linear-gradient(135deg,#f59e0b 0%,#b45309 100%);color:#fff;">
+              <i class="fa-solid fa-flask"></i> Testes registrados
+            </button>
+          </div>
+          <div style="font-weight:700;margin:12px 0;">Novo Registro</div>
           <div class="gg-form-grid">
             <label>Temperatura <input id="ggTemp" type="number" step="0.1" value="30"></label>
             <label>Pressão <input id="ggPressao" type="number" step="1" value="250"></label>
@@ -736,14 +1213,21 @@
         <div class="gg-body">
           <div class="gg-layout">
             <div class="gg-side">
-              <input id="ggNomeAgua" class="gg-nome" value="Temperatura da água" title="Clique para mudar o nome">
+              <select id="ggNomeAgua" class="gg-nome gg-select-eixo" title="Coluna do teste (eixo esquerdo)">
+                <option value="temp_ambiente">temp ambiente</option>
+              </select>
               <label>Máximo <input id="ggAguaMax" type="number" value="40"></label>
               <label>Mínimo <input id="ggAguaMin" type="number" value="16"></label>
               <label>Intervalo <input id="ggAguaTick" type="number" value="2"></label>
             </div>
             <div class="gg-chart-wrap">
               <div class="gg-chart-toolbar">
-                <input id="ggTituloGrafico" class="gg-nome" placeholder="Título do gráfico — clique para editar" title="Título que aparece no gráfico" style="flex:1;min-width:180px;">
+                <input id="ggTituloGrafico" class="gg-nome gg-titulo-edit" placeholder="Título do gráfico — clique para editar" title="Título centralizado no gráfico">
+              </div>
+              <div class="gg-chart-box">
+                <canvas id="ggChartAlta"></canvas>
+              </div>
+              <div class="gg-chart-actions">
                 <button type="button" id="ggBtnCopiar" class="content-button" style="background:#1d4ed8;color:#fff;">
                   <i class="fa-regular fa-copy"></i> Copiar gráfico
                 </button>
@@ -751,10 +1235,8 @@
                   <i class="fa-solid fa-image"></i> Exportar gráfico
                 </button>
               </div>
-              <div class="gg-chart-box">
-                <canvas id="ggChartAlta"></canvas>
-              </div>
-              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho entre dois pontos para deixar <b>curvo</b> ou <b>reto</b>.</p>
+              <div id="ggOverlayInfo" class="gg-overlay-info"></div>
+              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta.</p>
             </div>
             <div class="gg-side">
               <input id="ggNomeParametros" class="gg-nome" value="Parâmetros" title="Clique para mudar o nome">
@@ -764,11 +1246,68 @@
               <div id="ggGrupos" class="gg-grupos-scroll"></div>
             </div>
           </div>
-          <input id="ggNomePressao" class="gg-nome" value="Parâmetros de pressão" title="Clique para mudar o nome" style="max-width:420px;margin:18px 0 8px;">
+          <select id="ggNomePressao" class="gg-nome gg-select-eixo" title="Coluna do teste (eixo de baixo)" style="max-width:420px;margin:18px 0 8px;">
+            <option value="pressao_alta">pressao alta</option>
+          </select>
           <div class="gg-pressao-row">
             <label>Mínimo <input id="ggPaMin" type="number" value="180"></label>
             <label>Máximo <input id="ggPaMax" type="number" value="300"></label>
             <label>Intervalo <input id="ggPaTick" type="number" value="10"></label>
+          </div>
+        </div>
+      </div>
+      <div id="ggModalTestes" class="gg-gerador-modal">
+        <div class="gg-modal-box">
+          <div class="gg-modal-head">
+            <h3 style="margin:0;">Testes registrados</h3>
+            <button type="button" class="content-button gg-fechar-modal" style="background:#334155;color:#fff;">Fechar</button>
+          </div>
+          <p class="gg-dica" style="margin-top:0;">Digite a OP ou escolha o modelo, clique no teste e escolha os campos de cada eixo.</p>
+          <div class="gg-form-grid">
+            <label>OP
+              <input id="ggTesteOp" type="text" placeholder="Ex.: 12345">
+            </label>
+            <label>Modelo
+              <select id="ggTesteModelo"><option value="">— escolher modelo —</option></select>
+            </label>
+          </div>
+          <button type="button" id="ggBtnBuscarOp" class="content-button" style="margin-top:12px;background:#0369a1;color:#fff;">Buscar OP</button>
+          <div id="ggTesteLista" style="margin-top:14px;"></div>
+        </div>
+      </div>
+      <div id="ggModalMapa" class="gg-gerador-modal">
+        <div class="gg-modal-box">
+          <div class="gg-modal-head">
+            <h3 style="margin:0;">Como plotar no gráfico</h3>
+            <button type="button" class="content-button gg-fechar-modal" style="background:#334155;color:#fff;">Fechar</button>
+          </div>
+          <div class="gg-mapa-grid">
+            <div>
+              <div style="font-weight:700;margin-bottom:8px;">Eixo da esquerda</div>
+              <label>Campo (temp. ambiente em diante)
+                <select id="ggMapaColY"></select>
+              </label>
+            </div>
+            <div>
+              <div id="ggMapaResumo" style="font-size:13px;color:#cbd5e1;margin-bottom:10px;"></div>
+              <p class="gg-dica">A linha azul do gerador fica. Os pontos laranja são o teste real.</p>
+            </div>
+            <div>
+              <div style="font-weight:700;margin-bottom:8px;">Eixos da direita (grupos)</div>
+              <div id="ggMapaGrupos" class="gg-form-grid" style="grid-template-columns:1fr;"></div>
+            </div>
+          </div>
+          <div class="gg-pressao-row" style="margin-top:16px;">
+            <label>Campo da parte de baixo (pressão)
+              <select id="ggMapaColX"></select>
+            </label>
+            <label>Quantidade de pontos (igual ao gerador)
+              <input id="ggMapaQtd" type="number" min="1" step="1" value="12">
+            </label>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;">
+            <button type="button" id="ggBtnVoltarTestes" class="content-button" style="background:#334155;color:#fff;">Voltar à lista</button>
+            <button type="button" id="ggBtnAplicarTeste" class="content-button" style="background:linear-gradient(135deg,#22c55e 0%,#16a34a 100%);color:#fff;">Mostrar no gráfico</button>
           </div>
         </div>
       </div>`;
@@ -788,7 +1327,13 @@
       a.setAttribute('data-nav-selector', '#menu-engenharia-gerador-graficos');
       a.innerHTML = '<i class="fa-solid fa-chart-line" style="margin-right:8px;"></i> Gerados de graficos';
       const pir = $('menu-engenharia-pir-eng');
-      (pir || menuDesenho).insertAdjacentElement('afterend', a);
+      const projetos = $('menu-engenharia-projetos');
+      (projetos || pir || menuDesenho).insertAdjacentElement('afterend', a);
+    }
+    const desenhoVis = menuDesenho || $('menu-engenharia-desenho-tecnico');
+    const geradorLink = $('menu-engenharia-gerador-graficos');
+    if (desenhoVis && geradorLink) {
+      geradorLink.classList.toggle('perm-hidden', desenhoVis.classList.contains('perm-hidden'));
     }
 
     let pane = $('engenhariaGeradorGraficosPane');
@@ -827,6 +1372,41 @@
       const wrap = $('ggFormWrap');
       if (!wrap) return;
       wrap.style.display = wrap.style.display === 'none' ? 'block' : 'none';
+      if (wrap.style.display === 'block') recarregarSalvos();
+    });
+    $('ggSalvosSelect')?.addEventListener('change', () => {
+      const id = $('ggSalvosSelect')?.value;
+      if (!id) return;
+      aplicarSalvo(id).catch((err) => alert(err.message || 'Não carregou o gráfico salvo.'));
+    });
+    $('ggBtnTestes')?.addEventListener('click', () => {
+      abrirTestesRegistrados().catch((err) => alert(err.message || 'Não abriu os testes.'));
+    });
+    $('ggBtnBuscarOp')?.addEventListener('click', () => {
+      const q = String($('ggTesteOp')?.value || '').trim();
+      if (!q) { alert('Digite a OP.'); return; }
+      buscarTestes('op', q);
+    });
+    $('ggTesteOp')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        $('ggBtnBuscarOp')?.click();
+      }
+    });
+    $('ggTesteModelo')?.addEventListener('change', () => {
+      const q = String($('ggTesteModelo')?.value || '').trim();
+      if (q) buscarTestes('modelo', q);
+    });
+    $('ggBtnVoltarTestes')?.addEventListener('click', () => {
+      fecharModais();
+      abrirModal('ggModalTestes');
+    });
+    $('ggBtnAplicarTeste')?.addEventListener('click', aplicarTesteNoGrafico);
+    document.querySelectorAll('.gg-gerador-modal .gg-fechar-modal').forEach((btn) => {
+      btn.addEventListener('click', fecharModais);
+    });
+    document.querySelectorAll('.gg-gerador-modal').forEach((el) => {
+      el.addEventListener('click', (e) => { if (e.target === el) fecharModais(); });
     });
     $('ggBtnEnviar')?.addEventListener('click', () => {
       grupos = lerGruposDoDom();
@@ -838,11 +1418,12 @@
         valor: num('ggValor', 12.4),
       });
       saveRegs(regs);
-      $('ggFormWrap').style.display = 'none';
       desenhar();
     });
     $('ggBtnLimpar')?.addEventListener('click', () => {
       if (!confirm('Apagar todos os pontos marcados?')) return;
+      overlayTeste = null;
+      atualizarOverlayInfo();
       saveRegs([]);
       desenhar();
     });
@@ -864,6 +1445,8 @@
       await carregarPrefs();
     }
     atualizarRotulos();
+    recarregarSalvos();
+    await carregarColunasTeste();
     setTimeout(desenhar, 40);
   }
 

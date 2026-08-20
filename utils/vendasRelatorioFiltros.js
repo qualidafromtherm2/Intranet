@@ -214,8 +214,11 @@ function parseFiltrosRelatorio(query = {}) {
     trimestre: String(query.trimestre || '').trim(),
     vendedor: String(query.vendedor || '').trim(),
     familia: parseListaFiltro(query.familia),
+    familia_nome: String(query.familia_nome || '').trim(),
     estado: String(query.estado || '').trim().toUpperCase(),
     tipo: String(query.tipo || '').trim(),
+    cliente: String(query.cliente || '').trim(),
+    etapa_pedido: String(query.etapa_pedido || '').trim(),
   };
 }
 
@@ -243,6 +246,32 @@ function appendFiltrosSql(filtros, params) {
     );
   }
 
+  if (filtros.cliente) {
+    params.push(filtros.cliente);
+    const idx = params.length;
+    clausesPedido.push(
+      `AND COALESCE(
+        NULLIF(TRIM(f.nome_fantasia), ''),
+        NULLIF(TRIM(f.razao_social), ''),
+        NULLIF(TRIM(nf.payload_ultimo->'nfDestInt'->>'cRazao'), ''),
+        '(sem cliente)'
+      ) = $${idx}`
+    );
+  }
+
+  if (filtros.etapa_pedido) {
+    params.push(filtros.etapa_pedido);
+    const idx = params.length;
+    clausesPedido.push(
+      `AND (
+        CASE
+          WHEN p.codigo_pedido IS NULL THEN '70'
+          ELSE TRIM(COALESCE(p.etapa::text, ''))
+        END
+      ) = $${idx}`
+    );
+  }
+
   if (Array.isArray(filtros.familia) ? filtros.familia.length : filtros.familia) {
     const familias = Array.isArray(filtros.familia)
       ? filtros.familia.map((v) => String(v || '').trim()).filter(Boolean)
@@ -260,6 +289,20 @@ function appendFiltrosSql(filtros, params) {
       clausesPedido.push(`AND ${exists}`);
       clausesItem.push(`AND TRIM(COALESCE(po.codigo_familia::text, '')) = ANY($${idx}::text[])`);
     }
+  }
+
+  if (filtros.familia_nome) {
+    params.push(filtros.familia_nome);
+    const idx = params.length;
+    const existsNome = `EXISTS (
+      SELECT 1
+        FROM vendas.pedidos_venda_itens ix
+        JOIN produto.produtos_omie pox ON TRIM(pox.codigo) = TRIM(ix.codigo)
+       WHERE ix.codigo_pedido = p.codigo_pedido
+         AND COALESCE(NULLIF(TRIM(pox.descricao_familia), ''), '(sem família)') = $${idx}
+    )`;
+    clausesPedido.push(`AND ${existsNome}`);
+    clausesItem.push(`AND COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $${idx}`);
   }
 
   if (filtros.tipo) {

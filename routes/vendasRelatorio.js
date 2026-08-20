@@ -1254,8 +1254,11 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         trimestre: filtros.trimestre || null,
         vendedor: filtros.vendedor || null,
         familia: (Array.isArray(filtros.familia) && filtros.familia.length) ? filtros.familia : null,
+        familia_nome: filtros.familia_nome || null,
         estado: filtros.estado || null,
         tipo: filtros.tipo || null,
+        cliente: filtros.cliente || null,
+        etapa_pedido: filtros.etapa_pedido || null,
       },
       cfop_config: {
         total: cfgCfop.total || 0,

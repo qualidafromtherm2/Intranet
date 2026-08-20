@@ -11072,7 +11072,7 @@ app.get('/api/produtos/search', async (req, res) => {
     const whereSql = tokens
       .map((_, i) => {
         const p = i + 1;
-        return `(codigo ILIKE $${p} OR unaccent(COALESCE(descricao, '')) ILIKE unaccent($${p}))`;
+        return `(p.codigo ILIKE $${p} OR unaccent(COALESCE(p.descricao, '')) ILIKE unaccent($${p}))`;
       })
       .join(' AND ');
     const likeParams = tokens.map((t) => `%${t}%`);
@@ -11082,15 +11082,24 @@ app.get('/api/produtos/search', async (req, res) => {
     const { rows } = await pool.query(
       `
       SELECT
-        codigo,
-        descricao,
-        descricao_familia,
-        codigo_produto
-      FROM produto.produtos_omie
+        p.codigo,
+        p.descricao,
+        p.descricao_familia,
+        p.codigo_produto,
+        (
+          SELECT TRIM(img.url_imagem)
+            FROM produto.produtos_omie_imagens img
+           WHERE COALESCE(img.ativo, TRUE) = TRUE
+             AND TRIM(COALESCE(img.url_imagem, '')) <> ''
+             AND img.codigo_produto::text IN (p.codigo_produto::text, TRIM(p.codigo))
+           ORDER BY img.pos NULLS LAST, img.id DESC
+           LIMIT 1
+        ) AS url_imagem
+      FROM produto.produtos_omie p
       WHERE ${whereSql}
       ORDER BY
-        (CASE WHEN codigo ILIKE $${prefixIdx} THEN 0 ELSE 1 END),
-        codigo
+        (CASE WHEN p.codigo ILIKE $${prefixIdx} THEN 0 ELSE 1 END),
+        p.codigo
       LIMIT $${limitIdx}
       `,
       [...likeParams, `${q}%`, limit]

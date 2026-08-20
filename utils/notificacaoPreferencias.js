@@ -41,6 +41,12 @@ const TIPOS_NOTIFICACAO = Object.freeze([
     canais: ['whatsapp'],
   },
   {
+    id: 'area_vermelha',
+    rotulo: 'Área vermelha — novo item',
+    grupo: 'Qualidade / PIR',
+    canais: ['whatsapp', 'email'],
+  },
+  {
     id: 'ri_check',
     rotulo: 'RI Check — atualização',
     grupo: 'Qualidade / PIR',

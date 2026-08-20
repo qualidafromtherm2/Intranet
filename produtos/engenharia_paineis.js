@@ -2,7 +2,7 @@
 (function initEngenhariaPaineis() {
   if (!document.querySelector('script[data-gg-gerador]')) {
     const s = document.createElement('script');
-    s.src = '/public/js/engenharia-gerador-graficos.js?v=20260819d';
+    s.src = '/public/js/engenharia-gerador-graficos.js?v=20260819k';
     s.defer = true;
     s.dataset.ggGerador = '1';
     document.head.appendChild(s);

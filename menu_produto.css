@@ -25860,6 +25860,17 @@ html.light-mode #minhasComprasWrapper {
   font-size: 10px;
   color: var(--inactive-color);
 }
+#producaoGembaPane .gemba-card-dias {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: rgba(255,255,255,.07);
+}
+#producaoGembaPane .gemba-card-dias[data-tipo="aberto"] { color: #7dd3fc; }
+#producaoGembaPane .gemba-card-dias[data-tipo="prazo"] { color: #fcd34d; }
+#producaoGembaPane .gemba-card-dias[data-tipo="hoje"] { color: #fdba74; }
+#producaoGembaPane .gemba-card-dias[data-tipo="atraso"] { color: #fca5a5; }
 #producaoGembaPane .gemba-card-status {
   font-size: 10px;
   border-radius: 6px;
@@ -25916,14 +25927,6 @@ html.light-mode #minhasComprasWrapper {
   padding: 8px 12px 12px;
   font-size: 12px;
   color: var(--inactive-color);
-}
-#producaoGembaPane .gemba-card-open {
-  border: 1px solid #334155;
-  background: rgba(14,165,233,.12);
-  color: #7dd3fc;
-  border-radius: 8px;
-  padding: 5px 10px;
-  cursor: pointer;
 }
 #producaoGembaPane .gemba-modal {
   position: fixed;
@@ -26059,6 +26062,47 @@ html.light-mode #minhasComprasWrapper {
   object-fit: contain;
   background: #0f172a;
 }
+#producaoGembaPane .gemba-preview img {
+  cursor: zoom-in;
+}
+#producaoGembaPane .gemba-user-combo {
+  position: relative;
+}
+#producaoGembaPane .gemba-user-combo-list {
+  position: absolute;
+  z-index: 5;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #111827;
+  box-shadow: 0 12px 28px rgba(0,0,0,.35);
+}
+#producaoGembaPane .gemba-user-combo-item {
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: #e5e7eb;
+  padding: 8px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#producaoGembaPane .gemba-user-combo-item:hover {
+  background: rgba(14,165,233,.16);
+}
+#producaoGembaPane .gemba-user-combo-empty {
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #94a3b8;
+}
 #producaoGembaPane .gemba-historico {
   border-top: 1px solid rgba(255,255,255,.08);
   padding-top: 10px;
@@ -26104,8 +26148,12 @@ html.light-mode #producaoGembaPane .gemba-modal-card {
 html.light-mode #producaoGembaPane .gemba-field input,
 html.light-mode #producaoGembaPane .gemba-field textarea,
 html.light-mode #producaoGembaPane .gemba-field select,
-html.light-mode #gembaBusca {
+html.light-mode #gembaBusca,
+html.light-mode #producaoGembaPane .gemba-user-combo-list {
   background: #fff;
+  color: #0f172a;
+}
+html.light-mode #producaoGembaPane .gemba-user-combo-item {
   color: #0f172a;
 }
 html.light-mode #producaoGembaPane .gemba-guia {

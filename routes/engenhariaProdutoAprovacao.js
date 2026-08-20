@@ -1,7 +1,12 @@
 'use strict';
 
 const express = require('express');
+const multer = require('multer');
+const { v4: uuidv4 } = require('uuid');
+const mime = require('mime-types');
 const { dbQuery } = require('../src/db');
+const { uploadPublicFile } = require('../utils/storage');
+const { dispararAlertaAreaVermelha } = require('../utils/alertaAreaVermelhaEmail');
 
 const STATUS_OK = new Set(['aprovado', 'reprovado', 'projeto']);
 const STATUS_LABEL = {
@@ -27,6 +32,111 @@ async function ensureProdutoAprovacaoTable() {
     CREATE INDEX IF NOT EXISTS idx_produto_aprovacao_codigo_produto_em
       ON engenharia.produto_aprovacao (codigo_produto, definido_em DESC)
   `);
+}
+
+async function ensureNiqAreaVermelhaTable() {
+  await dbQuery(`CREATE SCHEMA IF NOT EXISTS qualidade`);
+  await dbQuery(`
+    CREATE TABLE IF NOT EXISTS qualidade.niq_area_vermelha (
+      id SERIAL PRIMARY KEY,
+      codigo TEXT NOT NULL,
+      codigo_produto TEXT,
+      descricao TEXT,
+      quantidade NUMERIC(18,4),
+      descricao_falha TEXT NOT NULL,
+      numero_op TEXT,
+      op_producao_id BIGINT,
+      produto_grupo TEXT,
+      foto_url TEXT,
+      video_url TEXT,
+      anexos JSONB NOT NULL DEFAULT '[]'::jsonb,
+      registrado_por TEXT NOT NULL,
+      registrado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_niq_av_registrado_em
+      ON qualidade.niq_area_vermelha (registrado_em DESC)
+  `);
+  await dbQuery(`
+    CREATE INDEX IF NOT EXISTS idx_niq_av_codigo
+      ON qualidade.niq_area_vermelha (codigo)
+  `);
+}
+
+function extArquivo(file) {
+  const byMime = mime.extension(file?.mimetype);
+  const byName = String(file?.originalname || '').split('.').pop();
+  return String(byMime || byName || 'bin').replace(/[^a-zA-Z0-9]/g, '');
+}
+
+function coletarArquivosUpload(req) {
+  const files = req.files || {};
+  const lista = [];
+  for (const key of ['foto', 'video', 'arquivos']) {
+    const arr = Array.isArray(files[key]) ? files[key] : [];
+    lista.push(...arr);
+  }
+  return lista.filter((f) => f?.buffer?.length);
+}
+
+function tipoMidia(file) {
+  const mimeType = String(file?.mimetype || '').toLowerCase();
+  if (mimeType.startsWith('image/')) return 'foto';
+  if (mimeType.startsWith('video/')) return 'video';
+  const nome = String(file?.originalname || '').toLowerCase();
+  if (/\.(jpe?g|png|gif|webp|bmp)$/.test(nome)) return 'foto';
+  if (/\.(mp4|webm|mov|avi|mkv)$/.test(nome)) return 'video';
+  return 'arquivo';
+}
+
+async function uploadNiqArquivos(niqId, files) {
+  const anexos = [];
+  let fotoUrl = null;
+  let videoUrl = null;
+  for (const file of files) {
+    const tipo = tipoMidia(file);
+    const nome = `${uuidv4()}.${extArquivo(file)}`;
+    const pathKey = `AreaVermelhaNIQ/${niqId}/${tipo}/${nome}`;
+    const { url } = await uploadPublicFile('produtos', pathKey, file.buffer, {
+      contentType: file.mimetype || 'application/octet-stream',
+      upsert: false,
+    });
+    anexos.push({
+      url,
+      tipo,
+      nome: String(file.originalname || nome).trim() || nome,
+    });
+    if (tipo === 'foto' && !fotoUrl) fotoUrl = url;
+    if (tipo === 'video' && !videoUrl) videoUrl = url;
+  }
+  return { anexos, fotoUrl, videoUrl };
+}
+
+function mapearLinhaNiq(row) {
+  const qtd = row.quantidade != null && row.quantidade !== '' ? String(row.quantidade) : '';
+  const falha = String(row.descricao_falha || '').trim();
+  return {
+    id: row.id,
+    codigo_produto: row.codigo,
+    codigo: row.codigo,
+    status: 'reprovado',
+    status_label: 'NIQ',
+    definido_por: row.registrado_por,
+    definido_em: row.registrado_em,
+    etq_recebimento_id: null,
+    descricao: row.descricao || '',
+    numero_nfe: row.numero_op ? `OP ${row.numero_op}` : '',
+    lote: falha,
+    qtd_recebimento: row.quantidade,
+    ids_armazem: qtd ? `NIQ · Qtd ${qtd}` : 'NIQ',
+    origem: 'niq',
+    numero_op: row.numero_op || '',
+    descricao_falha: falha,
+    quantidade: row.quantidade,
+    foto_url: row.foto_url,
+    video_url: row.video_url,
+  };
 }
 
 function usuarioSessao(req) {
@@ -95,14 +205,45 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
           LIMIT 400`,
         [status, localAlvo, like]
       );
+      const pirItens = (result.rows || []).map((row) => ({
+        ...row,
+        status_label: STATUS_LABEL[row.status] || row.status,
+        origem: 'pir',
+      }));
+
+      let niqItens = [];
+      if (status === 'reprovado') {
+        await ensureNiqAreaVermelhaTable();
+        const niqResult = await dbQuery(
+          `SELECT n.id, n.codigo, n.codigo_produto, n.descricao, n.quantidade, n.descricao_falha,
+                  n.numero_op, n.op_producao_id, n.foto_url, n.video_url,
+                  n.registrado_por, n.registrado_em
+             FROM qualidade.niq_area_vermelha n
+            WHERE ($1::text IS NULL
+               OR n.codigo ILIKE $1
+               OR COALESCE(n.codigo_produto, '') ILIKE $1
+               OR COALESCE(n.descricao, '') ILIKE $1
+               OR COALESCE(n.numero_op, '') ILIKE $1
+               OR COALESCE(n.descricao_falha, '') ILIKE $1
+               OR COALESCE(n.registrado_por, '') ILIKE $1)
+            ORDER BY n.registrado_em DESC
+            LIMIT 400`,
+          [like]
+        );
+        niqItens = (niqResult.rows || []).map(mapearLinhaNiq);
+      }
+
+      const itens = [...niqItens, ...pirItens].sort((a, b) => {
+        const ta = new Date(a.definido_em || 0).getTime();
+        const tb = new Date(b.definido_em || 0).getTime();
+        return tb - ta;
+      });
+
       return res.json({
         ok: true,
         status,
         status_label: STATUS_LABEL[status] || status,
-        itens: (result.rows || []).map((row) => ({
-          ...row,
-          status_label: STATUS_LABEL[row.status] || row.status
-        }))
+        itens
       });
     } catch (err) {
       console.error('[engenharia/produto-aprovacao LIST]', err);
@@ -165,6 +306,28 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
         [codigoProduto || codigo, codigo || null, status, definidoPor, etqId]
       );
       const row = result.rows[0];
+      if (status === 'reprovado') {
+        let descricao = '';
+        try {
+          const prod = await dbQuery(
+            `SELECT descricao
+               FROM produto.produtos_omie
+              WHERE TRIM(codigo) = TRIM($1)
+                 OR TRIM(codigo_produto::text) = TRIM($1)
+              ORDER BY codigo_produto DESC
+              LIMIT 1`,
+            [row.codigo_produto || row.codigo]
+          );
+          descricao = prod.rows[0]?.descricao || '';
+        } catch (_) {}
+        dispararAlertaAreaVermelha({
+          origem: 'pir',
+          codigo_produto: row.codigo_produto || row.codigo,
+          codigo: row.codigo,
+          descricao,
+          definido_por: row.definido_por,
+        });
+      }
       return res.json({
         ok: true,
         aprovacao: {
@@ -175,6 +338,103 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
     } catch (err) {
       console.error('[engenharia/produto-aprovacao POST]', err);
       return res.status(500).json({ error: err.message || 'Falha ao gravar aprovação.' });
+    }
+  });
+
+  const uploadNiq = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 80 * 1024 * 1024 },
+  });
+
+  router.post('/niq-area-vermelha', uploadNiq.fields([
+    { name: 'foto', maxCount: 5 },
+    { name: 'video', maxCount: 5 },
+    { name: 'arquivos', maxCount: 10 },
+  ]), async (req, res) => {
+    try {
+      await ensureNiqAreaVermelhaTable();
+      const codigo = String(req.body?.codigo || req.body?.codigo_produto || '').trim();
+      if (!codigo) {
+        return res.status(400).json({ ok: false, error: 'Informe o código do produto.' });
+      }
+      const descricaoFalha = String(req.body?.descricao_falha || '').trim();
+      if (!descricaoFalha) {
+        return res.status(400).json({ ok: false, error: 'Informe a descrição da falha.' });
+      }
+      const qtdRaw = String(req.body?.quantidade ?? '').trim().replace(',', '.');
+      const quantidade = qtdRaw === '' ? null : Number(qtdRaw);
+      if (quantidade == null || !Number.isFinite(quantidade) || quantidade <= 0) {
+        return res.status(400).json({ ok: false, error: 'Informe a quantidade.' });
+      }
+
+      let descricao = String(req.body?.descricao || '').trim();
+      let codigoProduto = String(req.body?.codigo_produto || '').trim();
+      const prod = await dbQuery(
+        `SELECT codigo, codigo_produto::text AS codigo_produto, descricao
+           FROM produto.produtos_omie
+          WHERE TRIM(codigo) = TRIM($1)
+             OR TRIM(codigo_produto::text) = TRIM($1)
+          ORDER BY codigo_produto DESC
+          LIMIT 1`,
+        [codigo]
+      );
+      if (!prod.rows[0]) {
+        return res.status(400).json({ ok: false, error: 'Produto não encontrado. Pesquise e escolha na lista.' });
+      }
+      descricao = descricao || prod.rows[0].descricao || '';
+      codigoProduto = codigoProduto || prod.rows[0].codigo_produto || '';
+
+      const numeroOp = String(req.body?.numero_op || '').trim();
+      const opProducaoId = Number(req.body?.op_producao_id || 0) || null;
+      const produtoGrupo = String(req.body?.produto_grupo || '').trim();
+      const registradoPor = usuarioSessao(req);
+
+      const ins = await dbQuery(
+        `INSERT INTO qualidade.niq_area_vermelha
+           (codigo, codigo_produto, descricao, quantidade, descricao_falha,
+            numero_op, op_producao_id, produto_grupo, registrado_por)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         RETURNING id, codigo, codigo_produto, descricao, quantidade, descricao_falha,
+                   numero_op, op_producao_id, foto_url, video_url, registrado_por, registrado_em`,
+        [prod.rows[0]?.codigo || codigo, codigoProduto || null, descricao || null, quantidade,
+         descricaoFalha, numeroOp || null, opProducaoId, produtoGrupo || null, registradoPor]
+      );
+      const row = ins.rows[0];
+
+      const files = coletarArquivosUpload(req);
+      if (files.length) {
+        try {
+          const { anexos, fotoUrl, videoUrl } = await uploadNiqArquivos(row.id, files);
+          const upd = await dbQuery(
+            `UPDATE qualidade.niq_area_vermelha
+                SET foto_url = $2, video_url = $3, anexos = $4::jsonb
+              WHERE id = $1
+              RETURNING id, codigo, codigo_produto, descricao, quantidade, descricao_falha,
+                        numero_op, op_producao_id, foto_url, video_url, registrado_por, registrado_em`,
+            [row.id, fotoUrl, videoUrl, JSON.stringify(anexos)]
+          );
+          if (upd.rows[0]) Object.assign(row, upd.rows[0]);
+        } catch (upErr) {
+          console.warn('[engenharia/niq-area-vermelha] upload de mídia falhou:', upErr?.message || upErr);
+        }
+      }
+
+      dispararAlertaAreaVermelha({
+        origem: 'niq',
+        codigo_produto: row.codigo,
+        codigo: row.codigo,
+        descricao: row.descricao,
+        quantidade: row.quantidade,
+        numero_op: row.numero_op,
+        descricao_falha: row.descricao_falha,
+        definido_por: row.registrado_por,
+        registrado_por: row.registrado_por,
+      });
+
+      return res.json({ ok: true, niq: mapearLinhaNiq(row) });
+    } catch (err) {
+      console.error('[engenharia/niq-area-vermelha POST]', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Falha ao registrar NIQ.' });
     }
   });
 

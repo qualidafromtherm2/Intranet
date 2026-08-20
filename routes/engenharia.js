@@ -1009,6 +1009,9 @@ module.exports = (pool) => {
   const desenhoTecnicoRouter = require('./engenhariaDesenhoTecnico')(pool);
   router.use('/desenho-tecnico', desenhoTecnicoRouter);
 
+  const geradorGraficosRouter = require('./engenhariaGeradorGraficos')(pool);
+  router.use('/gerador-graficos', geradorGraficosRouter);
+
   const produtoAprovacaoRouter = require('./engenhariaProdutoAprovacao')();
   router.use(produtoAprovacaoRouter);
 

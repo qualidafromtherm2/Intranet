@@ -38,6 +38,44 @@
     });
   }
 
+  function inicioDoDia(v) {
+    if (!v) return null;
+    if (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}/.test(v)) {
+      const [y, m, d] = v.slice(0, 10).split('-').map(Number);
+      return new Date(y, m - 1, d);
+    }
+    const d = v instanceof Date ? new Date(v.getTime()) : new Date(v);
+    if (Number.isNaN(d.getTime())) return null;
+    d.setHours(0, 0, 0, 0);
+    return d;
+  }
+
+  function rotuloDiasCard(row) {
+    const status = row?.status || 'aberta';
+    if (status === 'resolvida' || status === 'cancelada') return null;
+    const hoje = inicioDoDia(new Date());
+    if (!hoje) return null;
+    const resp = String(row?.responsavel_acao || '').trim();
+    const prazo = inicioDoDia(row?.prazo);
+    if (resp && prazo) {
+      const dias = Math.round((prazo.getTime() - hoje.getTime()) / 86400000);
+      if (dias > 1) return { texto: `${dias} dias para vencer o prazo`, tipo: 'prazo' };
+      if (dias === 1) return { texto: '1 dia para vencer o prazo', tipo: 'prazo' };
+      if (dias === 0) return { texto: 'vence hoje', tipo: 'hoje' };
+      const atraso = Math.abs(dias);
+      return {
+        texto: atraso === 1 ? '1 dia fora do prazo' : `${atraso} dias fora do prazo`,
+        tipo: 'atraso',
+      };
+    }
+    const criado = inicioDoDia(row?.criado_em);
+    if (!criado) return null;
+    const dias = Math.max(0, Math.round((hoje.getTime() - criado.getTime()) / 86400000));
+    if (dias === 0) return { texto: 'aberto hoje', tipo: 'aberto' };
+    if (dias === 1) return { texto: '1 dia aberto', tipo: 'aberto' };
+    return { texto: `${dias} dias aberto`, tipo: 'aberto' };
+  }
+
   function revogarPreviews() {
     if (_fotoObjUrl) URL.revokeObjectURL(_fotoObjUrl);
     if (_videoObjUrl) URL.revokeObjectURL(_videoObjUrl);
@@ -98,6 +136,10 @@
     box.innerHTML = rows.map((row) => {
       const status = row.status || 'aberta';
       const desc = String(row.descricao || '').trim();
+      const dias = rotuloDiasCard(row);
+      const diasHtml = dias
+        ? `<span class="gemba-card-dias" data-tipo="${esc(dias.tipo)}">${esc(dias.texto)}</span>`
+        : '';
       const foto = row.foto_url
         ? `<img class="gemba-card-thumb" src="${esc(row.foto_url)}" alt="">`
         : '<div class="gemba-card-thumb is-empty"><i class="fa-solid fa-image"></i></div>';
@@ -110,6 +152,7 @@
           <div class="gemba-card-head">
             <span class="gemba-card-id">#${esc(row.id)}</span>
             <span class="gemba-card-date">${esc(formatarData(row.criado_em))}</span>
+            ${diasHtml}
             <span class="gemba-card-status" data-status="${esc(status)}">${esc(STATUS_LABEL[status] || status)}</span>
             ${videoBadge}
           </div>
@@ -122,7 +165,6 @@
           </div>
           <div class="gemba-card-foot">
             <span><i class="fa-solid fa-user"></i> ${esc(row.criado_por || '—')}</span>
-            <button type="button" class="gemba-card-open" data-id="${esc(row.id)}">Abrir</button>
           </div>
         </article>`;
     }).join('');
@@ -154,17 +196,17 @@
     const depoisBox = $('gembaFotoDepoisPreview');
     if (fotoBox) {
       fotoBox.innerHTML = row?.foto_url
-        ? `<img src="${esc(row.foto_url)}" alt="Foto do registro">`
+        ? `<img src="${esc(row.foto_url)}" alt="Foto do registro" title="Abrir em nova guia">`
         : 'Nenhuma foto selecionada';
     }
     if (videoBox) {
       videoBox.innerHTML = row?.video_url
-        ? `<video src="${esc(row.video_url)}" controls></video>`
+        ? `<video src="${esc(row.video_url)}" controls title="Abrir em nova guia"></video>`
         : 'Nenhum vídeo selecionado';
     }
     if (depoisBox) {
       depoisBox.innerHTML = row?.foto_depois_url
-        ? `<img src="${esc(row.foto_depois_url)}" alt="Foto do depois">`
+        ? `<img src="${esc(row.foto_depois_url)}" alt="Foto do depois" title="Abrir em nova guia">`
         : 'Nenhuma foto selecionada';
     }
   }
@@ -214,26 +256,39 @@
     return _usuariosAtivos;
   }
 
-  function garantirSelectResponsavel() {
-    const el = $('gembaFormResponsavel');
-    if (!el) return null;
-    if (el.tagName === 'SELECT') return el;
-    const sel = document.createElement('select');
-    sel.id = 'gembaFormResponsavel';
-    el.replaceWith(sel);
-    return sel;
+  function filtrarUsuarios(termo) {
+    const q = String(termo || '').trim().toLowerCase();
+    const lista = Array.isArray(_usuariosAtivos) ? _usuariosAtivos : [];
+    if (!q) return lista.slice(0, 40);
+    return lista.filter((u) => String(u).toLowerCase().includes(q)).slice(0, 40);
+  }
+
+  function renderListaResponsavel(termo) {
+    const box = $('gembaFormResponsavelLista');
+    if (!box) return;
+    const users = filtrarUsuarios(termo);
+    if (!users.length) {
+      box.hidden = false;
+      box.innerHTML = '<li class="gemba-user-combo-empty">Nenhum usuário encontrado</li>';
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML = users.map((u) =>
+      `<li><button type="button" class="gemba-user-combo-item" data-user="${esc(u)}">${esc(u)}</button></li>`
+    ).join('');
+  }
+
+  function fecharListaResponsavel() {
+    const box = $('gembaFormResponsavelLista');
+    if (box) box.hidden = true;
   }
 
   async function preencherSelectResponsavel(valorAtual) {
-    const sel = garantirSelectResponsavel();
-    if (!sel) return;
-    const users = await carregarUsuariosAtivos();
-    const atual = String(valorAtual || '').trim();
-    const lista = users.slice();
-    if (atual && !lista.includes(atual)) lista.unshift(atual);
-    sel.innerHTML = '<option value="">Selecione o responsável...</option>'
-      + lista.map((u) => `<option value="${esc(u)}">${esc(u)}</option>`).join('');
-    sel.value = atual;
+    const input = $('gembaFormResponsavel');
+    if (!input) return;
+    await carregarUsuariosAtivos();
+    input.value = String(valorAtual || '').trim();
+    fecharListaResponsavel();
   }
 
   async function preencherFormulario(row, historico) {
@@ -348,8 +403,66 @@
       mostrarGuia(btn.dataset.gembaTab);
     });
 
+    $('gembaCardsContainer')?.addEventListener('click', (e) => {
+      const card = e.target.closest('.gemba-card');
+      if (!card) return;
+      const id = Number(card.dataset.id);
+      if (!id) return;
+      const row = _lista.find((r) => Number(r.id) === id);
+      abrirModal(row || { id });
+    });
+
+    const abrirMidiaNovaGuia = (el) => {
+      const src = el?.currentSrc || el?.src;
+      if (!src) return;
+      window.open(src, '_blank', 'noopener,noreferrer');
+    };
+
     $('gembaFormModal')?.addEventListener('click', (e) => {
-      if (e.target === $('gembaFormModal')) fecharModal();
+      if (e.target === $('gembaFormModal')) {
+        fecharModal();
+        return;
+      }
+      const midia = e.target.closest('.gemba-preview img');
+      if (!midia) return;
+      e.preventDefault();
+      e.stopPropagation();
+      abrirMidiaNovaGuia(midia);
+    });
+
+    const inputResp = $('gembaFormResponsavel');
+    inputResp?.addEventListener('focus', async () => {
+      await carregarUsuariosAtivos();
+      renderListaResponsavel(inputResp.value);
+    });
+    inputResp?.addEventListener('input', async () => {
+      await carregarUsuariosAtivos();
+      renderListaResponsavel(inputResp.value);
+    });
+    inputResp?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        fecharListaResponsavel();
+        return;
+      }
+      if (e.key === 'Enter') {
+        const primeiro = $('gembaFormResponsavelLista')?.querySelector('.gemba-user-combo-item');
+        if (primeiro && !$('gembaFormResponsavelLista')?.hidden) {
+          e.preventDefault();
+          inputResp.value = primeiro.getAttribute('data-user') || '';
+          fecharListaResponsavel();
+        }
+      }
+    });
+    $('gembaFormResponsavelLista')?.addEventListener('mousedown', (e) => {
+      const btn = e.target.closest('.gemba-user-combo-item');
+      if (!btn) return;
+      e.preventDefault();
+      if (inputResp) inputResp.value = btn.getAttribute('data-user') || '';
+      fecharListaResponsavel();
+    });
+    document.addEventListener('click', (e) => {
+      if (e.target.closest('.gemba-user-combo')) return;
+      fecharListaResponsavel();
     });
 
     $('gembaBusca')?.addEventListener('input', () => {
@@ -367,15 +480,6 @@
       carregar();
     });
 
-    $('gembaCardsContainer')?.addEventListener('click', (e) => {
-      const card = e.target.closest('.gemba-card, .gemba-card-open');
-      if (!card) return;
-      const id = Number(card.dataset.id || e.target.closest('.gemba-card')?.dataset.id);
-      if (!id) return;
-      const row = _lista.find((r) => Number(r.id) === id);
-      abrirModal(row || { id });
-    });
-
     $('gembaFormFoto')?.addEventListener('change', () => {
       const file = $('gembaFormFoto').files?.[0];
       const box = $('gembaFotoPreview');
@@ -386,7 +490,7 @@
         return;
       }
       _fotoObjUrl = URL.createObjectURL(file);
-      box.innerHTML = `<img src="${_fotoObjUrl}" alt="Prévia da foto">`;
+      box.innerHTML = `<img src="${_fotoObjUrl}" alt="Prévia da foto" title="Abrir em nova guia">`;
     });
 
     $('gembaFormVideo')?.addEventListener('change', () => {
@@ -412,7 +516,7 @@
         return;
       }
       _fotoDepoisObjUrl = URL.createObjectURL(file);
-      box.innerHTML = `<img src="${_fotoDepoisObjUrl}" alt="Prévia da foto do depois">`;
+      box.innerHTML = `<img src="${_fotoDepoisObjUrl}" alt="Prévia da foto do depois" title="Abrir em nova guia">`;
     });
   }
 

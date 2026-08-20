@@ -14,6 +14,10 @@
   const _chartsRendered = new Set();
   let _dataB = null;
   let _comparacao = null; // { mes1, ano1, mes2, ano2, label1, label2 }
+  let _carregarGeracao = 0;
+  let _drillSnapshot = null;
+  const _drillExtra = { cliente: '', etapa_pedido: '', familia_nome: '' };
+  const HTML_APLICAR = '<i class="fa-solid fa-filter"></i> Aplicar filtro';
 
   const CORES = ['#1e3a5f', '#38bdf8', '#10b981', '#f59e0b', '#8b5cf6', '#ef4444', '#06b6d4', '#ec4899'];
   const COR_MES1 = '#38bdf8';
@@ -479,6 +483,252 @@
     });
   }
 
+  function _codigoFamiliaPorLabel(label) {
+    const n = String(label || '').trim().toLowerCase();
+    if (!n) return '';
+    const hit = (_familiasOpcoes || []).find((f) => String(f.descricao || '').trim().toLowerCase() === n);
+    return hit ? String(hit.codigo) : '';
+  }
+
+  function _setSelectValor(id, valor, label) {
+    const el = document.getElementById(id);
+    if (!el) return false;
+    const v = String(valor ?? '');
+    if (v && ![...el.options].some((o) => o.value === v)) {
+      el.appendChild(new Option(label || v, v, true, true));
+    }
+    el.value = v;
+    return true;
+  }
+
+  function _drillChips() {
+    const chips = [];
+    const snap = _drillSnapshot || {};
+    const est = document.getElementById('vendRelGerEstado')?.value || '';
+    if (est && est !== (snap.estado || '')) chips.push({ t: 'Estado', v: est });
+    const vendEl = document.getElementById('vendRelGerVendedor');
+    const vend = vendEl?.value || '';
+    if (vend && vend !== (snap.vendedor || '')) {
+      const nome = vendEl.options[vendEl.selectedIndex]?.text || vend;
+      chips.push({ t: 'Vendedor', v: nome });
+    }
+    const famNow = [..._familiasSelecionadas].sort().join(',');
+    const famSnap = [...(snap.familias || [])].sort().join(',');
+    if (famNow && famNow !== famSnap) {
+      const labels = (_familiasOpcoes || [])
+        .filter((f) => _familiasSelecionadas.has(String(f.codigo)))
+        .map((f) => f.descricao || f.codigo);
+      chips.push({ t: labels.length > 1 ? 'Famílias' : 'Família', v: labels.join(', ') || `${_familiasSelecionadas.size} família(s)` });
+    }
+    if (_drillExtra.cliente) chips.push({ t: 'Cliente', v: _drillExtra.cliente });
+    if (_drillExtra.etapa_pedido) {
+      const et = (_data?.por_etapa || []).find((r) => String(r.etapa) === String(_drillExtra.etapa_pedido));
+      chips.push({ t: 'Etapa', v: et?.etapa_descricao || _drillExtra.etapa_pedido });
+    }
+    if (_drillExtra.familia_nome) chips.push({ t: 'Família', v: _drillExtra.familia_nome });
+    const modo = (typeof _modoAtual === 'function') ? _modoAtual() : 'mes_ano';
+    const mes = document.getElementById('vendRelGerMes')?.value || '';
+    const ano = document.getElementById('vendRelGerAno')?.value || '';
+    if (snap.modo && (modo !== snap.modo || mes !== (snap.mes || '') || ano !== (snap.ano || ''))) {
+      const nomeMes = MESES_NOME[Number(mes) - 1] || mes;
+      chips.push({ t: 'Período', v: `${nomeMes}/${ano}` });
+    }
+    return chips;
+  }
+
+  function _atualizarBarraDrill() {
+    const bar = document.getElementById('vendRelGerDrillBar');
+    const btn = document.getElementById('vendRelGerResetDrillBtn');
+    const chips = _drillChips();
+    const ativo = chips.length > 0;
+    if (btn) btn.style.display = ativo ? 'flex' : 'none';
+    if (!ativo) {
+      _drillSnapshot = null;
+      if (bar) {
+        bar.style.display = 'none';
+        bar.innerHTML = '';
+      }
+      return;
+    }
+    if (!bar) return;
+    bar.style.display = 'flex';
+    bar.innerHTML = `
+      <span class="vend-rel-drill-label"><i class="fa-solid fa-filter"></i> Filtro do gráfico:</span>
+      ${chips.map((c) => `<span class="vend-rel-drill-chip"><strong>${_esc(c.t)}:</strong> ${_esc(c.v)}</span>`).join('')}
+      <button type="button" id="vendRelGerResetDrillBarBtn" class="vend-rel-drill-reset">
+        <i class="fa-solid fa-rotate-left"></i> Resetar filtro
+      </button>`;
+    document.getElementById('vendRelGerResetDrillBarBtn')?.addEventListener('click', _resetarFiltroGrafico);
+  }
+
+  function _garantirSnapshotDrill() {
+    if (_drillSnapshot) return;
+    _drillSnapshot = {
+      estado: document.getElementById('vendRelGerEstado')?.value || '',
+      vendedor: document.getElementById('vendRelGerVendedor')?.value || '',
+      tipo: document.getElementById('vendRelGerTipo')?.value || '',
+      familias: [..._familiasSelecionadas],
+      modo: _modoAtual(),
+      mes: document.getElementById('vendRelGerMes')?.value || '',
+      ano: document.getElementById('vendRelGerAno')?.value || '',
+      trimestre: document.getElementById('vendRelGerTrimestre')?.value || '',
+      data_inicio: document.getElementById('vendRelGerDataInicio')?.value || '',
+      data_fim: document.getElementById('vendRelGerDataFim')?.value || '',
+    };
+  }
+
+  function _toggleDimSelect(id, valor, label) {
+    const el = document.getElementById(id);
+    const v = String(valor ?? '');
+    if (el && el.value === v) {
+      _setSelectValor(id, '', '');
+      return;
+    }
+    _setSelectValor(id, v, label);
+  }
+
+  function _aplicarFiltroGrafico(patch) {
+    if (!patch || typeof patch !== 'object') return;
+    _garantirSnapshotDrill();
+    if (patch.estado != null && patch.estado !== '') {
+      _toggleDimSelect('vendRelGerEstado', String(patch.estado).trim().toUpperCase(), patch.estado);
+    }
+    if (patch.vendedor != null && String(patch.vendedor).trim() !== '') {
+      let v = String(patch.vendedor).trim();
+      if (v && !/^\d+$/.test(v)) {
+        const found = [...(_data?.por_vendedor || []), ...(_dataB?.por_vendedor || [])]
+          .find((r) => String(r.vendedor || '').trim() === v);
+        if (found?.codigo_vendedor) v = String(found.codigo_vendedor);
+      }
+      _toggleDimSelect('vendRelGerVendedor', v, patch.vendedorLabel || patch.vendedor);
+    }
+    if (patch.familia != null && String(patch.familia).trim() !== '') {
+      const nome = String(patch.familia).trim();
+      const cod = _codigoFamiliaPorLabel(nome);
+      if (cod) {
+        _drillExtra.familia_nome = '';
+        if (!_familiasSelecionadas.size) {
+          _familiasSelecionadas.add(cod);
+        } else if (_familiasSelecionadas.has(cod)) {
+          _familiasSelecionadas.delete(cod);
+        } else {
+          _familiasSelecionadas.add(cod);
+        }
+        _atualizarLabelFamilia();
+        _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
+      } else {
+        _drillExtra.familia_nome = (_drillExtra.familia_nome === nome) ? '' : nome;
+      }
+    }
+    if (patch.cliente != null && String(patch.cliente).trim() !== '') {
+      const v = String(patch.cliente).trim();
+      _drillExtra.cliente = (_drillExtra.cliente === v) ? '' : v;
+    }
+    if (patch.etapa_pedido != null && String(patch.etapa_pedido).trim() !== '') {
+      const v = String(patch.etapa_pedido).trim();
+      _drillExtra.etapa_pedido = (_drillExtra.etapa_pedido === v) ? '' : v;
+    }
+    if (patch.mes_key) {
+      const m = String(patch.mes_key).match(/^(\d{4})-(\d{2})$/);
+      if (m) {
+        _setModoFiltro('mes_ano');
+        _setSelectValor('vendRelGerAno', m[1], m[1]);
+        _setSelectValor('vendRelGerMes', String(Number(m[2])), MESES_NOME[Number(m[2]) - 1] || m[2]);
+      }
+    }
+    _atualizarBarraDrill();
+    _carregar();
+  }
+
+  function _resetarFiltroGrafico() {
+    const snap = _drillSnapshot;
+    _drillExtra.cliente = '';
+    _drillExtra.etapa_pedido = '';
+    _drillExtra.familia_nome = '';
+    if (snap) {
+      if (snap.modo) _setModoFiltro(snap.modo);
+      _setSelectValor('vendRelGerEstado', snap.estado || '', snap.estado || '');
+      _setSelectValor('vendRelGerVendedor', snap.vendedor || '', snap.vendedor || '');
+      _setSelectValor('vendRelGerTipo', snap.tipo || '', snap.tipo || '');
+      if (snap.mes) _setSelectValor('vendRelGerMes', snap.mes, snap.mes);
+      if (snap.ano) _setSelectValor('vendRelGerAno', snap.ano, snap.ano);
+      if (snap.trimestre) _setSelectValor('vendRelGerTrimestre', snap.trimestre, snap.trimestre);
+      const di = document.getElementById('vendRelGerDataInicio');
+      const df = document.getElementById('vendRelGerDataFim');
+      if (di && snap.data_inicio != null) di.value = snap.data_inicio;
+      if (df && snap.data_fim != null) df.value = snap.data_fim;
+      _familiasSelecionadas = new Set(snap.familias || []);
+      _atualizarLabelFamilia();
+      _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
+    }
+    _drillSnapshot = null;
+    _atualizarBarraDrill();
+    _carregar();
+  }
+
+  function _comClique(opts, dim, keys) {
+    if (!dim) return opts;
+    return {
+      ...opts,
+      onHover: (evt, els) => {
+        if (evt?.native?.target) evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+      },
+      onClick: (_evt, els, chart) => {
+        if (!els.length) return;
+        const el = els[0];
+        const labels = chart?.data?.labels || [];
+        const valor = (keys && keys[el.index] != null) ? keys[el.index] : labels[el.index];
+        if (valor == null || String(valor).trim() === '') return;
+        const patch = {};
+        if (dim === 'vendedor') {
+          patch.vendedor = valor;
+          patch.vendedorLabel = labels[el.index];
+        } else if (dim === 'etapa_pedido') {
+          patch.etapa_pedido = valor;
+        } else if (dim === 'mes_key') {
+          patch.mes_key = valor;
+        } else {
+          patch[dim] = valor;
+        }
+        _aplicarFiltroGrafico(patch);
+      },
+    };
+  }
+
+  function _optsStacked(tipo) {
+    const yTicks = tipo === 'itens' ? { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } : { stacked: true, beginAtZero: true };
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      onHover: (evt, els) => {
+        if (evt?.native?.target) evt.native.target.style.cursor = els.length ? 'pointer' : 'default';
+      },
+      onClick: (_evt, els, chart) => {
+        if (!els.length) return;
+        const el = els[0];
+        if (tipo === 'pareto') {
+          _aplicarFiltroGrafico({
+            familia: chart.data.labels[el.index],
+            estado: chart.data.datasets[el.datasetIndex]?.label,
+          });
+          return;
+        }
+        _aplicarFiltroGrafico({ familia: chart.data.datasets[el.datasetIndex]?.label });
+      },
+      plugins: {
+        legend: {
+          position: 'bottom',
+          labels: { font: { size: 10 } },
+          onClick: (_e, item) => {
+            if (tipo === 'pareto') _aplicarFiltroGrafico({ estado: item.text });
+            else _aplicarFiltroGrafico({ familia: item.text });
+          },
+        },
+      },
+      scales: { x: { stacked: true }, y: yTicks },
+    };
+  }
+
   function _chartOptsBarH() {
     return { indexAxis: 'y', responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
       scales: { x: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: '#e2e8f0' } }, y: { ticks: { color: '#334155', font: { size: 11 } }, grid: { display: false } } } };
@@ -489,20 +739,23 @@
       scales: { x: { ticks: { color: '#334155' }, grid: { display: false } }, y: { beginAtZero: true, ticks: { color: '#64748b' }, grid: { color: '#e2e8f0' } } } };
   }
 
-  function _renderBar(canvasId, key, labels, values, cor) {
+  function _renderBar(canvasId, key, labels, values, cor, dim, keys) {
     const canvas = document.getElementById(canvasId);
     if (!canvas || typeof Chart === 'undefined') return;
+    canvas.title = 'Clique para filtrar o relatório com este valor';
     _destroyChart(key);
+    const base = labels.length > 6 ? _chartOptsBarH() : _chartOptsBarV();
     _charts[key] = new Chart(canvas.getContext('2d'), {
       type: 'bar',
       data: { labels, datasets: [{ data: values, backgroundColor: `${cor || CORES[0]}cc`, borderColor: cor || CORES[0], borderWidth: 1, borderRadius: 4 }] },
-      options: labels.length > 6 ? _chartOptsBarH() : _chartOptsBarV(),
+      options: _comClique(base, dim, keys),
     });
   }
 
-  function _renderBarCmp(canvasId, key, labels, valuesA, valuesB) {
+  function _renderBarCmp(canvasId, key, labels, valuesA, valuesB, dim, keys) {
     const canvas = document.getElementById(canvasId);
     if (!canvas || typeof Chart === 'undefined') return;
+    canvas.title = 'Clique para filtrar o relatório com este valor';
     _destroyChart(key);
     const l1 = _comparacao?.label1 || 'Mês 1';
     const l2 = _comparacao?.label2 || 'Mês 2';
@@ -516,21 +769,38 @@
           { label: l2, data: valuesB, backgroundColor: `${COR_MES2}cc`, borderColor: COR_MES2, borderWidth: 1, borderRadius: 4 },
         ],
       },
-      options: {
+      options: _comClique({
         ...base,
         plugins: { ...base.plugins, legend: { display: true, position: 'bottom', labels: { font: { size: 10 } } } },
-      },
+      }, dim, keys),
     });
   }
 
-  function _renderDonut(canvasId, key, labels, values) {
+  function _renderDonut(canvasId, key, labels, values, dim, keys) {
     const canvas = document.getElementById(canvasId);
     if (!canvas || typeof Chart === 'undefined') return;
+    canvas.title = 'Clique para filtrar o relatório com este valor';
     _destroyChart(key);
+    const dimFiltro = dim || 'estado';
+    const keysFiltro = keys || labels;
     _charts[key] = new Chart(canvas.getContext('2d'), {
       type: 'doughnut',
       data: { labels, datasets: [{ data: values, backgroundColor: labels.map((_, i) => CORES[i % CORES.length]), borderColor: '#fff', borderWidth: 2 }] },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'right', labels: { font: { size: 10 } } } } },
+      options: _comClique({
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+          legend: {
+            position: 'right',
+            labels: { font: { size: 10 } },
+            onClick: (_e, item) => {
+              const valor = (keysFiltro && keysFiltro[item.index] != null) ? keysFiltro[item.index] : labels[item.index];
+              if (valor == null || String(valor).trim() === '') return;
+              _aplicarFiltroGrafico({ [dimFiltro]: valor });
+            },
+          },
+        },
+      }, dimFiltro, keysFiltro),
     });
   }
 
@@ -580,12 +850,12 @@
     if (sec === 'executivo') {
       if (dataB) {
         const et = _topMerge(etapas, dataB.por_etapa || [], 'etapa_descricao', 'total', 12);
-        _renderBarCmp('vendRelGerChartEtapa', 'etapa', et.map((r) => r.key), et.map((r) => r.a.total || 0), et.map((r) => r.b.total || 0));
+        _renderBarCmp('vendRelGerChartEtapa', 'etapa', et.map((r) => r.key), et.map((r) => r.a.total || 0), et.map((r) => r.b.total || 0), 'etapa_pedido', et.map((r) => r.a.etapa || r.b.etapa || r.key));
         const es = _topMerge(data.por_estado || [], dataB.por_estado || [], 'estado', 'valor_total', 8);
-        _renderBarCmp('vendRelGerChartValorEstado', 'valorEstado', es.map((r) => r.key), es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartValorEstado', 'valorEstado', es.map((r) => r.key), es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0), 'estado');
       } else {
-        _renderBar('vendRelGerChartEtapa', 'etapa', etapas.map(r => r.etapa_descricao), etapas.map(r => r.total), '#38bdf8');
-        _renderBar('vendRelGerChartValorEstado', 'valorEstado', est.slice(0, 8).map(r => r.estado), est.slice(0, 8).map(r => r.valor_total), '#1e3a5f');
+        _renderBar('vendRelGerChartEtapa', 'etapa', etapas.map(r => r.etapa_descricao), etapas.map(r => r.total), '#38bdf8', 'etapa_pedido', etapas.map(r => r.etapa));
+        _renderBar('vendRelGerChartValorEstado', 'valorEstado', est.slice(0, 8).map(r => r.estado), est.slice(0, 8).map(r => r.valor_total), '#1e3a5f', 'estado');
       }
     }
     if (sec === 'geografico') {
@@ -593,38 +863,46 @@
       if (dataB) {
         const es = _topMerge(data.por_estado || [], dataB.por_estado || [], 'estado', 'valor_total', 12);
         const labs = es.map((r) => r.key);
-        _renderBarCmp('vendRelGerChartEstado', 'estado', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
-        _renderBarCmp('vendRelGerChartEstadoDonut', 'estadoDonut', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartEstado', 'estado', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0), 'estado');
+        _renderBarCmp('vendRelGerChartEstadoDonut', 'estadoDonut', labs, es.map((r) => r.a.valor_total || 0), es.map((r) => r.b.valor_total || 0), 'estado');
         if (donutTitulo) donutTitulo.textContent = 'Comparativo por Estado';
       } else {
-        _renderBar('vendRelGerChartEstado', 'estado', est.map(r => r.estado), est.map(r => r.valor_total), '#1e3a5f');
-        _renderDonut('vendRelGerChartEstadoDonut', 'estadoDonut', est.map(r => r.estado), est.map(r => r.valor_total));
+        _renderBar('vendRelGerChartEstado', 'estado', est.map(r => r.estado), est.map(r => r.valor_total), '#1e3a5f', 'estado');
+        _renderDonut('vendRelGerChartEstadoDonut', 'estadoDonut', est.map(r => r.estado), est.map(r => r.valor_total), 'estado');
         if (donutTitulo) donutTitulo.textContent = 'Participação por Estado (%)';
       }
     }
     if (sec === 'familias') {
       if (dataB) {
         const rows = _topMerge(data.por_familia || [], dataB.por_familia || [], 'familia', 'valor_total', 10);
-        _renderBarCmp('vendRelGerChartFamilia', 'familia', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartFamilia', 'familia', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0), 'familia');
       } else {
-        _renderBar('vendRelGerChartFamilia', 'familia', fam.map(r => r.familia), fam.map(r => r.valor_total), '#10b981');
+        _renderBar('vendRelGerChartFamilia', 'familia', fam.map(r => r.familia), fam.map(r => r.valor_total), '#10b981', 'familia');
       }
     }
     if (sec === 'clientes') {
       if (dataB) {
         const rows = _topMerge(data.por_cliente || [], dataB.por_cliente || [], 'cliente', 'valor_total', 10);
-        _renderBarCmp('vendRelGerChartCliente', 'cliente', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+        _renderBarCmp('vendRelGerChartCliente', 'cliente', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0), 'cliente');
       } else {
-        _renderBar('vendRelGerChartCliente', 'cliente', cli.map(r => r.cliente), cli.map(r => r.valor_total), '#f59e0b');
+        _renderBar('vendRelGerChartCliente', 'cliente', cli.map(r => r.cliente), cli.map(r => r.valor_total), '#f59e0b', 'cliente');
       }
     }
     if (sec === 'vendedores') {
       if (dataB) {
-        const rows = _topMerge(data.por_vendedor || [], dataB.por_vendedor || [], 'vendedor', 'valor_total', 12);
-        _renderBarCmp('vendRelGerChartVendedor', 'vendedor', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+        const rows = _topMerge(data.por_vendedor || [], dataB.por_vendedor || [], 'codigo_vendedor', 'valor_total', 12);
+        _renderBarCmp(
+          'vendRelGerChartVendedor',
+          'vendedor',
+          rows.map((r) => r.a.vendedor || r.b.vendedor || r.key),
+          rows.map((r) => r.a.valor_total || 0),
+          rows.map((r) => r.b.valor_total || 0),
+          'vendedor',
+          rows.map((r) => r.key)
+        );
       } else {
         const vend = (data.por_vendedor || []).slice(0, 12);
-        _renderBar('vendRelGerChartVendedor', 'vendedor', vend.map(r => r.vendedor), vend.map(r => r.valor_total), '#6366f1');
+        _renderBar('vendRelGerChartVendedor', 'vendedor', vend.map(r => r.vendedor), vend.map(r => r.valor_total), '#6366f1', 'vendedor', vend.map(r => r.codigo_vendedor));
       }
     }
     if (sec === 'evolucao') {
@@ -634,35 +912,34 @@
       const rowsA = multi ? (data.evolucao_mensal || []) : (data.evolucao_semanal || []);
       if (dataB) {
         const rowsB = multi ? (dataB.evolucao_mensal || []) : (dataB.evolucao_semanal || []);
-        const chave = multi ? 'label' : 'semana';
+        const chave = multi ? 'mes' : 'semana';
         const merged = _mergePorChave(rowsA, rowsB, chave);
         merged.sort((x, y) => String(x.key).localeCompare(String(y.key), 'pt-BR', { numeric: true }));
-        const labels = merged.map((r) => r.key);
-        _renderBarCmp('vendRelGerChartEvol', 'evol', labels, merged.map((r) => r.a.valor_total || 0), merged.map((r) => r.b.valor_total || 0));
-        _renderBarCmp('vendRelGerChartEvolPedidos', 'evolPed', labels, merged.map((r) => r.a.total_pedidos || 0), merged.map((r) => r.b.total_pedidos || 0));
+        const labels = merged.map((r) => r.a.label || r.b.label || r.key);
+        const keys = multi ? merged.map((r) => r.key) : null;
+        _renderBarCmp('vendRelGerChartEvol', 'evol', labels, merged.map((r) => r.a.valor_total || 0), merged.map((r) => r.b.valor_total || 0), multi ? 'mes_key' : null, keys);
+        _renderBarCmp('vendRelGerChartEvolPedidos', 'evolPed', labels, merged.map((r) => r.a.total_pedidos || 0), merged.map((r) => r.b.total_pedidos || 0), multi ? 'mes_key' : null, keys);
       } else {
         const labels = multi ? rowsA.map(r => r.label) : rowsA.map(r => r.semana);
-        _renderBar('vendRelGerChartEvol', 'evol', labels, rowsA.map(r => r.valor_total), '#38bdf8');
-        _renderBar('vendRelGerChartEvolPedidos', 'evolPed', labels, rowsA.map(r => r.total_pedidos), '#8b5cf6');
+        const keys = multi ? rowsA.map(r => r.mes) : null;
+        _renderBar('vendRelGerChartEvol', 'evol', labels, rowsA.map(r => r.valor_total), '#38bdf8', multi ? 'mes_key' : null, keys);
+        _renderBar('vendRelGerChartEvolPedidos', 'evolPed', labels, rowsA.map(r => r.total_pedidos), '#8b5cf6', multi ? 'mes_key' : null, keys);
       }
     }
     if (sec === 'pareto') {
       const canvas = document.getElementById('vendRelGerChartPareto');
       if (canvas && typeof Chart !== 'undefined') {
+        canvas.title = 'Clique para filtrar o relatório com este valor';
         _destroyChart('pareto');
         if (dataB) {
           const rows = _topMerge(data.pareto || [], dataB.pareto || [], 'familia', 'valor_total', 10);
-          _renderBarCmp('vendRelGerChartPareto', 'pareto', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0));
+          _renderBarCmp('vendRelGerChartPareto', 'pareto', rows.map((r) => r.key), rows.map((r) => r.a.valor_total || 0), rows.map((r) => r.b.valor_total || 0), 'familia');
         } else {
           const stacked = _dadosParetoStacked(data);
           _charts.pareto = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: { labels: stacked.labels, datasets: stacked.datasets },
-            options: {
-              responsive: true, maintainAspectRatio: false,
-              plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
-              scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } },
-            },
+            options: _optsStacked('pareto'),
           });
         }
       }
@@ -670,6 +947,7 @@
     if (sec === 'itens') {
       const rows = data.analise_itens?.por_mes_familia || [];
       const canvas = document.getElementById('vendRelGerChartItens');
+      if (canvas) canvas.title = 'Clique para filtrar o relatório com este valor';
       const info = document.getElementById('vendRelGerItensInfo');
       const resumo = document.getElementById('vendRelGerItensResumo');
       const tituloItens = document.getElementById('vendRelGerItensChartTitle');
@@ -677,7 +955,7 @@
         const famA = data.por_familia || [];
         const famB = dataB.por_familia || [];
         const merged = _topMerge(famA, famB, 'familia', 'quantidade', 10);
-        _renderBarCmp('vendRelGerChartItens', 'itens', merged.map((r) => r.key), merged.map((r) => r.a.quantidade || 0), merged.map((r) => r.b.quantidade || 0));
+        _renderBarCmp('vendRelGerChartItens', 'itens', merged.map((r) => r.key), merged.map((r) => r.a.quantidade || 0), merged.map((r) => r.b.quantidade || 0), 'familia');
         if (tituloItens) tituloItens.textContent = 'Quantidade de itens por família';
         const q1 = Number(data.kpis?.quantidade_itens) || 0;
         const q2 = Number(dataB.kpis?.quantidade_itens) || 0;
@@ -690,11 +968,7 @@
           _charts.itens = new Chart(canvas.getContext('2d'), {
             type: 'bar',
             data: { labels: stacked.labels, datasets: stacked.datasets },
-            options: {
-              responsive: true, maintainAspectRatio: false,
-              plugins: { legend: { position: 'bottom', labels: { font: { size: 10 } } } },
-              scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true, ticks: { stepSize: 1 } } },
-            },
+            options: _optsStacked('itens'),
           });
         }
         if (tituloItens) tituloItens.textContent = 'Itens por mês de NF e família';
@@ -923,19 +1197,20 @@
   }
 
   async function _carregar() {
+    const geracao = ++_carregarGeracao;
     const statusEl = document.getElementById('vendRelGerStatus');
     const erroEl = document.getElementById('vendRelGerErro');
     const conteudoEl = document.getElementById('vendRelGerConteudo');
     const aplicarBtn = document.getElementById('vendRelGerAplicarBtn');
+    const resetBtn = document.getElementById('vendRelGerResetDrillBtn');
     const jaTemConteudo = !!(conteudoEl && conteudoEl.style.display !== 'none' && _data);
 
     if (_carregarAbort) _carregarAbort.abort();
     _carregarAbort = new AbortController();
 
-    // Mantém o relatório visível enquanto o filtro atualiza; só usa o painel
-    // de loading "cheio" na primeira carga (quando ainda não há conteúdo).
     if (statusEl) {
-      statusEl.style.display = jaTemConteudo ? 'none' : 'block';
+      statusEl.style.display = 'block';
+      statusEl.classList.toggle('is-inline', jaTemConteudo);
       const span = statusEl.querySelector('.at-rel-ger-loading-inner span');
       if (span) span.textContent = jaTemConteudo ? 'Atualizando relatório...' : 'Gerando relatório...';
     }
@@ -944,7 +1219,11 @@
       conteudoEl.style.pointerEvents = 'none';
     }
     if (erroEl) erroEl.style.display = 'none';
-    if (aplicarBtn) aplicarBtn.disabled = true;
+    if (aplicarBtn) {
+      aplicarBtn.disabled = true;
+      aplicarBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Aplicando...';
+    }
+    if (resetBtn) resetBtn.disabled = true;
 
     try {
       const signal = _carregarAbort.signal;
@@ -961,6 +1240,8 @@
         _dataB = null;
       }
 
+      if (geracao !== _carregarGeracao) return;
+
       _destroyAllCharts();
       _data = data;
       _textos = _resolverTextos(data);
@@ -970,8 +1251,12 @@
       _renderTabelas(data);
       _renderTextos();
       _renderChartsSecao(_secao, data);
+      _atualizarBarraDrill();
 
-      if (statusEl) statusEl.style.display = 'none';
+      if (statusEl) {
+        statusEl.style.display = 'none';
+        statusEl.classList.remove('is-inline');
+      }
       if (conteudoEl) {
         conteudoEl.style.display = 'block';
         conteudoEl.style.opacity = '';
@@ -979,17 +1264,24 @@
       }
     } catch (err) {
       if (err?.name === 'AbortError') {
-        // Nova carga em andamento — ela cuida do visual.
         return;
       }
-      if (statusEl) statusEl.style.display = 'none';
+      if (statusEl) {
+        statusEl.style.display = 'none';
+        statusEl.classList.remove('is-inline');
+      }
       if (conteudoEl) {
         conteudoEl.style.opacity = '';
         conteudoEl.style.pointerEvents = '';
       }
       if (erroEl) { erroEl.style.display = 'block'; erroEl.textContent = err.message || 'Erro.'; }
     } finally {
-      if (aplicarBtn) aplicarBtn.disabled = false;
+      if (geracao !== _carregarGeracao) return;
+      if (aplicarBtn) {
+        aplicarBtn.disabled = false;
+        aplicarBtn.innerHTML = HTML_APLICAR;
+      }
+      if (resetBtn) resetBtn.disabled = false;
     }
   }
 
@@ -1124,6 +1416,34 @@
         background: #111827; color: #e5e7eb; font-size: 13px;
       }
       #vendRelGerCmpErro { font-size: 12px; color: #f87171; min-height: 16px; margin-top: 8px; }
+      #vendRelGerAplicarBtn:disabled { cursor: wait; opacity: .9; }
+      #vendRelGerResetDrillBtn:disabled { cursor: wait; opacity: .85; }
+      #vendRelGerStatus.at-rel-ger-loading.is-inline {
+        margin-top: 10px; padding: 10px 16px;
+        background: rgba(14,165,233,.12); border: 1px solid #0ea5e9;
+      }
+      #vendRelGerStatus.at-rel-ger-loading.is-inline .at-rel-ger-loading-inner {
+        flex-direction: row; gap: 10px;
+      }
+      #vendRelGerStatus.at-rel-ger-loading.is-inline .at-rel-ger-loading-inner i { font-size: 18px; color: #38bdf8; }
+      #vendRelGerStatus.at-rel-ger-loading.is-inline .at-rel-ger-loading-inner small { display: none; }
+      .vend-rel-drill-bar {
+        display: none; align-items: center; gap: 8px; flex-wrap: wrap;
+        margin-top: 10px; padding: 8px 12px; border-radius: 10px;
+        border: 1px solid #0ea5e9; background: rgba(14,165,233,.12);
+      }
+      .vend-rel-drill-label { font-size: 12px; font-weight: 700; color: #7dd3fc; display: flex; align-items: center; gap: 6px; }
+      .vend-rel-drill-chip {
+        font-size: 12px; color: #e2e8f0; background: #0f172a; border: 1px solid #334155;
+        border-radius: 999px; padding: 4px 10px;
+      }
+      .vend-rel-drill-chip strong { color: #7dd3fc; margin-right: 4px; }
+      .vend-rel-drill-reset, #vendRelGerResetDrillBtn {
+        padding: 6px 14px; border-radius: 8px; border: 1px solid #f87171;
+        background: rgba(248,113,113,.18); color: #fecaca; cursor: pointer;
+        display: none; align-items: center; gap: 6px; font-size: 13px; font-weight: 700;
+      }
+      .vend-rel-drill-reset { display: inline-flex; }
     `;
     document.head.appendChild(st);
   }
@@ -1272,6 +1592,36 @@
     btn.style.cssText = 'padding:6px 14px;border-radius:8px;border:1px solid #64748b;background:rgba(100,116,139,.15);color:#cbd5e1;cursor:pointer;display:flex;align-items:center;gap:6px;font-size:13px;font-weight:600;';
     btn.innerHTML = '<i class="fa-solid fa-filter"></i> Filtro';
     cfg.parentElement.insertBefore(btn, cfg);
+  }
+
+  function _injetarBotaoResetDrill() {
+    if (document.getElementById('vendRelGerResetDrillBtn')) return;
+    const filtro = document.getElementById('vendRelGerFiltroBtn');
+    const cfg = document.getElementById('vendRelGerConfigBtn');
+    const parent = filtro?.parentElement || cfg?.parentElement;
+    if (!parent) return;
+    const btn = document.createElement('button');
+    btn.id = 'vendRelGerResetDrillBtn';
+    btn.type = 'button';
+    btn.title = 'Limpar os filtros feitos pelo clique nos gráficos';
+    btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Resetar filtro';
+    btn.style.display = 'none';
+    if (filtro && filtro.nextSibling) parent.insertBefore(btn, filtro.nextSibling);
+    else if (cfg) parent.insertBefore(btn, cfg);
+    else parent.appendChild(btn);
+    btn.addEventListener('click', _resetarFiltroGrafico);
+  }
+
+  function _injetarBarraDrill() {
+    if (document.getElementById('vendRelGerDrillBar')) return;
+    const bar = document.getElementById('vendRelGerFiltrosBar');
+    const host = bar?.parentElement;
+    if (!host) return;
+    const drill = document.createElement('div');
+    drill.id = 'vendRelGerDrillBar';
+    drill.className = 'vend-rel-drill-bar';
+    drill.style.display = 'none';
+    host.insertBefore(drill, bar.nextSibling);
   }
 
   function _injetarBotaoComparar() {
@@ -1536,6 +1886,7 @@
     const mesEl = document.getElementById('vendRelGerMes');
     if (mesEl) mesEl.value = String(now.getMonth() + 1);
     _preencherAnos([now.getFullYear()]);
+    _injetarBarraDrill();
   }
 
   function _injetarModalRegistros() {
@@ -2150,7 +2501,11 @@
     });
     if (_familiasSelecionadas.size) {
       qs.set('familia', [..._familiasSelecionadas].join(','));
+    } else if (_drillExtra.familia_nome) {
+      qs.set('familia_nome', _drillExtra.familia_nome);
     }
+    if (_drillExtra.cliente) qs.set('cliente', _drillExtra.cliente);
+    if (_drillExtra.etapa_pedido) qs.set('etapa_pedido', _drillExtra.etapa_pedido);
     return qs;
   }
 
@@ -2586,6 +2941,8 @@
       _init = true;
       _injetarEstilosFiltro();
       _injetarUiFiltro();
+      _injetarBotaoResetDrill();
+      _injetarBarraDrill();
       _injetarBotaoComparar();
       _injetarModalComparar();
       _injetarFamiliaMulti();

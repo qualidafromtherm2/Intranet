@@ -1052,6 +1052,18 @@
       <i class="fa-solid fa-drafting-compass" style="margin-right:8px;"></i>
       Desenho técnico
     </a>
+
+    <a href="#"
+       id="menu-engenharia-gerador-graficos"
+       class="menu-link"
+       data-nav-key="side:engenharia:gerador-graficos"
+       data-nav-parent="side:engenharia"
+       data-nav-pos="side"
+       data-nav-label="Gerados de graficos"
+       data-nav-selector="#menu-engenharia-gerador-graficos">
+      <i class="fa-solid fa-chart-line" style="margin-right:8px;"></i>
+      Gerados de graficos
+    </a>
   </div>
 </div>
 
@@ -1076,12 +1088,6 @@
               </div>
             </div>
             <div id="notifPrefLayout" class="notif-pref-layout">
-              <div class="notif-pref-aviso" role="status">
-                <i class="fa-solid fa-circle-info"></i>
-                E-mail de <strong>nova reunião</strong> e <strong>lembrete do dia</strong> já vêm ligados.
-                O restante começa desligado. Depois você pode mudar o que quiser.
-                É preciso ter telefone e/ou e-mail cadastrados no perfil.
-              </div>
               <div id="notifPrefStatus" class="notif-pref-status" hidden></div>
               <div id="notifPrefLista" class="notif-pref-lista">
                 <div class="notif-pref-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando…</div>
@@ -3659,11 +3665,11 @@
                     <i class="fa-solid fa-ban" style="color:#ef4444;"></i>
                     <span>Área vermelha</span>
                   </h3>
-                  <div class="content-text">Produtos com status Reprovar material. O ID foi enviado ao armazém 7. AREA VERMELHA e não entra em separação.</div>
+                  <div class="content-text">Produtos reprovados no PIR (ID no armazém 7. AREA VERMELHA) e NIQ registrados na linha de produção / preparações. Não entram em separação.</div>
                 </div>
               </div>
               <div style="display:flex;gap:10px;margin:12px 0;flex-wrap:wrap;">
-                <input id="qualidadeAreaVermelhaBusca" type="text" placeholder="Pesquisar código, descrição, NFe ou lote..." autocomplete="off"
+                <input id="qualidadeAreaVermelhaBusca" type="text" placeholder="Pesquisar código, descrição, NFe, lote, OP ou NIQ..." autocomplete="off"
                   style="flex:1;min-width:220px;max-width:420px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-color);" />
                 <button id="qualidadeAreaVermelhaRefreshBtn" class="content-button" type="button" style="background:#334155;color:#fff;">
                   <i class="fa-solid fa-rotate-right"></i> Atualizar
@@ -13538,28 +13544,30 @@
                     <input id="gembaFormComentario" type="text" maxlength="240" placeholder="Ex.: Encaminhado para manutenção" />
                   </label>
                   <div class="gemba-midia-grid">
-                    <label class="gemba-midia-box">
+                    <div class="gemba-midia-box">
                       <span><i class="fa-solid fa-image"></i> Foto do registro</span>
-                      <small class="gemba-midia-hint">Esta é a foto do card. Só a primeira fica visível na lista.</small>
+                      <small class="gemba-midia-hint">Clique na foto para abrir em nova guia. Use Escolher arquivo para trocar.</small>
                       <input id="gembaFormFoto" type="file" accept="image/*" />
                       <div id="gembaFotoPreview" class="gemba-preview">Nenhuma foto selecionada</div>
-                    </label>
-                    <label class="gemba-midia-box">
+                    </div>
+                    <div class="gemba-midia-box">
                       <span><i class="fa-solid fa-video"></i> Vídeo</span>
+                      <small class="gemba-midia-hint">Use Escolher arquivo para adicionar ou trocar o vídeo.</small>
                       <input id="gembaFormVideo" type="file" accept="video/*" />
                       <div id="gembaVideoPreview" class="gemba-preview">Nenhum vídeo selecionado</div>
-                    </label>
+                    </div>
                   </div>
                   <div id="gembaFormHistorico" class="gemba-historico" hidden></div>
                 </div>
 
                 <div data-gemba-panel="acao" hidden>
-                  <label class="gemba-field">
+                  <div class="gemba-field">
                     <span>Responsável pela ação</span>
-                    <select id="gembaFormResponsavel">
-                      <option value="">Selecione o responsável...</option>
-                    </select>
-                  </label>
+                    <div class="gemba-user-combo">
+                      <input id="gembaFormResponsavel" type="search" placeholder="Pesquisar usuário..." autocomplete="off" />
+                      <ul id="gembaFormResponsavelLista" class="gemba-user-combo-list" hidden></ul>
+                    </div>
+                  </div>
                   <label class="gemba-field">
                     <span>Plano de ação</span>
                     <textarea id="gembaFormPlanoAcao" rows="6" placeholder="O que será feito para corrigir e evitar que aconteça de novo..."></textarea>
@@ -13575,12 +13583,12 @@
                     <span>Data de conclusão</span>
                     <input id="gembaFormDataConclusao" type="date" />
                   </label>
-                  <label class="gemba-midia-box">
+                  <div class="gemba-midia-box">
                     <span><i class="fa-solid fa-image"></i> Foto do depois</span>
-                    <small class="gemba-midia-hint">Não aparece no card. Só neste modal.</small>
+                    <small class="gemba-midia-hint">Clique na foto para abrir em nova guia. Não aparece no card.</small>
                     <input id="gembaFormFotoDepois" type="file" accept="image/*" />
                     <div id="gembaFotoDepoisPreview" class="gemba-preview">Nenhuma foto selecionada</div>
-                  </label>
+                  </div>
                 </div>
 
                 <div id="gembaFormErro" class="gemba-form-erro" hidden></div>
@@ -14199,7 +14207,7 @@
   <script src="produtos/alteracao_produto.js?v=20260713b" defer></script>
   <script src="produtos/editar_em_massa.js?v=20260713b" defer></script>
   <script src="produtos/desenho_tecnico.js?v=20260630a" defer></script>
-  <script src="produtos/engenharia_paineis.js?v=20260630a" defer></script>
+  <script src="produtos/engenharia_paineis.js?v=20260819k" defer></script>
   <script type="module" src="produtos/Enviar_estrutura.js" defer></script>
 <style>
   /* ── Modal Etiquetas Pendentes ──────────────────────────────────────────── */
@@ -16918,8 +16926,6 @@ function attachDropZone(ul) {
 <style>
 /* ===== Configurações de notificações (#chatPane reaproveitado) ===== */
 #chatPane .notif-pref-layout{max-width:820px;margin:0 auto;padding:8px 4px 24px;display:flex;flex-direction:column;gap:14px}
-#chatPane .notif-pref-aviso{display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:10px;background:rgba(245,158,11,.12);border:1px solid rgba(245,158,11,.35);color:#fde68a;font-size:13px;line-height:1.45}
-#chatPane .notif-pref-aviso i{margin-top:2px;color:#f59e0b}
 #chatPane .notif-pref-status{padding:10px 12px;border-radius:8px;font-size:13px;font-weight:600}
 #chatPane .notif-pref-status.is-ok{background:rgba(16,185,129,.15);color:#6ee7b7;border:1px solid rgba(16,185,129,.35)}
 #chatPane .notif-pref-status.is-erro{background:rgba(239,68,68,.15);color:#fca5a5;border:1px solid rgba(239,68,68,.35)}
