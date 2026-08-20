@@ -10,6 +10,7 @@ export function usePilotData() {
   const [filtersMeta, setFiltersMeta] = useState<ProductFiltersMeta>({ families: [], typeItems: [], locations: [] })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [warnings, setWarnings] = useState<string[]>([])
   const [filters, setFilters] = useState<FiltersState>(defaultFilters)
   const [page, setPage] = useState(1)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
@@ -21,19 +22,33 @@ export function usePilotData() {
     setError(null)
 
     try {
-      const [productsResponse, purchasesResponse, locationsResponse, cartResponse] = await Promise.all([
-        loadProducts(),
-        loadPurchases(),
-        loadLocations(),
-        loadCart(),
-      ])
+      const productsResponse = await loadProducts()
+      const [purchasesResult, locationsResult, cartResult] = await Promise.allSettled([loadPurchases(), loadLocations(), loadCart()])
+
+      const nextWarnings: string[] = []
+      const purchasesResponse =
+        purchasesResult.status === 'fulfilled'
+          ? purchasesResult.value
+          : (nextWarnings.push('Situação de compra indisponível no momento.'), { ok: false, total: 0, itens: [] })
+
+      const locationsResponse =
+        locationsResult.status === 'fulfilled'
+          ? locationsResult.value
+          : (nextWarnings.push('Locais de inventário indisponíveis no momento.'), { ok: false, locais: [] })
+
+      const cartResponse =
+        cartResult.status === 'fulfilled'
+          ? cartResult.value
+          : (nextWarnings.push('Carrinho indisponível no momento.'), { ok: false, itens: [] })
 
       const merged = mergePilotData(productsResponse, purchasesResponse, locationsResponse)
       setProducts(merged)
       setFiltersMeta(buildFilterMeta(merged, locationsResponse))
       setCartCount(Array.isArray(cartResponse.itens) ? cartResponse.itens.length : 0)
+      setWarnings(nextWarnings)
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : 'Falha ao carregar a Lista de Produtos real.')
+      setWarnings([])
     } finally {
       setLoading(false)
     }
@@ -64,6 +79,7 @@ export function usePilotData() {
     paginated,
     loading,
     error,
+    warnings,
     filters,
     setFilters,
     filtersMeta,

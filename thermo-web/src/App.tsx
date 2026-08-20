@@ -459,7 +459,7 @@ function Pagination({
 }
 
 function App() {
-  const { filtered, paginated, loading, error, filters, setFilters, filtersMeta, page, setPage, pageCount, pageSize, viewMode, setViewMode, cartCount, streamEvents, dataMode, reload } = usePilotData()
+  const { filtered, paginated, loading, error, warnings, filters, setFilters, filtersMeta, page, setPage, pageCount, pageSize, viewMode, setViewMode, cartCount, streamEvents, dataMode, reload } = usePilotData()
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [bridgeState, setBridgeState] = useState<{ key: keyof typeof bridgeCopy; product?: ProductRecord } | null>(null)
 
@@ -496,21 +496,11 @@ function App() {
       <main className="mx-auto max-w-[1540px] px-4 py-5 md:px-6 xl:px-8">
         <section className="rounded-[28px] border border-thermo-border bg-white shadow-sm">
           <div className="border-b border-thermo-border px-4 py-4 md:px-6">
-            <div className="flex flex-wrap items-center gap-2">
-              <button className="inline-flex items-center gap-2 rounded-xl bg-thermo-navy px-4 py-2 text-sm font-semibold text-white" type="button">
-                <Boxes className="size-4" />
-                {pageTitle}
-                <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs">{filtered.length}</span>
-              </button>
-              <button className="inline-flex items-center gap-2 rounded-xl border border-thermo-border px-4 py-2 text-sm font-medium text-slate-500" type="button" onClick={() => openBridge('separation')}>
-                <ClipboardList className="size-4" />
-                Tela de separação
-              </button>
-              <button className="inline-flex items-center gap-2 rounded-xl border border-thermo-border px-4 py-2 text-sm font-medium text-slate-500" type="button" onClick={() => openBridge('separation')}>
-                <Grid2X2 className="size-4" />
-                Kanban solicitações
-              </button>
-            </div>
+            <button className="inline-flex items-center gap-2 rounded-xl bg-thermo-navy px-4 py-2 text-sm font-semibold text-white" type="button">
+              <Boxes className="size-4" />
+              {pageTitle}
+              <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs">{filtered.length}</span>
+            </button>
           </div>
 
           <div className="border-b border-thermo-border px-4 py-4 md:px-6">
@@ -581,6 +571,16 @@ function App() {
                 {dataMode === 'proxy' ? 'Dados reais via proxy do legado' : 'Demo explícita'} · SSE: {latestEvent}
               </div>
             </div>
+
+            {!loading && !error && warnings.length > 0 ? (
+              <div className="mb-4 flex flex-wrap gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+                {warnings.map((warning) => (
+                  <span key={warning} className="rounded-full border border-amber-200 bg-white/70 px-3 py-1 font-medium">
+                    {warning}
+                  </span>
+                ))}
+              </div>
+            ) : null}
 
             {loading ? <LoadingState /> : null}
             {!loading && error ? <ErrorState error={error} onRetry={() => void reload()} /> : null}
