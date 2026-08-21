@@ -21949,7 +21949,8 @@ function pickLocalFromPayload(body) {
   );
 }
 
-const OMIE_REQUEST_DELAY_MS = 350; // 3 req/s (aprox)
+const { OMIE_MIN_INTERVAL_MS } = require('./utils/omieRateLimit');
+const OMIE_REQUEST_DELAY_MS = OMIE_MIN_INTERVAL_MS; // máx. 4 req/s
 let _notasEntradaOmieTablesReady = false;
 let _vendasNotasOmieTablesReady = false;
 

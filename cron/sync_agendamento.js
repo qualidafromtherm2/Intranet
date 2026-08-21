@@ -37,8 +37,9 @@ if (!DATABASE_URL || !OMIE_APP_KEY || !OMIE_APP_SECRET) {
   process.exit(1);
 }
 
-// Delay entre chamadas Omie (~350ms ≈ ~2,8 req/s — limite seguro abaixo de 3 req/s)
-const DELAY_MS = 350;
+// Delay entre chamadas Omie — máx. 4 req/s (250 ms)
+const { OMIE_MIN_INTERVAL_MS } = require('../utils/omieRateLimit');
+const DELAY_MS = OMIE_MIN_INTERVAL_MS;
 // Janela de tolerância: executa se proxima_execucao for até 10 min atrás
 const TOLERANCIA_MS = 10 * 60 * 1000;
 // Janela de dias para syncs incrementais (busca apenas registros dos últimos N dias)
@@ -1040,8 +1041,6 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 25 } = {}) {
       const data = await omiePost('produtos/pedido', 'ConsultarPedido', {
         codigo_pedido: codigo,
       });
-      // Pace extra além do DELAY_MS do omiePost — evita bloqueio Omie
-      await sleep(800);
       const ped = Array.isArray(data?.pedido_venda_produto)
         ? data.pedido_venda_produto
         : (data?.pedido_venda_produto ? [data.pedido_venda_produto] : []);

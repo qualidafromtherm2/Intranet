@@ -57,10 +57,11 @@ function pickRemoteUrl() {
 }
 
 function parseArgs(argv) {
-  const out = { limite: 60, delayMs: 2000, desde: '2025-09-01', waitUnlock: true };
+  // Default: 4 req/s (250 ms) — regra do projeto
+  const out = { limite: 60, delayMs: 250, desde: '2025-09-01', waitUnlock: true };
   for (const a of argv) {
     if (a.startsWith('--limite=')) out.limite = Math.max(1, Number(a.slice(9)) || 60);
-    else if (a.startsWith('--delay-ms=')) out.delayMs = Math.max(800, Number(a.slice(11)) || 2000);
+    else if (a.startsWith('--delay-ms=')) out.delayMs = Math.max(250, Number(a.slice(11)) || 250);
     else if (a.startsWith('--desde=')) out.desde = String(a.slice(8) || '2025-09-01');
     else if (a === '--no-wait') out.waitUnlock = false;
   }
@@ -78,6 +79,8 @@ function loadOmieKeys() {
 }
 
 async function omieConsultarPedido(codigo, key, secret) {
+  const { omieThrottle } = require('../utils/omieRateLimit');
+  await omieThrottle();
   const res = await fetch('https://app.omie.com.br/api/v1/produtos/pedido/', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -211,7 +214,8 @@ async function main() {
       const codigo = ids[i];
       try {
         const data = await omieConsultarPedido(codigo, key, secret);
-        await sleep(opts.delayMs);
+        // Espaço extra opcional (--delay-ms); omieThrottle já garante 4 req/s
+        if (opts.delayMs > 250) await sleep(opts.delayMs - 250);
         const ped = Array.isArray(data.pedido_venda_produto)
           ? data.pedido_venda_produto
           : (data.pedido_venda_produto ? [data.pedido_venda_produto] : []);
@@ -232,6 +236,7 @@ async function main() {
           console.log('');
           log(`BLOQUEIO Omie no pedido ${codigo}: ${msg.slice(0, 140)}`);
           log(`parei com ok=${ok} skip=${skip} err=${err}. Rode de novo depois.`);
+          process.exitCode = 2;
           break;
         }
         if (/não cadastrado|nao cadastrado/i.test(msg)) {

@@ -3,6 +3,8 @@
 // utils/omieCall.js
 // Chama endpoints JSON da OMIE e SEMPRE preserva faultstring/faultcode no erro.
 
+const { omieThrottle } = require('./omieRateLimit');
+
 async function omieCall(url, body, options = {}) {
   const bodyMasked = (() => {
     const p = JSON.parse(JSON.stringify(body || {}));
@@ -23,6 +25,7 @@ async function omieCall(url, body, options = {}) {
   const maxTentativas = retryRedundant ? 2 : 1;
 
   for (let tentativa = 1; tentativa <= maxTentativas; tentativa += 1) {
+    await omieThrottle(); // máx. 4 req/s (global)
     const t0 = Date.now();
     const res = await fetch(url, {
       method: 'POST',
