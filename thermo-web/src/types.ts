@@ -33,6 +33,21 @@ export interface ProductListItem {
   primeira_imagem: string | null
 }
 
+export interface ProductWarehouseBalance {
+  local_codigo: string | null
+  local_nome: string | null
+  saldo: number | null
+  unidade: string | null
+  updated_at?: string | null
+  bloqueado_separacao?: boolean
+}
+
+export interface ProductStockBatchResponse {
+  ok: boolean
+  dados: Record<string, ProductWarehouseBalance[]>
+  minimos: Record<string, { min: number; saldoAlmox: number; abaixo: boolean }>
+}
+
 export interface ProductListResponse {
   total: number
   page: number
@@ -238,6 +253,7 @@ export interface ProductRecord extends ProductListItem {
   tipoCodigo: string | null
   imageUrl: string | null
   locaisPositivos: ProductLocationRef[]
+  warehouseBalances: ProductWarehouseBalance[]
   isInactive: boolean
   isObsolete: boolean
   isEngineering: boolean

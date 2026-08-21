@@ -27,7 +27,7 @@ import { defaultFilters } from '../lib/products'
 import { quantity } from '../lib/format'
 import { buildLegacyUrl } from '../services/authGateway'
 import { loadPurchaseDetail } from '../services/pilotGateway'
-import type { FiltersState, ProductFilterOption, ProductPurchaseDetailItem, ProductRecord } from '../types'
+import type { FiltersState, ProductFilterOption, ProductPurchaseDetailItem, ProductRecord, ProductWarehouseBalance } from '../types'
 
 type BridgeKey = 'qr' | 'bulk' | 'cart' | 'separation' | 'detail'
 
@@ -112,15 +112,63 @@ function toNumber(value: number | null | undefined) {
 }
 
 function renderStockLines(product: ProductRecord) {
-  const lines = [
-    { key: 'almox', label: '#ALMOX', numeric: toNumber(product.saldo_almox), priority: true },
-    { key: 'expedicao', label: 'Expedição', numeric: toNumber(product.saldo_expedicao), priority: false },
-  ]
+  const seen = new Set<string>()
+  const balances = Array.isArray(product.warehouseBalances) ? product.warehouseBalances : []
+  const normalized = balances
+    .map((item, index) => normalizeWarehouseBalance(item, product.unidade, index))
+    .filter((item): item is ReturnType<typeof normalizeWarehouseBalance> => Boolean(item))
+    .filter((item) => {
+      if (seen.has(item.key)) return false
+      seen.add(item.key)
+      return true
+    })
 
-  return lines.filter((line) => line.priority || line.numeric !== 0).map((line) => ({
-    ...line,
-    value: quantity(line.numeric, product.unidade),
-  }))
+  const almox =
+    normalized.find((item) => item.isAlmox)
+    ?? {
+      key: '10717096386',
+      label: '#ALMOX',
+      numeric: toNumber(product.saldo_almox),
+      priority: true,
+      isAlmox: true,
+      value: quantity(toNumber(product.saldo_almox), product.unidade),
+    }
+
+  const others = normalized
+    .filter((item) => !item.isAlmox && item.numeric !== 0)
+    .sort((left, right) => left.label.localeCompare(right.label, 'pt-BR'))
+
+  return [almox, ...others]
+}
+
+function normalizeWarehouseBalance(item: ProductWarehouseBalance, unit: string | null | undefined, index: number) {
+  const code = String(item.local_codigo || '').trim()
+  const rawLabel = String(item.local_nome || '').trim()
+  const isAlmox = code === '10717096386' || /porta pallet|almox/i.test(rawLabel)
+  const label = isAlmox ? '#ALMOX' : rawLabel || code || `Armazém ${index + 1}`
+  return {
+    key: code || `${label}-${index}`,
+    label,
+    numeric: toNumber(item.saldo),
+    priority: isAlmox,
+    isAlmox,
+    value: quantity(toNumber(item.saldo), unit),
+  }
+}
+
+function minimumHealth(product: ProductRecord) {
+  const minimo = toNumber(product.estoque_minimo)
+  const saldo = toNumber(product.saldo_almox)
+  if (minimo <= 0) return null
+  const percentual = (saldo / minimo) * 100
+  return {
+    saldo,
+    minimo,
+    percentual,
+    progress: Math.max(0, Math.min(percentual, 100)),
+    tone: percentual < 100 ? 'bg-red-500' : percentual === 100 ? 'bg-amber-500' : 'bg-emerald-500',
+    textTone: percentual < 100 ? 'text-red-700' : percentual === 100 ? 'text-amber-700' : 'text-emerald-700',
+  }
 }
 
 function hasNegativeStock(product: ProductRecord) {
@@ -219,6 +267,7 @@ function ProductCard({
   const tone = statusTone(product)
   const stockLines = renderStockLines(product)
   const statusFlags = buildStatusFlags(product)
+  const minimum = minimumHealth(product)
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-thermo-border bg-white shadow-sm" data-testid="product-card">
@@ -250,6 +299,20 @@ function ProductCard({
       </div>
 
       <div className="space-y-2 px-3 py-2.5">
+        <div className="rounded-md border border-thermo-border bg-slate-50 px-2 py-1.5 text-[11px]">
+          {minimum ? (
+            <>
+              <div className={clsx('font-semibold', minimum.textTone)}>
+                {quantity(minimum.saldo, product.unidade)} / mín {quantity(minimum.minimo, product.unidade)} · {Math.round(minimum.percentual)}%
+              </div>
+              <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                <div className={clsx('h-full rounded-full', minimum.tone)} style={{ width: `${minimum.progress}%` }} />
+              </div>
+            </>
+          ) : (
+            <div className="font-semibold text-slate-500">Sem mínimo</div>
+          )}
+        </div>
         <div className="space-y-1.5">
           {stockLines.map((line) => (
             <div key={line.label} className={clsx('flex items-center justify-between rounded-md px-2 py-1 text-[11px]', line.priority ? 'bg-slate-100 text-slate-900' : 'bg-white text-slate-600')}>
@@ -298,8 +361,9 @@ function ProductTable({
             <th className="px-3 py-2.5">Descrição</th>
             <th className="px-3 py-2.5">Compra</th>
             <th className="px-3 py-2.5">Exceção</th>
+            <th className="px-3 py-2.5">Saldo / mínimo</th>
             <th className="px-3 py-2.5">#ALMOX</th>
-            <th className="px-3 py-2.5">Exp.</th>
+            <th className="px-3 py-2.5">Demais armazéns</th>
             <th className="px-3 py-2.5">Mínimo</th>
             <th className="px-3 py-2.5">Ação</th>
           </tr>
@@ -307,12 +371,15 @@ function ProductTable({
         <tbody>
           {rows.map((product) => (
             <tr key={product.codigo} className="border-t border-thermo-border align-top">
+              {(() => {
+                const minimum = minimumHealth(product)
+                const stockLines = renderStockLines(product)
+                return (
+                  <>
               <td className="px-3 py-2.5 font-mono text-xs font-semibold text-slate-600">{product.codigo}</td>
               <td className="px-3 py-2.5">
                 <div className="font-semibold text-thermo-navy">{product.descricao}</div>
-                <div className="mt-1 flex flex-wrap gap-1.5">
-                  {product.estoque_minimo > 0 ? <StatusBadge tone={product.abaixo_minimo ? 'red' : 'green'}>{`Mínimo: ${quantity(product.estoque_minimo, product.unidade)}`}</StatusBadge> : null}
-                </div>
+                <div className="mt-1 text-xs text-slate-500">{product.imageUrl ? 'Com foto' : 'Sem foto'}</div>
               </td>
               <td className="px-3 py-2.5 text-slate-600">
                 {product.purchaseState === 'em_compra' ? (
@@ -324,8 +391,19 @@ function ProductTable({
                 )}
               </td>
               <td className="px-3 py-2.5 text-slate-600">{buildStatusFlags(product).filter((flag) => flag.key !== 'estoque-minimo').map((flag) => flag.label).join(' · ') || '—'}</td>
+              <td className="px-3 py-2.5 text-xs">
+                {minimum ? (
+                  <div className={clsx('font-semibold', minimum.textTone)}>
+                    {quantity(minimum.saldo, product.unidade)} / mín {quantity(minimum.minimo, product.unidade)} · {Math.round(minimum.percentual)}%
+                  </div>
+                ) : (
+                  <span className="text-slate-500">Sem mínimo</span>
+                )}
+              </td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
-              <td className="px-3 py-2.5 font-mono text-slate-600">{toNumber(product.saldo_expedicao) !== 0 ? quantity(product.saldo_expedicao, product.unidade) : '—'}</td>
+              <td className="px-3 py-2.5 text-xs text-slate-600">
+                {stockLines.filter((line) => !line.isAlmox).length > 0 ? stockLines.filter((line) => !line.isAlmox).map((line) => `${line.label}: ${line.value}`).join(' · ') : '—'}
+              </td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{product.estoque_minimo > 0 ? quantity(product.estoque_minimo, product.unidade) : '—'}</td>
               <td className="px-3 py-2.5">
                 <button className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs" type="button" onClick={() => onOpenActions(product)}>
@@ -333,6 +411,9 @@ function ProductTable({
                   Ações
                 </button>
               </td>
+                  </>
+                )
+              })()}
             </tr>
           ))}
         </tbody>

@@ -6,6 +6,7 @@ import type {
   ProductListResponse,
   ProductPurchaseResponse,
   ProductRecord,
+  ProductStockBatchResponse,
 } from '../types'
 
 export const defaultFilters: FiltersState = {
@@ -102,6 +103,7 @@ export const mergePilotData = (
   products: ProductListResponse,
   purchases: ProductPurchaseResponse,
   locations: InventoryLocationsResponse,
+  stockBatch: ProductStockBatchResponse = { ok: true, dados: {}, minimos: {} },
 ): ProductRecord[] => {
   const purchaseMap = new Map(purchases.itens.map((entry) => [entry.codigo.trim().toUpperCase(), entry.status]))
   const { byProduct } = buildLocationMaps(locations)
@@ -109,15 +111,29 @@ export const mergePilotData = (
   return products.itens.map((product) => {
     const code = product.codigo.trim().toUpperCase()
     const compraStatus = purchaseMap.get(code) ?? null
+    const warehouseBalances = Array.isArray(stockBatch.dados?.[product.codigo]) ? stockBatch.dados[product.codigo]! : Array.isArray(stockBatch.dados?.[code]) ? stockBatch.dados[code]! : []
+    const almoxBalance =
+      warehouseBalances.find((item) => String(item.local_codigo || '').trim() === '10717096386')
+      ?? warehouseBalances.find((item) => /porta pallet|almox/i.test(String(item.local_nome || '')))
+    const minimumInfo = stockBatch.minimos?.[product.codigo] ?? stockBatch.minimos?.[code]
+    const saldoAlmox = Number.isFinite(Number(almoxBalance?.saldo)) ? Number(almoxBalance?.saldo) : product.saldo_almox
+    const estoqueMinimo = Number.isFinite(Number(minimumInfo?.min)) ? Number(minimumInfo?.min) : product.estoque_minimo
+    const abaixoMinimo = typeof minimumInfo?.abaixo === 'boolean' ? minimumInfo.abaixo : product.abaixo_minimo
+    const estoqueNegativo = warehouseBalances.some((item) => Number(item.saldo || 0) < 0) || product.estoque_negativo
 
     return {
       ...product,
+      saldo_almox: saldoAlmox,
+      estoque_minimo: estoqueMinimo,
+      abaixo_minimo: abaixoMinimo,
+      estoque_negativo: estoqueNegativo,
       compraStatus,
       purchaseState: compraStatus ? 'em_compra' : 'sem_compra',
       origemCodigo: extractOrigemFromCodigo(product.codigo),
       tipoCodigo: extractTipoFromCodigo(product.codigo),
       imageUrl: product.primeira_imagem,
       locaisPositivos: byProduct.get(code) ?? [],
+      warehouseBalances,
       isInactive: isInactive(product.inativo),
       isObsolete: isObsolete(product.descricao),
       isEngineering: isEngineering(product.descricao),

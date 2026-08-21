@@ -67,6 +67,7 @@ const baseProduct: ProductRecord = {
   tipoCodigo: null,
   imageUrl: null,
   locaisPositivos: [],
+  warehouseBalances: [{ local_codigo: '10717096386', local_nome: 'Porta Pallet (Almoxarifado)', saldo: 1, unidade: 'UN' }],
   isInactive: false,
   isObsolete: false,
   isEngineering: false,
@@ -241,6 +242,7 @@ describe('ProductListScreen', () => {
           saldo_expedicao: 0,
           saldo_enderecado: 12300,
           estoque_negativo: true,
+          warehouseBalances: [{ local_codigo: '10717096386', local_nome: 'Porta Pallet (Almoxarifado)', saldo: 12300, unidade: 'UN' }],
         },
       ],
       paginated: [
@@ -251,6 +253,7 @@ describe('ProductListScreen', () => {
           saldo_expedicao: 0,
           saldo_enderecado: 12300,
           estoque_negativo: true,
+          warehouseBalances: [{ local_codigo: '10717096386', local_nome: 'Porta Pallet (Almoxarifado)', saldo: 12300, unidade: 'UN' }],
         },
       ],
     }
@@ -271,5 +274,59 @@ describe('ProductListScreen', () => {
     expect(screen.queryByText('Endereçado')).not.toBeInTheDocument()
     expect(screen.queryByText('Locais:')).not.toBeInTheDocument()
     expect(screen.queryAllByText(/Estoque negativo/i)).toHaveLength(0)
+  })
+
+  it('renders all non-zero warehouses beyond #ALMOX and keeps zero-only locations hidden', () => {
+    hookState = {
+      ...hookState,
+      filtered: [
+        {
+          ...baseProduct,
+          saldo_almox: 0,
+          estoque_minimo: 20,
+          warehouseBalances: [
+            { local_codigo: '10717096386', local_nome: 'Porta Pallet (Almoxarifado)', saldo: 0, unidade: 'UN' },
+            { local_codigo: 'PROD', local_nome: 'Produção', saldo: 5, unidade: 'UN' },
+            { local_codigo: 'REC', local_nome: 'Recebimento', saldo: 0, unidade: 'UN' },
+            { local_codigo: 'EXP', local_nome: 'Expedição', saldo: -2, unidade: 'UN' },
+            { local_codigo: 'X7', local_nome: 'Armazém X7', saldo: 7, unidade: 'UN' },
+          ],
+        },
+      ],
+      paginated: [
+        {
+          ...baseProduct,
+          saldo_almox: 0,
+          estoque_minimo: 20,
+          warehouseBalances: [
+            { local_codigo: '10717096386', local_nome: 'Porta Pallet (Almoxarifado)', saldo: 0, unidade: 'UN' },
+            { local_codigo: 'PROD', local_nome: 'Produção', saldo: 5, unidade: 'UN' },
+            { local_codigo: 'REC', local_nome: 'Recebimento', saldo: 0, unidade: 'UN' },
+            { local_codigo: 'EXP', local_nome: 'Expedição', saldo: -2, unidade: 'UN' },
+            { local_codigo: 'X7', local_nome: 'Armazém X7', saldo: 7, unidade: 'UN' },
+          ],
+        },
+      ],
+    }
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    expect(screen.getByText('#ALMOX')).toBeInTheDocument()
+    expect(screen.getByText('Produção')).toBeInTheDocument()
+    expect(screen.queryByText('Recebimento')).not.toBeInTheDocument()
+    expect(screen.getByText('Expedição')).toBeInTheDocument()
+    expect(screen.getByText('Armazém X7')).toBeInTheDocument()
+    expect(screen.queryByText('Locais:')).not.toBeInTheDocument()
+    expect(screen.getByText(/0%/i)).toBeInTheDocument()
   })
 })

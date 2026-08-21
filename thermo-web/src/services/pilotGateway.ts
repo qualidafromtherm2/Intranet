@@ -6,6 +6,7 @@ import type {
   ProductListResponse,
   ProductPurchaseDetailResponse,
   ProductPurchaseResponse,
+  ProductStockBatchResponse,
   ProductStreamEvent,
 } from '../types'
 
@@ -89,6 +90,27 @@ export async function loadPurchaseDetail(codigo: string): Promise<ProductPurchas
 export async function loadLocations(): Promise<InventoryLocationsResponse> {
   if (dataMode === 'demo') return demoSnapshot.locations
   return getJson<InventoryLocationsResponse>('/api/logistica/locais-inventario')
+}
+
+export async function loadStockBatch(codes: string[]): Promise<ProductStockBatchResponse> {
+  if (dataMode === 'demo') return { ok: true, dados: {}, minimos: {} }
+  const normalized = [...new Set(codes.map((code) => String(code || '').trim()).filter(Boolean))]
+  if (!normalized.length) return { ok: true, dados: {}, minimos: {} }
+
+  const dados: ProductStockBatchResponse['dados'] = {}
+  const minimos: ProductStockBatchResponse['minimos'] = {}
+  const chunkSize = 80
+
+  for (let index = 0; index < normalized.length; index += chunkSize) {
+    const chunk = normalized.slice(index, index + chunkSize)
+    const params = new URLSearchParams()
+    params.set('codigos', chunk.join(','))
+    const response = await getJson<ProductStockBatchResponse>(`/api/logistica/estoque/batch?${params.toString()}`)
+    Object.assign(dados, response.dados || {})
+    Object.assign(minimos, response.minimos || {})
+  }
+
+  return { ok: true, dados, minimos }
 }
 
 export async function loadCart(): Promise<CartResponse> {

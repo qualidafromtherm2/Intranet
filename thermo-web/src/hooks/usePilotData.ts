@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { buildFilterMeta, defaultFilters, filterProducts, mergePilotData, paginateProducts } from '../lib/products'
-import { getPilotMode, loadCart, loadLocations, loadProducts, loadPurchases, subscribeProductsStream } from '../services/pilotGateway'
+import { getPilotMode, loadCart, loadLocations, loadProducts, loadPurchases, loadStockBatch, subscribeProductsStream } from '../services/pilotGateway'
 import type { FiltersState, ProductFiltersMeta, ProductRecord, ProductStreamEvent, ViewMode } from '../types'
 
 const pageSize = 50
@@ -89,6 +89,7 @@ const saveCache = (next: Partial<PilotCacheState>) => {
 
 async function fetchPilotSnapshot(): Promise<PilotSnapshot> {
   const productsResponse = await loadProducts()
+  const stockBatchResult = await loadStockBatch(productsResponse.itens.map((item) => item.codigo))
   const [purchasesResult, locationsResult, cartResult] = await Promise.allSettled([loadPurchases(), loadLocations(), loadCart()])
 
   const nextWarnings: string[] = []
@@ -107,7 +108,7 @@ async function fetchPilotSnapshot(): Promise<PilotSnapshot> {
       ? cartResult.value
       : (nextWarnings.push('Carrinho indisponível no momento.'), { ok: false, itens: [] })
 
-  const merged = mergePilotData(productsResponse, purchasesResponse, locationsResponse)
+  const merged = mergePilotData(productsResponse, purchasesResponse, locationsResponse, stockBatchResult)
   const nextFiltersMeta = buildFilterMeta(merged, locationsResponse)
   const nextCartCount = Array.isArray(cartResponse.itens) ? cartResponse.itens.length : 0
 

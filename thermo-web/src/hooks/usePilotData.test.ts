@@ -44,6 +44,7 @@ vi.mock('../services/pilotGateway', () => ({
   })),
   loadPurchases: vi.fn(async () => ({ ok: true, total: 0, itens: [] })),
   loadLocations: vi.fn(async () => ({ ok: true, locais: [] })),
+  loadStockBatch: vi.fn(async () => ({ ok: true, dados: {}, minimos: {} })),
   loadCart: vi.fn(async () => ({ ok: true, itens: [] })),
   subscribeProductsStream: vi.fn(() => () => undefined),
 }))
@@ -63,6 +64,7 @@ describe('prefetchPilotData', () => {
     expect(gateway.loadProducts).toHaveBeenCalledTimes(1)
     expect(gateway.loadPurchases).toHaveBeenCalledTimes(1)
     expect(gateway.loadLocations).toHaveBeenCalledTimes(1)
+    expect(gateway.loadStockBatch).toHaveBeenCalledTimes(1)
     expect(gateway.loadCart).toHaveBeenCalledTimes(1)
   })
 })
