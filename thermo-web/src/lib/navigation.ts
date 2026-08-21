@@ -176,6 +176,33 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-recebimento') {
+    return {
+      icon: itemIconMap[selector] ?? 'truck-ramp',
+      migrationStatus: 'migrated',
+      view: 'receiving',
+      destination: '/logistics/receiving',
+    }
+  }
+
+  if (selector === '#menu-produto-recebido') {
+    return {
+      icon: itemIconMap[selector] ?? 'package-check',
+      migrationStatus: 'migrated',
+      view: 'products-received',
+      destination: '/logistics/products-received',
+    }
+  }
+
+  if (selector === '#menu-envio-mercadoria') {
+    return {
+      icon: itemIconMap[selector] ?? 'truck',
+      migrationStatus: 'migrated',
+      view: 'shipping',
+      destination: '/logistics/shipping',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',

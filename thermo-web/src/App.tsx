@@ -72,7 +72,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
 import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
+import { ProductsReceivedScreen, ReceivingScreen } from './features/receiving'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
+import { ShippingScreen } from './features/shipping/ShippingScreen'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
 import { buildNavigationCatalog, isSelectorAllowed } from './lib/navigation'
 import { buildLegacyUrl, getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
@@ -1306,6 +1308,9 @@ function App() {
   const canEditCatalog = useMemo(() => isSelectorAllowed('#menu-produto', navigation.selectorMap) || isSelectorAllowed('#btn-definicoes', navigation.selectorMap), [navigation.selectorMap])
   const canStoreMaterials = useMemo(() => isSelectorAllowed('#menu-guardar-materiais', navigation.selectorMap) || isSelectorAllowed('#menu-guardar-materiais-expedicao', navigation.selectorMap), [navigation.selectorMap])
   const canIdentifyProduct = useMemo(() => isSelectorAllowed('#menu-identificacao-produto', navigation.selectorMap) || isSelectorAllowed('#menu-identificacao-produto-expedicao', navigation.selectorMap), [navigation.selectorMap])
+  const canReceive = useMemo(() => isSelectorAllowed('#menu-recebimento', navigation.selectorMap), [navigation.selectorMap])
+  const canViewReceived = useMemo(() => isSelectorAllowed('#menu-produto-recebido', navigation.selectorMap), [navigation.selectorMap])
+  const canShip = useMemo(() => isSelectorAllowed('#menu-envio-mercadoria', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1368,8 +1373,14 @@ function App() {
               <SeparationWorkspace />
             ) : activeView === 'store-materials' ? (
               <StoreMaterialsScreen username={user.username} allowed={canStoreMaterials} />
-            ) : (
+            ) : activeView === 'identify-product' ? (
               <IdentifyProductScreen username={user.username} allowed={canIdentifyProduct} />
+            ) : activeView === 'receiving' ? (
+              <ReceivingScreen allowed={canReceive} />
+            ) : activeView === 'products-received' ? (
+              <ProductsReceivedScreen allowed={canViewReceived} />
+            ) : (
+              <ShippingScreen allowed={canShip} />
             )}
           </main>
         </div>
