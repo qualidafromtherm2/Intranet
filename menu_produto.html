@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -971,6 +972,17 @@
        data-nav-selector="#menu-configurar-agente">
       <i class="fa-solid fa-print" style="margin-right:8px;"></i>
       Configurar agente
+    </a>
+    <a href="#"
+       id="menu-chatbot-cursor"
+       class="menu-link"
+       data-nav-key="side:conf-sistema:chatbot"
+       data-nav-parent="side:conf-sistema"
+       data-nav-pos="side"
+       data-nav-label="Chatbot"
+       data-nav-selector="#menu-chatbot-cursor">
+      <i class="fa-solid fa-robot" style="margin-right:8px;"></i>
+      Chatbot
     </a>
   </div>
 </div>
@@ -10303,6 +10315,49 @@
         </div>
       </div>
 
+      <!-- Painel Conf. sistema → Chatbot (Cloud Agent) -->
+      <div id="cursorChatbotPane" class="tab-pane" style="display:none;">
+        <div class="content-wrapper" style="padding:12px;">
+          <div class="cursor-chat-page">
+            <header class="cursor-chat-header">
+              <div>
+                <h3>Chatbot</h3>
+                <p>Cloud Agent no GitHub — como no app do celular. Só admin.</p>
+              </div>
+              <div class="cursor-chat-header-actions">
+                <span id="cursorChatBadge" class="cursor-chat-badge">Chatbot</span>
+                <button type="button" class="cursor-chat-btn" id="cursorChatRefresh">Atualizar lista</button>
+                <button type="button" class="cursor-chat-btn primary" id="cursorChatNew">Nova conversa</button>
+              </div>
+            </header>
+            <div class="cursor-chat-body">
+              <aside class="cursor-chat-sidebar" id="cursorChatSidebar">
+                <div id="cursorChatAgentList"></div>
+              </aside>
+              <section class="cursor-chat-main">
+                <div class="cursor-chat-statusline" id="cursorChatStatus">Pronto</div>
+                <div class="cursor-chat-messages" id="cursorChatMessages" aria-live="polite"></div>
+                <div class="cursor-chat-review" id="cursorChatReview">
+                  <div id="cursorChatReviewText">Proposta pronta.</div>
+                  <div class="cursor-chat-files" id="cursorChatFiles"></div>
+                  <div class="cursor-chat-review-actions">
+                    <button type="button" class="cursor-chat-btn" id="cursorChatTest">Entrar no modo de teste</button>
+                    <button type="button" class="cursor-chat-btn success" id="cursorChatApprove">Aprovar e publicar</button>
+                    <button type="button" class="cursor-chat-btn danger" id="cursorChatReject">Descartar</button>
+                  </div>
+                </div>
+                <div class="cursor-chat-composer">
+                  <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (como no Cursor)"></textarea>
+                  <div class="send-wrap">
+                    <button type="button" class="cursor-chat-btn primary" id="cursorChatSend">Enviar</button>
+                  </div>
+                </div>
+              </section>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div id="confPerfilNovoModal" style="display:none;position:fixed;inset:0;z-index:10061;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:16px;">
         <div style="width:min(470px,96vw);background:#0f172a;border:1px solid #334155;border-radius:14px;color:#e2e8f0;box-shadow:0 24px 70px rgba(0,0,0,.45);">
           <div style="padding:16px 18px;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;">
@@ -14284,6 +14339,7 @@
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 
@@ -21031,6 +21087,109 @@ function attachDropZone(ul) {
   font-family: inherit;
 }
 #sgf-ai-panel.open { display: flex; }
+#sgf-ai-panel.dev-mode {
+  width: min(420px, calc(100vw - 24px));
+  height: min(620px, calc(100vh - 100px));
+}
+
+/* Abas Ajuda / Agente Dev */
+#sgf-ai-mode-tabs {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px 0;
+  background: #0f172a;
+  flex-shrink: 0;
+}
+#sgf-ai-mode-tabs button {
+  flex: 1;
+  border: 1px solid rgba(148,163,184,.25);
+  background: transparent;
+  color: #94a3b8;
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#sgf-ai-mode-tabs button.active {
+  background: #4f46e5;
+  border-color: #6366f1;
+  color: #fff;
+}
+#sgf-ai-panel:not(.dev-mode) #sgf-ai-mode-tabs button[data-mode="dev"] {
+  opacity: .95;
+}
+
+#sgf-ai-dev-review {
+  display: none;
+  margin: 8px 12px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: rgba(34,197,94,.12);
+  border: 1px solid rgba(34,197,94,.35);
+  color: #bbf7d0;
+  font-size: 12px;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+#sgf-ai-panel.dev-mode #sgf-ai-dev-review.is-visible { display: block; }
+#sgf-ai-dev-review .dev-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+#sgf-ai-dev-review button {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+#sgf-ai-dev-review .btn-test { background: #38bdf8; color: #0f172a; }
+#sgf-ai-dev-review .btn-approve { background: #22c55e; color: #052e16; }
+#sgf-ai-dev-review .btn-reject { background: #334155; color: #e2e8f0; }
+#sgf-ai-dev-files {
+  margin-top: 6px;
+  max-height: 90px;
+  overflow: auto;
+  color: #cbd5e1;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
+#dev-agent-preview-banner {
+  display: none;
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 10050;
+  background: linear-gradient(90deg, #b45309, #ca8a04);
+  color: #fffbeb;
+  padding: 10px 16px;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 4px 20px rgba(0,0,0,.25);
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+body.dev-agent-preview-mode #dev-agent-preview-banner { display: flex; }
+body.dev-agent-preview-mode { padding-top: 44px; }
+#dev-agent-preview-banner .dev-banner-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+#dev-agent-preview-banner button {
+  border: 0;
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-weight: 700;
+  cursor: pointer;
+  font-size: 12px;
+}
+#dev-agent-preview-banner .btn-approve { background: #22c55e; color: #052e16; }
+#dev-agent-preview-banner .btn-exit { background: rgba(255,255,255,.2); color: #fff; }
+
 
 /* ── Header do painel ── */
 #sgf-ai-header {
@@ -21538,6 +21697,21 @@ function attachDropZone(ul) {
     </button>
   </div>
 
+  <div id="sgf-ai-mode-tabs" role="tablist" aria-label="Modo do assistente">
+    <button type="button" data-mode="ajuda" class="active" role="tab" aria-selected="true">Ajuda</button>
+    <button type="button" data-mode="dev" role="tab" aria-selected="false">Agente Dev</button>
+  </div>
+
+  <div id="sgf-ai-dev-review" aria-live="polite">
+    <div id="sgf-ai-dev-review-text">Proposta pronta para revisão.</div>
+    <div id="sgf-ai-dev-files"></div>
+    <div class="dev-review-actions">
+      <button type="button" class="btn-test" id="sgf-ai-dev-test">Entrar no modo de teste</button>
+      <button type="button" class="btn-approve" id="sgf-ai-dev-approve">Aprovar e publicar</button>
+      <button type="button" class="btn-reject" id="sgf-ai-dev-reject">Descartar</button>
+    </div>
+  </div>
+
   <!-- Mensagens -->
   <div id="sgf-ai-messages"></div>
 
@@ -21563,6 +21737,22 @@ function attachDropZone(ul) {
     <button id="sgf-ai-send" title="Enviar" aria-label="Enviar mensagem">
       <i class="fa-solid fa-paper-plane"></i>
     </button>
+  </div>
+</div>
+
+<div id="dev-agent-preview-banner" role="status">
+  <span id="dev-agent-preview-banner-text">Modo de teste do Agente Dev — as mudanças ainda NÃO estão no GitHub/produção.</span>
+  <div class="dev-banner-actions">
+    <button type="button" class="btn-approve" id="dev-agent-banner-approve">Aprovar e publicar</button>
+    <button type="button" class="btn-exit" id="dev-agent-banner-exit">Sair do modo teste</button>
+  </div>
+</div>
+
+<div id="cursor-chat-preview-banner" role="status">
+  <span id="cursorChatPreviewText">Modo de teste do Chatbot — mudanças ainda NÃO publicadas no GitHub.</span>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <button type="button" class="cursor-chat-btn success" id="cursorChatBannerApprove">Aprovar e publicar</button>
+    <button type="button" class="cursor-chat-btn" id="cursorChatBannerExit">Sair do modo teste</button>
   </div>
 </div>
 
@@ -23768,6 +23958,9 @@ function attachDropZone(ul) {
 
   // ── Envio de mensagem ────────────────────────────────────────────────────
   async function sendMessage(text) {
+    if (devAgent.mode === 'dev') {
+      return sendDevAgentMessage(text);
+    }
     appendMsg('user', text);
     history.push({ role: 'user', content: text });
     void reportAiClientLog('info', 'Mensagem enviada ao assistente', {
@@ -24242,6 +24435,261 @@ function attachDropZone(ul) {
     input.style.height = '38px';
     input.style.height = Math.min(input.scrollHeight, 100) + 'px';
   });
+
+  // ── Agente Dev (Cloud Agent + aprovação GitHub) ───────────────────────────
+  const devAgent = {
+    mode: 'ajuda',
+    agentId: null,
+    runId: null,
+    prNumber: null,
+    prUrl: null,
+    branch: null,
+    pollTimer: null,
+    busy: false,
+  };
+  const modeTabs = document.getElementById('sgf-ai-mode-tabs');
+  const reviewBox = document.getElementById('sgf-ai-dev-review');
+  const reviewText = document.getElementById('sgf-ai-dev-review-text');
+  const reviewFiles = document.getElementById('sgf-ai-dev-files');
+  const btnDevTest = document.getElementById('sgf-ai-dev-test');
+  const btnDevApprove = document.getElementById('sgf-ai-dev-approve');
+  const btnDevReject = document.getElementById('sgf-ai-dev-reject');
+  const bannerApprove = document.getElementById('dev-agent-banner-approve');
+  const bannerExit = document.getElementById('dev-agent-banner-exit');
+  const suggBox = document.getElementById('sgf-ai-suggestions');
+
+  function stopDevPoll() {
+    if (devAgent.pollTimer) {
+      clearInterval(devAgent.pollTimer);
+      devAgent.pollTimer = null;
+    }
+  }
+
+  function setAssistantMode(mode) {
+    const next = mode === 'dev' ? 'dev' : 'ajuda';
+    devAgent.mode = next;
+    panel.classList.toggle('dev-mode', next === 'dev');
+    modeTabs?.querySelectorAll('button').forEach((b) => {
+      const on = b.dataset.mode === next;
+      b.classList.toggle('active', on);
+      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    });
+    if (suggBox) suggBox.style.display = next === 'dev' ? 'none' : '';
+    if (titleStrong) {
+      titleStrong.textContent = next === 'dev' ? 'Agente Dev' : 'Assistente SGF';
+    }
+    input.placeholder = next === 'dev'
+      ? 'Ex.: mudar o texto do botão X na tela de Y…'
+      : 'Pergunte algo sobre o sistema...';
+    if (next === 'dev' && messages.children.length === 0) {
+      appendMsg(
+        'assistant',
+        'Modo Agente Dev (admin).\n\nDescreva a mudança. Eu trabalho numa branch/PR no GitHub.\nQuando ficar pronto, use “Entrar no modo de teste”, confira o site e só então “Aprovar e publicar” (merge na main → Render).'
+      );
+    }
+    if (next !== 'dev') {
+      reviewBox?.classList.remove('is-visible');
+      stopDevPoll();
+    }
+  }
+
+  modeTabs?.addEventListener('click', (ev) => {
+    const b = ev.target.closest('button[data-mode]');
+    if (!b) return;
+    setAssistantMode(b.dataset.mode);
+  });
+
+  function showReviewCard(summary) {
+    if (!reviewBox || !reviewText) return;
+    const parts = [
+      'Proposta pronta para revisão.',
+      summary.branch ? `Branch: ${summary.branch}` : null,
+      summary.prUrl ? `PR: ${summary.prUrl}` : null,
+      summary.result ? `\n${summary.result}` : null,
+    ].filter(Boolean);
+    reviewText.textContent = parts.join('\n');
+    reviewBox.classList.add('is-visible');
+  }
+
+  async function loadPrFiles(prNumber) {
+    if (!reviewFiles || !prNumber) return;
+    reviewFiles.textContent = 'Carregando arquivos…';
+    try {
+      const resp = await fetch(`/api/dev-agent/pulls/${prNumber}/files`, { credentials: 'include' });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao listar arquivos');
+      const lines = (data.items || []).slice(0, 40).map((f) => {
+        const sign = f.status === 'removed' ? '-' : (f.status === 'added' ? '+' : '~');
+        return `${sign} ${f.filename} (+${f.additions}/-${f.deletions})`;
+      });
+      reviewFiles.textContent = lines.length ? lines.join('\n') : 'Sem arquivos listados.';
+    } catch (e) {
+      reviewFiles.textContent = e.message || 'Não foi possível listar o PR.';
+    }
+  }
+
+  async function pollDevAgent() {
+    if (!devAgent.agentId) return;
+    try {
+      const resp = await fetch(`/api/dev-agent/agents/${encodeURIComponent(devAgent.agentId)}`, {
+        credentials: 'include',
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) return;
+      devAgent.runId = data.runId || devAgent.runId;
+      devAgent.prNumber = data.prNumber || devAgent.prNumber;
+      devAgent.prUrl = data.prUrl || devAgent.prUrl;
+      devAgent.branch = data.branch || devAgent.branch;
+      const st = String(data.runStatus || '').toUpperCase();
+      if (st === 'FINISHED') {
+        stopDevPoll();
+        loading = false;
+        sendBtn.disabled = false;
+        if (data.result) appendMsg('assistant', data.result);
+        else appendMsg('assistant', 'Agent concluiu. Revise a proposta abaixo.');
+        showReviewCard(data);
+        if (data.prNumber) await loadPrFiles(data.prNumber);
+      } else if (st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') {
+        stopDevPoll();
+        loading = false;
+        sendBtn.disabled = false;
+        appendMsg('error', `Agent: ${statusLabelDev(st)}`);
+      }
+    } catch (_) {}
+  }
+
+  function statusLabelDev(st) {
+    return ({ FINISHED: 'concluído', ERROR: 'erro', CANCELLED: 'cancelado', EXPIRED: 'expirado' })[st] || st;
+  }
+
+  function startDevPoll() {
+    stopDevPoll();
+    void pollDevAgent();
+    devAgent.pollTimer = setInterval(() => { void pollDevAgent(); }, 8000);
+  }
+
+  async function sendDevAgentMessage(text) {
+    appendMsg('user', text);
+    loading = true;
+    sendBtn.disabled = true;
+    const typingEl = appendMsg('typing', '...');
+    try {
+      let data;
+      if (!devAgent.agentId) {
+        const resp = await fetch('/api/dev-agent/agents', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: text, autoCreatePR: true }),
+        });
+        data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        devAgent.agentId = data.agentId;
+        devAgent.runId = data.runId;
+        appendMsg('assistant', 'Agent iniciado no GitHub. Aguarde — vou avisar quando a proposta estiver pronta.');
+      } else {
+        const resp = await fetch(`/api/dev-agent/agents/${encodeURIComponent(devAgent.agentId)}/runs`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: text }),
+        });
+        data = await resp.json();
+        if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        devAgent.runId = data.run?.id || data.runId || null;
+        appendMsg('assistant', 'Follow-up enviado. Trabalhando…');
+      }
+      typingEl.remove();
+      startDevPoll();
+    } catch (err) {
+      typingEl.remove();
+      loading = false;
+      sendBtn.disabled = false;
+      appendMsg('error', `⚠ ${err.message || 'Falha no Agente Dev'}`);
+    }
+  }
+
+  function enterTestMode() {
+    document.body.classList.add('dev-agent-preview-mode');
+    const el = document.getElementById('dev-agent-preview-banner-text');
+    if (el) {
+      el.textContent = `Modo de teste — branch ${devAgent.branch || 'pendente'}. As mudanças ainda NÃO foram publicadas. Confira o que dá para validar na tela; depois aprove para subir no GitHub.`;
+    }
+    appendMsg(
+      'assistant',
+      'Modo de teste ativo.\n\nImportante: o código da PR ainda não está no site ao vivo (só depois do “Aprovar e publicar”). Use o card/banner para publicar quando estiver bom, ou descarte.'
+    );
+  }
+
+  function exitTestMode() {
+    document.body.classList.remove('dev-agent-preview-mode');
+  }
+
+  async function approveDevProposal() {
+    if (!devAgent.prNumber) {
+      appendMsg('error', 'Não há PR para aprovar ainda.');
+      return;
+    }
+    if (!window.confirm('Publicar de verdade no GitHub (merge na main)? O Render vai atualizar o site.')) return;
+    loading = true;
+    try {
+      const resp = await fetch('/api/dev-agent/approve', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prNumber: devAgent.prNumber,
+          agentId: devAgent.agentId,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao mesclar PR');
+      exitTestMode();
+      reviewBox?.classList.remove('is-visible');
+      appendMsg('assistant', `✅ Publicado.\n${data.message || 'Merge ok — aguarde o deploy do Render.'}`);
+      devAgent.agentId = null;
+      devAgent.runId = null;
+      devAgent.prNumber = null;
+      devAgent.prUrl = null;
+      devAgent.branch = null;
+      stopDevPoll();
+    } catch (e) {
+      appendMsg('error', `⚠ ${e.message}`);
+    } finally {
+      loading = false;
+      sendBtn.disabled = false;
+    }
+  }
+
+  async function rejectDevProposal() {
+    if (!window.confirm('Descartar a proposta (fecha o PR sem publicar)?')) return;
+    try {
+      await fetch('/api/dev-agent/reject', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prNumber: devAgent.prNumber,
+          agentId: devAgent.agentId,
+        }),
+      });
+      exitTestMode();
+      reviewBox?.classList.remove('is-visible');
+      appendMsg('assistant', 'Proposta descartada.');
+      devAgent.agentId = null;
+      devAgent.runId = null;
+      devAgent.prNumber = null;
+      stopDevPoll();
+    } catch (e) {
+      appendMsg('error', `⚠ ${e.message}`);
+    }
+  }
+
+  btnDevTest?.addEventListener('click', enterTestMode);
+  btnDevApprove?.addEventListener('click', () => { void approveDevProposal(); });
+  btnDevReject?.addEventListener('click', () => { void rejectDevProposal(); });
+  bannerApprove?.addEventListener('click', () => { void approveDevProposal(); });
+  bannerExit?.addEventListener('click', exitTestMode);
 
 })();
 </script>

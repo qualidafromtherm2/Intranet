@@ -458,6 +458,7 @@ app.use('/api/sac', require('./routes/masp'));
 app.use('/api/sac', require('./routes/vendasRelatorio'));
 app.use('/api/sac', require('./routes/logisticaRelatorio'));
 app.use('/api/ai', require('./routes/ai_assistant'));
+app.use('/api/dev-agent', require('./routes/devAgent'));
 app.use('/api/producao', require('./routes/producao'));
 app.use('/api/gemba', require('./routes/gemba'));
 app.use('/api', require('./routes/producaoRelatorio'));
