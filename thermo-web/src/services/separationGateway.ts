@@ -45,6 +45,37 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
 
 const jsonBody = (value: unknown) => JSON.stringify(value)
 
+export interface SeparationOperatorContext {
+  id: string
+  username: string
+  restringir_destinos: boolean
+  destinos_codigos: string[]
+  destinos_chaves: string[]
+}
+
+export interface SeparationProductOption {
+  codigo: string
+  descricao: string
+  unidade: string
+}
+
+export interface SeparationExecutionInput {
+  solic_ids: number[]
+  carr_ids?: number[]
+  cod_local_origem: string
+  codigo_produto: string
+  etq_enderecos?: Array<{ etq_id?: number; endereco?: string; qtd: number }>
+  etq_id?: number
+  endereco_origem?: string
+  ignorar_saldo_etq?: true
+}
+
+export interface SeparationQuantityInput extends SeparationExecutionInput {
+  carr_ids: number[]
+  quantidade_separada: number
+  motivo: string
+}
+
 export function loadSeparationCart() { return requestJson<SeparationCartResponse>('/api/logistica/carrinho') }
 
 export function loadSeparationKanban(search = '') {
@@ -62,6 +93,24 @@ export function loadSeparationItems(nSolic: string, options: { includeDerived?: 
 
 export function loadSeparationActiveUsers() { return requestJson<ActiveUsersResponse>('/api/usuarios/ativos') }
 export function loadSeparationStockLocations() { return requestJson<SeparationStockLocationsResponse>('/api/armazem/locais') }
+
+export async function loadSeparationOperatorContext(): Promise<SeparationOperatorContext> {
+  const auth = await requestJson<{ loggedIn: boolean; user: { id: string | number; username: string } | null }>('/api/auth/status')
+  if (!auth.loggedIn || !auth.user) throw new Error(buildFriendlyError('/api/auth/status', 'Não autenticado.'))
+  const rule = await requestJson<{ restringir_destinos?: boolean; destinos_codigos?: string[]; destinos_chaves?: string[] }>(`/api/colaboradores/${encodeURIComponent(String(auth.user.id))}/separacao-permissao`)
+  return {
+    id: String(auth.user.id),
+    username: String(auth.user.username || '').trim(),
+    restringir_destinos: rule.restringir_destinos === true,
+    destinos_codigos: Array.isArray(rule.destinos_codigos) ? rule.destinos_codigos.map(String) : [],
+    destinos_chaves: Array.isArray(rule.destinos_chaves) ? rule.destinos_chaves.map(String) : [],
+  }
+}
+
+export function searchSeparationProducts(query: string) {
+  const params = new URLSearchParams({ q: query.trim() })
+  return requestJson<{ ok: boolean; resultados: SeparationProductOption[] }>(`/api/logistica/produtos/buscar?${params.toString()}`)
+}
 
 export function addSeparationCartItem(input: AddSeparationCartItemInput) {
   return requestJson<AddSeparationCartItemResponse>('/api/logistica/separacao', { method: 'POST', body: jsonBody(input) })
@@ -93,3 +142,35 @@ function mutateSeparationItems(path: string, solicIds: number[]) {
 export function startSeparation(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/separacao', solicIds) }
 export function moveSeparationToAwaitingPickup(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/aguardando-retirada', solicIds) }
 export function completeSeparation(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/concluido', solicIds) }
+export function assumeSeparation(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/assumir-separacao', solicIds) }
+export function cancelSeparation(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/cancelar-separacao', solicIds) }
+export function reverseSeparatedItem(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/reverter-separacao', solicIds) }
+export function reverseCheckedItem(solicIds: number[]) { return mutateSeparationItems('/api/logistica/itens_solicitados/reverter-conferido', solicIds) }
+
+export function registerManualSeparationQuantity(input: SeparationQuantityInput) {
+  return requestJson<SeparationMutationResponse>('/api/logistica/itens_solicitados/registrar-qtd-manual', { method: 'POST', body: jsonBody(input) })
+}
+
+export function separateItem(input: SeparationExecutionInput) {
+  return requestJson<SeparationMutationResponse>('/api/logistica/itens_solicitados/separar', { method: 'PATCH', body: jsonBody(input) })
+}
+
+export function separateItemPartially(input: SeparationQuantityInput) {
+  return requestJson<SeparationMutationResponse>('/api/logistica/itens_solicitados/separar-parcial', { method: 'POST', body: jsonBody(input) })
+}
+
+export function declineSeparationItem(solicId: number, justificativa: string) {
+  return requestJson<SeparationMutationResponse>('/api/logistica/itens_solicitados/nao-separar', { method: 'POST', body: jsonBody({ solic_id: solicId, justificativa }) })
+}
+
+export function swapSeparationProduct(input: { solic_id: number; codigo_novo: string; descricao_novo: string; unidade_novo: string; quantidade_nova: number | null }) {
+  return requestJson<SeparationMutationResponse>('/api/logistica/itens_solicitados/trocar', { method: 'POST', body: jsonBody(input) })
+}
+
+export function deleteSeparationItem(solicId: number) {
+  return requestJson<SeparationMutationResponse>(`/api/logistica/itens_solicitados/${solicId}/sep`, { method: 'DELETE' })
+}
+
+export function deleteSeparation(nSolic: string) {
+  return requestJson<SeparationMutationResponse>(`/api/logistica/sep/${encodeURIComponent(nSolic)}`, { method: 'DELETE' })
+}
