@@ -72,6 +72,8 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
 import { CalendarScreen } from './features/calendar'
+import { ChatbotMonitorScreen } from './features/chatbot-monitor'
+import { EngineeringChangesScreen } from './features/engineering-changes/EngineeringChangesScreen'
 import { FreightSimulatorScreen } from './features/freight'
 import { FirstPieceScreen } from './features/first-piece'
 import { InspectionRecordsScreen } from './features/inspection-records'
@@ -86,6 +88,7 @@ import { ProductRegistrationScreen } from './features/product-registration'
 import { ProductionRegistrationScreen } from './features/production-registration'
 import { ProductionRecordsScreen } from './features/production-records'
 import { ProductionIncidentsScreen } from './features/production-incidents'
+import { ProductionGembaScreen } from './features/production-gemba'
 import { PreparationsScreen } from './features/preparations'
 import { ProductionReportScreen } from './features/production-report'
 import { ProductionTestsScreen } from './features/production-tests'
@@ -1389,6 +1392,9 @@ function App() {
   const canWritePurchaseSettings = useMemo(() => permissionNodes.some((node) => node.allowed && node.selector === '#menu-compras-configuracoes' && /(?:write|edit|escrever|editar|crud)/i.test(node.key)), [permissionNodes])
   const canViewSacShippingRequest = useMemo(() => isSelectorAllowed('#menu-sac-solicitacao-envio', navigation.selectorMap), [navigation.selectorMap])
   const canViewSacReport = useMemo(() => isSelectorAllowed('#menu-sac-at-relatorio', navigation.selectorMap), [navigation.selectorMap])
+  const canViewProductionGemba = useMemo(() => isSelectorAllowed('#menu-producao-gemba', navigation.selectorMap), [navigation.selectorMap])
+  const canViewEngineeringChanges = useMemo(() => isSelectorAllowed('#menu-engenharia-alteracoes', navigation.selectorMap), [navigation.selectorMap])
+  const canViewChatbotMonitor = useMemo(() => isSelectorAllowed('#menu-chatbot-monitor', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1513,6 +1519,12 @@ function App() {
               <SacShippingRequestScreen allowed={canViewSacShippingRequest} canWrite={false} canCreate={false} />
             ) : activeView === 'sac-report' ? (
               canViewSacReport ? <SacReportScreen /> : <PermissionDenied feature="Relatório SAC/AT" />
+            ) : activeView === 'production-gemba' ? (
+              canViewProductionGemba ? <ProductionGembaScreen /> : <PermissionDenied feature="Gemba de produção" />
+            ) : activeView === 'engineering-changes' ? (
+              canViewEngineeringChanges ? <EngineeringChangesScreen /> : <PermissionDenied feature="Alterações de engenharia" />
+            ) : activeView === 'chatbot-monitor' ? (
+              canViewChatbotMonitor ? <ChatbotMonitorScreen /> : <PermissionDenied feature="Monitor do chatbot" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

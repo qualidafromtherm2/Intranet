@@ -20,3 +20,6 @@ e12867a5756e62324c13a1cf765fda200a7ef2b0,d51fcbb7d5ad9d69602f9d3c2bf1090448e409b
 0a28345a13300af619d40c40506ac5b14a0a76aa,2286db7c369226d0633c5cc7a67e69664bf6723f,769a6e4,Configurações de Compras,6,"purchase settings: 5 passed","Ligado a #menu-compras-configuracoes; CRUD opt-in por nó explícito",0
 0a28345a13300af619d40c40506ac5b14a0a76aa,bb59f4495f7c11f635166fd3bb257688e0686fc9,2947f84,Solicitações de Envio SAC,6,"sac shipping: 7 passed","Ligado a #menu-sac-solicitacao-envio; VIPP/upload/geração/impressão bloqueados",0
 0a28345a13300af619d40c40506ac5b14a0a76aa,da7894d17c72e19f9acdc974dec0da75156252de,d6da606,Relatório SAC/AT,5,"sac report: 1 passed","Ligado a #menu-sac-at-relatorio; consulta somente leitura",0
+953effff72557bb8bb967f49f9b413c6e9b70775,2c7c08340cf5cfd3cb9e2c4e162affa4f1ddc70f,19b0534,Gemba de Produção,5,"production Gemba: 2 passed","Ligado a #menu-producao-gemba; GET-only e contrato items[] estrito",1
+953effff72557bb8bb967f49f9b413c6e9b70775,15cc86347463803e3ca60607b5bb545c49fe52ee,08a8824,Alterações de Engenharia,4,"engineering changes: 2 passed","Ligado a #menu-engenharia-alteracoes; consulta somente leitura",0
+953effff72557bb8bb967f49f9b413c6e9b70775,34d771499f21891acd95308009e928c9937e0126,1edc01d,Monitor do Chatbot,5,"chatbot monitor: 2 passed","Ligado a #menu-chatbot-monitor; endpoints GET-only",0
