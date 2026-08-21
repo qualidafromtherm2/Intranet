@@ -25818,12 +25818,12 @@ html.light-mode #minhasComprasWrapper {
   background: var(--content-bg, #111827);
   color: var(--content-color, #e5e7eb);
 }
-#producaoGembaPane .gemba-filtros, #qualidadeAreaVermelhaPane .gemba-filtros {
+#producaoGembaPane .gemba-filtros, #qualidadeAreaVermelhaPane .gemba-filtros, #montaProducaoPane .gemba-filtros {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-#producaoGembaPane .gemba-filtro, #qualidadeAreaVermelhaPane .gemba-filtro {
+#producaoGembaPane .gemba-filtro, #qualidadeAreaVermelhaPane .gemba-filtro, #montaProducaoPane .gemba-filtro {
   border: 1px solid var(--border-color, #374151);
   background: rgba(255,255,255,.04);
   color: var(--content-color, #e5e7eb);
@@ -25835,13 +25835,13 @@ html.light-mode #minhasComprasWrapper {
   align-items: center;
   gap: 6px;
 }
-#producaoGembaPane .gemba-filtro span, #qualidadeAreaVermelhaPane .gemba-filtro span {
+#producaoGembaPane .gemba-filtro span, #qualidadeAreaVermelhaPane .gemba-filtro span, #montaProducaoPane .gemba-filtro span {
   background: rgba(255,255,255,.08);
   border-radius: 999px;
   padding: 0 7px;
   font-weight: 700;
 }
-#producaoGembaPane .gemba-filtro.is-active, #qualidadeAreaVermelhaPane .gemba-filtro.is-active {
+#producaoGembaPane .gemba-filtro.is-active, #qualidadeAreaVermelhaPane .gemba-filtro.is-active, #montaProducaoPane .gemba-filtro.is-active {
   background: rgba(14,165,233,.16);
   border-color: #0284c7;
   color: #7dd3fc;
@@ -25852,17 +25852,39 @@ html.light-mode #minhasComprasWrapper {
   color: #94a3b8;
 }
 #producaoGembaPane .gemba-status-msg.is-erro, #qualidadeAreaVermelhaPane .gemba-status-msg.is-erro { color: #f87171; }
-#producaoGembaPane .gemba-cards, #qualidadeAreaVermelhaPane .gemba-cards {
+#producaoGembaPane .gemba-cards, #qualidadeAreaVermelhaPane .gemba-cards, #montaProducaoPane .gemba-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
   padding: 6px 0 20px;
 }
-#producaoGembaPane .gemba-empty, #qualidadeAreaVermelhaPane .gemba-empty {
+#producaoGembaPane .gemba-empty, #qualidadeAreaVermelhaPane .gemba-empty, #montaProducaoPane .gemba-empty {
   grid-column: 1 / -1;
   text-align: center;
   padding: 36px 16px;
   color: var(--inactive-color);
+}
+
+/* Linha de produção — visão operador (cards estilo Gemba) */
+#montaProducaoPane #montaOpCards .kanban-prod-grupo {
+  background: var(--card-bg, #1e2535);
+  border: 1px solid var(--border-color, #374151);
+  border-radius: 12px;
+  overflow: hidden;
+  transition: box-shadow .2s, transform .2s;
+  height: fit-content;
+}
+#montaProducaoPane #montaOpCards .kanban-prod-grupo:hover {
+  box-shadow: 0 8px 24px rgba(0,0,0,.32);
+  transform: translateY(-1px);
+}
+#montaProducaoPane #montaOpCards .kanban-prod-grupo-ops {
+  border-top: 1px solid rgba(255,255,255,.08);
+  padding-top: 10px;
+  margin-top: 10px;
+}
+#montaProducaoPane.monta-modo-operador #montaKanban {
+  display: none !important;
 }
 #producaoGembaPane .gemba-card, #qualidadeAreaVermelhaPane .gemba-card {
   background: var(--card-bg, #1e2535);
