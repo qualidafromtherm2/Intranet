@@ -6,7 +6,9 @@ const {
   parseFiltrosRelatorio,
   appendFiltrosSql,
   labelTipoItem,
+  CODIGO_VENDEDOR_SQL,
 } = require('../utils/vendasRelatorioFiltros');
+const { BACKFILL_CODIGO_VENDEDOR_SQL } = require('../utils/nfCodigoVendedor');
 
 const router = express.Router();
 
@@ -126,6 +128,8 @@ async function ensureVendasRelatorioSchema() {
       ADD COLUMN IF NOT EXISTS data_emissao_dt DATE;
     ALTER TABLE vendas.notas_fiscais_omie
       ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie
+      ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT;
     CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_data_emissao_dt
       ON vendas.notas_fiscais_omie (data_emissao_dt)
       WHERE ativa IS DISTINCT FROM FALSE;
@@ -134,7 +138,17 @@ async function ensureVendasRelatorioSchema() {
     CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_id_pedido_omie
       ON vendas.notas_fiscais_omie (id_pedido_omie)
       WHERE id_pedido_omie IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_codigo_vendedor
+      ON vendas.notas_fiscais_omie (codigo_vendedor)
+      WHERE codigo_vendedor IS NOT NULL;
   `);
+
+    // Backfill leve: preenche vendedor a partir dos títulos da NF (idempotente)
+    try {
+      await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
+    } catch (errBf) {
+      console.warn('[vendas] backfill codigo_vendedor:', errBf?.message || errBf);
+    }
 
     try {
       await pool.query(`
@@ -409,6 +423,7 @@ const VENDAS_CTES = `
       nf.cfop,
       nf.status_ultimo,
       nf.payload_ultimo,
+      NULLIF(TRIM(nf.codigo_vendedor), '') AS codigo_vendedor,
       ${NF_DATA_EMISSAO_RESOLVED_SQL} AS data_emissao_dt
     FROM vendas.notas_fiscais_omie nf
     WHERE nf.ativa IS DISTINCT FROM FALSE
@@ -471,6 +486,7 @@ const VENDAS_CTES = `
       p.cfop,
       p.status_ultimo,
       p.payload_ultimo,
+      p.codigo_vendedor,
       p.data_emissao_dt,
       COALESCE(a.tem_itens_payload, FALSE) AS tem_itens_payload,
       COALESCE(a.valor_itens_incluidos, 0)::numeric(14,2) AS valor_itens_incluidos,
@@ -504,7 +520,7 @@ function buildBaseCte(etapaSql, pedidoSql = '') {
       SELECT
         COALESCE(p.codigo_pedido, nf.id_pedido_omie, (-nf.id)) AS codigo_pedido,
         COALESCE(NULLIF(TRIM(p.numero_pedido), ''), NULLIF(TRIM(nf.numero_nota), ''), TRIM(nf.id::text)) AS numero_pedido,
-        TRIM(COALESCE(p.informacoes_adicionais->>'codVend', '')) AS codigo_vendedor,
+        TRIM(${CODIGO_VENDEDOR_SQL}) AS codigo_vendedor,
         CASE
           WHEN p.codigo_pedido IS NULL THEN '70'
           ELSE TRIM(COALESCE(p.etapa::text, ''))
@@ -1475,7 +1491,6 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
           ON TRIM(v.codigo::text) = TRIM(b.codigo_vendedor)
         GROUP BY b.codigo_vendedor, v.nome
         ORDER BY valor_total DESC, total_pedidos DESC, vendedor
-        LIMIT 30
       `);
       await client.query('COMMIT');
     } catch (err) {

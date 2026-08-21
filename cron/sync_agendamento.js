@@ -937,7 +937,103 @@ async function syncPedidosVenda(cfg) {
   }
 
   log(`── [pedidos_venda] Concluído: ${sincronizados} sincronizados, ${erros} erros`);
-  return { sincronizados, erros };
+
+  // Complemento: NFs com id_pedido sem linha em pedidos_venda (janela ListarPedidos não cobre tudo)
+  let faltantes = { sincronizados: 0, erros: 0, pendentes: 0 };
+  try {
+    faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 80 });
+  } catch (eFat) {
+    log(`  [pedidos_venda] aviso reconciliar faltantes: ${eFat.message}`);
+    faltantes.erros += 1;
+  }
+
+  return {
+    sincronizados: sincronizados + (faltantes.sincronizados || 0),
+    erros: erros + (faltantes.erros || 0),
+    pedidos_faltantes: faltantes,
+  };
+}
+
+/**
+ * Busca na Omie os pedidos apontados por NFs que ainda não existem em vendas.pedidos_venda.
+ * Também preenche codigo_vendedor nas NFs a partir dos títulos (nCodVendedor).
+ */
+async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
+  log('── [nf→pedido] Reconciliando pedidos faltantes das NFs...');
+  try {
+    const { BACKFILL_CODIGO_VENDEDOR_SQL } = require('../utils/nfCodigoVendedor');
+    await pool.query(`ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT`);
+    const bf = await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
+    if (bf.rowCount > 0) log(`  [nf→pedido] backfill codigo_vendedor: ${bf.rowCount} NFs`);
+  } catch (eBf) {
+    log(`  [nf→pedido] aviso backfill vendedor: ${eBf.message}`);
+  }
+
+  const { rows } = await pool.query(`
+    SELECT DISTINCT nf.id_pedido_omie::bigint AS codigo_pedido
+      FROM vendas.notas_fiscais_omie nf
+     WHERE nf.ativa IS DISTINCT FROM FALSE
+       AND nf.id_pedido_omie IS NOT NULL
+       AND nf.id_pedido_omie::text NOT IN ('0', '')
+       AND NOT EXISTS (
+         SELECT 1 FROM vendas.pedidos_venda p
+          WHERE p.codigo_pedido = nf.id_pedido_omie
+       )
+     ORDER BY 1 DESC
+     LIMIT $1
+  `, [limite]);
+
+  if (!rows.length) {
+    log('── [nf→pedido] Nenhum pedido faltante');
+    return { sincronizados: 0, erros: 0, pendentes: 0 };
+  }
+
+  // Quantos ainda restam além do lote
+  const { rows: rest } = await pool.query(`
+    SELECT COUNT(DISTINCT nf.id_pedido_omie)::int AS n
+      FROM vendas.notas_fiscais_omie nf
+     WHERE nf.ativa IS DISTINCT FROM FALSE
+       AND nf.id_pedido_omie IS NOT NULL
+       AND nf.id_pedido_omie::text NOT IN ('0', '')
+       AND NOT EXISTS (
+         SELECT 1 FROM vendas.pedidos_venda p
+          WHERE p.codigo_pedido = nf.id_pedido_omie
+       )
+  `);
+  const pendentes = Math.max(0, (rest[0]?.n || 0) - rows.length);
+
+  let sincronizados = 0;
+  let erros = 0;
+  for (const row of rows) {
+    const codigo = Number(row.codigo_pedido);
+    if (!codigo) continue;
+    try {
+      const data = await omiePost('produtos/pedido', 'ConsultarPedido', {
+        codigo_pedido: codigo,
+      });
+      const ped = Array.isArray(data?.pedido_venda_produto)
+        ? data.pedido_venda_produto
+        : (data?.pedido_venda_produto ? [data.pedido_venda_produto] : []);
+      if (!ped.length) {
+        log(`  [nf→pedido] ConsultarPedido ${codigo} sem payload`);
+        erros++;
+        continue;
+      }
+      for (const pedido of ped) {
+        await pool.query(
+          'SELECT vendas.pedido_upsert_from_payload($1::jsonb)',
+          [pedido]
+        );
+      }
+      sincronizados++;
+    } catch (e) {
+      log(`  [nf→pedido] erro pedido ${codigo}: ${e.message}`);
+      erros++;
+    }
+  }
+
+  log(`── [nf→pedido] Concluído: sync=${sincronizados} erros=${erros} restantes≈${pendentes}`);
+  return { sincronizados, erros, pendentes };
 }
 
 // ─── Dispatcher de tabelas ────────────────────────────────────────────────────
@@ -1003,6 +1099,14 @@ async function main() {
   } catch (e) {
     log(`✗ Erro na reconciliação final de pedidos_omie: ${e.message}`);
     resumo.pedidos_omie_reconcile = { erros: 1, erro: e.message };
+  }
+
+  // Sempre: vendedor nas NFs + pedidos apontados por NF que faltam na base local
+  try {
+    resumo.nf_pedidos_faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 40 });
+  } catch (e) {
+    log(`✗ Erro na reconciliação nf→pedido: ${e.message}`);
+    resumo.nf_pedidos_faltantes = { erros: 1, erro: e.message };
   }
 
   log('═'.repeat(65));

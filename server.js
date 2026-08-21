@@ -18,6 +18,7 @@ if (IS_CHAT_SERVICE) {
 // utils/supabase.js — carrega R2 na subida (log do backend)
 require('./utils/supabase');
 const { resolveNumeroPedidoFromWebhook } = require('./utils/vendasNfJoin');
+const { extractCodigoVendedorFromNfPayload } = require('./utils/nfCodigoVendedor');
 const { obterPermissaoMovimentacao } = require('./utils/movimentacaoPermissoes');
 const { obterPermissaoSeparacao, assertAcessoSeparacao } = require('./utils/separacaoPermissoes');
 const { exigirGestaoEnderecos } = require('./utils/produtoEnderecosPermissoes');
@@ -8250,6 +8251,10 @@ app.post([
         } catch (ePed) {
           console.warn('[webhook/notas-vendas] aviso ao marcar pedido faturado:', ePed?.message || ePed);
         }
+      }
+      // Sempre enfileira sync do pedido quando a NF aponta um id — evita sumiço de vendedor
+      // (ListarPedidos do cron só pega janela curta de data_previsao).
+      if (parsed.idPedidoOmie || parsed.numeroPedido) {
         try {
           _pedidoSyncEnqueue(parsed.idPedidoOmie || null, parsed.numeroPedido || null);
         } catch (eEnq) {
@@ -22222,6 +22227,10 @@ async function ensureVendasNotasOmieTables(client) {
     ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_uf VARCHAR(5);
     ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS empresa_cnpj VARCHAR(20);
     ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+    ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT;
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_codigo_vendedor
+      ON vendas.notas_fiscais_omie (codigo_vendedor)
+      WHERE codigo_vendedor IS NOT NULL;
   `);
 
   _vendasNotasOmieTablesReady = true;
@@ -22338,7 +22347,7 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
       await ensureVendasNotasOmieTables(client);
 
       const atual = await client.query(
-        `SELECT cfop, chave_nfe, id_nf_omie, numero_nota, payload_ultimo, valor_total
+        `SELECT cfop, chave_nfe, id_nf_omie, numero_nota, payload_ultimo, valor_total, id_pedido_omie, codigo_vendedor
            FROM vendas.notas_fiscais_omie
           WHERE identidade = $1
           LIMIT 1`,
@@ -22349,7 +22358,21 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
 
       const payloadAtual = payloadNfParaGravar(row.payload_ultimo);
       const temCfop = !!String(row.cfop || '').trim();
-      if (payloadAtual && temCfop) return;
+      if (payloadAtual && temCfop) {
+        if (!String(row.codigo_vendedor || '').trim()) {
+          const cv = extractCodigoVendedorFromNfPayload(payloadAtual);
+          if (cv) {
+            await client.query(
+              `UPDATE vendas.notas_fiscais_omie
+                  SET codigo_vendedor = $1, updated_at = NOW()
+                WHERE identidade = $2
+                  AND COALESCE(TRIM(codigo_vendedor), '') = ''`,
+              [cv, id]
+            );
+          }
+        }
+        return;
+      }
 
       if (payloadAtual && !temCfop) {
         const cfopLocal = extractCfopsFromNfPayload(payloadAtual);
@@ -22377,17 +22400,31 @@ function agendarEnrichCfopNotaVenda({ identidade, chaveNfe = null, idNfOmie = nu
       }
       const cfop = extractCfopsFromNfPayload(nf);
       const valorTotal = valorTotalFromNfPayload(nf);
+      const codigoVendedor = extractCodigoVendedorFromNfPayload(nf);
 
       await client.query(
         `UPDATE vendas.notas_fiscais_omie
             SET payload_ultimo = $1,
                 cfop = COALESCE(NULLIF(TRIM($2), ''), cfop),
                 valor_total = COALESCE($3, valor_total),
+                codigo_vendedor = COALESCE(NULLIF(TRIM($4), ''), codigo_vendedor),
                 updated_at = NOW()
-          WHERE identidade = $4`,
-        [nf, cfop, valorTotal, id]
+          WHERE identidade = $5`,
+        [nf, cfop, valorTotal, codigoVendedor, id]
       );
-      console.log('[vendas/cfop] preenchido:', { identidade: id, cfop, tem_itens: true });
+      console.log('[vendas/cfop] preenchido:', { identidade: id, cfop, tem_itens: true, codigo_vendedor: codigoVendedor || null });
+
+      // Se a NF aponta pedido que ainda não existe localmente, busca na Omie
+      try {
+        const idPed = Number(nf?.compl?.nIdPedido || row.id_pedido_omie || 0) || null;
+        if (idPed) {
+          const existe = await client.query(
+            `SELECT 1 FROM vendas.pedidos_venda WHERE codigo_pedido = $1 LIMIT 1`,
+            [idPed]
+          );
+          if (!existe.rows.length) _pedidoSyncEnqueue(idPed, null);
+        }
+      } catch (_) { /* ignore */ }
     } catch (err) {
       const fault = String(err?.faultstring || err?.message || err);
       const waitMatch = fault.match(/Aguarde\s+(\d+)\s+segundos?/i);
@@ -22415,6 +22452,11 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     ? String(dados.cfop).trim()
     : extractCfopsFromNfPayload(dados.payload || {});
 
+  const codigoVendedor =
+    dados.codigoVendedor
+      ? String(dados.codigoVendedor).replace(/\D/g, '').trim() || null
+      : extractCodigoVendedorFromNfPayload(dados.payload || {});
+
   const ativa = !['Cancelada'].includes(String(dados.statusUltimo || ''));
   await client.query(`
     INSERT INTO vendas.notas_fiscais_omie (
@@ -22423,7 +22465,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       acao_ultimo, id_nf_omie, serie, url_xml,
       ambiente, operacao, hora_emissao, id_pedido_omie,
       url_danfe, empresa_ie, empresa_uf, empresa_cnpj,
-      cfop,
+      cfop, codigo_vendedor,
       valor_total,
       cnpj_emitente, razao_emitente, data_emissao,
       message_id_ultimo, author_ultimo, payload_ultimo,
@@ -22434,11 +22476,11 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       $8,$9,$10,$11,
       $12,$13,$14,$15,
       $16,$17,$18,$19,
-      $20,
-      $21,
-      $22,$23,$24,
-      $25,$26,$27,
-      $28,NOW()
+      $20,$21,
+      $22,
+      $23,$24,$25,
+      $26,$27,$28,
+      $29,NOW()
     )
     ON CONFLICT (identidade)
     DO UPDATE SET
@@ -22461,6 +22503,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
       empresa_uf = COALESCE(EXCLUDED.empresa_uf, vendas.notas_fiscais_omie.empresa_uf),
       empresa_cnpj = COALESCE(EXCLUDED.empresa_cnpj, vendas.notas_fiscais_omie.empresa_cnpj),
       cfop = COALESCE(EXCLUDED.cfop, vendas.notas_fiscais_omie.cfop),
+      codigo_vendedor = COALESCE(EXCLUDED.codigo_vendedor, vendas.notas_fiscais_omie.codigo_vendedor),
       valor_total = COALESCE(EXCLUDED.valor_total, vendas.notas_fiscais_omie.valor_total),
       cnpj_emitente = COALESCE(EXCLUDED.cnpj_emitente, vendas.notas_fiscais_omie.cnpj_emitente),
       razao_emitente = COALESCE(EXCLUDED.razao_emitente, vendas.notas_fiscais_omie.razao_emitente),
@@ -22499,6 +22542,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     dados.empresaUf || null,
     dados.empresaCnpj || null,
     cfopInformado || null,
+    codigoVendedor || null,
     dados.valorTotal || null,
     dados.cnpjEmitente || null,
     dados.razaoEmitente || null,
@@ -22509,7 +22553,7 @@ async function upsertNotaFiscalVendaEstado(client, dados = {}) {
     ativa,
   ]);
 
-  return { ok: true, identidade, cfop: cfopInformado || null };
+  return { ok: true, identidade, cfop: cfopInformado || null, codigo_vendedor: codigoVendedor || null };
 }
 
 async function registrarEventoNotaFiscalVenda(client, dados = {}) {

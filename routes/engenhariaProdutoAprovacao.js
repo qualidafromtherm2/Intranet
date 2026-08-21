@@ -272,6 +272,11 @@ function usuarioPodeAlterarAnalistaNiq(req, registradoPor) {
   return sessaoCorrespondeUsuarioNiq(req, registradoPor);
 }
 
+function usuarioPodeExcluirNiq(req, registradoPor) {
+  if (usuarioEhAdminOuQualidade(req)) return true;
+  return sessaoCorrespondeUsuarioNiq(req, registradoPor);
+}
+
 function usuarioPodeDecidirNiq(req, analistaUser) {
   if (usuarioEhAdminNiq(req)) return true;
   const a = String(analistaUser || '').trim();
@@ -954,6 +959,43 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
     } catch (err) {
       console.error('[engenharia/niq-area-vermelha analista]', err);
       return res.status(500).json({ ok: false, error: err.message || 'Falha ao alterar analista.' });
+    }
+  });
+
+  // Excluir NIQ — só quem registrou, Qualidade ou Admin.
+  router.delete('/niq-area-vermelha/:id', async (req, res) => {
+    try {
+      await ensureNiqAreaVermelhaTable();
+      const id = Number(req.params.id) || 0;
+      if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+      const { rows: atualRows } = await dbQuery(
+        `SELECT id, registrado_por, status, omie_trf_codigo, omie_sai_codigo
+           FROM qualidade.niq_area_vermelha
+          WHERE id = $1
+          LIMIT 1`,
+        [id]
+      );
+      if (!atualRows.length) {
+        return res.status(404).json({ ok: false, error: 'NIQ não encontrada.' });
+      }
+      const atual = atualRows[0];
+      if (!usuarioPodeExcluirNiq(req, atual.registrado_por)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Somente quem registrou o NIQ, Qualidade ou Admin podem excluir.',
+        });
+      }
+
+      await dbQuery(`DELETE FROM qualidade.niq_area_vermelha WHERE id = $1`, [id]);
+      return res.json({
+        ok: true,
+        id,
+        aviso_omie: !!(atual.omie_trf_codigo || atual.omie_sai_codigo),
+      });
+    } catch (err) {
+      console.error('[engenharia/niq-area-vermelha DELETE]', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Falha ao excluir NIQ.' });
     }
   });
 

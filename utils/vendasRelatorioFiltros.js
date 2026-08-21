@@ -231,6 +231,8 @@ function parseFiltrosRelatorio(query = {}) {
  * - nBaseParams — quantos parâmetros a CTE base usa (datas + filtros de pedido)
  * - itemSqlStandalone / itemParams — `$1…` próprios (temp table de itens sem datas)
  */
+const { CODIGO_VENDEDOR_SQL } = require('./nfCodigoVendedor');
+
 function appendFiltrosSql(filtros, params) {
   const clausesPedido = [];
   const clausesItem = [];
@@ -240,8 +242,9 @@ function appendFiltrosSql(filtros, params) {
   if (filtros.vendedor) {
     params.push(filtros.vendedor);
     const idx = params.length;
+    // Mesma regra do relatório: pedido → coluna NF → títulos da NF
     clausesPedido.push(
-      `AND TRIM(COALESCE(p.informacoes_adicionais->>'codVend', '')) = $${idx}`
+      `AND TRIM(${CODIGO_VENDEDOR_SQL}) = $${idx}`
     );
   }
 
@@ -335,4 +338,5 @@ module.exports = {
   calcPeriodoComFiltros,
   parseFiltrosRelatorio,
   appendFiltrosSql,
+  CODIGO_VENDEDOR_SQL,
 };
