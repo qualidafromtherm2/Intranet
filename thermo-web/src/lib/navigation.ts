@@ -294,9 +294,11 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
   }
   if (selector === '#menu-producao-ocorrencias') return { icon: itemIconMap[selector] ?? 'triangle-alert', migrationStatus: 'migrated', view: 'production-incidents', destination: '/production/incidents' }
   if (selector === '#menu-preparacoes') return { icon: itemIconMap[selector] ?? 'package-search', migrationStatus: 'migrated', view: 'preparations', destination: '/production/preparations' }
+  if (selector === '#menu-producao-testes') return { icon: itemIconMap[selector] ?? 'flask-conical', migrationStatus: 'migrated', view: 'production-tests', destination: '/production/tests' }
   if (selector === '#menu-producao-relatorio') return { icon: itemIconMap[selector] ?? 'file-chart-column', migrationStatus: 'migrated', view: 'production-report', destination: '/production/report' }
   if (selector === '#menu-ri-registro-inspecao') return { icon: itemIconMap[selector] ?? 'clipboard-check', migrationStatus: 'migrated', view: 'inspection-records', destination: '/quality/inspection-records' }
   if (selector === '#menu-qualidade-manuais') return { icon: itemIconMap[selector] ?? 'book-open', migrationStatus: 'migrated', view: 'quality-manuals', destination: '/quality/manuals' }
+  if (selector === '#menu-qualidade-area-vermelha') return { icon: itemIconMap[selector] ?? 'ban', migrationStatus: 'migrated', view: 'red-area', destination: '/quality/red-area' }
 
   if (selector === '#menu-vendas-relatorio') {
     return {
@@ -325,6 +327,7 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
   if (selector === '#menu-vendas-mapa') return { icon: itemIconMap[selector] ?? 'map', migrationStatus: 'migrated', view: 'sales-map', destination: '/sales/map' }
+  if (selector === '#menu-compras-contas-utilizadas') return { icon: itemIconMap[selector] ?? 'landmark', migrationStatus: 'migrated', view: 'purchase-accounts', destination: '/purchases/accounts' }
 
   if (selector === '#menu-log-relatorio') {
     return {

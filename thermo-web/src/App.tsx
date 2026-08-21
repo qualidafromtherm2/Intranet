@@ -88,7 +88,10 @@ import { ProductionRecordsScreen } from './features/production-records'
 import { ProductionIncidentsScreen } from './features/production-incidents'
 import { PreparationsScreen } from './features/preparations'
 import { ProductionReportScreen } from './features/production-report'
+import { ProductionTestsScreen } from './features/production-tests'
+import { PurchaseAccountsScreen } from './features/purchase-accounts'
 import { QualityManualsScreen } from './features/quality-manuals'
+import { RedAreaScreen } from './features/red-area'
 import { SalesReportScreen } from './features/sales-report'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { ShippingScreen } from './features/shipping/ShippingScreen'
@@ -1376,6 +1379,9 @@ function App() {
   const canUsePreparations = useMemo(() => isSelectorAllowed('#menu-preparacoes', navigation.selectorMap), [navigation.selectorMap])
   const canViewQualityManuals = useMemo(() => isSelectorAllowed('#menu-qualidade-manuais', navigation.selectorMap), [navigation.selectorMap])
   const canViewProductionReport = useMemo(() => isSelectorAllowed('#menu-producao-relatorio', navigation.selectorMap), [navigation.selectorMap])
+  const canViewProductionTests = useMemo(() => isSelectorAllowed('#menu-producao-testes', navigation.selectorMap), [navigation.selectorMap])
+  const canViewRedArea = useMemo(() => isSelectorAllowed('#menu-qualidade-area-vermelha', navigation.selectorMap), [navigation.selectorMap])
+  const canViewPurchaseAccounts = useMemo(() => isSelectorAllowed('#menu-compras-contas-utilizadas', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1488,6 +1494,12 @@ function App() {
               <QualityManualsScreen allowed={canViewQualityManuals} canManageProducts={false} canUploadMaster={false} />
             ) : activeView === 'production-report' ? (
               canViewProductionReport ? <ProductionReportScreen /> : <PermissionDenied feature="Relatório de produção" />
+            ) : activeView === 'production-tests' ? (
+              <ProductionTestsScreen allowed={canViewProductionTests} />
+            ) : activeView === 'red-area' ? (
+              <RedAreaScreen allowed={canViewRedArea} canWrite={false} currentUser={user.username} />
+            ) : activeView === 'purchase-accounts' ? (
+              canViewPurchaseAccounts ? <PurchaseAccountsScreen /> : <PermissionDenied feature="Contas utilizadas" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}
