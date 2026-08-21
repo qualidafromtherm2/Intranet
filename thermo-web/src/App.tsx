@@ -504,6 +504,7 @@ function SidebarSection({
 }
 
 function useAccordionState(storageKey: string, ids: string[]) {
+  const idsKey = ids.join('|')
   const [openIds, setOpenIds] = useState<string[]>(() => {
     if (typeof window === 'undefined') return ids
     try {
@@ -523,8 +524,14 @@ function useAccordionState(storageKey: string, ids: string[]) {
   }, [openIds, storageKey])
 
   useEffect(() => {
-    setOpenIds((current) => current.filter((id) => ids.includes(id)))
-  }, [ids])
+    setOpenIds((current) => {
+      const next = current.filter((id) => ids.includes(id))
+      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        return current
+      }
+      return next
+    })
+  }, [ids, idsKey])
 
   return {
     openIds,
