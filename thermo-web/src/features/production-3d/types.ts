@@ -1,0 +1,1 @@
+export type Production3dItem={id:number;n_op?:string;codigo?:string;codigo_produto?:number|null;descricao?:string;foto_url?:string|null;status?:string;postos?:unknown;created_at?:string};export type Production3dResponse={ok:true;total:number;itens:Production3dItem[];sincronizado_em?:string}

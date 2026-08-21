@@ -1,0 +1,1 @@
+import type {Production3dResponse} from '../features/production-3d/types';export async function loadProduction3d(){const r=await fetch('/api/producao/cena-3d',{credentials:'include',cache:'no-store',headers:{Accept:'application/json'}});const p=await r.json().catch(()=>({}));if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);return p as Production3dResponse}
