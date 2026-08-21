@@ -1,8 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
+  deleteReceiptIdentification,
   extractPrintedReceiptId,
   loadPrintedReceipts,
+  loadReceiptIdentifications,
+  printReceiptIdentifications,
+  printSplitReceiptIdentification,
   reprintPrintedReceipt,
+  setReceiptIdentificationHidden,
   storePrintedReceipt,
   validateWarehouseAddress,
 } from './logistics'
@@ -79,5 +84,40 @@ describe('logistics gateway', () => {
         }),
       }),
     )
+  })
+
+  it('preserves identification filters and receiving/expedition split', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ etiquetas: [], filtro: 'sem_mp' }))
+
+    await loadReceiptIdentifications({ query: 'LT-24', flow: 'recebimento', showHidden: true, withoutMp: true })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/etiquetas/recebimento/pendentes?q=LT-24&mostrar_ocultos=1&sem_mp=1&fluxo=recebimento',
+      expect.objectContaining({ credentials: 'include' }),
+    )
+  })
+
+  it('keeps hide and Jair-only deletion on their audited endpoints', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ ok: true }))
+
+    await setReceiptIdentificationHidden(44, true)
+    await deleteReceiptIdentification(44)
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/etiquetas/recebimento/44/oculto', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ oculto: true }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/etiquetas/recebimento/44/identificacao', expect.objectContaining({ method: 'DELETE' }))
+  })
+
+  it('uses the real queue contracts for selected and split agent printing', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => jsonResponse({ ok: true, quantidade: 2 }))
+
+    await printReceiptIdentifications({ ids: [44, 45], printer: '__AGENT__:PC-LOG:Zebra P', username: 'jair.r' })
+    await printSplitReceiptIdentification({ id: 44, multiple: 6, printer: '__AGENT__:PC-LOG:Zebra P', username: 'jair.r' })
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/etiquetas/fila', expect.objectContaining({
+      body: JSON.stringify({ ids: [44, 45], usuario: 'jair.r', destino_agente: 'PC-LOG', impressora: 'Zebra P' }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/etiquetas/fila', expect.objectContaining({
+      body: JSON.stringify({ ids: [44], multiplo: 6, usuario: 'jair.r', destino_agente: 'PC-LOG', impressora: 'Zebra P' }),
+    }))
   })
 })

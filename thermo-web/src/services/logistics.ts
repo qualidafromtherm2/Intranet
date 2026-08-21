@@ -17,6 +17,23 @@ export type PrintedReceipt = {
   usuario_criacao: string | null
 }
 
+export type ReceiptIdentification = {
+  id: number
+  numero_nfe: string | null
+  numero_pedido: string | null
+  lote: string | null
+  codigo_produto: string | null
+  descricao_produto: string | null
+  qtd: number
+  unidade: string | null
+  data_emissao: string | null
+  criado_em: string | null
+  oculto: boolean
+  impressa: boolean
+  pir: boolean
+  id_impresso: number | null
+}
+
 export type PrintedReceiptDetail = {
   id: number
   id_rotulo: string | null
@@ -109,6 +126,17 @@ async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
   return response.json() as Promise<T>
 }
 
+async function requestBlob(path: string) {
+  let response: Response
+  try {
+    response = await fetch(path, { credentials: 'include', headers: { Accept: 'application/pdf' } })
+  } catch (error) {
+    throw new LogisticsApiError(error instanceof Error ? error.message : 'Não foi possível acessar o backend legado.')
+  }
+  if (!response.ok) throw new LogisticsApiError(await responseError(response), response.status)
+  return response.blob()
+}
+
 export function isPermissionFailure(error: unknown) {
   return error instanceof LogisticsApiError && (error.status === 401 || error.status === 403)
 }
@@ -145,6 +173,44 @@ export async function loadPrintedReceipts(input: { query?: string; flow?: Logist
   if (input.flow) params.set('fluxo', input.flow)
   const query = params.toString()
   return requestJson<{ etiquetas: PrintedReceipt[] }>(`/api/etiquetas/rec-impresso${query ? `?${query}` : ''}`)
+}
+
+export async function loadReceiptIdentifications(input: {
+  query?: string
+  flow?: LogisticsFlow
+  showHidden?: boolean
+  withoutMp?: boolean
+} = {}) {
+  const params = new URLSearchParams()
+  if (input.query?.trim()) params.set('q', input.query.trim())
+  if (input.showHidden) params.set('mostrar_ocultos', '1')
+  if (input.withoutMp) params.set('sem_mp', '1')
+  if (input.flow) params.set('fluxo', input.flow)
+  const query = params.toString()
+  return requestJson<{ etiquetas: ReceiptIdentification[]; filtro: string }>(
+    `/api/etiquetas/recebimento/pendentes${query ? `?${query}` : ''}`,
+  )
+}
+
+export async function setReceiptIdentificationHidden(id: number, hidden: boolean) {
+  return requestJson<{ ok: true; id: number; oculto: boolean; codigo_produto: string | null }>(
+    `/api/etiquetas/recebimento/${id}/oculto`,
+    { method: 'PATCH', body: JSON.stringify({ oculto: hidden }) },
+  )
+}
+
+export async function reopenReceiptIdentification(id: number) {
+  return requestJson<{ ok: true; id: number; impressa: false }>(
+    `/api/etiquetas/recebimento/${id}/reimprimir`,
+    { method: 'PATCH' },
+  )
+}
+
+export async function deleteReceiptIdentification(id: number) {
+  return requestJson<{ ok: true; identificacao: ReceiptIdentification }>(
+    `/api/etiquetas/recebimento/${id}/identificacao`,
+    { method: 'DELETE' },
+  )
 }
 
 export async function loadWarehouseLocations() {
@@ -267,6 +333,94 @@ function parseAgentDestination(value: string) {
   const separator = raw.indexOf(':')
   if (separator < 0) return null
   return { pcName: raw.slice(0, separator), printer: raw.slice(separator + 1) }
+}
+
+export type PrintResult =
+  | { kind: 'queued'; quantity: number }
+  | { kind: 'download'; blob: Blob; filename: string }
+
+export async function printReceiptIdentifications(input: {
+  ids: number[]
+  printer: string
+  username: string
+}): Promise<PrintResult> {
+  if (!input.ids.length) throw new LogisticsApiError('Selecione ao menos uma etiqueta.', 400)
+  if (!input.printer) throw new LogisticsApiError('Escolha a impressora antes de continuar.', 400)
+  if (input.printer === '__PDF__') {
+    const blob = await requestBlob(
+      `/api/etiquetas/recebimento/pdf-download?ids=${input.ids.join(',')}&usuario=${encodeURIComponent(input.username)}`,
+    )
+    return { kind: 'download', blob, filename: `etiquetas_${input.ids.join('-')}.pdf` }
+  }
+
+  const agent = parseAgentDestination(input.printer)
+  if (input.printer === '__BP__' || agent) {
+    const body: JsonObject = { ids: input.ids, usuario: input.username }
+    if (agent) {
+      body.destino_agente = agent.pcName
+      body.impressora = agent.printer
+    }
+    const response = await requestJson<{ ok: boolean; quantidade: number }>('/api/etiquetas/fila', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    return { kind: 'queued', quantity: response.quantidade || input.ids.length }
+  }
+
+  const response = await requestJson<{ ok: boolean; impressas?: number; error?: string }>(
+    '/api/etiquetas/recebimento/imprimir-modal',
+    {
+      method: 'POST',
+      body: JSON.stringify({ ids: input.ids, printer: input.printer, usuario: input.username }),
+    },
+  )
+  if (!response.ok) throw new LogisticsApiError(response.error || 'Falha ao imprimir etiqueta(s).')
+  return { kind: 'queued', quantity: response.impressas || input.ids.length }
+}
+
+export async function printSplitReceiptIdentification(input: {
+  id: number
+  multiple: number
+  printer: string
+  username: string
+}): Promise<PrintResult> {
+  if (!(input.multiple > 0)) throw new LogisticsApiError('Informe um múltiplo válido (> 0).', 400)
+  if (!input.printer) throw new LogisticsApiError('Escolha a impressora antes de continuar.', 400)
+  if (input.printer === '__PDF__') {
+    const blob = await requestBlob(
+      `/api/etiquetas/recebimento/pdf-download?ids=${input.id}&multiplo=${input.multiple}&usuario=${encodeURIComponent(input.username)}`,
+    )
+    return { kind: 'download', blob, filename: `etiqueta_${input.id}_multiplo${input.multiple}.pdf` }
+  }
+
+  const agent = parseAgentDestination(input.printer)
+  if (input.printer === '__BP__' || agent) {
+    const body: JsonObject = { ids: [input.id], multiplo: input.multiple, usuario: input.username }
+    if (agent) {
+      body.destino_agente = agent.pcName
+      body.impressora = agent.printer
+    }
+    const response = await requestJson<{ ok: boolean; quantidade: number }>('/api/etiquetas/fila', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    })
+    return { kind: 'queued', quantity: response.quantidade || 1 }
+  }
+
+  const response = await requestJson<{ ok: boolean; impressas: number; error?: string }>(
+    '/api/etiquetas/recebimento/imprimir-multiplo',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        id: input.id,
+        multiplo: input.multiple,
+        printer: input.printer,
+        usuario: input.username,
+      }),
+    },
+  )
+  if (!response.ok) throw new LogisticsApiError(response.error || 'Falha ao gerar etiquetas.')
+  return { kind: 'queued', quantity: response.impressas || 1 }
 }
 
 export async function reprintPrintedReceipt(input: {
