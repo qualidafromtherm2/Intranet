@@ -167,6 +167,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-estoque-minimo') {
+    return {
+      icon: itemIconMap[selector] ?? 'boxes',
+      migrationStatus: 'migrated',
+      view: 'minimum-stock',
+      destination: '/logistics/minimum-stock',
+    }
+  }
+
   if (selector === '#menu-solicitacao-ajuste') {
     return {
       icon: itemIconMap[selector] ?? 'file-pen',
@@ -257,12 +266,30 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-registrar-producao') {
+    return {
+      icon: itemIconMap[selector] ?? 'factory',
+      migrationStatus: 'migrated',
+      view: 'production-registration',
+      destination: '/production/register',
+    }
+  }
+
   if (selector === '#menu-vendas-relatorio') {
     return {
       icon: itemIconMap[selector] ?? 'file-chart-column',
       migrationStatus: 'migrated',
       view: 'sales-report',
       destination: '/sales/report',
+    }
+  }
+
+  if (selector === '#menu-vendas-controle') {
+    return {
+      icon: itemIconMap[selector] ?? 'receipt',
+      migrationStatus: 'migrated',
+      view: 'sales-control',
+      destination: '/sales/orders',
     }
   }
 
