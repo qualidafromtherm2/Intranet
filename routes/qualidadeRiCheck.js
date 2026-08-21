@@ -1592,21 +1592,28 @@ router.post('/abrir', requireAuth, express.json(), async (req, res) => {
 });
 
 // GET /api/qualidade/ri-check/template-verificacao/produtos — máquinas com verificações (agrupado)
+// Query opcional: q, local (posto/linha: Montagem hermetica, Teste, …)
 router.get('/template-verificacao/produtos', requireAuth, async (req, res) => {
   try {
     await garantirSchemaRi();
     const q = String(req.query?.q || '').trim();
+    const localFiltro = String(req.query?.local || req.query?.local_verificacao || '').trim();
     const limit = Math.min(Math.max(Number(req.query?.limit) || 300, 1), 500);
     const params = [];
-    let where = '';
+    const whereParts = [];
     if (q) {
       params.push(`%${q}%`);
-      where = `WHERE (
-        COALESCE(t.codigo, '') ILIKE $1
-        OR CAST(t.id_omie AS TEXT) ILIKE $1
-        OR COALESCE(t.item_verificado, '') ILIKE $1
-      )`;
+      whereParts.push(`(
+        COALESCE(t.codigo, '') ILIKE $${params.length}
+        OR CAST(t.id_omie AS TEXT) ILIKE $${params.length}
+        OR COALESCE(t.item_verificado, '') ILIKE $${params.length}
+      )`);
     }
+    if (localFiltro) {
+      params.push(localFiltro);
+      whereParts.push(`TRIM(COALESCE(t.local_verificacao, '')) = $${params.length}`);
+    }
+    const where = whereParts.length ? `WHERE ${whereParts.join(' AND ')}` : '';
     params.push(limit);
     const { rows } = await dbQuery(
       `SELECT g.id_omie,
@@ -1655,12 +1662,14 @@ router.get('/template-verificacao/produtos', requireAuth, async (req, res) => {
 });
 
 // GET /api/qualidade/ri-check/template-verificacao — lista cadastros mestre (para copiar)
+// Query opcional: q, id_omie, codigo, local (posto/linha)
 router.get('/template-verificacao', requireAuth, async (req, res) => {
   try {
     await garantirSchemaRi();
     const q = String(req.query?.q || '').trim();
     const idOmieFiltro = Number(req.query?.id_omie || req.query?.codigo_produto) || 0;
     const codigoFiltro = String(req.query?.codigo || '').trim();
+    const localFiltro = String(req.query?.local || req.query?.local_verificacao || '').trim();
     const limit = Math.min(Math.max(Number(req.query?.limit) || 300, 1), 500);
     const params = [];
     const whereParts = [];
@@ -1671,6 +1680,10 @@ router.get('/template-verificacao', requireAuth, async (req, res) => {
     if (codigoFiltro) {
       params.push(codigoFiltro);
       whereParts.push(`COALESCE(NULLIF(TRIM(t.codigo), ''), CAST(t.id_omie AS TEXT)) = $${params.length}`);
+    }
+    if (localFiltro) {
+      params.push(localFiltro);
+      whereParts.push(`TRIM(COALESCE(t.local_verificacao, '')) = $${params.length}`);
     }
     if (q) {
       params.push(`%${q}%`);

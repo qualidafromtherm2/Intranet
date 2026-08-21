@@ -93,6 +93,7 @@ async function ensureNiqAreaVermelhaTable() {
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_foto_url TEXT`);
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_video_url TEXT`);
   await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS decisao_anexos JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE qualidade.niq_area_vermelha ADD COLUMN IF NOT EXISTS analista_user TEXT`);
   await dbQuery(`
     CREATE INDEX IF NOT EXISTS idx_niq_av_registrado_em
       ON qualidade.niq_area_vermelha (registrado_em DESC)
@@ -212,6 +213,7 @@ function mapearLinhaNiq(row) {
     local_origem_nome: row.local_origem_nome || '',
     local_destino_codigo: row.local_destino_codigo || LOCAL_AREA_VERMELHA,
     local_destino_nome: destinoNome,
+    analista_user: row.analista_user || '',
     analise_por: row.analise_por || '',
     analise_em: row.analise_em || null,
     analise_foto_url: row.analise_foto_url || null,
@@ -232,12 +234,30 @@ function usuarioSessao(req) {
   return String(u.fullName || u.username || u.email || u.id || 'sistema').trim() || 'sistema';
 }
 
-function usuarioEhAdminOuQualidade(req) {
+function identidadesSessaoNiq(req) {
+  const u = req.session?.user || {};
+  return [u.username, u.fullName, u.email, u.name, u.id]
+    .map((s) => String(s || '').trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function sessaoCorrespondeUsuarioNiq(req, alvo) {
+  const n = String(alvo || '').trim().toLowerCase();
+  if (!n) return false;
+  return identidadesSessaoNiq(req).includes(n);
+}
+
+function usuarioEhAdminNiq(req) {
   const u = req.session?.user || {};
   const roles = Array.isArray(u.roles)
     ? u.roles
     : String(u.roles || '').split(',').map((s) => s.trim()).filter(Boolean);
-  if (roles.some((r) => String(r || '').trim().toLowerCase() === 'admin')) return true;
+  return roles.some((r) => String(r || '').trim().toLowerCase() === 'admin');
+}
+
+function usuarioEhAdminOuQualidade(req) {
+  if (usuarioEhAdminNiq(req)) return true;
+  const u = req.session?.user || {};
   if (Number(u.sector_id) === 2) return true;
   const setor = String(u.setor || u.sector || '')
     .normalize('NFD')
@@ -247,10 +267,22 @@ function usuarioEhAdminOuQualidade(req) {
   return setor.includes('qualidade');
 }
 
+function usuarioPodeAlterarAnalistaNiq(req, registradoPor) {
+  if (usuarioEhAdminNiq(req)) return true;
+  return sessaoCorrespondeUsuarioNiq(req, registradoPor);
+}
+
+function usuarioPodeDecidirNiq(req, analistaUser) {
+  if (usuarioEhAdminNiq(req)) return true;
+  const a = String(analistaUser || '').trim();
+  if (!a) return true; // NIQ legado sem analista: mantém comportamento anterior
+  return sessaoCorrespondeUsuarioNiq(req, a);
+}
+
 const NIQ_SELECT_COLS = `
   n.id, n.codigo, n.codigo_produto, n.descricao, n.quantidade, n.descricao_falha,
   n.numero_op, n.op_producao_id, n.referencia_tipo, n.foto_url, n.video_url,
-  n.registrado_por, n.registrado_em, n.status,
+  n.registrado_por, n.registrado_em, n.status, n.analista_user,
   n.local_origem_codigo, n.local_origem_nome,
   n.local_destino_codigo, n.local_destino_nome,
   n.omie_trf_codigo, n.analise_por, n.analise_em,
@@ -341,7 +373,8 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
                OR COALESCE(n.decisao_motivo, '') ILIKE $1
                OR COALESCE(n.registrado_por, '') ILIKE $1
                OR COALESCE(n.status, '') ILIKE $1
-               OR COALESCE(n.analise_por, '') ILIKE $1)
+               OR COALESCE(n.analise_por, '') ILIKE $1
+               OR COALESCE(n.analista_user, '') ILIKE $1)
             ORDER BY n.registrado_em DESC
             LIMIT 400`,
           [like]
@@ -503,6 +536,11 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
       descricao = descricao || prod.rows[0].descricao || '';
       codigoProduto = codigoProduto || prod.rows[0].codigo_produto || '';
 
+      const analistaUser = String(req.body?.analista_user || req.body?.analista || '').trim();
+      if (!analistaUser) {
+        return res.status(400).json({ ok: false, error: 'Selecione o usuário que vai realizar a análise.' });
+      }
+
       const numeroOp = String(req.body?.numero_op || '').trim();
       const opProducaoId = Number(req.body?.op_producao_id || 0) || null;
       let referenciaTipo = String(req.body?.referencia_tipo || '').trim().toLowerCase();
@@ -519,8 +557,8 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
         `INSERT INTO qualidade.niq_area_vermelha
            (codigo, codigo_produto, descricao, quantidade, descricao_falha,
             numero_op, op_producao_id, referencia_tipo, produto_grupo, registrado_por, status,
-            local_origem_codigo, local_destino_codigo, local_destino_nome)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'registrado', $11, $12, $13)
+            local_origem_codigo, local_destino_codigo, local_destino_nome, analista_user)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'registrado', $11, $12, $13, $14)
          RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
         [
           prod.rows[0]?.codigo || codigo,
@@ -536,6 +574,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
           localOrigemCodigo,
           LOCAL_AREA_VERMELHA,
           NOME_AREA_VERMELHA,
+          analistaUser,
         ]
       );
       let row = ins.rows[0];
@@ -767,7 +806,7 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
       }
 
       const { rows: atualRows } = await dbQuery(
-        `SELECT id, codigo, quantidade, numero_op, status
+        `SELECT id, codigo, quantidade, numero_op, status, analista_user
            FROM qualidade.niq_area_vermelha
           WHERE id = $1
           LIMIT 1`,
@@ -781,6 +820,12 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
         return res.status(409).json({
           ok: false,
           error: 'Só é possível decidir NIQ em Aguardando aprovação.',
+        });
+      }
+      if (!usuarioPodeDecidirNiq(req, atual.analista_user)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Somente o analista designado (ou Admin) pode confirmar scrap, retrabalhar ou liberar.',
         });
       }
 
@@ -859,6 +904,56 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
     } catch (err) {
       console.error('[engenharia/niq-area-vermelha decisao]', err);
       return res.status(500).json({ ok: false, error: err.message || 'Falha ao registrar decisão.' });
+    }
+  });
+
+  // Alterar quem vai realizar a análise — só quem registrou o NIQ ou Admin.
+  router.post('/niq-area-vermelha/:id/analista', express.json(), async (req, res) => {
+    try {
+      await ensureNiqAreaVermelhaTable();
+      const id = Number(req.params.id) || 0;
+      if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+      const analistaUser = String(req.body?.analista_user || req.body?.analista || '').trim();
+      if (!analistaUser) {
+        return res.status(400).json({ ok: false, error: 'Selecione o usuário que vai realizar a análise.' });
+      }
+
+      const { rows: atualRows } = await dbQuery(
+        `SELECT id, registrado_por, status
+           FROM qualidade.niq_area_vermelha
+          WHERE id = $1
+          LIMIT 1`,
+        [id]
+      );
+      if (!atualRows.length) {
+        return res.status(404).json({ ok: false, error: 'NIQ não encontrada.' });
+      }
+      const atual = atualRows[0];
+      if (!usuarioPodeAlterarAnalistaNiq(req, atual.registrado_por)) {
+        return res.status(403).json({
+          ok: false,
+          error: 'Somente quem registrou o NIQ ou Admin pode alterar o analista.',
+        });
+      }
+      const st = String(atual.status || '').toLowerCase();
+      if (['scrap', 'retrabalho', 'liberado', 'scrapado'].includes(st)) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Não é possível alterar o analista após a decisão final.',
+        });
+      }
+
+      const upd = await dbQuery(
+        `UPDATE qualidade.niq_area_vermelha
+            SET analista_user = $2
+          WHERE id = $1
+          RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
+        [id, analistaUser]
+      );
+      return res.json({ ok: true, niq: mapearLinhaNiq(upd.rows[0]) });
+    } catch (err) {
+      console.error('[engenharia/niq-area-vermelha analista]', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Falha ao alterar analista.' });
     }
   });
 

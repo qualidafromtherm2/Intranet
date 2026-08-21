@@ -1339,7 +1339,7 @@
 
   if (!document.querySelector('script[data-chamado-aviso-diario]')) {
     const s = document.createElement('script');
-    s.src = '/public/js/chamado-aviso-diario.js?v=20260819a';
+    s.src = '/public/js/chamado-aviso-diario.js?v=20260821a';
     s.defer = true;
     s.dataset.chamadoAvisoDiario = '1';
     document.head.appendChild(s);
