@@ -123,25 +123,37 @@ async function main() {
 
   try {
     await pool.query(`ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendas.pedidos_omie_inexistentes (
+        codigo_pedido BIGINT PRIMARY KEY,
+        motivo TEXT,
+        marcado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     const bf = await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
     const prop = await pool.query(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
     log(`local: backfill títulos=${bf.rowCount || 0} propagado pedido→NF=${prop.rowCount || 0}`);
 
+    // Só IDs cujo pedido AINDA NÃO está local — evita reconsultar os que a Omie
+    // já devolveu sem codVend (vendedor realmente em branco no ERP).
     const { rows: sem } = await pool.query(
       `
       SELECT DISTINCT nf.id_pedido_omie::bigint AS codigo_pedido
         FROM vendas.notas_fiscais_omie nf
-        LEFT JOIN vendas.pedidos_venda p ON p.codigo_pedido = nf.id_pedido_omie
        WHERE nf.ativa IS DISTINCT FROM FALSE
          AND COALESCE(nf.payload_ultimo->'ide'->>'tpNF', '1') <> '0'
          AND nf.data_emissao_dt >= $1::date
          AND nf.id_pedido_omie IS NOT NULL
          AND nf.id_pedido_omie::text NOT IN ('0', '')
-         AND COALESCE(
-               NULLIF(TRIM(p.informacoes_adicionais->>'codVend'), ''),
-               NULLIF(TRIM(nf.codigo_vendedor), ''),
-               ''
-             ) = ''
+         AND COALESCE(TRIM(nf.codigo_vendedor), '') = ''
+         AND NOT EXISTS (
+           SELECT 1 FROM vendas.pedidos_venda p
+            WHERE p.codigo_pedido = nf.id_pedido_omie
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM vendas.pedidos_omie_inexistentes x
+            WHERE x.codigo_pedido = nf.id_pedido_omie
+         )
        ORDER BY 1 DESC
       `,
       [opts.desde]

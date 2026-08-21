@@ -968,6 +968,13 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 25 } = {}) {
       PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL,
     } = require('../utils/nfCodigoVendedor');
     await pool.query(`ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT`);
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS vendas.pedidos_omie_inexistentes (
+        codigo_pedido BIGINT PRIMARY KEY,
+        motivo TEXT,
+        marcado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
     const bf = await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
     if (bf.rowCount > 0) log(`  [nf→pedido] backfill codigo_vendedor (titulos): ${bf.rowCount} NFs`);
     const prop = await pool.query(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
@@ -991,6 +998,10 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 25 } = {}) {
        AND NOT EXISTS (
          SELECT 1 FROM vendas.pedidos_venda p
           WHERE p.codigo_pedido = nf.id_pedido_omie
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM vendas.pedidos_omie_inexistentes x
+          WHERE x.codigo_pedido = nf.id_pedido_omie
        )
      ORDER BY nf.id_pedido_omie, prioridade ASC, nf.data_emissao_dt DESC NULLS LAST
      LIMIT $1
@@ -1056,8 +1067,18 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 25 } = {}) {
         log('  [nf→pedido] Omie bloqueou — interrompendo lote (tenta de novo no próximo cron)');
         break;
       }
-      // Pedido inexistente na Omie: não insiste no mesmo id neste ciclo
-      if (/não cadastrado|nao cadastrado/i.test(msg)) continue;
+      // Pedido inexistente na Omie: marca para não gastar cota de novo
+      if (/não cadastrado|nao cadastrado/i.test(msg)) {
+        try {
+          await pool.query(
+            `INSERT INTO vendas.pedidos_omie_inexistentes (codigo_pedido, motivo)
+             VALUES ($1, $2)
+             ON CONFLICT (codigo_pedido) DO UPDATE SET motivo = EXCLUDED.motivo, marcado_em = NOW()`,
+            [codigo, msg.slice(0, 240)]
+          );
+        } catch (_) { /* ignore */ }
+        continue;
+      }
     }
   }
 
