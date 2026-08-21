@@ -25894,8 +25894,13 @@ html.light-mode #minhasComprasWrapper {
   border-width: 0 26px 26px 0;
   border-color: transparent #64748b transparent transparent;
 }
+#montaProducaoPane .gemba-card-corner[data-status="producao"] { border-right-color: #22c55e; }
+#montaProducaoPane .gemba-card-corner[data-status="notificacao"] { border-right-color: #ef4444; }
+#montaProducaoPane .gemba-card-corner[data-status="parada"] { border-right-color: #f97316; }
+#montaProducaoPane .gemba-card-corner[data-status="ri"] { border-right-color: #3b82f6; }
+#montaProducaoPane .gemba-card-corner[data-status="programado"] { border-right-color: #64748b; }
 #montaProducaoPane .gemba-card-corner[data-status="aberta"] { border-right-color: #ef4444; }
-#montaProducaoPane .gemba-card-corner[data-status="em_andamento"] { border-right-color: #f59e0b; }
+#montaProducaoPane .gemba-card-corner[data-status="em_andamento"] { border-right-color: #f97316; }
 #montaProducaoPane .gemba-card-corner[data-status="resolvida"] { border-right-color: #22c55e; }
 #montaProducaoPane .gemba-card-head {
   display: flex;
@@ -25933,6 +25938,11 @@ html.light-mode #minhasComprasWrapper {
   background: rgba(255,255,255,.07);
   color: #fcd34d;
 }
+#montaProducaoPane .gemba-card-status[data-status="producao"] { color: #86efac; }
+#montaProducaoPane .gemba-card-status[data-status="notificacao"] { color: #fca5a5; }
+#montaProducaoPane .gemba-card-status[data-status="parada"] { color: #fdba74; }
+#montaProducaoPane .gemba-card-status[data-status="ri"] { color: #93c5fd; }
+#montaProducaoPane .gemba-card-status[data-status="programado"] { color: #94a3b8; }
 #montaProducaoPane .gemba-card-status[data-status="resolvida"] { color: #86efac; }
 #montaProducaoPane .gemba-card-status[data-status="aberta"] { color: #fca5a5; }
 #montaProducaoPane .gemba-card-body {

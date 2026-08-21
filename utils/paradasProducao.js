@@ -34,6 +34,7 @@ async function garantirSchemaParadas() {
     CREATE INDEX IF NOT EXISTS idx_producao_paradas_numero_op
       ON producao."Paradas" (numero_op);
   `);
+  await dbQuery(`ALTER TABLE producao."Paradas" ADD COLUMN IF NOT EXISTS explicacao_fim TEXT`);
   schemaOk = true;
 }
 
@@ -127,21 +128,24 @@ async function buscarParadaAberta({ kanbanProgramacaoId = null, numeroOp = '' })
   return rows[0] || null;
 }
 
-async function retomarParada(paradaId) {
+async function retomarParada(paradaId, { explicacaoFim = '' } = {}) {
   await garantirSchemaParadas();
   const id = Number(paradaId) || 0;
   if (!id) throw new Error('Parada inválida.');
+  const explicacao = String(explicacaoFim || '').trim();
+  if (!explicacao) throw new Error('Informe a explicação da parada para finalizar.');
 
   const { rows, rowCount } = await dbQuery(
     `UPDATE producao."Paradas"
-        SET parada_fim = NOW()
+        SET parada_fim = NOW(),
+            explicacao_fim = $2
       WHERE id = $1
         AND parada_fim IS NULL
       RETURNING id, kanban_programacao_id, numero_op, usuario, operacao,
                 parada_inicio::text AS parada_inicio,
                 parada_fim::text AS parada_fim,
-                tipo_parada, motivo`,
-    [id]
+                tipo_parada, motivo, explicacao_fim`,
+    [id, explicacao]
   );
   if (!rowCount) throw new Error('Parada não encontrada ou já encerrada.');
   return rows[0];

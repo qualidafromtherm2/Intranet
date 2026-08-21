@@ -2691,7 +2691,8 @@ router.post('/paradas/ativas-por-ops', express.json(), async (req, res) => {
  * --------------------------------------------------------------- */
 router.post('/paradas/:id/retomar', express.json(), async (req, res) => {
   try {
-    const row = await retomarParada(req.params.id);
+    const explicacao = String(req.body?.explicacao_fim || req.body?.explicacao || '').trim();
+    const row = await retomarParada(req.params.id, { explicacaoFim: explicacao });
     return res.json({ success: true, parada: row });
   } catch (err) {
     console.error('[producao] Erro ao retomar parada:', err.message);
