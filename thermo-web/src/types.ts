@@ -174,7 +174,7 @@ export interface PermissionTreeResponse {
   nodes: PermissionNode[]
 }
 
-export type AppView = 'home' | 'products'
+export type AppView = 'home' | 'products' | 'separation' | 'store-materials' | 'identify-product'
 
 export type ShellNavStatus = 'migrated' | 'in_progress' | 'pending'
 

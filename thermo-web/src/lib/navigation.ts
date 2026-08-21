@@ -149,6 +149,33 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-solicitacao-transferencia') {
+    return {
+      icon: itemIconMap[selector] ?? 'clipboard-list',
+      migrationStatus: 'migrated',
+      view: 'separation',
+      destination: '/separation',
+    }
+  }
+
+  if (selector === '#menu-guardar-materiais' || selector === '#menu-guardar-materiais-expedicao') {
+    return {
+      icon: itemIconMap[selector] ?? 'warehouse',
+      migrationStatus: 'migrated',
+      view: 'store-materials',
+      destination: '/logistics/store-materials',
+    }
+  }
+
+  if (selector === '#menu-identificacao-produto' || selector === '#menu-identificacao-produto-expedicao') {
+    return {
+      icon: itemIconMap[selector] ?? 'scan-line',
+      migrationStatus: 'migrated',
+      view: 'identify-product',
+      destination: '/logistics/identify-product',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',

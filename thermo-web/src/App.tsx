@@ -70,6 +70,8 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
+import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
+import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
 import { buildNavigationCatalog, isSelectorAllowed } from './lib/navigation'
 import { buildLegacyUrl, getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
@@ -1321,6 +1323,8 @@ function App() {
   const canOpenCart = useMemo(() => isSelectorAllowed('#cart-icon', navigation.selectorMap), [navigation.selectorMap])
   const canOpenSeparation = useMemo(() => isSelectorAllowed('#menu-solicitacao-transferencia', navigation.selectorMap), [navigation.selectorMap])
   const canEditCatalog = useMemo(() => isSelectorAllowed('#menu-produto', navigation.selectorMap) || isSelectorAllowed('#btn-definicoes', navigation.selectorMap), [navigation.selectorMap])
+  const canStoreMaterials = useMemo(() => isSelectorAllowed('#menu-guardar-materiais', navigation.selectorMap) || isSelectorAllowed('#menu-guardar-materiais-expedicao', navigation.selectorMap), [navigation.selectorMap])
+  const canIdentifyProduct = useMemo(() => isSelectorAllowed('#menu-identificacao-produto', navigation.selectorMap) || isSelectorAllowed('#menu-identificacao-produto-expedicao', navigation.selectorMap), [navigation.selectorMap])
 
   const topRightLabel = useMemo(() => {
     if (!user) return null
@@ -1390,7 +1394,7 @@ function App() {
                 sections={navigation.sections}
                 onNavigate={(view) => setActiveView(view)}
               />
-            ) : (
+            ) : activeView === 'products' ? (
               <ProductListScreen
                 permissions={{
                   canOpenCart,
@@ -1400,6 +1404,12 @@ function App() {
                   separationReason: canOpenSeparation ? null : 'Sua árvore de permissões não liberou a Solicitação de transferência (#menu-solicitacao-transferencia).',
                 }}
               />
+            ) : activeView === 'separation' ? (
+              <SeparationWorkspace />
+            ) : activeView === 'store-materials' ? (
+              <StoreMaterialsScreen username={user.username} allowed={canStoreMaterials} />
+            ) : (
+              <IdentifyProductScreen username={user.username} allowed={canIdentifyProduct} />
             )}
           </main>
         </div>
