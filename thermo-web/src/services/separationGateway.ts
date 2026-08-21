@@ -4,9 +4,13 @@ import type {
   AddSeparationCartItemResponse,
   SeparationCartResponse,
   SeparationItemsResponse,
+  SeparationInventoryAddress,
   SeparationKanbanResponse,
   SeparationMutationResponse,
   SeparationStockLocationsResponse,
+  RequesterKanbanResponse,
+  SeparationStockBalance,
+  SeparationFifoId,
   SubmitSeparationInput,
   SubmitSeparationResponse,
 } from '../features/separation/types'
@@ -83,6 +87,33 @@ export function loadSeparationKanban(search = '') {
   if (search.trim()) params.set('q', search.trim())
   const query = params.toString()
   return requestJson<SeparationKanbanResponse>(`/api/logistica/solicitacoes-kanban${query ? `?${query}` : ''}`)
+}
+
+export function loadRequesterSeparationKanban() { return requestJson<RequesterKanbanResponse>('/api/logistica/kanban') }
+
+export function loadSeparationOperationalData(codes: string[]) {
+  const value = [...new Set(codes.map(String).map((code) => code.trim()).filter(Boolean))].join(',')
+  const query = encodeURIComponent(value)
+  return Promise.all([
+    requestJson<{ ok: boolean; dados: Record<string, SeparationStockBalance[]> }>(`/api/logistica/estoque/batch?codigos=${query}`),
+    requestJson<{ ok: boolean; dados: Record<string, SeparationInventoryAddress[]> }>(`/api/logistica/endereco-pp/batch?codigos=${query}`),
+    requestJson<{ ok: boolean; dados: Record<string, SeparationFifoId[]> }>(`/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=${query}`),
+  ]).then(([stock, addresses, fifo]) => ({
+    stock: Object.fromEntries(Object.entries(stock.dados || {}).map(([code, rows]) => [code, rows.map((row) => ({ ...row, codigo_local_estoque: row.local_codigo, descricao_local_estoque: row.local_nome }))])),
+    addresses: addresses.dados || {}, fifo: fifo.dados || {},
+  }))
+}
+
+export function loadSeparationPlan(nSolic: string) {
+  return requestJson<{ ok: boolean; n_solic: string | null; codigos: string[]; itens: Array<{ codigo: string; descricao?: string; seps: number; quantidade: number | string }> }>(`/api/logistica/planejar-sep/codigos?n_solic=${encodeURIComponent(nSolic)}`)
+}
+
+export function printSeparationLabels(ids: number[], usuario: string) {
+  return requestJson<SeparationMutationResponse>('/api/etiquetas/rec-impresso/imprimir-ids', { method: 'POST', body: jsonBody({ ids, usuario, via_fila: true }) })
+}
+
+export function returnCompletedSeparationItem(input: { solic_id: number; quantidade: number; motivo: string; etq_modo: 'mesmo_id' | 'novo_id' }) {
+  return requestJson<SeparationMutationResponse & { etiquetas_criadas?: Array<{ id: number; id_rotulo?: string; endereco?: string }> }>('/api/logistica/itens_solicitados/devolver', { method: 'POST', body: jsonBody(input) })
 }
 
 export function loadSeparationItems(nSolic: string, options: { includeDerived?: boolean } = {}) {

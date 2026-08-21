@@ -12,6 +12,7 @@ const statusStyles: Record<SeparationWorkflowStatus, string> = {
   Separado: 'border-emerald-200 bg-emerald-50 text-emerald-800',
   'Aguardando retirada': 'border-violet-200 bg-violet-50 text-violet-800',
   Concluído: 'border-slate-200 bg-slate-100 text-slate-700',
+  Devolvido: 'border-orange-200 bg-orange-50 text-orange-800',
 }
 
 interface PendingTransition {
@@ -169,7 +170,7 @@ export function SeparationKanbanScreen() {
   return (
     <section aria-labelledby="separation-kanban-title" className="min-w-0">
       <header className="mb-4 flex flex-col gap-3 border-b-2 border-thermo-border pb-4 lg:flex-row lg:items-end lg:justify-between">
-        <div><div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-thermo-red"><PackageCheck className="size-4" />THM-011</div><h1 className="text-xl font-bold text-thermo-navy" id="separation-kanban-title">Kanban de separação</h1><p className="mt-1 text-sm text-slate-600">{total} SEPs nos seis estados operacionais auditados.</p></div>
+        <div><div className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-thermo-red"><PackageCheck className="size-4" />THM-032</div><h1 className="text-xl font-bold text-thermo-navy" id="separation-kanban-title">Kanban de separação</h1><p className="mt-1 text-sm text-slate-600">{total} SEPs nos sete estados operacionais auditados.</p></div>
         <form className="flex min-w-0 flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()) }}><label className="relative min-w-0 flex-1 sm:w-72"><span className="sr-only">Buscar SEP, pessoa ou produto</span><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" /><input className="min-h-11 w-full rounded-md border border-slate-300 bg-white pl-9 pr-3 text-sm focus:border-thermo-navy focus:outline-none focus:ring-2 focus:ring-thermo-navy/15" onChange={(event) => setSearchDraft(event.target.value)} placeholder="Buscar SEP, pessoa ou produto" value={searchDraft} /></label><button className="thermo-button thermo-button-secondary min-h-11" type="submit">Buscar</button><button aria-label="Atualizar kanban" className="thermo-icon-button" disabled={loading || busy} onClick={() => void reload()} type="button"><RefreshCw className="size-4" /></button></form>
       </header>
       {error ? <div className="mb-4 flex items-start gap-2 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800" role="alert"><AlertCircle className="mt-0.5 size-4 shrink-0" />{error}</div> : null}

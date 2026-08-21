@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { assumeSeparation, cancelSeparation, clearSeparationCart, declineSeparationItem, deleteSeparation, deleteSeparationItem, loadSeparationItems, loadSeparationKanban, loadSeparationOperatorContext, registerManualSeparationQuantity, reverseCheckedItem, reverseSeparatedItem, separateItem, separateItemPartially, startSeparation, submitSeparation, swapSeparationProduct, updateSeparationCartQuantity } from './separationGateway'
+import { assumeSeparation, cancelSeparation, clearSeparationCart, declineSeparationItem, deleteSeparation, deleteSeparationItem, loadRequesterSeparationKanban, loadSeparationItems, loadSeparationKanban, loadSeparationOperationalData, loadSeparationOperatorContext, loadSeparationPlan, printSeparationLabels, registerManualSeparationQuantity, returnCompletedSeparationItem, reverseCheckedItem, reverseSeparatedItem, separateItem, separateItemPartially, startSeparation, submitSeparation, swapSeparationProduct, updateSeparationCartQuantity } from './separationGateway'
 
 const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
 afterEach(() => vi.unstubAllGlobals())
@@ -70,5 +70,20 @@ describe('separationGateway', () => {
       ['/api/logistica/itens_solicitados/91/sep', 'DELETE', undefined],
       ['/api/logistica/sep/SEP-1042', 'DELETE', undefined],
     ])
+  })
+
+  it('uses the requester-scoped board and audited operational reads', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true, colunas: {}, dados: {}, itens: [], codigos: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+    await loadRequesterSeparationKanban(); await loadSeparationOperationalData(['A 1']); await loadSeparationPlan('SEP-10')
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/logistica/kanban', '/api/logistica/estoque/batch?codigos=A%201', '/api/logistica/endereco-pp/batch?codigos=A%201', '/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=A%201', '/api/logistica/planejar-sep/codigos?n_solic=SEP-10'])
+  })
+
+  it('preserves print and return payloads without reaching a real backend', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
+    vi.stubGlobal('fetch', fetchMock)
+    await printSeparationLabels([44], 'Jair'); await returnCompletedSeparationItem({ solic_id: 91, quantidade: 1, motivo: 'Código incorreto', etq_modo: 'mesmo_id' })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/etiquetas/rec-impresso/imprimir-ids', expect.objectContaining({ method: 'POST', body: JSON.stringify({ ids: [44], usuario: 'Jair', via_fila: true }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/itens_solicitados/devolver', expect.objectContaining({ method: 'POST', body: JSON.stringify({ solic_id: 91, quantidade: 1, motivo: 'Código incorreto', etq_modo: 'mesmo_id' }) }))
   })
 })

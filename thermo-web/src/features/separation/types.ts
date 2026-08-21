@@ -5,10 +5,11 @@ export const separationWorkflowStatuses = [
   'Separado',
   'Aguardando retirada',
   'Concluído',
+  'Devolvido',
 ] as const
 
 export type SeparationWorkflowStatus = (typeof separationWorkflowStatuses)[number]
-export type SeparationKanbanStatus = SeparationWorkflowStatus | 'Devolvido'
+export type SeparationKanbanStatus = SeparationWorkflowStatus
 
 export const separationStatusLabels: Record<SeparationWorkflowStatus, string> = {
   Solicitado: 'Solicitado',
@@ -17,7 +18,17 @@ export const separationStatusLabels: Record<SeparationWorkflowStatus, string> = 
   Separado: 'Separado',
   'Aguardando retirada': 'Aguardando retirada',
   Concluído: 'Concluído',
+  Devolvido: 'Devolvido',
 }
+
+export interface RequesterKanbanResponse {
+  ok: boolean
+  colunas: Record<'carrinho' | 'pendente' | 'Stund-by' | 'Separação' | 'Separado' | 'Aguardando retirada' | 'Concluído' | 'Devolvido', SeparationKanbanCard[]>
+  error?: string
+}
+
+export interface SeparationStockBalance { local_codigo?: string; local_nome?: string; codigo_local_estoque?: string; descricao_local_estoque?: string; saldo?: number | string; unidade?: string; bloqueado_separacao?: boolean; [key: string]: unknown }
+export interface SeparationFifoId { id: number; id_rotulo?: string; endereco?: string; qtd?: number | string; unidade?: string; [key: string]: unknown }
 
 export interface SeparationCartItem {
   id: number
