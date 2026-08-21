@@ -23,6 +23,7 @@ import {
   isPermissionFailure,
   loadPrintedReceipt,
   loadPrintedReceipts,
+  loadIdentificationPhoto,
   loadPrinterSetup,
   loadProductAddressReferences,
   loadWarehouseLocations,
@@ -75,6 +76,7 @@ function StoreReceiptDialog({
   initialDestination,
   onClose,
   onStored,
+  onStoredIds,
 }: {
   open: boolean
   initialId: number | null
@@ -82,6 +84,7 @@ function StoreReceiptDialog({
   initialDestination: string
   onClose: () => void
   onStored: (message: string) => void
+  onStoredIds: (ids: number[]) => void
 }) {
   const [items, setItems] = useState<PrintedReceiptDetail[]>([])
   const [labelInput, setLabelInput] = useState('')
@@ -226,6 +229,7 @@ function StoreReceiptDialog({
     setBusy(true)
     setError(null)
     const failures: Array<{ item: PrintedReceiptDetail; message: string }> = []
+    const completedIds: number[] = []
     let completed = 0
     for (const item of items) {
       setFeedback(`Guardando ${completed + 1} de ${items.length} no endereço ${normalizedAddress}…`)
@@ -237,11 +241,13 @@ function StoreReceiptDialog({
           destinationCode: destination,
         })
         completed += 1
+        completedIds.push(item.id)
       } catch (storeError) {
         failures.push({ item, message: errorMessage(storeError, 'Falha ao guardar.') })
       }
     }
     setBusy(false)
+    if (completedIds.length) onStoredIds(completedIds)
 
     if (failures.length) {
       setItems(failures.map((failure) => failure.item))
@@ -566,16 +572,17 @@ export function StoreMaterialsScreen({
       {!permissionDenied && error ? <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 size-4 shrink-0" /><span>{error}</span><button className="ml-auto font-semibold underline" type="button" onClick={() => void load(query)}>Tentar novamente</button></div> : null}
 
       <div className="overflow-hidden rounded-xl border border-thermo-border bg-white shadow-sm">
-        <div className="hidden grid-cols-[minmax(12rem,1.2fr)_minmax(8rem,.7fr)_minmax(10rem,.8fr)_minmax(7rem,.5fr)_minmax(12rem,.9fr)_minmax(18rem,1.2fr)] gap-3 border-b border-thermo-border bg-thermo-bg px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid"><span>Produto</span><span>Lote</span><span>Origem</span><span>Quantidade</span><span>Situação</span><span>Ações</span></div>
+        <div className="hidden grid-cols-[3.5rem_minmax(12rem,1.2fr)_minmax(8rem,.7fr)_minmax(10rem,.8fr)_minmax(7rem,.5fr)_minmax(12rem,.9fr)_minmax(18rem,1.2fr)] gap-3 border-b border-thermo-border bg-thermo-bg px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid"><span>Foto</span><span>Produto</span><span>Lote</span><span>Origem</span><span>Quantidade</span><span>Situação</span><span>Ações</span></div>
         {loading && receipts.length === 0 ? (
           <div className="space-y-3 p-4" aria-label="Carregando materiais"><div className="h-20 animate-pulse rounded-xl bg-slate-100" /><div className="h-20 animate-pulse rounded-xl bg-slate-100" /><div className="h-20 animate-pulse rounded-xl bg-slate-100" /></div>
         ) : null}
         {!loading && !error && receipts.length === 0 ? <div className="px-6 py-14 text-center"><PackageCheck className="mx-auto size-8 text-slate-300" /><h2 className="mt-3 font-bold text-thermo-navy">Nenhum material aguardando armazenamento</h2><p className="mt-1 text-sm text-slate-500">Ajuste a busca ou atualize a lista.</p></div> : null}
         {receipts.map((receipt) => (
-          <article key={receipt.id} className="grid gap-3 border-b border-thermo-border px-4 py-4 last:border-b-0 lg:grid-cols-[minmax(12rem,1.2fr)_minmax(8rem,.7fr)_minmax(10rem,.8fr)_minmax(7rem,.5fr)_minmax(12rem,.9fr)_minmax(18rem,1.2fr)] lg:items-center" data-testid="store-material-row">
+          <article key={receipt.id} className="grid gap-3 border-b border-thermo-border px-4 py-4 last:border-b-0 lg:grid-cols-[3.5rem_minmax(12rem,1.2fr)_minmax(8rem,.7fr)_minmax(10rem,.8fr)_minmax(7rem,.5fr)_minmax(12rem,.9fr)_minmax(18rem,1.2fr)] lg:items-center" data-testid="store-material-row">
+            <MaterialPhoto code={receipt.codigo_produto} description={receipt.descricao_produto} />
             <div><div className="font-mono text-xs font-semibold text-slate-500">{receipt.codigo_produto || '—'}</div><div className="mt-1 text-sm font-bold text-thermo-navy">{receipt.descricao_produto || 'Produto sem descrição'}</div></div>
             <div><span className="lg:hidden text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Lote · </span><strong className="font-mono text-sm text-thermo-ink">{receipt.lote || '—'}</strong></div>
-            <div className="text-sm"><strong className="block text-thermo-ink">{receipt.numero_nfe ? `NF-e Nº ${receipt.numero_nfe}` : receipt.numero_pedido ? `Pedido Nº ${receipt.numero_pedido}` : 'Sem documento'}</strong>{receipt.fornecedor ? <span className="text-xs text-slate-500">{receipt.fornecedor}</span> : null}</div>
+            <div className="text-sm"><strong className="block text-thermo-ink">{receipt.numero_nfe ? `NF-e Nº ${receipt.numero_nfe}` : receipt.numero_pedido ? `Pedido Nº ${receipt.numero_pedido}` : 'Sem documento'}</strong>{receipt.fornecedor ? <span className="block text-xs text-slate-500">{receipt.fornecedor}</span> : null}{receipt.data_emissao ? <span className="block text-xs text-slate-500">Emissão: {receipt.data_emissao}</span> : null}</div>
             <div className="text-sm font-semibold text-thermo-ink">{quantity(receipt.qtd, receipt.unidade)}</div>
             <div><strong className="inline-flex rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-mono text-xs text-sky-800">ETQ {receiptLabel(receipt)}</strong><span className="mt-1 block text-xs text-slate-500"><Printer className="mr-1 inline size-3" />{dateTime(receipt.impresso_em)}{receipt.usuario_criacao ? ` · ${receipt.usuario_criacao}` : ''}</span></div>
             <div className="grid gap-2 sm:grid-cols-3 lg:grid-cols-1 xl:grid-cols-3">
@@ -587,7 +594,7 @@ export function StoreMaterialsScreen({
         ))}
       </div>
 
-      <StoreReceiptDialog open={storeOpen} initialId={storeInitialId} locations={locations} initialDestination={destination} onClose={() => setStoreOpen(false)} onStored={(message) => { setNotice(message); void load(query) }} />
+      <StoreReceiptDialog open={storeOpen} initialId={storeInitialId} locations={locations} initialDestination={destination} onClose={() => setStoreOpen(false)} onStored={setNotice} onStoredIds={(ids) => setReceipts((current) => current.filter((receipt) => !ids.includes(receipt.id)))} />
       <ReprintDialog receipt={reprintReceipt} username={username} onClose={() => setReprintReceipt(null)} onSuccess={setNotice} />
 
       <ModalShell open={Boolean(returnReceipt)} title={returnReceipt ? `Retornar ETQ ${receiptLabel(returnReceipt)}` : 'Retornar etiqueta'} description="O saldo volta para Identificação do produto e poderá ser reimpresso com múltiplo." onClose={() => { if (!returnBusy) setReturnReceipt(null) }}>
@@ -614,4 +621,10 @@ export function StoreMaterialsScreen({
       </ModalShell>
     </section>
   )
+}
+
+function MaterialPhoto({ code, description }: { code: string | null; description: string | null }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => { if (code) void loadIdentificationPhoto(code).then(setUrl).catch(() => setUrl(null)) }, [code])
+  return url ? <img className="size-11 rounded-lg border border-thermo-border object-cover" src={url} alt={`Foto de ${description || code || 'produto'}`} /> : <div className="flex size-11 items-center justify-center rounded-lg border border-dashed border-thermo-border bg-thermo-bg text-slate-400" aria-label={`Foto de ${code || 'produto'} indisponível`}><PackageCheck className="size-4" /></div>
 }

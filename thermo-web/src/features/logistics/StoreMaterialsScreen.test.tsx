@@ -5,6 +5,7 @@ import { StoreMaterialsScreen } from './StoreMaterialsScreen'
 import {
   loadPrintedReceipt,
   loadPrintedReceipts,
+  loadIdentificationPhoto,
   loadWarehouseLocations,
   returnPrintedReceipt,
   storePrintedReceipt,
@@ -15,6 +16,7 @@ vi.mock('../../services/logistics', async (importOriginal) => {
   return {
     ...actual,
     loadPrintedReceipt: vi.fn(),
+    loadIdentificationPhoto: vi.fn(),
     loadPrintedReceipts: vi.fn(),
     loadPrinterSetup: vi.fn(),
     loadProductAddressReferences: vi.fn().mockResolvedValue([]),
@@ -62,6 +64,7 @@ describe('StoreMaterialsScreen', () => {
       { codigo: '#ALMOX', descricao: 'Porta Pallet (Almoxarifado)', codigo_local_estoque: '10717096386' },
     ])
     vi.mocked(loadPrintedReceipt).mockReset().mockResolvedValue({ ok: true, etiqueta: detail })
+    vi.mocked(loadIdentificationPhoto).mockReset().mockResolvedValue('https://cdn.example/produto.jpg')
     vi.mocked(storePrintedReceipt).mockReset().mockResolvedValue({
       ok: true,
       id: 1850,
@@ -78,7 +81,7 @@ describe('StoreMaterialsScreen', () => {
       impressos_removidos: 2,
       origens_consolidadas: 1,
     })
-  })
+  }, 15_000)
 
   it('blocks the entire screen when the navigation permission was not granted', () => {
     render(<StoreMaterialsScreen username="operador" allowed={false} />)
@@ -93,6 +96,8 @@ describe('StoreMaterialsScreen', () => {
     expect(await screen.findByText('Compressor scroll 4TR')).toBeInTheDocument()
     expect(screen.getByText('LT-24')).toBeInTheDocument()
     expect(screen.getByText('NF-e Nº 4582')).toBeInTheDocument()
+    expect(screen.getByText('Emissão: 20/08/2026')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Foto de Compressor scroll 4TR' })).toHaveAttribute('src', 'https://cdn.example/produto.jpg')
     expect(screen.getByText('ETQ 1850.1')).toBeInTheDocument()
     expect(loadPrintedReceipts).toHaveBeenCalledWith({ query: '', flow: 'recebimento' })
   })
@@ -100,7 +105,7 @@ describe('StoreMaterialsScreen', () => {
   it('validates the address beside the field and stores using the audited payload', async () => {
     const user = userEvent.setup()
     render(<StoreMaterialsScreen username="jair.r" />)
-    await screen.findByText('Compressor scroll 4TR')
+    await screen.findAllByText('Compressor scroll 4TR')
 
     await user.click(screen.getByRole('button', { name: 'Guardar material' }))
     expect(await screen.findByText('ETQ 1850.1 adicionada. Inclua outras ETQs ou informe o endereço.')).toBeInTheDocument()
@@ -121,7 +126,9 @@ describe('StoreMaterialsScreen', () => {
       complement: 'Caixa azul',
       destinationCode: '10717096386',
     }))
-  })
+    await waitFor(() => expect(screen.queryByTestId('store-material-row')).not.toBeInTheDocument())
+    expect(loadPrintedReceipts).toHaveBeenCalledTimes(1)
+  }, 15_000)
 
   it('preserves return-all semantics for the same product and lot', async () => {
     const user = userEvent.setup()
@@ -134,4 +141,30 @@ describe('StoreMaterialsScreen', () => {
     await waitFor(() => expect(returnPrintedReceipt).toHaveBeenCalledWith(1850, 'todas'))
     expect(await screen.findByText(/Saldo 20 UN devolvido para Identificação do produto/)).toBeInTheDocument()
   })
+
+  it('removes only confirmed ETQs after a partial batch failure and keeps the remainder retryable', async () => {
+    const user = userEvent.setup()
+    const secondReceipt = { ...receipt, id: 1851, id_rotulo: '1851.1', qtd: 5 }
+    const secondDetail = { ...detail, id: 1851, id_rotulo: '1851.1', qtd: 5 }
+    vi.mocked(loadPrintedReceipts).mockResolvedValue({ etiquetas: [receipt, secondReceipt] })
+    vi.mocked(loadPrintedReceipt).mockImplementation(async (id) => ({ ok: true, etiqueta: String(id) === '1851' ? secondDetail : detail }))
+    vi.mocked(storePrintedReceipt).mockImplementation(async ({ id }) => {
+      if (id === 1851) throw new Error('Endereço temporariamente bloqueado')
+      return { ok: true, id, id_rotulo: '1850.1', endereco: '01-03-21-002', local_destino_codigo: '10717096386', local_destino_nome: 'Almoxarifado' }
+    })
+    render(<StoreMaterialsScreen username="jair.r" />)
+    await screen.findAllByText('Compressor scroll 4TR')
+    await user.click(screen.getByRole('button', { name: 'Ler etiquetas em lote' }))
+    const idInput = screen.getByPlaceholderText('Bipe, leia ou digite o ID da ETQ')
+    await user.type(idInput, '1850{enter}')
+    await screen.findByText(/ETQ 1850.1 adicionada/)
+    await user.type(idInput, '1851{enter}')
+    await screen.findByText(/ETQ 1851.1 adicionada/)
+    await user.type(screen.getByPlaceholderText('01-03-21-002'), '01-03-21-002')
+    await user.click(screen.getByRole('button', { name: 'Guardar 2 materiais' }))
+    expect(await screen.findByText(/1 ETQ\(s\) concluída\(s\).*1 permanece/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getAllByTestId('store-material-row')).toHaveLength(1))
+    expect(screen.getAllByText('ETQ 1851.1').length).toBeGreaterThan(0)
+    expect(loadPrintedReceipts).toHaveBeenCalledTimes(1)
+  }, 15_000)
 })
