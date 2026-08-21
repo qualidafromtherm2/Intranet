@@ -1,6 +1,5 @@
 import { clsx } from 'clsx'
 import {
-  ArrowLeftRight,
   CheckCircle2,
   ClipboardList,
   Ellipsis,
@@ -10,15 +9,12 @@ import {
   ImageOff,
   Info,
   List,
-  PackagePlus,
   PackageSearch,
-  Pencil,
   QrCode,
   RefreshCw,
   Search,
   ShoppingCart,
   SquarePen,
-  Truck,
   X,
 } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -29,6 +25,7 @@ import { quantity } from '../lib/format'
 import { buildLegacyUrl } from '../services/authGateway'
 import { loadPurchaseDetail } from '../services/pilotGateway'
 import type { FiltersState, ProductFilterOption, ProductPurchaseDetailItem, ProductRecord, ProductWarehouseBalance } from '../types'
+import { ProductActionsPanel } from './products/ProductActionsPanel'
 
 type BridgeKey = 'qr' | 'bulk' | 'cart' | 'separation' | 'detail'
 
@@ -994,84 +991,13 @@ export function ProductListScreen({
         ) : null}
       </ModalShell>
 
-      <ModalShell
+      <ProductActionsPanel
         open={Boolean(actionProduct)}
-        title={actionProduct ? `Ações · ${actionProduct.codigo}` : 'Ações do produto'}
-        description="Fluxos já migrados ou pontes explícitas para rotinas legadas reais."
+        product={actionProduct}
+        permissions={permissions}
         onClose={() => setActionProduct(null)}
-        panelStyle={{ width: 'min(96vw, 40rem)', maxWidth: '40rem', flexShrink: 0 }}
-      >
-        {actionProduct ? (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-thermo-border bg-thermo-bg px-4 py-4">
-              <div className="font-mono text-xs font-semibold text-slate-500">{actionProduct.codigo}</div>
-              <div className="mt-1 text-base font-bold text-thermo-navy">{actionProduct.descricao}</div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <a
-                className={clsx('thermo-button justify-start', permissions.canOpenCart ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
-                href={permissions.canOpenCart ? buildLegacyUrl('/menu_produto.html') : undefined}
-                target={permissions.canOpenCart ? '_blank' : undefined}
-                rel={permissions.canOpenCart ? 'noreferrer' : undefined}
-                aria-disabled={!permissions.canOpenCart}
-                onClick={(event) => {
-                  if (!permissions.canOpenCart) event.preventDefault()
-                }}
-                title={permissions.cartReason || 'Abrir compra no legado'}
-              >
-                <PackagePlus className="size-4" />
-                Compra
-              </a>
-              <a
-                className={clsx('thermo-button justify-start', permissions.canOpenSeparation ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
-                href={permissions.canOpenSeparation ? buildLegacyUrl('/menu_produto.html') : undefined}
-                target={permissions.canOpenSeparation ? '_blank' : undefined}
-                rel={permissions.canOpenSeparation ? 'noreferrer' : undefined}
-                aria-disabled={!permissions.canOpenSeparation}
-                onClick={(event) => {
-                  if (!permissions.canOpenSeparation) event.preventDefault()
-                }}
-                title={permissions.separationReason || 'Abrir separação no legado'}
-              >
-                <ClipboardList className="size-4" />
-                Separação
-              </a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ArrowLeftRight className="size-4" />Movimentação</a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><Truck className="size-4" />Expedição</a>
-              <a
-                className={clsx('thermo-button justify-start', permissions.canEditCatalog ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
-                href={permissions.canEditCatalog ? buildLegacyUrl('/menu_produto.html#produto-dados') : undefined}
-                target={permissions.canEditCatalog ? '_blank' : undefined}
-                rel={permissions.canEditCatalog ? 'noreferrer' : undefined}
-                aria-disabled={!permissions.canEditCatalog}
-                onClick={(event) => {
-                  if (!permissions.canEditCatalog) event.preventDefault()
-                }}
-                title={permissions.canEditCatalog ? 'Abrir dados do produto no legado' : 'Sua sessão não liberou edição de cadastro do produto.'}
-              >
-                <Info className="size-4" />
-                Informações / editar produto
-              </a>
-              <a
-                className={clsx('thermo-button justify-start', permissions.canEditCatalog ? 'thermo-button-secondary' : 'cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400')}
-                href={permissions.canEditCatalog ? buildLegacyUrl('/menu_produto.html#produto-dados') : undefined}
-                target={permissions.canEditCatalog ? '_blank' : undefined}
-                rel={permissions.canEditCatalog ? 'noreferrer' : undefined}
-                aria-disabled={!permissions.canEditCatalog}
-                onClick={(event) => {
-                  if (!permissions.canEditCatalog) event.preventDefault()
-                }}
-                title={permissions.canEditCatalog ? 'Abrir edição rápida no legado' : 'Sua sessão não liberou edição de cadastro do produto.'}
-              >
-                <Pencil className="size-4" />
-                Editar rápido
-              </a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ShoppingCart className="size-4" />Últimas compras</a>
-              <a className="thermo-button thermo-button-secondary justify-start" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer"><ExternalLink className="size-4" />Manual de instrução</a>
-            </div>
-          </div>
-        ) : null}
-      </ModalShell>
+        onChanged={reload}
+      />
     </>
   )
 }

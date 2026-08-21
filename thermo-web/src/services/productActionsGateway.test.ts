@@ -2,7 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AuthUser, PermissionNode, ProductRecord } from '../types'
 import {
   addProductToCart,
+  createManualReceipt,
   deriveProductActionAccess,
+  executeDispatch,
+  reprintIdentification,
   requestSeparation,
   saveProductMultiple,
 } from './productActionsGateway'
@@ -114,5 +117,74 @@ describe('productActionsGateway', () => {
     expect(path).toBe(`/api/produtos/${encodeURIComponent(product.codigo)}/multiplo`)
     expect(init.method).toBe('PUT')
     expect(JSON.parse(String(init.body))).toEqual({ multiplo: 20 })
+  })
+
+  it('executa expedição entre os mesmos locais e aprova a transferência do legado', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ dados: [{ codigo: product.codigo, cmc: 8.75 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true, registros: [{ id: 91 }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await executeDispatch(product, user, 3, 'Envio para expedição')
+
+    expect(fetchMock.mock.calls[0]![0]).toContain('/api/logistica/estoque?local=10408747829')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/transferencias')
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1].body))).toMatchObject({
+      origem: '10408747829',
+      destino: '10440426539',
+      solicitante: user.username,
+      itens: [{ codigo: product.codigo, qtd: 3, cmc: 8.75 }],
+    })
+    expect(fetchMock.mock.calls[2]![0]).toBe('/api/transferencias/91/aprovar')
+    expect(fetchMock.mock.calls[2]![1].method).toBe('PATCH')
+  })
+
+  it('preserva os campos reais do recebimento manual', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true, id: 14, destino: 'pir' }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createManualReceipt(product, {
+      qtd: 7,
+      unidade: 'UN',
+      nfe: 'SEM-NFE',
+      pedido: 'PED-42',
+      motivo: 'Recebimento emergencial',
+      usuario: user.username,
+    })
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/etiquetas/recebimento/manual')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body))).toEqual({
+      codigo_produto: product.codigo,
+      descricao_produto: product.descricao,
+      qtd: 7,
+      unidade: 'UN',
+      nfe: 'SEM-NFE',
+      pedido: 'PED-42',
+      motivo: 'Recebimento emergencial',
+      usuario: user.username,
+    })
+  })
+
+  it('reimprime somente o identificador escolhido na impressora real', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await reprintIdentification(55, user.username, 'grande', {
+      value: 'PC-LOG\u0000Zebra',
+      label: 'Zebra · PC-LOG',
+      destino_agente: 'PC-LOG',
+      impressora: 'Zebra',
+    })
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/etiquetas/rec-impresso/imprimir-ids')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body))).toEqual({
+      ids: [55],
+      usuario: user.username,
+      via_fila: true,
+      formato: 'grande',
+      destino_agente: 'PC-LOG',
+      impressora: 'Zebra',
+    })
   })
 })
