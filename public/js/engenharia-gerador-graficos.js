@@ -4,7 +4,7 @@
 
   const PREF_CHAVE = 'engenharia_gerador_graficos';
   const GG_API = '/api/engenharia/gerador-graficos';
-  const PANE_VERSION = '13';
+  const PANE_VERSION = '14';
   const MAX_GRUPOS = 5;
   const CORES = ['#ef4444', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4'];
   const DEFAULTS = {
@@ -417,6 +417,38 @@
     }
   }
 
+  function resetEscalaParaParametros() {
+    escalaModo = 'original';
+    vista = null;
+    vistaDinamica = null;
+  }
+
+  function extremosVisiveis() {
+    const vis = vista || vistaPadrao();
+    const xMin = Number(vis.xMin);
+    const xMax = Number(vis.xMax);
+    const yMin = Number(vis.yMin);
+    const yMax = Number(vis.yMax);
+    return {
+      xMin: Math.min(xMin, xMax),
+      xMax: Math.max(xMin, xMax),
+      yMin: Math.min(yMin, yMax),
+      yMax: Math.max(yMin, yMax),
+    };
+  }
+
+  function ancorarExtremosLinha() {
+    const vis = extremosVisiveis();
+    if (pontosLinha.length < 2) {
+      garantirPontosNaGrade();
+      return;
+    }
+    const c0 = curvaDoPonto(pontosLinha[0]);
+    const cN = curvaDoPonto(pontosLinha[pontosLinha.length - 1]);
+    pontosLinha[0] = { x: vis.xMin, y: vis.yMin, curva: c0 };
+    pontosLinha[pontosLinha.length - 1] = { x: vis.xMax, y: vis.yMax, curva: cN };
+  }
+
   function aplicarVistaNoChart(chart) {
     if (!chart?.options?.scales || !vista) return;
     const sc = chart.options.scales;
@@ -427,6 +459,7 @@
       const g = vista.grupos?.[gr.id];
       if (axis && g) { axis.min = g.min; axis.max = g.max; }
     });
+    ancorarExtremosLinha();
     chart.update('none');
     atualizarBotoesVista();
   }
@@ -871,7 +904,14 @@
       sel.addEventListener('change', () => { syncCaps(); atualizarRotulos(); salvarPrefs(); desenhar(); });
     });
     wrap.querySelectorAll('[data-gg-max],[data-gg-min],[data-gg-tick]').forEach((inp) => {
-      inp.addEventListener('change', () => { atualizarRotulos(); salvarPrefs(); desenhar(); });
+      inp.addEventListener('change', () => {
+        if (inp.hasAttribute('data-gg-max') || inp.hasAttribute('data-gg-min')) {
+          resetEscalaParaParametros();
+        }
+        atualizarRotulos();
+        salvarPrefs();
+        desenhar();
+      });
     });
     wrap.querySelectorAll('[data-gg-excluir]').forEach((btn) => {
       btn.addEventListener('click', () => {
@@ -1111,12 +1151,21 @@
   }
 
   function garantirPontosNaGrade() {
-    const paMin = num('ggPaMin', DEFAULTS.paMin);
-    const paMax = num('ggPaMax', DEFAULTS.paMax);
+    const vis = extremosVisiveis();
+    const paMin = vis.xMin;
+    const paMax = vis.xMax;
+    const tMin = vis.yMin;
+    const tMax = vis.yMax;
     const paTick = num('ggPaTick', DEFAULTS.paTick);
-    const tMin = num('ggAguaMin', DEFAULTS.aguaMin);
-    const tMax = num('ggAguaMax', DEFAULTS.aguaMax);
-    const xs = ticksEixo(paMin, paMax, paTick);
+    let xs = ticksEixo(paMin, paMax, paTick);
+    if (!xs.length) xs = [paMin, paMax];
+    if (Math.abs(xs[0] - paMin) > 1e-9) xs = [paMin, ...xs];
+    if (Math.abs(xs[xs.length - 1] - paMax) > 1e-9) xs = [...xs, paMax];
+    const uniq = [];
+    xs.forEach((x) => {
+      if (!uniq.length || Math.abs(uniq[uniq.length - 1] - x) > 1e-9) uniq.push(x);
+    });
+    xs = uniq;
     const prev = pontosLinha.slice();
     pontosLinha = xs.map((x, i) => {
       const old = prev.find((p) => Math.abs(p.x - x) < 1e-6);
@@ -1127,6 +1176,17 @@
         curva: old ? curvaDoPonto(old) : (prev[i] ? curvaDoPonto(prev[i]) : 0),
       };
     });
+    if (pontosLinha.length === 1) {
+      pontosLinha.push({ x: paMax, y: tMax, curva: 0 });
+    }
+    if (pontosLinha.length) {
+      pontosLinha[0] = { x: paMin, y: tMin, curva: curvaDoPonto(pontosLinha[0]) };
+      pontosLinha[pontosLinha.length - 1] = {
+        x: paMax,
+        y: tMax,
+        curva: curvaDoPonto(pontosLinha[pontosLinha.length - 1]),
+      };
+    }
   }
 
   function pixelDoPonto(chart, p) {
@@ -1226,7 +1286,8 @@
       const py = ev.y;
       if (tipo === 'mousedown') {
         const idx = hitPontoLinha(chart, px, py);
-        if (idx >= 0) {
+        // Pontos inicial/final ficam fixos nas estremidades da área visível.
+        if (idx > 0 && idx < pontosLinha.length - 1) {
           dragLinha = { idx, moved: false };
           dragPan = null;
           chart.canvas.style.cursor = 'grabbing';
@@ -1239,19 +1300,18 @@
         return;
       }
       if (tipo === 'mousemove' && dragLinha) {
-        const tMin = num('ggAguaMin', DEFAULTS.aguaMin);
-        const tMax = num('ggAguaMax', DEFAULTS.aguaMax);
-        const paMin = num('ggPaMin', DEFAULTS.paMin);
-        const paMax = num('ggPaMax', DEFAULTS.paMax);
+        const vis = extremosVisiveis();
+        const tMin = vis.yMin;
+        const tMax = vis.yMax;
         const i = dragLinha.idx;
         const prev = pontosLinha[i - 1];
         const next = pontosLinha[i + 1];
         let x = chart.scales.x.getValueForPixel(px);
         let y = chart.scales.yTemp.getValueForPixel(py);
-        const lo = prev ? prev.x + 0.01 : paMin;
-        const hi = next ? next.x - 0.01 : paMax;
+        const lo = prev ? prev.x + 0.01 : vis.xMin;
+        const hi = next ? next.x - 0.01 : vis.xMax;
         x = Math.max(lo, Math.min(hi, x));
-        y = Math.max(Math.min(tMin, tMax), Math.min(Math.max(tMin, tMax), y));
+        y = Math.max(tMin, Math.min(tMax, y));
         pontosLinha[i] = { x, y, curva: curvaDoPonto(pontosLinha[i]) };
         dragLinha.moved = true;
         args.changed = true;
@@ -1626,7 +1686,7 @@
               </div>
               <div id="ggOverlayInfo" class="gg-overlay-info"></div>
               <div id="ggTabelaTesteWrap" class="gg-tabela-teste-wrap" style="display:none;"></div>
-              <p class="gg-dica">Arraste os pontos azuis para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll = zoom · arraste com a mãozinha para mover o gráfico. Botão direito abre o menu flutuante (não copia a imagem).</p>
+              <p class="gg-dica">O 1º e o último ponto azul ficam nas estremidades do gráfico (também no zoom). Arraste os pontos do meio para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll = zoom · arraste com a mãozinha para mover o gráfico. Botão direito abre o menu flutuante (não copia a imagem).</p>
             </div>
             <div class="gg-side">
               <input id="ggNomeParametros" class="gg-nome" value="Parâmetros" title="Clique para mudar o nome">
@@ -1714,8 +1774,15 @@
     injectCss();
     renderGrupos();
     ligarZoomRoda();
-    ['ggAguaMax', 'ggAguaMin', 'ggAguaTick', 'ggPaMin', 'ggPaMax', 'ggPaTick'].forEach((id) => {
-      $(id)?.addEventListener('change', () => { vista = null; salvarPrefs(); desenhar(); });
+    ['ggAguaMax', 'ggAguaMin', 'ggPaMin', 'ggPaMax'].forEach((id) => {
+      $(id)?.addEventListener('change', () => {
+        resetEscalaParaParametros();
+        salvarPrefs();
+        desenhar();
+      });
+    });
+    ['ggAguaTick', 'ggPaTick'].forEach((id) => {
+      $(id)?.addEventListener('change', () => { salvarPrefs(); desenhar(); });
     });
     ['ggNomeAgua', 'ggNomeParametros', 'ggNomePressao', 'ggTituloGrafico'].forEach((id) => {
       const fn = () => { atualizarRotulos(); salvarPrefs(); desenhar(); };
