@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { loadFreightLocations, loadFreightStatus, searchFreightProducts, simulateFreight } from './freightGateway'
+import { loadFreightLocations, loadFreightManagement, loadFreightStatus, loadPendingFreightProducts, searchFreightProducts, simulateFreight, updateFreightProductMeasures } from './freightGateway'
 
 const json = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
 afterEach(() => vi.unstubAllGlobals())
@@ -27,5 +27,16 @@ describe('freightGateway', () => {
   it('surfaces backend validation without replacing it with mock data', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(json({ ok: false, error: 'Existem produtos sem peso ou dimensões confiáveis.' }, 422)))
     await expect(simulateFreight({ destino: { cep: null, cidade: 'Joinville', uf: 'SC' }, valor_mercadoria: '0,00', itens: [{ codigo: 'X', quantidade: 1 }] })).rejects.toThrow('Existem produtos sem peso')
+  })
+
+  it('uses the audited management, quality and product-measure contracts', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(json({ ok: true, itens: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+    await loadFreightManagement()
+    await loadPendingFreightProducts()
+    await updateFreightProductMeasures('FH 240', { altura: 100, largura: 90, profundidade: 80, peso_bruto: 120 })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/frete/gestao', expect.objectContaining({ credentials: 'include' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/frete/produtos-pendentes?limit=500', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/produtos/FH%20240', expect.objectContaining({ method: 'PUT', body: JSON.stringify({ altura: 100, largura: 90, profundidade: 80, peso_bruto: 120 }) }))
   })
 })

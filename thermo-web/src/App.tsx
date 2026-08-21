@@ -1386,7 +1386,7 @@ function App() {
             ) : activeView === 'shipping' ? (
               <ShippingScreen allowed={canShip} />
             ) : activeView === 'freight-simulator' ? (
-              <FreightSimulatorScreen allowed={canSimulateFreight} />
+              <FreightSimulatorScreen allowed={canSimulateFreight} canEditProducts={canEditCatalog} />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

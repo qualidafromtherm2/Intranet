@@ -14,7 +14,9 @@ export type FreightProduct = {
 }
 
 export type FreightLocation = { cidade: string; uf: string; codigo_ibge?: string; transportadoras?: number }
-export type FreightTable = { id: number; transportadora: string; versao: string; status: 'ativa' | 'em_revisao' | 'inativa' }
+export type FreightTable = { id: number; transportadora: string; nome?: string; versao: string; status: 'ativa' | 'em_revisao' | 'inativa'; coberturas?: number; faixas?: number; arquivo_origem?: string | null; fontes_auxiliares?: FreightTable[]; diagnostico?: { coberturas?: number; tarifas?: number; bloqueios?: string[]; alertas?: string[] } }
+export type FreightPendingProduct = FreightProduct & { pendencias: string[] }
+export type FreightPendingSummary = { total_pendentes: number; sem_altura: number; sem_largura: number; sem_profundidade: number; sem_peso: number; unidade_suspeita: number }
 export type FreightResult = {
   tabela_id: number
   transportadora: string
