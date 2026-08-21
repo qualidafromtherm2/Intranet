@@ -174,7 +174,7 @@ export interface PermissionTreeResponse {
   nodes: PermissionNode[]
 }
 
-export type AppView = 'home' | 'calendar' | 'products' | 'product-registration' | 'separation' | 'store-materials' | 'identify-product' | 'receiving' | 'products-received' | 'shipping' | 'machine-stock' | 'freight-simulator' | 'pir' | 'sales-report' | 'print-agent-config'
+export type AppView = 'home' | 'calendar' | 'products' | 'product-registration' | 'separation' | 'store-materials' | 'identify-product' | 'receiving' | 'products-received' | 'shipping' | 'machine-stock' | 'freight-simulator' | 'pir' | 'sales-report' | 'print-agent-config' | 'warehouses' | 'stock-adjustment' | 'logistics-report'
 
 export type ShellNavStatus = 'migrated' | 'in_progress' | 'pending'
 

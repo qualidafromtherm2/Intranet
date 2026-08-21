@@ -158,6 +158,24 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-armazens') {
+    return {
+      icon: itemIconMap[selector] ?? 'warehouse',
+      migrationStatus: 'migrated',
+      view: 'warehouses',
+      destination: '/logistics/warehouses',
+    }
+  }
+
+  if (selector === '#menu-solicitacao-ajuste') {
+    return {
+      icon: itemIconMap[selector] ?? 'file-pen',
+      migrationStatus: 'migrated',
+      view: 'stock-adjustment',
+      destination: '/logistics/stock-adjustment',
+    }
+  }
+
   if (selector === '#menu-solicitacao-transferencia') {
     return {
       icon: itemIconMap[selector] ?? 'clipboard-list',
@@ -245,6 +263,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
       migrationStatus: 'migrated',
       view: 'sales-report',
       destination: '/sales/report',
+    }
+  }
+
+  if (selector === '#menu-log-relatorio') {
+    return {
+      icon: itemIconMap[selector] ?? 'file-chart-column',
+      migrationStatus: 'migrated',
+      view: 'logistics-report',
+      destination: '/logistics/report',
     }
   }
 
