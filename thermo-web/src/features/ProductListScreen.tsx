@@ -95,7 +95,7 @@ function describeAppliedFilters(filters: FiltersState) {
   if (filters.families.length) parts.push({ key: 'families', label: `${filters.families.length} família(s)` })
   if (filters.typeItems.length) parts.push({ key: 'typeItems', label: `${filters.typeItems.length} tipo(s)` })
   if (filters.origins.length) parts.push({ key: 'origins', label: `${filters.origins.length} origem(ns)` })
-  if (filters.purchaseStatus.length) parts.push({ key: 'purchaseStatus', label: `${filters.purchaseStatus.length} situação(ões) de compra` })
+  if (filters.purchaseStatus.includes('em_compra')) parts.push({ key: 'purchaseStatus', label: 'Em compra' })
   if (filters.locationCodes.length) parts.push({ key: 'locationCodes', label: `${filters.locationCodes.length} local(is)` })
   return parts
 }
@@ -723,10 +723,9 @@ export function ProductListScreen({
                 multiple
                 size={2}
                 value={draftFilters.purchaseStatus}
-                onChange={(event) => updateDraftFilters({ purchaseStatus: Array.from(event.target.selectedOptions, (option) => option.value as 'sem_compra' | 'em_compra') })}
+                onChange={(event) => updateDraftFilters({ purchaseStatus: Array.from(event.target.selectedOptions, (option) => option.value as 'em_compra') })}
                 className="min-h-20 w-full rounded-xl border border-thermo-border bg-white px-3 py-2 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
               >
-                <option value="sem_compra">Não comprado ainda</option>
                 <option value="em_compra">Em compra</option>
               </select>
               <p className="mt-1 text-xs text-slate-500">Sem seleção exibe todas.</p>

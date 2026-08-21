@@ -143,6 +143,27 @@ describe('ProductListScreen', () => {
     expect(screen.queryByText('Não comprado ainda')).not.toBeInTheDocument()
   })
 
+  it('shows only "Em compra" in purchase status filter', async () => {
+    const user = userEvent.setup()
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    await user.click(screen.getByRole('button', { name: /filtrar produtos/i }))
+
+    expect(screen.queryByRole('option', { name: /Não comprado ainda/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: 'Em compra' })).toBeInTheDocument()
+  })
+
   it('restores draft filters on cancel and applies only after confirmation', async () => {
     const user = userEvent.setup()
 
