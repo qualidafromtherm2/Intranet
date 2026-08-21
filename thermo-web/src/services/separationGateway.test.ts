@@ -1,110 +1,40 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { buildSeparationActionPreviews, loadSeparationCart, loadSeparationKanban, loadSeparationPermissions, loadSeparationRequests } from './separationGateway'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { clearSeparationCart, loadSeparationItems, loadSeparationKanban, startSeparation, submitSeparation, updateSeparationCartQuantity } from './separationGateway'
+
+const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
+afterEach(() => vi.unstubAllGlobals())
 
 describe('separationGateway', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks()
+  it('uses the audited global kanban and detail query names', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, colunas: {} })).mockResolvedValueOnce(jsonResponse({ ok: true, itens: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await loadSeparationKanban('SEP 1042')
+    await loadSeparationItems('SEP-1042', { includeDerived: true })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/logistica/solicitacoes-kanban?q=SEP+1042', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/kanban/itens?n_solic=SEP-1042&escopo=global&include_derivados=1', expect.objectContaining({ credentials: 'include' }))
   })
 
-  it('normalizes permission and destinations from legacy endpoints', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ user: { id: '12', username: 'jair.r' } }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ ok: true }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        destino_padrao_codigo: '10717096386',
-        destinos: [
-          { codigo: '10717096386', descricao: 'Almoxarifado' },
-          { codigo: '2', descricao: 'Expedição' },
-        ],
-      }), { status: 200 })))
-
-    const data = await loadSeparationPermissions()
-
-    expect(data.userId).toBe('12')
-    expect(data.username).toBe('jair.r')
-    expect(data.canRequest).toBe(true)
-    expect(data.destinations).toHaveLength(2)
-    expect(data.destinations[0]).toMatchObject({ code: '10717096386', isDefault: true })
+  it('sends exact legacy mutation payloads', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true })).mockResolvedValueOnce(jsonResponse({ ok: true, atualizados: 2 })).mockResolvedValueOnce(jsonResponse({ ok: true, deleted: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await updateSeparationCartQuantity(31, 2.5)
+    await startSeparation([91, 92])
+    await clearSeparationCart()
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/logistica/carrinho/31/quantidade', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ quantidade: 2.5 }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/itens_solicitados/separacao', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ solic_ids: [91, 92] }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/logistica/carrinho', expect.objectContaining({ method: 'DELETE' }))
   })
 
-  it('normalizes cart, requests and kanban responses', async () => {
-    vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        itens: [{ id: 1, codigo_produto: '07.MP.N.70005', descricao: 'Abraçadeira', unidade: 'UN', quantidade: 10, urgente: true }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        grupos: [{
-          n_solic: 'SEP-1001',
-          status: 'pendente',
-          nome_user: 'Jair.R',
-          total_itens: 1,
-          itens: [{ solic_id: 11, carr_id: 1, codigo_produto: '07.MP.N.70005', descricao: 'Abraçadeira', unidade: 'UN', quantidade: 10, status: 'pendente' }],
-        }],
-      }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({
-        colunas: {
-          pendente: [{ n_solic: 'SEP-1001', nome_user: 'Jair.R', itens: [{ solic_id: 11, carr_id: 1, codigo_produto: '07.MP.N.70005', descricao: 'Abraçadeira', unidade: 'UN', quantidade: 10, status: 'pendente' }] }],
-          'Stund-by': [],
-          'Separação': [],
-          Separado: [],
-          'Aguardando retirada': [],
-          'Concluído': [],
-        },
-      }), { status: 200 })))
-
-    const cart = await loadSeparationCart()
-    const requests = await loadSeparationRequests()
-    const kanban = await loadSeparationKanban()
-
-    expect(cart[0]).toMatchObject({ codigoProduto: '07.MP.N.70005', urgente: true })
-    expect(requests[0]).toMatchObject({ nSolic: 'SEP-1001', status: 'pendente', itensCount: 1 })
-    expect(kanban.columns.pendente[0]?.nSolic).toBe('SEP-1001')
-    expect(kanban.totalCards).toBe(1)
+  it('submits the real cart contract without inferred fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, total: 2, n_solic: 'SEP-1042', reutilizada: false }))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = { solicitado_para: 'Jair', local_estoque: '10717096386', local_estoque_nome: 'Almoxarifado', data_prevista: '2026-08-21', horario: '14:30', observacao: 'Retirada no balcão' }
+    await submitSeparation(input)
+    expect(fetchMock).toHaveBeenCalledWith('/api/logistica/separacao/enviar', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }))
   })
 
-  it('builds preview actions for mutable separation flows', () => {
-    const actions = buildSeparationActionPreviews({
-      nSolic: 'SEP-1009',
-      status: 'Separação',
-      statusLabel: 'Em Separação',
-      nomeUser: 'Jair.R',
-      totalItens: 1,
-      itensCount: 1,
-      dataPrevista: null,
-      horario: null,
-      criadoEm: null,
-      atualizadoEm: null,
-      itemCriadoEm: null,
-      usuarioSeparando: 'jair.r',
-      hasUrgent: false,
-      hasPurchase: false,
-      itemIds: [45],
-      carrIds: [67],
-      itens: [{
-        solicId: 45,
-        carrId: 67,
-        idUser: '12',
-        nomeUser: 'Jair.R',
-        codigoProduto: '07.MP.N.70005',
-        descricao: 'Abraçadeira',
-        unidade: 'UN',
-        quantidade: 10,
-        status: 'Separação',
-        comentario: null,
-        urgente: false,
-        nSolic: 'SEP-1009',
-        dataPrevista: null,
-        horario: null,
-        itemCriadoEm: null,
-        usuarioSeparando: 'jair.r',
-        nomeLocal: 'Almox',
-        codLocal: '10717096386',
-        quantidadeSolicitada: null,
-        quantidadeSeparada: null,
-      }],
-    })
-
-    expect(actions.some((action) => action.endpoint === '/api/logistica/itens_solicitados/separar')).toBe(true)
-    expect(actions.some((action) => action.endpoint === '/api/logistica/itens_solicitados/nao-separar')).toBe(true)
+  it('surfaces backend errors with endpoint context', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ok: false, error: 'Não autenticado.' }, 401)))
+    await expect(loadSeparationKanban()).rejects.toThrow('Falha ao acessar o fluxo real de separação por /api/logistica/solicitacoes-kanban. Não autenticado.')
   })
 })
