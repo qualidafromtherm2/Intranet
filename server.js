@@ -6826,6 +6826,10 @@ async function _pedidoSyncWorker() {
 
       if (ped.length) {
         await dbQuery('select vendas.pedidos_upsert_from_list($1::jsonb)', [{ pedido_venda_produto: ped }]);
+        try {
+          const { PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL } = require('./utils/nfCodigoVendedor');
+          await dbQuery(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
+        } catch (_) { /* ignore */ }
         console.log(`[pedidoSyncQueue] ✓ upsert pedido ${codigoPedido || numeroPedido} (fila restante: ${_pedidoSyncQueue.length})`);
       }
     } catch (e) {

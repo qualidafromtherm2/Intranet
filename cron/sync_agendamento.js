@@ -941,7 +941,7 @@ async function syncPedidosVenda(cfg) {
   // Complemento: NFs com id_pedido sem linha em pedidos_venda (janela ListarPedidos não cobre tudo)
   let faltantes = { sincronizados: 0, erros: 0, pendentes: 0 };
   try {
-    faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 80 });
+    faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 25 });
   } catch (eFat) {
     log(`  [pedidos_venda] aviso reconciliar faltantes: ${eFat.message}`);
     faltantes.erros += 1;
@@ -956,21 +956,34 @@ async function syncPedidosVenda(cfg) {
 
 /**
  * Busca na Omie os pedidos apontados por NFs que ainda não existem em vendas.pedidos_venda.
- * Também preenche codigo_vendedor nas NFs a partir dos títulos (nCodVendedor).
+ * Prioriza NFs sem vendedor (títulos vazios — caso típico PIX/à vista).
+ * Propaga codVend do pedido para a coluna codigo_vendedor da NF.
+ * Para na hora se a Omie bloquear por rate-limit.
  */
-async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
+async function reconciliarPedidosFaltantesDasNfs({ limite = 25 } = {}) {
   log('── [nf→pedido] Reconciliando pedidos faltantes das NFs...');
   try {
-    const { BACKFILL_CODIGO_VENDEDOR_SQL } = require('../utils/nfCodigoVendedor');
+    const {
+      BACKFILL_CODIGO_VENDEDOR_SQL,
+      PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL,
+    } = require('../utils/nfCodigoVendedor');
     await pool.query(`ALTER TABLE vendas.notas_fiscais_omie ADD COLUMN IF NOT EXISTS codigo_vendedor TEXT`);
     const bf = await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
-    if (bf.rowCount > 0) log(`  [nf→pedido] backfill codigo_vendedor: ${bf.rowCount} NFs`);
+    if (bf.rowCount > 0) log(`  [nf→pedido] backfill codigo_vendedor (titulos): ${bf.rowCount} NFs`);
+    const prop = await pool.query(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
+    if (prop.rowCount > 0) log(`  [nf→pedido] propagado do pedido: ${prop.rowCount} NFs`);
   } catch (eBf) {
     log(`  [nf→pedido] aviso backfill vendedor: ${eBf.message}`);
   }
 
+  // Prioriza NF sem vendedor (são as que aparecem "(sem vendedor)" no relatório)
   const { rows } = await pool.query(`
-    SELECT DISTINCT nf.id_pedido_omie::bigint AS codigo_pedido
+    SELECT DISTINCT ON (nf.id_pedido_omie)
+           nf.id_pedido_omie::bigint AS codigo_pedido,
+           CASE
+             WHEN COALESCE(TRIM(nf.codigo_vendedor), '') = '' THEN 0
+             ELSE 1
+           END AS prioridade
       FROM vendas.notas_fiscais_omie nf
      WHERE nf.ativa IS DISTINCT FROM FALSE
        AND nf.id_pedido_omie IS NOT NULL
@@ -979,16 +992,18 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
          SELECT 1 FROM vendas.pedidos_venda p
           WHERE p.codigo_pedido = nf.id_pedido_omie
        )
-     ORDER BY 1 DESC
+     ORDER BY nf.id_pedido_omie, prioridade ASC, nf.data_emissao_dt DESC NULLS LAST
      LIMIT $1
   `, [limite]);
 
+  // Reordena: sem vendedor primeiro
+  rows.sort((a, b) => (a.prioridade - b.prioridade) || (Number(b.codigo_pedido) - Number(a.codigo_pedido)));
+
   if (!rows.length) {
     log('── [nf→pedido] Nenhum pedido faltante');
-    return { sincronizados: 0, erros: 0, pendentes: 0 };
+    return { sincronizados: 0, erros: 0, pendentes: 0, bloqueado: false };
   }
 
-  // Quantos ainda restam além do lote
   const { rows: rest } = await pool.query(`
     SELECT COUNT(DISTINCT nf.id_pedido_omie)::int AS n
       FROM vendas.notas_fiscais_omie nf
@@ -1004,6 +1019,9 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
 
   let sincronizados = 0;
   let erros = 0;
+  let bloqueado = false;
+  const { PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL } = require('../utils/nfCodigoVendedor');
+
   for (const row of rows) {
     const codigo = Number(row.codigo_pedido);
     if (!codigo) continue;
@@ -1011,6 +1029,8 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
       const data = await omiePost('produtos/pedido', 'ConsultarPedido', {
         codigo_pedido: codigo,
       });
+      // Pace extra além do DELAY_MS do omiePost — evita bloqueio Omie
+      await sleep(800);
       const ped = Array.isArray(data?.pedido_venda_produto)
         ? data.pedido_venda_produto
         : (data?.pedido_venda_produto ? [data.pedido_venda_produto] : []);
@@ -1025,15 +1045,24 @@ async function reconciliarPedidosFaltantesDasNfs({ limite = 80 } = {}) {
           [pedido]
         );
       }
+      await pool.query(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
       sincronizados++;
     } catch (e) {
-      log(`  [nf→pedido] erro pedido ${codigo}: ${e.message}`);
+      const msg = String(e.message || e);
+      log(`  [nf→pedido] erro pedido ${codigo}: ${msg}`);
       erros++;
+      if (/bloquead|Aguarde\s+\d+|consumo indevido|rate.?limit/i.test(msg)) {
+        bloqueado = true;
+        log('  [nf→pedido] Omie bloqueou — interrompendo lote (tenta de novo no próximo cron)');
+        break;
+      }
+      // Pedido inexistente na Omie: não insiste no mesmo id neste ciclo
+      if (/não cadastrado|nao cadastrado/i.test(msg)) continue;
     }
   }
 
-  log(`── [nf→pedido] Concluído: sync=${sincronizados} erros=${erros} restantes≈${pendentes}`);
-  return { sincronizados, erros, pendentes };
+  log(`── [nf→pedido] Concluído: sync=${sincronizados} erros=${erros} restantes≈${pendentes}${bloqueado ? ' (bloqueado)' : ''}`);
+  return { sincronizados, erros, pendentes, bloqueado };
 }
 
 // ─── Dispatcher de tabelas ────────────────────────────────────────────────────
@@ -1103,7 +1132,7 @@ async function main() {
 
   // Sempre: vendedor nas NFs + pedidos apontados por NF que faltam na base local
   try {
-    resumo.nf_pedidos_faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 40 });
+    resumo.nf_pedidos_faltantes = await reconciliarPedidosFaltantesDasNfs({ limite: 20 });
   } catch (e) {
     log(`✗ Erro na reconciliação nf→pedido: ${e.message}`);
     resumo.nf_pedidos_faltantes = { erros: 1, erro: e.message };

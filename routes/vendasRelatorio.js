@@ -8,7 +8,7 @@ const {
   labelTipoItem,
   CODIGO_VENDEDOR_SQL,
 } = require('../utils/vendasRelatorioFiltros');
-const { BACKFILL_CODIGO_VENDEDOR_SQL } = require('../utils/nfCodigoVendedor');
+const { BACKFILL_CODIGO_VENDEDOR_SQL, PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL } = require('../utils/nfCodigoVendedor');
 
 const router = express.Router();
 
@@ -146,6 +146,7 @@ async function ensureVendasRelatorioSchema() {
     // Backfill leve: preenche vendedor a partir dos títulos da NF (idempotente)
     try {
       await pool.query(BACKFILL_CODIGO_VENDEDOR_SQL);
+      await pool.query(PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL);
     } catch (errBf) {
       console.warn('[vendas] backfill codigo_vendedor:', errBf?.message || errBf);
     }

@@ -4,7 +4,7 @@
 
   const PREF_CHAVE = 'engenharia_gerador_graficos';
   const GG_API = '/api/engenharia/gerador-graficos';
-  const PANE_VERSION = '14';
+  const PANE_VERSION = '15';
   const MAX_GRUPOS = 5;
   const CORES = ['#ef4444', '#22c55e', '#a855f7', '#f59e0b', '#06b6d4'];
   const DEFAULTS = {
@@ -164,7 +164,10 @@
     set('ggRegsJson', '[]');
     grupos = migrarGrupos(c);
     pontosLinha = Array.isArray(c.pontosLinha) ? c.pontosLinha.map((p) => ({
-      x: Number(p.x), y: Number(p.y), curva: curvaDoPonto(p),
+      x: Number(p.x),
+      y: Number(p.y),
+      curva: curvaDoPonto(p),
+      movido: !!p.movido,
     })).filter((p) => Number.isFinite(p.x) && Number.isFinite(p.y)) : [];
     overlayTeste = null;
     vista = null;
@@ -438,15 +441,7 @@
   }
 
   function ancorarExtremosLinha() {
-    const vis = extremosVisiveis();
-    if (pontosLinha.length < 2) {
-      garantirPontosNaGrade();
-      return;
-    }
-    const c0 = curvaDoPonto(pontosLinha[0]);
-    const cN = curvaDoPonto(pontosLinha[pontosLinha.length - 1]);
-    pontosLinha[0] = { x: vis.xMin, y: vis.yMin, curva: c0 };
-    pontosLinha[pontosLinha.length - 1] = { x: vis.xMax, y: vis.yMax, curva: cN };
+    garantirPontosNaGrade();
   }
 
   function aplicarVistaNoChart(chart) {
@@ -459,7 +454,10 @@
       const g = vista.grupos?.[gr.id];
       if (axis && g) { axis.min = g.min; axis.max = g.max; }
     });
-    ancorarExtremosLinha();
+    const grade = ticksGradeVisivel();
+    if (sc.x) forcarTicksNoAxis(sc.x, grade.xs);
+    if (sc.yTemp) forcarTicksNoAxis(sc.yTemp, grade.ys);
+    garantirPontosNaGrade();
     chart.update('none');
     atualizarBotoesVista();
   }
@@ -1108,6 +1106,53 @@
     return out.length ? out : [ini, fim];
   }
 
+  /** Ticks alinhados ao intervalo (ex.: 180, 190…), dentro do intervalo aberto (min, max). */
+  function ticksAlinhados(min, max, step) {
+    const s = Number(step) > 0 ? Number(step) : 1;
+    const a = Number(min);
+    const b = Number(max);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return [];
+    const start = Math.ceil((a + s * 1e-9) / s) * s;
+    const out = [];
+    for (let v = start, g = 0; v < b - s * 1e-9 && g < 500; v += s, g += 1) {
+      out.push(Number(v.toFixed(10)));
+    }
+    return out;
+  }
+
+  function snapValor(v, ticks) {
+    if (!ticks || !ticks.length) return v;
+    let best = ticks[0];
+    let bestD = Math.abs(Number(v) - best);
+    for (let i = 1; i < ticks.length; i++) {
+      const d = Math.abs(Number(v) - ticks[i]);
+      if (d < bestD) {
+        best = ticks[i];
+        bestD = d;
+      }
+    }
+    return best;
+  }
+
+  function ticksGradeVisivel() {
+    const vis = extremosVisiveis();
+    const paTick = Math.max(1e-9, num('ggPaTick', DEFAULTS.paTick));
+    const tTick = Math.max(1e-9, num('ggAguaTick', DEFAULTS.aguaTick));
+    const xsMid = ticksAlinhados(vis.xMin, vis.xMax, paTick);
+    const ysMid = ticksAlinhados(vis.yMin, vis.yMax, tTick);
+    const xs = [vis.xMin, ...xsMid, vis.xMax];
+    const ys = [vis.yMin, ...ysMid, vis.yMax];
+    return { vis, xs, ys, xsMid, ysMid, paTick, tTick };
+  }
+
+  function forcarTicksNoAxis(axisCfg, valores) {
+    const ticks = (valores || []).filter((v) => Number.isFinite(v));
+    axisCfg.afterBuildTicks = function afterBuildTicks(axis) {
+      axis.ticks = ticks.map((value) => ({ value }));
+    };
+    return axisCfg;
+  }
+
   function yDiagonal(x, paMin, paMax, tMin, tMax) {
     if (paMax === paMin) return tMin;
     return tMin + ((x - paMin) / (paMax - paMin)) * (tMax - tMin);
@@ -1150,42 +1195,68 @@
     return 0;
   }
 
-  function garantirPontosNaGrade() {
-    const vis = extremosVisiveis();
-    const paMin = vis.xMin;
-    const paMax = vis.xMax;
-    const tMin = vis.yMin;
-    const tMax = vis.yMax;
-    const paTick = num('ggPaTick', DEFAULTS.paTick);
-    let xs = ticksEixo(paMin, paMax, paTick);
-    if (!xs.length) xs = [paMin, paMax];
-    if (Math.abs(xs[0] - paMin) > 1e-9) xs = [paMin, ...xs];
-    if (Math.abs(xs[xs.length - 1] - paMax) > 1e-9) xs = [...xs, paMax];
-    const uniq = [];
-    xs.forEach((x) => {
-      if (!uniq.length || Math.abs(uniq[uniq.length - 1] - x) > 1e-9) uniq.push(x);
+  function acharMovidoParaX(movidos, x, paTick) {
+    const tol = Math.max(paTick * 0.51, 1e-6);
+    let melhor = null;
+    let melhorD = tol;
+    movidos.forEach((p) => {
+      const d = Math.abs(Number(p.x) - x);
+      if (d < melhorD) {
+        melhor = p;
+        melhorD = d;
+      }
     });
-    xs = uniq;
+    return melhor;
+  }
+
+  function garantirPontosNaGrade() {
+    const grade = ticksGradeVisivel();
+    const { vis, xs, ys, paTick } = grade;
     const prev = pontosLinha.slice();
+    const movidos = prev.filter((p) => p.movido);
     pontosLinha = xs.map((x, i) => {
-      const old = prev.find((p) => Math.abs(p.x - x) < 1e-6);
-      const yPrev = old ? old.y : interpolarY(x, prev);
+      const isFirst = i === 0;
+      const isLast = i === xs.length - 1;
+      if (isFirst) {
+        return { x: vis.xMin, y: vis.yMin, curva: 0, movido: false };
+      }
+      if (isLast) {
+        return { x: vis.xMax, y: vis.yMax, curva: 0, movido: false };
+      }
+      const mov = acharMovidoParaX(movidos, x, paTick);
+      if (mov) {
+        return {
+          x,
+          y: snapValor(mov.y, ys),
+          curva: curvaDoPonto(mov),
+          movido: true,
+        };
+      }
+      const yDiag = yDiagonal(x, vis.xMin, vis.xMax, vis.yMin, vis.yMax);
+      const old = prev.find((p) => !p.movido && Math.abs(Number(p.x) - x) < Math.max(paTick * 0.51, 1e-6));
       return {
         x,
-        y: Number.isFinite(yPrev) ? yPrev : yDiagonal(x, paMin, paMax, tMin, tMax),
-        curva: old ? curvaDoPonto(old) : (prev[i] ? curvaDoPonto(prev[i]) : 0),
+        y: snapValor(yDiag, ys),
+        curva: old ? curvaDoPonto(old) : 0,
+        movido: false,
       };
     });
-    if (pontosLinha.length === 1) {
-      pontosLinha.push({ x: paMax, y: tMax, curva: 0 });
+    if (pontosLinha.length < 2) {
+      pontosLinha = [
+        { x: vis.xMin, y: vis.yMin, curva: 0, movido: false },
+        { x: vis.xMax, y: vis.yMax, curva: 0, movido: false },
+      ];
     }
-    if (pontosLinha.length) {
-      pontosLinha[0] = { x: paMin, y: tMin, curva: curvaDoPonto(pontosLinha[0]) };
-      pontosLinha[pontosLinha.length - 1] = {
-        x: paMax,
-        y: tMax,
-        curva: curvaDoPonto(pontosLinha[pontosLinha.length - 1]),
-      };
+  }
+
+  function resetarLinhaAzul() {
+    pontosLinha = [];
+    garantirPontosNaGrade();
+    salvarPrefs();
+    if (chartAlta) {
+      chartAlta.update('none');
+    } else {
+      desenhar();
     }
   }
 
@@ -1300,19 +1371,24 @@
         return;
       }
       if (tipo === 'mousemove' && dragLinha) {
-        const vis = extremosVisiveis();
-        const tMin = vis.yMin;
-        const tMax = vis.yMax;
+        const grade = ticksGradeVisivel();
+        const { vis, xs, ys } = grade;
         const i = dragLinha.idx;
         const prev = pontosLinha[i - 1];
         const next = pontosLinha[i + 1];
         let x = chart.scales.x.getValueForPixel(px);
         let y = chart.scales.yTemp.getValueForPixel(py);
-        const lo = prev ? prev.x + 0.01 : vis.xMin;
-        const hi = next ? next.x - 0.01 : vis.xMax;
-        x = Math.max(lo, Math.min(hi, x));
-        y = Math.max(tMin, Math.min(tMax, y));
-        pontosLinha[i] = { x, y, curva: curvaDoPonto(pontosLinha[i]) };
+        x = snapValor(x, xs);
+        y = snapValor(y, ys);
+        const lo = prev ? prev.x + 1e-9 : vis.xMin;
+        const hi = next ? next.x - 1e-9 : vis.xMax;
+        if (x <= lo || x >= hi) {
+          // Mantém o X da grade mais próximo ainda entre os vizinhos.
+          const candidatos = xs.filter((vx) => vx > lo && vx < hi);
+          x = candidatos.length ? snapValor(x, candidatos) : pontosLinha[i].x;
+        }
+        y = Math.max(vis.yMin, Math.min(vis.yMax, y));
+        pontosLinha[i] = { x, y, curva: curvaDoPonto(pontosLinha[i]), movido: true };
         dragLinha.moved = true;
         args.changed = true;
         return;
@@ -1463,13 +1539,17 @@
         clip: false,
       },
     ];
+    const grade = ticksGradeVisivel();
     const scales = {
-      x: {
+      x: forcarTicksNoAxis({
         type: 'linear', min: paMin, max: paMax,
         title: { display: true, text: nomePressao, color: '#0f172a' },
         ticks: { stepSize: paTick || undefined, maxRotation: 90, minRotation: 90, color: '#334155' },
-      },
-      yTemp: eixoY('yTemp', nomeAgua, '#2563eb', tMin, tMax, tTick, { position: 'left' }),
+      }, grade.xs),
+      yTemp: forcarTicksNoAxis(
+        eixoY('yTemp', nomeAgua, '#2563eb', tMin, tMax, tTick, { position: 'left' }),
+        grade.ys
+      ),
     };
     grupos.forEach((g, i) => {
       const axisId = `yG_${g.id}`;
@@ -1674,6 +1754,9 @@
                 <button type="button" id="ggBtnRestaurar" class="content-button" style="display:none;background:#475569;color:#fff;">
                   <i class="fa-solid fa-rotate-left"></i> Restaurar
                 </button>
+                <button type="button" id="ggBtnResetLinha" class="content-button" style="background:#0f766e;color:#fff;">
+                  <i class="fa-solid fa-grip-lines"></i> Resetar linha
+                </button>
                 <button type="button" id="ggBtnCopiar" class="content-button" style="background:#1d4ed8;color:#fff;">
                   <i class="fa-regular fa-copy"></i> Copiar gráfico
                 </button>
@@ -1686,7 +1769,7 @@
               </div>
               <div id="ggOverlayInfo" class="gg-overlay-info"></div>
               <div id="ggTabelaTesteWrap" class="gg-tabela-teste-wrap" style="display:none;"></div>
-              <p class="gg-dica">O 1º e o último ponto azul ficam nas estremidades do gráfico (também no zoom). Arraste os pontos do meio para mudar a linha. Clique no trecho: 1º curva para o lado oposto do ponto da direita, 2º o outro lado, 3º volta a ficar reta. Scroll = zoom · arraste com a mãozinha para mover o gráfico. Botão direito abre o menu flutuante (não copia a imagem).</p>
+              <p class="gg-dica">Pontos azuis nas quinas da grade (e ponta a ponta). Zoom recoloca na grade; pontos que você moveu são mantidos. “Resetar linha” volta a reta de ponta a ponta. Arraste os pontos do meio (encaixam na grade). Clique no trecho para curvar. Scroll = zoom · arraste com a mãozinha para mover. Botão direito = menu flutuante.</p>
             </div>
             <div class="gg-side">
               <input id="ggNomeParametros" class="gg-nome" value="Parâmetros" title="Clique para mudar o nome">
@@ -1859,6 +1942,7 @@
       desenhar();
     });
     $('ggBtnRestaurar')?.addEventListener('click', restaurarVistaPadrao);
+    $('ggBtnResetLinha')?.addEventListener('click', resetarLinhaAzul);
     $('ggBtnCopiar')?.addEventListener('click', copiarGrafico);
     $('ggBtnExportar')?.addEventListener('click', exportarGrafico);
     $('ggBtnSalvar')?.addEventListener('click', salvarGraficoComNome);

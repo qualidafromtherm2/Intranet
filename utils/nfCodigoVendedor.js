@@ -87,8 +87,20 @@ const BACKFILL_CODIGO_VENDEDOR_SQL = `
      AND sub.cod IS NOT NULL
 `;
 
+/** Propaga codVend do pedido → coluna da NF (quando a NF ainda está sem vendedor). */
+const PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL = `
+  UPDATE vendas.notas_fiscais_omie nf
+     SET codigo_vendedor = NULLIF(TRIM(p.informacoes_adicionais->>'codVend'), ''),
+         updated_at = NOW()
+    FROM vendas.pedidos_venda p
+   WHERE p.codigo_pedido = nf.id_pedido_omie
+     AND COALESCE(TRIM(nf.codigo_vendedor), '') = ''
+     AND COALESCE(TRIM(p.informacoes_adicionais->>'codVend'), '') <> ''
+`;
+
 module.exports = {
   extractCodigoVendedorFromNfPayload,
   CODIGO_VENDEDOR_SQL,
   BACKFILL_CODIGO_VENDEDOR_SQL,
+  PROPAGA_VENDEDOR_PEDIDO_PARA_NF_SQL,
 };

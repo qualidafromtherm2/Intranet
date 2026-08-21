@@ -1984,6 +1984,33 @@ router.put('/verificacoes/:id', requireAuth, upload.fields([
   }
 });
 
+// DELETE /api/qualidade/ri-check/verificacoes/:id — remove verificação da RI
+router.delete('/verificacoes/:id', requireAuth, async (req, res) => {
+  try {
+    await garantirSchemaRi();
+    const verifId = Number(req.params.id) || 0;
+    if (!verifId) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+    const { rows: atuais } = await dbQuery(
+      `SELECT id, ri_check_id FROM qualidade."RI_Verificacoes" WHERE id = $1 LIMIT 1`,
+      [verifId]
+    );
+    if (!atuais.length) return res.status(404).json({ ok: false, error: 'Verificação não encontrada.' });
+    const atual = atuais[0];
+
+    await dbQuery(`DELETE FROM qualidade."RI_Verificacoes" WHERE id = $1`, [verifId]);
+    if (atual.ri_check_id) {
+      await dbQuery(`UPDATE qualidade."RI_Check" SET updated_at = NOW() WHERE id = $1`, [atual.ri_check_id]);
+      dispararNotificacaoRiCheck(atual.ri_check_id);
+    }
+
+    return res.json({ ok: true, id: verifId });
+  } catch (err) {
+    console.error('[qualidade/ri-check/verificacoes DELETE]', err);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao excluir verificação.' });
+  }
+});
+
 // POST /api/qualidade/ri-check/niq — ocorrência por OP (sem exigir RI_Check gravado)
 router.post('/niq', requireAuth, upload.fields([
   { name: 'arquivos', maxCount: 20 },
