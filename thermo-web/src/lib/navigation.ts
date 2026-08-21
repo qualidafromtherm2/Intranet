@@ -203,6 +203,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-estoque-maquinas') {
+    return {
+      icon: itemIconMap[selector] ?? 'cog',
+      migrationStatus: 'migrated',
+      view: 'machine-stock',
+      destination: '/logistics/machine-stock',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',

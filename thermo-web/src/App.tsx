@@ -72,6 +72,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
 import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
+import { MachineStockScreen } from './features/inventory/MachineStockScreen'
 import { ProductsReceivedScreen, ReceivingScreen } from './features/receiving'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { ShippingScreen } from './features/shipping/ShippingScreen'
@@ -1311,6 +1312,7 @@ function App() {
   const canReceive = useMemo(() => isSelectorAllowed('#menu-recebimento', navigation.selectorMap), [navigation.selectorMap])
   const canViewReceived = useMemo(() => isSelectorAllowed('#menu-produto-recebido', navigation.selectorMap), [navigation.selectorMap])
   const canShip = useMemo(() => isSelectorAllowed('#menu-envio-mercadoria', navigation.selectorMap), [navigation.selectorMap])
+  const canViewMachineStock = useMemo(() => isSelectorAllowed('#menu-estoque-maquinas', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1379,8 +1381,10 @@ function App() {
               <ReceivingScreen allowed={canReceive} />
             ) : activeView === 'products-received' ? (
               <ProductsReceivedScreen allowed={canViewReceived} />
-            ) : (
+            ) : activeView === 'shipping' ? (
               <ShippingScreen allowed={canShip} />
+            ) : (
+              <MachineStockScreen allowed={canViewMachineStock} />
             )}
           </main>
         </div>
