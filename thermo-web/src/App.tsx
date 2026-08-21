@@ -90,6 +90,7 @@ import { PreparationsScreen } from './features/preparations'
 import { ProductionReportScreen } from './features/production-report'
 import { ProductionTestsScreen } from './features/production-tests'
 import { PurchaseAccountsScreen } from './features/purchase-accounts'
+import { PurchaseSettingsScreen } from './features/purchase-settings'
 import { QualityManualsScreen } from './features/quality-manuals'
 import { RedAreaScreen } from './features/red-area'
 import { SalesReportScreen } from './features/sales-report'
@@ -98,6 +99,8 @@ import { ShippingScreen } from './features/shipping/ShippingScreen'
 import { SalesControlScreen } from './features/sales-control'
 import { SalesChartsScreen } from './features/sales-charts'
 import { SalesMapScreen } from './features/sales-map'
+import { SacReportScreen } from './features/sac-report'
+import { SacShippingRequestScreen } from './features/sac-shipping-request'
 import { StockAdjustmentScreen } from './features/stock-adjustment'
 import { WarehouseScreen } from './features/warehouses'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
@@ -1382,6 +1385,10 @@ function App() {
   const canViewProductionTests = useMemo(() => isSelectorAllowed('#menu-producao-testes', navigation.selectorMap), [navigation.selectorMap])
   const canViewRedArea = useMemo(() => isSelectorAllowed('#menu-qualidade-area-vermelha', navigation.selectorMap), [navigation.selectorMap])
   const canViewPurchaseAccounts = useMemo(() => isSelectorAllowed('#menu-compras-contas-utilizadas', navigation.selectorMap), [navigation.selectorMap])
+  const canViewPurchaseSettings = useMemo(() => isSelectorAllowed('#menu-compras-configuracoes', navigation.selectorMap), [navigation.selectorMap])
+  const canWritePurchaseSettings = useMemo(() => permissionNodes.some((node) => node.allowed && node.selector === '#menu-compras-configuracoes' && /(?:write|edit|escrever|editar|crud)/i.test(node.key)), [permissionNodes])
+  const canViewSacShippingRequest = useMemo(() => isSelectorAllowed('#menu-sac-solicitacao-envio', navigation.selectorMap), [navigation.selectorMap])
+  const canViewSacReport = useMemo(() => isSelectorAllowed('#menu-sac-at-relatorio', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1500,6 +1507,12 @@ function App() {
               <RedAreaScreen allowed={canViewRedArea} canWrite={false} currentUser={user.username} />
             ) : activeView === 'purchase-accounts' ? (
               canViewPurchaseAccounts ? <PurchaseAccountsScreen /> : <PermissionDenied feature="Contas utilizadas" />
+            ) : activeView === 'purchase-settings' ? (
+              <PurchaseSettingsScreen allowed={canViewPurchaseSettings} canWrite={canWritePurchaseSettings} />
+            ) : activeView === 'sac-shipping-request' ? (
+              <SacShippingRequestScreen allowed={canViewSacShippingRequest} canWrite={false} canCreate={false} />
+            ) : activeView === 'sac-report' ? (
+              canViewSacReport ? <SacReportScreen /> : <PermissionDenied feature="Relatório SAC/AT" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

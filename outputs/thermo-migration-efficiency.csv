@@ -17,3 +17,6 @@ e12867a5756e62324c13a1cf765fda200a7ef2b0,d51fcbb7d5ad9d69602f9d3c2bf1090448e409b
 032e605aeae2d36e076219f5609f565aaf450771,a079b4aeb7cbc99513f876a8fb7b5c215c7f7234,8621ad7,Preparações,6,"preparations: 5 passed","Ligado a #menu-preparacoes; último posto PP bloqueado sem contrato",0
 032e605aeae2d36e076219f5609f565aaf450771,cbe25b94758593676efb60ebb427c1f97ee74f2c,90802e1,Manuais de Qualidade,6,"quality manuals: 8 passed","Ligado a #menu-qualidade-manuais; gestão e upload bloqueados",0
 032e605aeae2d36e076219f5609f565aaf450771,a53eb55b4a0bef99cd26263cc7f62b3efff77e5c,864da56,Relatório de Produção,5,"production report: 1 passed","Ligado a #menu-producao-relatorio; consulta somente leitura",0
+0a28345a13300af619d40c40506ac5b14a0a76aa,2286db7c369226d0633c5cc7a67e69664bf6723f,769a6e4,Configurações de Compras,6,"purchase settings: 5 passed","Ligado a #menu-compras-configuracoes; CRUD opt-in por nó explícito",0
+0a28345a13300af619d40c40506ac5b14a0a76aa,bb59f4495f7c11f635166fd3bb257688e0686fc9,2947f84,Solicitações de Envio SAC,6,"sac shipping: 7 passed","Ligado a #menu-sac-solicitacao-envio; VIPP/upload/geração/impressão bloqueados",0
+0a28345a13300af619d40c40506ac5b14a0a76aa,da7894d17c72e19f9acdc974dec0da75156252de,d6da606,Relatório SAC/AT,5,"sac report: 1 passed","Ligado a #menu-sac-at-relatorio; consulta somente leitura",0

@@ -328,6 +328,9 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
   }
   if (selector === '#menu-vendas-mapa') return { icon: itemIconMap[selector] ?? 'map', migrationStatus: 'migrated', view: 'sales-map', destination: '/sales/map' }
   if (selector === '#menu-compras-contas-utilizadas') return { icon: itemIconMap[selector] ?? 'landmark', migrationStatus: 'migrated', view: 'purchase-accounts', destination: '/purchases/accounts' }
+  if (selector === '#menu-compras-configuracoes') return { icon: itemIconMap[selector] ?? 'settings', migrationStatus: 'migrated', view: 'purchase-settings', destination: '/purchases/settings' }
+  if (selector === '#menu-sac-solicitacao-envio') return { icon: itemIconMap[selector] ?? 'send', migrationStatus: 'migrated', view: 'sac-shipping-request', destination: '/sac/shipping-requests' }
+  if (selector === '#menu-sac-at-relatorio') return { icon: itemIconMap[selector] ?? 'file-chart-column', migrationStatus: 'migrated', view: 'sac-report', destination: '/sac/report' }
 
   if (selector === '#menu-log-relatorio') {
     return {
