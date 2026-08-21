@@ -237,6 +237,14 @@ async function main() {
         if (/não cadastrado|nao cadastrado/i.test(msg)) {
           skip++;
           process.stdout.write('!');
+          try {
+            await pool.query(
+              `INSERT INTO vendas.pedidos_omie_inexistentes (codigo_pedido, motivo)
+               VALUES ($1, $2)
+               ON CONFLICT (codigo_pedido) DO UPDATE SET motivo = EXCLUDED.motivo, marcado_em = NOW()`,
+              [codigo, msg.slice(0, 240)]
+            );
+          } catch (_) { /* ignore */ }
           await sleep(Math.min(1000, opts.delayMs));
           continue;
         }
