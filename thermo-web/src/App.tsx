@@ -77,6 +77,7 @@ import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistic
 import { MachineStockScreen } from './features/inventory/MachineStockScreen'
 import { ProductsReceivedScreen, ReceivingScreen } from './features/receiving'
 import { PirScreen } from './features/pir'
+import { PrintAgentConfigScreen } from './features/print-agent-config'
 import { ProductRegistrationScreen } from './features/product-registration'
 import { SalesReportScreen } from './features/sales-report'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
@@ -1343,6 +1344,7 @@ function App() {
   const canSimulateFreight = useMemo(() => isSelectorAllowed('#menu-simulador-frete', navigation.selectorMap), [navigation.selectorMap])
   const canUsePir = useMemo(() => isSelectorAllowed('#menu-qualidade-fabrica', navigation.selectorMap) || isSelectorAllowed('#menu-engenharia-pir-eng', navigation.selectorMap), [navigation.selectorMap])
   const canViewSalesReport = useMemo(() => isSelectorAllowed('#menu-vendas-relatorio', navigation.selectorMap), [navigation.selectorMap])
+  const canConfigurePrintAgent = useMemo(() => isSelectorAllowed('#menu-configurar-agente', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1423,6 +1425,8 @@ function App() {
               canUsePir ? <PirScreen /> : <PermissionDenied feature="PIR" />
             ) : activeView === 'sales-report' ? (
               canViewSalesReport ? <SalesReportScreen /> : <PermissionDenied feature="Relatório Gerencial de Vendas" />
+            ) : activeView === 'print-agent-config' ? (
+              canConfigurePrintAgent ? <PrintAgentConfigScreen /> : <PermissionDenied feature="Configurador do agente de impressão" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

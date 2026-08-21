@@ -248,6 +248,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-configurar-agente') {
+    return {
+      icon: itemIconMap[selector] ?? 'settings',
+      migrationStatus: 'migrated',
+      view: 'print-agent-config',
+      destination: '/settings/print-agent',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',

@@ -1,0 +1,4 @@
+base,commit_origem,commit_integrado,area,arquivos,teste_direcionado,fluxo_validado,retrabalho
+e12867a5756e62324c13a1cf765fda200a7ef2b0,f013c04b20c4ae283adeaee1e904573174e46ad4,6962290,Recebimento,5,"ReceivingScreen + receivingGateway: 9 passed","Nó legado #menu-recebimento preservado; acesso por árvore real",0
+e12867a5756e62324c13a1cf765fda200a7ef2b0,c36d0cf5d8842bb55ecc9476f8600d2d893b1676,dac9ec8,Ações de produto,3,"productActionsGateway: 9 passed","Fluxo Ações preservado no painel de produtos",0
+e12867a5756e62324c13a1cf765fda200a7ef2b0,d51fcbb7d5ad9d69602f9d3c2bf1090448e409b0,088846c,Configurador do agente,5,"printAgentGateway: 5 passed","Ligado a #menu-configurar-agente e à árvore real de permissões",3
