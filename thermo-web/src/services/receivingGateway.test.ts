@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { confirmNfeAssociation, findNfeKey, loadNfeDetails, loadPendingReceipts, loadReceivedProducts, previewNfeAssociation } from './receivingGateway'
+import { confirmNfeAssociation, findNfeKey, loadActivePurchaseCategories, loadNfeDetails, loadPendingReceipts, loadReceivedProducts, previewNfeAssociation } from './receivingGateway'
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
@@ -38,5 +38,14 @@ describe('receivingGateway', () => {
   it('propaga mensagem do backend em erro de permissão', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(response({ ok: false, error: 'Acesso negado.' }, 403))
     await expect(loadPendingReceipts()).rejects.toMatchObject({ message: 'Acesso negado.', status: 403 })
+  })
+
+  it('consulta categorias reais e envia overrides somente no payload explícito', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(response({ ok: true, categorias: [] })).mockResolvedValueOnce(response({ ok: true }))
+    await loadActivePurchaseCategories()
+    const input = { numero_nfe: '7788', numero_pedido: '9001', nova_categoria_compra: '2.01', itens_override: [{ n_sequencia: 1, nIdItPedidoExistente: 22, nIdPedidoExistente: 42, nQtde: 3, cUnidade: 'UN' }] }
+    await confirmNfeAssociation(input)
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/compras/categorias')
+    expect(fetchMock.mock.calls[1]![1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }))
   })
 })

@@ -66,8 +66,12 @@ export interface AssociationInput {
   numero_pedido?: string
   n_cod_ped?: number
   nova_categoria_compra?: string
-  itens_override?: Array<Record<string, unknown>>
+  itens_override?: AssociationItemOverride[]
 }
+
+export interface AssociationItemOverride { n_sequencia: number; nIdItPedidoExistente?: number; nIdPedidoExistente?: number; nIdProdutoServico?: number; nQtde?: number; cUnidade?: string; conversaoUnidade?: boolean }
+export interface AssociationPreviewItem { n_sequencia?: number; nf_codigo_produto?: string; nf_descricao_produto?: string; nf_qtde?: number; nf_unidade?: string; nf_valor_unitario?: number; pedido_item_encontrado?: boolean; requer_revisao?: boolean; criterio_match?: string; pedido_n_cod_item?: number; pedido_n_cod_ped?: number; pedido_numero?: string; pedido_codigo_produto?: string; pedido_descricao_produto?: string; pedido_qtde?: number; pedido_unidade?: string; pedido_c_unidade?: string; pedido_valor_unitario?: number; conversao_unidade_manual?: boolean; conversao_unidade_necessaria?: boolean; item_servico?: boolean; nIdProdutoServico?: number }
+export interface PurchaseCategory { codigo: string; descricao?: string; conta_inativa?: string; categoria_superior?: string }
 
 export interface AssociationPreviewResponse {
   ok: boolean
@@ -83,8 +87,9 @@ export interface AssociationPreviewResponse {
     itens_match_total?: number
     itens_sem_match_total?: number
     categoria?: { codigo?: string; descricao?: string; inativa?: boolean } | null
-    itens?: Array<Record<string, unknown>>
-    itens_preview?: Array<Record<string, unknown>>
+    itens?: AssociationPreviewItem[]
+    itens_preview?: AssociationPreviewItem[]
+    itens_pedido_informativos?: AssociationPreviewItem[]
     [key: string]: unknown
   }
 }

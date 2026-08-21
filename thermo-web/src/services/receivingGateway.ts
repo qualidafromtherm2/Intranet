@@ -4,6 +4,7 @@ import type {
   AssociationPreviewResponse,
   NfeDetailsResponse,
   ReceivingRow,
+  PurchaseCategory,
 } from '../features/receiving/types'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
@@ -68,6 +69,10 @@ export function previewNfeAssociation(input: AssociationInput) {
   return requestJson<AssociationPreviewResponse>('/api/compras/pedidos-omie/nfe-associar-pedido/preview', {
     method: 'POST', body: JSON.stringify(input),
   })
+}
+
+export function loadActivePurchaseCategories() {
+  return requestJson<{ ok: boolean; categorias: PurchaseCategory[] }>('/api/compras/categorias')
 }
 
 export function confirmNfeAssociation(input: AssociationInput) {
