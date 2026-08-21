@@ -364,9 +364,20 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
   }
 }
 
-function buildNavItem(node: PermissionNode, childrenByParent: Map<number, PermissionNode[]>, moduleKey: string, moduleLabel: string): ShellNavItem {
+function buildNavItem(node: PermissionNode, childrenByParent: Map<number, PermissionNode[]>, moduleKey: string, moduleLabel: string): ShellNavItem | null {
   const meta = inferMeta(node, moduleKey)
-  const children = (childrenByParent.get(node.id) ?? []).sort(compareNodes).map((child) => buildNavItem(child, childrenByParent, moduleKey, moduleLabel))
+  const selector = normalizeText(node.selector)
+  const children = meta.migrationStatus === 'migrated'
+    ? []
+    : (childrenByParent.get(node.id) ?? [])
+        .sort(compareNodes)
+        .map((child) => buildNavItem(child, childrenByParent, moduleKey, moduleLabel))
+        .filter((child): child is ShellNavItem => child !== null)
+
+  // The permission tree also contains form sections (for example, product
+  // registration fields). They control access in the legacy screen but are
+  // not destinations and must not become disabled sidebar entries.
+  if (!selector && children.length === 0) return null
 
   return {
     id: String(node.id),
@@ -390,9 +401,12 @@ function buildNavItem(node: PermissionNode, childrenByParent: Map<number, Permis
 
 function buildTopSection(nodes: PermissionNode[], childrenByParent: Map<number, PermissionNode[]>): ShellNavSection | null {
   const topRoots = nodes
-    .filter((node) => node.pos === 'top')
+    .filter((node) => node.pos === 'top' && normalizeText(node.selector) !== '#menu-inicio')
     .sort(compareNodes)
     .map((node) => buildNavItem(node, childrenByParent, 'top', 'Topo'))
+    // The legacy top area mixes true shortcuts with product-detail tabs.
+    // Only expose shortcuts that already have a real Thermo destination.
+    .filter((item): item is ShellNavItem => item !== null && item.migrationStatus === 'migrated' && item.view !== null)
 
   if (topRoots.length === 0) return null
 
@@ -444,7 +458,8 @@ export function buildNavigationCatalog(nodes: PermissionNode[]): ShellNavigation
       order: node.sort ?? 0,
       children: (childrenByParent.get(node.id) ?? [])
         .sort(compareNodes)
-        .map((child) => buildNavItem(child, childrenByParent, node.key, node.label)),
+        .map((child) => buildNavItem(child, childrenByParent, node.key, node.label))
+        .filter((item): item is ShellNavItem => item !== null),
     }))
     .filter((section) => section.children.length > 0)
 
