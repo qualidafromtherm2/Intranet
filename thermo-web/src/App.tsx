@@ -71,15 +71,19 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
+import { CalendarScreen } from './features/calendar'
 import { FreightSimulatorScreen } from './features/freight'
 import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
 import { MachineStockScreen } from './features/inventory/MachineStockScreen'
 import { ProductsReceivedScreen, ReceivingScreen } from './features/receiving'
+import { PirScreen } from './features/pir'
+import { ProductRegistrationScreen } from './features/product-registration'
+import { SalesReportScreen } from './features/sales-report'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { ShippingScreen } from './features/shipping/ShippingScreen'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
 import { buildNavigationCatalog, isSelectorAllowed } from './lib/navigation'
-import { buildLegacyUrl, getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
+import { getAuthStatus, getPermissionTree, login, logout } from './services/authGateway'
 import { loadActiveUsers, loadRecentActivity, loadRemindersMonth, loadReservationsMonth } from './services/homeGateway'
 import type {
   ActivityEvent,
@@ -403,7 +407,7 @@ function SidebarItem({
 }) {
   const Icon = getIconComponent(item.icon)
   const isActive = item.view === activeView && item.migrationStatus === 'migrated'
-  const isClickable = item.migrationStatus === 'migrated' && item.view !== null
+  const isClickable = item.allowed && item.migrationStatus === 'migrated' && item.view !== null
   const statusText = isClickable ? 'Disponível' : 'Indisponível nesta tela'
 
   return (
@@ -544,6 +548,7 @@ function Sidebar({
   navigation: ShellNavigationCatalog
 }) {
   const sectionIds = navigation.sections.filter((section) => section.key !== 'top').map((section) => section.id)
+  const topItems = navigation.sections.find((section) => section.key === 'top')?.children ?? []
   const accordion = useAccordionState('thermo.sidebar.sections', sectionIds)
 
   const content = (
@@ -590,6 +595,12 @@ function Sidebar({
           <Home className="size-4 shrink-0" />
           {!collapsed ? <span className="flex-1 truncate">Página inicial</span> : <span className="pointer-events-none absolute left-full z-20 ml-3 hidden whitespace-nowrap rounded-lg border border-thermo-border bg-white px-3 py-2 text-xs font-semibold text-thermo-ink shadow-lg group-hover:block group-focus-visible:block">Página inicial</span>}
         </button>
+      </div>
+
+      <div className="space-y-1 px-3 pb-3">
+        {topItems.map((item) => (
+          <SidebarItem key={`top-${item.id}`} item={item} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
+        ))}
       </div>
 
       {!collapsed ? (
@@ -648,6 +659,11 @@ function Sidebar({
             <Home className="size-5 shrink-0" />
             <span className="flex-1">Página inicial</span>
           </button>
+        </div>
+        <div className="space-y-1 border-t border-white/8 px-3 py-3">
+          {topItems.map((item) => (
+            <SidebarItem key={`mobile-top-${item.id}`} item={item} collapsed={false} activeView={activeView} onNavigate={(view) => { onNavigate(view); onClose() }} />
+          ))}
         </div>
         <div className="flex items-center justify-between px-3 pb-2 text-[11px] font-semibold text-slate-300">
           <button type="button" onClick={accordion.collapseAll}>Recolher todos</button>
@@ -756,7 +772,7 @@ function ModulesSection({
                 <div className="space-y-1 border-t border-thermo-border p-2">
                   {entries.map((item) => {
                     const ItemIcon = getIconComponent(item.icon)
-                    const clickable = item.migrationStatus === 'migrated' && item.view !== null
+                    const clickable = item.allowed && item.migrationStatus === 'migrated' && item.view !== null
                     const active = clickable && item.view === activeView
                     return (
                       <button
@@ -900,10 +916,10 @@ function HomeScreen({
               <Boxes className="size-4" />
               Lista de Produtos
             </button>
-            <a className="thermo-button thermo-button-secondary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
+            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onNavigate('calendar')}>
               <ExternalLink className="size-4" />
               Abrir agenda
-            </a>
+            </button>
           </div>
         </div>
       </section>
@@ -1179,10 +1195,10 @@ function HomeScreen({
           ))}
 
           <div className="flex flex-wrap gap-2">
-            <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
+            <button className="thermo-button thermo-button-primary" type="button" onClick={() => { setDetailDay(null); onNavigate('calendar') }}>
               <ExternalLink className="size-4" />
               Abrir agenda
-            </a>
+            </button>
             <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setDetailDay(null)}>
               Fechar
             </button>
@@ -1202,10 +1218,10 @@ function HomeScreen({
             Para registrar uma reserva nesta data, continue na Agenda.
           </div>
           <div className="flex flex-wrap gap-2">
-            <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
+            <button className="thermo-button thermo-button-primary" type="button" onClick={() => { setBridgeDay(null); onNavigate('calendar') }}>
               <ExternalLink className="size-4" />
               Abrir agenda
-            </a>
+            </button>
             <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setBridgeDay(null)}>
               Fechar
             </button>
@@ -1224,6 +1240,16 @@ function LoadingShell({ message }: { message: string }) {
         <div className="mt-4 text-sm text-slate-500">{message}</div>
       </div>
     </div>
+  )
+}
+
+function PermissionDenied({ feature }: { feature: string }) {
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-amber-50 p-6 text-amber-950">
+      <Lock className="size-6" />
+      <h1 className="mt-3 text-xl font-bold">Acesso bloqueado</h1>
+      <p className="mt-1 text-sm">Sua árvore real de permissões não liberou {feature}.</p>
+    </section>
   )
 }
 
@@ -1315,6 +1341,8 @@ function App() {
   const canShip = useMemo(() => isSelectorAllowed('#menu-envio-mercadoria', navigation.selectorMap), [navigation.selectorMap])
   const canViewMachineStock = useMemo(() => isSelectorAllowed('#menu-estoque-maquinas', navigation.selectorMap), [navigation.selectorMap])
   const canSimulateFreight = useMemo(() => isSelectorAllowed('#menu-simulador-frete', navigation.selectorMap), [navigation.selectorMap])
+  const canUsePir = useMemo(() => isSelectorAllowed('#menu-qualidade-fabrica', navigation.selectorMap) || isSelectorAllowed('#menu-engenharia-pir-eng', navigation.selectorMap), [navigation.selectorMap])
+  const canViewSalesReport = useMemo(() => isSelectorAllowed('#menu-vendas-relatorio', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1363,6 +1391,8 @@ function App() {
                 sections={navigation.sections}
                 onNavigate={(view) => setActiveView(view)}
               />
+            ) : activeView === 'calendar' ? (
+              <CalendarScreen currentUser={user.username} />
             ) : activeView === 'products' ? (
               <ProductListScreen
                 permissions={{
@@ -1373,6 +1403,8 @@ function App() {
                   separationReason: canOpenSeparation ? null : 'Sua árvore de permissões não liberou a Solicitação de transferência (#menu-solicitacao-transferencia).',
                 }}
               />
+            ) : activeView === 'product-registration' ? (
+              <ProductRegistrationScreen hasPermission={canEditCatalog} />
             ) : activeView === 'separation' ? (
               <SeparationWorkspace />
             ) : activeView === 'store-materials' ? (
@@ -1387,6 +1419,10 @@ function App() {
               <ShippingScreen allowed={canShip} />
             ) : activeView === 'freight-simulator' ? (
               <FreightSimulatorScreen allowed={canSimulateFreight} canEditProducts={canEditCatalog} />
+            ) : activeView === 'pir' ? (
+              canUsePir ? <PirScreen /> : <PermissionDenied feature="PIR" />
+            ) : activeView === 'sales-report' ? (
+              canViewSalesReport ? <SalesReportScreen /> : <PermissionDenied feature="Relatório Gerencial de Vendas" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

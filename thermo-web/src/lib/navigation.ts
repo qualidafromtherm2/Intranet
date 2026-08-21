@@ -140,12 +140,21 @@ function inferIcon(node: PermissionNode, moduleKey: string) {
 
 function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
   const selector = normalizeText(node.selector)
-  if (selector === '#btn-omie-list1') {
+  if (selector === '#btn-omie-list1' || selector === '#menu-lista-produtos') {
     return {
       icon: itemIconMap[selector] ?? 'boxes',
       migrationStatus: 'migrated',
       view: 'products',
       destination: '/products',
+    }
+  }
+
+  if (selector === '#menu-produto') {
+    return {
+      icon: itemIconMap[selector] ?? 'square-plus',
+      migrationStatus: 'migrated',
+      view: 'product-registration',
+      destination: '/products/register',
     }
   }
 
@@ -221,6 +230,24 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-qualidade-fabrica' || selector === '#menu-engenharia-pir-eng') {
+    return {
+      icon: itemIconMap[selector] ?? 'clipboard-check',
+      migrationStatus: 'migrated',
+      view: 'pir',
+      destination: '/quality/pir',
+    }
+  }
+
+  if (selector === '#menu-vendas-relatorio') {
+    return {
+      icon: itemIconMap[selector] ?? 'file-chart-column',
+      migrationStatus: 'migrated',
+      view: 'sales-report',
+      destination: '/sales/report',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',
@@ -255,7 +282,7 @@ function buildNavItem(node: PermissionNode, childrenByParent: Map<number, Permis
 
 function buildTopSection(nodes: PermissionNode[], childrenByParent: Map<number, PermissionNode[]>): ShellNavSection | null {
   const topRoots = nodes
-    .filter((node) => node.allowed && node.pos === 'top')
+    .filter((node) => node.pos === 'top')
     .sort(compareNodes)
     .map((node) => buildNavItem(node, childrenByParent, 'top', 'Topo'))
 
@@ -273,12 +300,12 @@ function buildTopSection(nodes: PermissionNode[], childrenByParent: Map<number, 
 
 export function buildNavigationCatalog(nodes: PermissionNode[]): ShellNavigationCatalog {
   const selectorMap = buildSelectorMap(nodes)
-  const allowedNodes = nodes.filter((node) => node.allowed && (node.pos === 'side' || node.pos === 'top'))
-  const nodesById = new Map(allowedNodes.map((node) => [node.id, node]))
+  const navigationNodes = nodes.filter((node) => node.pos === 'side' || node.pos === 'top')
+  const nodesById = new Map(navigationNodes.map((node) => [node.id, node]))
   const childrenByParent = new Map<number, PermissionNode[]>()
   const sectionRoots: PermissionNode[] = []
 
-  for (const node of allowedNodes) {
+  for (const node of navigationNodes) {
     if (node.parent_id && nodesById.has(node.parent_id)) {
       const bucket = childrenByParent.get(node.parent_id) ?? []
       bucket.push(node)
@@ -289,7 +316,7 @@ export function buildNavigationCatalog(nodes: PermissionNode[]): ShellNavigation
   }
 
   const sections: ShellNavSection[] = []
-  const topSection = buildTopSection(allowedNodes, childrenByParent)
+  const topSection = buildTopSection(navigationNodes, childrenByParent)
   if (topSection) sections.push(topSection)
 
   const sideSections = sectionRoots
