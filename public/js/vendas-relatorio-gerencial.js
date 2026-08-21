@@ -703,27 +703,18 @@
   }
 
   function _resetarFiltroGrafico() {
-    const snap = _drillSnapshot;
+    // Limpa TODOS os filtros de dimensão (dropdown + clique no gráfico).
+    // Período (mês/trimestre/ano) e comparação ficam como estão.
     _drillExtra.cliente = '';
     _drillExtra.etapa_pedido = '';
     _drillExtra.familia_nome = '';
-    if (snap) {
-      if (snap.modo) _setModoFiltro(snap.modo);
-      _setSelectValor('vendRelGerEstado', snap.estado || '', snap.estado || '');
-      _setSelectValor('vendRelGerVendedor', snap.vendedor || '', snap.vendedor || '');
-      _setSelectValor('vendRelGerTipo', snap.tipo || '', snap.tipo || '');
-      if (snap.mes) _setSelectValor('vendRelGerMes', snap.mes, snap.mes);
-      if (snap.ano) _setSelectValor('vendRelGerAno', snap.ano, snap.ano);
-      if (snap.trimestre) _setSelectValor('vendRelGerTrimestre', snap.trimestre, snap.trimestre);
-      const di = document.getElementById('vendRelGerDataInicio');
-      const df = document.getElementById('vendRelGerDataFim');
-      if (di && snap.data_inicio != null) di.value = snap.data_inicio;
-      if (df && snap.data_fim != null) df.value = snap.data_fim;
-      _familiasSelecionadas = new Set(snap.familias || []);
-      _atualizarLabelFamilia();
-      _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
-    }
     _drillSnapshot = null;
+    _setSelectValor('vendRelGerEstado', '', 'Todos');
+    _setSelectValor('vendRelGerVendedor', '', 'Todos');
+    _setSelectValor('vendRelGerTipo', '', 'Todos');
+    _familiasSelecionadas = new Set();
+    _atualizarLabelFamilia();
+    _renderFamiliaLista(document.getElementById('vendRelGerFamiliaBusca')?.value || '');
     _atualizarBarraDrill();
     _carregar();
   }
@@ -1665,7 +1656,7 @@
     const btn = document.createElement('button');
     btn.id = 'vendRelGerResetDrillBtn';
     btn.type = 'button';
-    btn.title = 'Limpar os filtros feitos pelo clique nos gráficos';
+    btn.title = 'Limpar todos os filtros (vendedor, família, estado, tipo e clique nos gráficos)';
     btn.innerHTML = '<i class="fa-solid fa-rotate-left"></i> Resetar filtro';
     btn.style.display = 'none';
     if (filtro && filtro.nextSibling) parent.insertBefore(btn, filtro.nextSibling);
