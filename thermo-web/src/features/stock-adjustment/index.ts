@@ -1,0 +1,1 @@
+export { StockAdjustmentScreen } from './StockAdjustmentScreen'
