@@ -78,32 +78,26 @@ function countAppliedFilters(filters: FiltersState) {
     Number(filters.abaixoEstoqueMin) +
     Number(filters.acimaEstoqueMin) +
     Number(filters.proximoEstoqueMin) +
-    Number(filters.estoqueNegativo) +
-    Number(filters.expedicaoNegativa) +
-    Number(filters.saldoEnderecoSemOmie) +
-    Number(filters.saldoDivergenteEndereco)
+    Number(filters.estoqueNegativo)
   )
 }
 
 function describeAppliedFilters(filters: FiltersState) {
-  const parts: string[] = []
-  if (filters.families.length) parts.push(`${filters.families.length} família(s)`)
-  if (filters.typeItems.length) parts.push(`${filters.typeItems.length} tipo(s)`)
-  if (filters.origins.length) parts.push(`${filters.origins.length} origem(ns)`)
-  if (filters.purchaseStatus.length) parts.push(`${filters.purchaseStatus.length} situação(ões) de compra`)
-  if (filters.locationCodes.length) parts.push(`${filters.locationCodes.length} local(is)`)
-  if (filters.showInactive) parts.push('inativos')
-  if (filters.hideObsolete) parts.push('ocultando obsoletos')
-  if (filters.hideEngineering) parts.push('ocultando engenharia')
-  if (filters.semEstoqueMin) parts.push('sem estoque mínimo')
-  if (filters.abaixoEstoqueMin) parts.push('abaixo do mínimo')
-  if (filters.acimaEstoqueMin) parts.push('acima do mínimo')
-  if (filters.proximoEstoqueMin) parts.push(`até ${filters.proximoPercent}% acima do mínimo`)
-  if (filters.estoqueNegativo) parts.push('estoque negativo')
-  if (filters.expedicaoNegativa) parts.push('expedição negativa')
-  if (filters.saldoEnderecoSemOmie) parts.push('saldo em endereço sem Omie')
-  if (filters.saldoDivergenteEndereco) parts.push('divergência Omie/endereço')
-  return parts.length > 0 ? parts.join(' · ') : 'Nenhum filtro ativo'
+  const parts: Array<{ key: string; label: string }> = []
+  if (filters.semEstoqueMin) parts.push({ key: 'semEstoqueMin', label: 'Sem estoque mínimo' })
+  if (filters.abaixoEstoqueMin) parts.push({ key: 'abaixoEstoqueMin', label: 'Abaixo do mínimo' })
+  if (filters.acimaEstoqueMin) parts.push({ key: 'acimaEstoqueMin', label: 'Acima do mínimo' })
+  if (filters.proximoEstoqueMin) parts.push({ key: 'proximoEstoqueMin', label: `Até ${filters.proximoPercent}% acima do mínimo` })
+  if (filters.estoqueNegativo) parts.push({ key: 'estoqueNegativo', label: 'Estoque negativo' })
+  if (filters.showInactive) parts.push({ key: 'showInactive', label: 'Mostrar inativos' })
+  if (filters.hideObsolete) parts.push({ key: 'hideObsolete', label: 'Ocultar obsoletos' })
+  if (filters.hideEngineering) parts.push({ key: 'hideEngineering', label: 'Ocultar engenharia' })
+  if (filters.families.length) parts.push({ key: 'families', label: `${filters.families.length} família(s)` })
+  if (filters.typeItems.length) parts.push({ key: 'typeItems', label: `${filters.typeItems.length} tipo(s)` })
+  if (filters.origins.length) parts.push({ key: 'origins', label: `${filters.origins.length} origem(ns)` })
+  if (filters.purchaseStatus.length) parts.push({ key: 'purchaseStatus', label: `${filters.purchaseStatus.length} situação(ões) de compra` })
+  if (filters.locationCodes.length) parts.push({ key: 'locationCodes', label: `${filters.locationCodes.length} local(is)` })
+  return parts
 }
 
 function statusTone(product: ProductRecord) {
@@ -166,7 +160,7 @@ function MultiSelectField({
         size={size}
         value={value}
         onChange={(event) => onChange(Array.from(event.target.selectedOptions, (option) => option.value))}
-        className="min-h-32 w-full rounded-2xl border border-thermo-border bg-thermo-bg px-3 py-3 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
+        className="min-h-24 w-full rounded-xl border border-thermo-border bg-white px-3 py-2 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
       >
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -421,6 +415,7 @@ export function ProductListScreen({
   const { filtered, paginated, loading, error, warnings, filters, setFilters, filtersMeta, page, setPage, pageCount, pageSize, viewMode, setViewMode, cartCount, streamEvents, dataMode, reload, fetchedAt } = usePilotData()
   const [filtersOpen, setFiltersOpen] = useState(false)
   const [bridgeState, setBridgeState] = useState<{ key: BridgeKey; product?: ProductRecord } | null>(null)
+  const [draftFilters, setDraftFilters] = useState<FiltersState>({ ...filters })
   const [purchaseProduct, setPurchaseProduct] = useState<ProductRecord | null>(null)
   const [purchaseLoading, setPurchaseLoading] = useState(false)
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
@@ -429,11 +424,60 @@ export function ProductListScreen({
 
   const appliedFilterCount = useMemo(() => countAppliedFilters(filters), [filters])
   const appliedFilterSummary = useMemo(() => describeAppliedFilters(filters), [filters])
+  const draftFilterCount = useMemo(() => countAppliedFilters(draftFilters), [draftFilters])
   const latestEvent = streamEvents[0]?.message || (streamEvents[0]?.type === 'error' ? 'canal indisponível' : 'aguardando')
 
   const updateFilters = (next: Partial<FiltersState>) => {
     setPage(1)
     setFilters((current) => ({ ...current, ...next }))
+  }
+
+  const updateDraftFilters = (next: Partial<FiltersState>) => {
+    setDraftFilters((current) => ({ ...current, ...next }))
+  }
+
+  const openFilters = () => {
+    setDraftFilters({ ...filters })
+    setFiltersOpen(true)
+  }
+
+  const closeFilters = () => {
+    setDraftFilters({ ...filters })
+    setFiltersOpen(false)
+  }
+
+  const applyDraftFilters = () => {
+    setPage(1)
+    setFilters({ ...draftFilters })
+    setFiltersOpen(false)
+  }
+
+  const clearDraftFilters = () => {
+    setDraftFilters({ ...defaultFilters })
+  }
+
+  const removeAppliedFilter = (key: string) => {
+    switch (key) {
+      case 'semEstoqueMin':
+      case 'abaixoEstoqueMin':
+      case 'acimaEstoqueMin':
+      case 'proximoEstoqueMin':
+      case 'estoqueNegativo':
+      case 'showInactive':
+      case 'hideObsolete':
+      case 'hideEngineering':
+        updateFilters({ [key]: false } as Partial<FiltersState>)
+        return
+      case 'families':
+      case 'typeItems':
+      case 'origins':
+      case 'purchaseStatus':
+      case 'locationCodes':
+        updateFilters({ [key]: [] } as Partial<FiltersState>)
+        return
+      default:
+        break
+    }
   }
 
   const openBridge = (key: BridgeKey, product?: ProductRecord) => setBridgeState({ key, product })
@@ -500,9 +544,10 @@ export function ProductListScreen({
               <QrCode className="size-4" />
               <span>QR</span>
             </button>
-            <button className="thermo-toolbar-button" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={() => setFiltersOpen(true)}>
+            <button className="thermo-toolbar-button" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={openFilters}>
               <Filter className="size-4" />
               <span>Filtrar</span>
+              {appliedFilterCount > 0 ? <span className="rounded-full bg-thermo-red px-2 py-0.5 text-xs text-white">{appliedFilterCount}</span> : null}
             </button>
             <button className="thermo-toolbar-button" type="button" title="Atualizar produtos" aria-label="Atualizar produtos" onClick={() => void reload()}>
               <RefreshCw className={clsx('size-4', loading && 'animate-spin')} />
@@ -533,10 +578,17 @@ export function ProductListScreen({
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
-            <span className="rounded-full border border-thermo-border bg-thermo-bg px-3 py-1 font-semibold">
-              {appliedFilterCount > 0 ? `${appliedFilterCount} filtro(s)` : 'Nenhum filtro ativo'}
-            </span>
-            <span className="text-slate-500">{appliedFilterSummary}</span>
+            {appliedFilterSummary.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => removeAppliedFilter(chip.key)}
+                className="inline-flex items-center gap-2 rounded-full border border-thermo-border bg-thermo-bg px-3 py-1 text-xs font-semibold text-slate-700"
+              >
+                {chip.label}
+                <X className="size-3" />
+              </button>
+            ))}
             {appliedFilterCount > 0 ? (
               <button className="text-sm font-semibold text-thermo-navy" type="button" onClick={() => setFilters(defaultFilters)}>
                 Limpar tudo
@@ -583,63 +635,61 @@ export function ProductListScreen({
         </div>
       </section>
 
-      <ModalShell open={filtersOpen} title="Central de filtros" description="Critérios equivalentes à tela atual da Lista de Produtos." onClose={() => setFiltersOpen(false)}>
-        <div className="space-y-6">
-          <div className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
-            <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Resumo ativo</div>
-            <div className="mt-1 text-sm text-slate-600">{appliedFilterSummary}</div>
+      <ModalShell open={filtersOpen} title="Central de filtros" description="Critérios equivalentes ao modal legado da Lista de Produtos." onClose={closeFilters} panelStyle={{ width: 'min(94vw, 30rem)', maxWidth: '30rem', flexShrink: 0 }}>
+        <div className="flex max-h-[82vh] flex-col overflow-hidden">
+          <div className="border-b border-thermo-border px-1 pb-3 text-sm text-slate-500">
+            {draftFilterCount > 0 ? `${draftFilterCount} filtro(s) em edição` : 'Nenhum filtro em edição'}
           </div>
 
-          <section>
-            <div className="mb-3 text-sm font-bold text-thermo-navy">Relatórios rápidos</div>
-            <div className="space-y-3">
-              <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={filters.semEstoqueMin} onChange={(event) => updateFilters({ semEstoqueMin: event.target.checked })} className="size-4 accent-thermo-navy" />Sem estoque mínimo</label>
-              <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={filters.abaixoEstoqueMin} onChange={(event) => updateFilters({ abaixoEstoqueMin: event.target.checked })} className="size-4 accent-thermo-red" />Abaixo do estoque mínimo</label>
-              <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={filters.acimaEstoqueMin} onChange={(event) => updateFilters({ acimaEstoqueMin: event.target.checked })} className="size-4 accent-emerald-600" />Acima do estoque mínimo</label>
-              <div className="flex flex-wrap items-center gap-3">
-                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={filters.proximoEstoqueMin} onChange={(event) => updateFilters({ proximoEstoqueMin: event.target.checked })} className="size-4 accent-amber-500" />Próximo do mínimo</label>
+          <div className="flex-1 space-y-5 overflow-y-auto py-4">
+            <section>
+              <div className="mb-2 text-sm font-bold text-thermo-navy">Estoque e situação</div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.semEstoqueMin} onChange={(event) => updateDraftFilters({ semEstoqueMin: event.target.checked })} className="size-4 accent-thermo-navy" />Sem estoque mínimo</label>
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.abaixoEstoqueMin} onChange={(event) => updateDraftFilters({ abaixoEstoqueMin: event.target.checked })} className="size-4 accent-thermo-red" />Abaixo do estoque mínimo</label>
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.acimaEstoqueMin} onChange={(event) => updateDraftFilters({ acimaEstoqueMin: event.target.checked })} className="size-4 accent-emerald-600" />Acima do estoque mínimo</label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.proximoEstoqueMin} onChange={(event) => updateDraftFilters({ proximoEstoqueMin: event.target.checked })} className="size-4 accent-amber-500" />Próximo do mínimo</label>
                 <label className="flex items-center gap-2 text-sm text-slate-600">
                   até
                   <input
                     type="number"
                     min={1}
                     max={100}
-                    value={filters.proximoPercent}
-                    disabled={!filters.proximoEstoqueMin}
-                    onChange={(event) => updateFilters({ proximoPercent: Math.min(100, Math.max(1, Number(event.target.value) || 10)) })}
-                    className="w-20 rounded-xl border border-thermo-border px-2 py-1 disabled:bg-slate-100"
+                    value={draftFilters.proximoPercent}
+                    disabled={!draftFilters.proximoEstoqueMin}
+                    onChange={(event) => updateDraftFilters({ proximoPercent: Math.min(100, Math.max(1, Number(event.target.value) || 10)) })}
+                    className="w-16 rounded-lg border border-thermo-border px-2 py-1 disabled:bg-slate-100"
                   />
                   % acima do mínimo
                 </label>
               </div>
-              <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={filters.estoqueNegativo} onChange={(event) => updateFilters({ estoqueNegativo: event.target.checked })} className="size-4 accent-thermo-red" />Estoque negativo</label>
-              <label className="flex items-start gap-3 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.expedicaoNegativa} onChange={(event) => updateFilters({ expedicaoNegativa: event.target.checked })} className="mt-0.5 size-4 accent-orange-500" /><span><strong>Expedição negativa</strong><br /><span className="text-xs text-orange-900">Somente produtos com saldo negativo em expedição.</span></span></label>
-              <label className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.saldoDivergenteEndereco} onChange={(event) => updateFilters({ saldoDivergenteEndereco: event.target.checked })} className="mt-0.5 size-4 accent-thermo-red" /><span><strong>Omie diferente dos endereços</strong><br /><span className="text-xs text-red-700">Compara saldo do #ALMOX com os endereços vinculados.</span></span></label>
-              <label className="flex items-start gap-3 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.saldoEnderecoSemOmie} onChange={(event) => updateFilters({ saldoEnderecoSemOmie: event.target.checked })} className="mt-0.5 size-4 accent-thermo-red" /><span><strong>Saldo em endereço sem Omie</strong><br /><span className="text-xs text-red-700">Localiza produtos que precisam de conferência entre o #ALMOX e seus endereços.</span></span></label>
-            </div>
-          </section>
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.estoqueNegativo} onChange={(event) => updateDraftFilters({ estoqueNegativo: event.target.checked })} className="size-4 accent-thermo-red" />Estoque negativo</label>
+              </div>
+            </section>
 
-          <section>
-            <div className="mb-3 text-sm font-bold text-thermo-navy">Visibilidade do cadastro</div>
-            <div className="grid gap-3 md:grid-cols-3">
-              <label className="flex items-center gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.showInactive} onChange={(event) => updateFilters({ showInactive: event.target.checked })} className="size-4 accent-thermo-navy" />Mostrar inativos</label>
-              <label className="flex items-center gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.hideObsolete} onChange={(event) => updateFilters({ hideObsolete: event.target.checked })} className="size-4 accent-thermo-navy" />Ocultar obsoletos</label>
-              <label className="flex items-center gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-700"><input type="checkbox" checked={filters.hideEngineering} onChange={(event) => updateFilters({ hideEngineering: event.target.checked })} className="size-4 accent-thermo-navy" />Ocultar engenharia</label>
-            </div>
-          </section>
+            <section>
+              <div className="mb-2 text-sm font-bold text-thermo-navy">Cadastro e visibilidade</div>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.showInactive} onChange={(event) => updateDraftFilters({ showInactive: event.target.checked })} className="size-4 accent-thermo-navy" />Mostrar inativos</label>
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.hideObsolete} onChange={(event) => updateDraftFilters({ hideObsolete: event.target.checked })} className="size-4 accent-thermo-navy" />Ocultar obsoletos</label>
+                <label className="flex items-center gap-3 text-sm text-slate-700"><input type="checkbox" checked={draftFilters.hideEngineering} onChange={(event) => updateDraftFilters({ hideEngineering: event.target.checked })} className="size-4 accent-thermo-navy" />Ocultar engenharia</label>
+              </div>
+            </section>
 
-          <section className="grid gap-5 lg:grid-cols-2">
-            <MultiSelectField label="Família" hint="Sem seleção exibe todas." value={filters.families} options={filtersMeta.families} onChange={(families) => updateFilters({ families })} />
-            <MultiSelectField label="Tipo de item" hint="Sem seleção exibe todos." value={filters.typeItems} options={filtersMeta.typeItems} onChange={(typeItems) => updateFilters({ typeItems })} />
+            <section className="grid gap-4">
+              <div className="text-sm font-bold text-thermo-navy">Classificação e local</div>
+              <MultiSelectField label="Família" hint="Sem seleção exibe todas." size={4} value={draftFilters.families} options={filtersMeta.families} onChange={(families) => updateDraftFilters({ families })} />
+              <MultiSelectField label="Tipo de item" hint="Sem seleção exibe todos." size={4} value={draftFilters.typeItems} options={filtersMeta.typeItems} onChange={(typeItems) => updateDraftFilters({ typeItems })} />
 
             <div>
               <label className="mb-1 block text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Origem do produto</label>
               <select
                 multiple
                 size={2}
-                value={filters.origins}
-                onChange={(event) => updateFilters({ origins: Array.from(event.target.selectedOptions, (option) => option.value as 'N' | 'I') })}
-                className="min-h-24 w-full rounded-2xl border border-thermo-border bg-thermo-bg px-3 py-3 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
+                value={draftFilters.origins}
+                onChange={(event) => updateDraftFilters({ origins: Array.from(event.target.selectedOptions, (option) => option.value as 'N' | 'I') })}
+                className="min-h-20 w-full rounded-xl border border-thermo-border bg-white px-3 py-2 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
               >
                 <option value="N">Nacional</option>
                 <option value="I">Importado</option>
@@ -652,9 +702,9 @@ export function ProductListScreen({
               <select
                 multiple
                 size={2}
-                value={filters.purchaseStatus}
-                onChange={(event) => updateFilters({ purchaseStatus: Array.from(event.target.selectedOptions, (option) => option.value as 'sem_compra' | 'em_compra') })}
-                className="min-h-24 w-full rounded-2xl border border-thermo-border bg-thermo-bg px-3 py-3 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
+                value={draftFilters.purchaseStatus}
+                onChange={(event) => updateDraftFilters({ purchaseStatus: Array.from(event.target.selectedOptions, (option) => option.value as 'sem_compra' | 'em_compra') })}
+                className="min-h-20 w-full rounded-xl border border-thermo-border bg-white px-3 py-2 text-sm text-thermo-ink outline-none focus:border-thermo-navy"
               >
                 <option value="sem_compra">Não comprado ainda</option>
                 <option value="em_compra">Em compra</option>
@@ -662,24 +712,21 @@ export function ProductListScreen({
               <p className="mt-1 text-xs text-slate-500">Sem seleção exibe todas.</p>
             </div>
 
-            <div className="lg:col-span-2">
-              <MultiSelectField label="Local" hint="O produto aparece se tiver saldo positivo em qualquer local selecionado." value={filters.locationCodes} options={filtersMeta.locations} onChange={(locationCodes) => updateFilters({ locationCodes })} />
-            </div>
-          </section>
+              <MultiSelectField label="Local" hint="O produto aparece se tiver saldo positivo em qualquer local selecionado." size={4} value={draftFilters.locationCodes} options={filtersMeta.locations} onChange={(locationCodes) => updateDraftFilters({ locationCodes })} />
+            </section>
+          </div>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-thermo-border pt-4">
-            <div className="text-sm text-slate-500">
-              <strong className="text-thermo-navy">O resultado aparece na própria lista.</strong> Você pode combinar relatórios e critérios.
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setFilters(defaultFilters)}>
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t border-thermo-border pt-4">
+              <button className="thermo-button thermo-button-secondary" type="button" onClick={clearDraftFilters}>
                 Limpar tudo
               </button>
-              <button className="thermo-button thermo-button-primary" type="button" onClick={() => setFiltersOpen(false)}>
-                <CheckCircle2 className="size-4" />
-                Ver resultados
+              <button className="thermo-button thermo-button-secondary" type="button" onClick={closeFilters}>
+                Cancelar
               </button>
-            </div>
+              <button className="thermo-button thermo-button-primary" type="button" onClick={applyDraftFilters}>
+                <CheckCircle2 className="size-4" />
+                Aplicar
+              </button>
           </div>
         </div>
       </ModalShell>
