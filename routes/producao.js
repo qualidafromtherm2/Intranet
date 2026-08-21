@@ -22,6 +22,7 @@ const {
   encerrarCicloPosto,
   iniciarRegistroTempo,
   calcularTemposPostoPorOps,
+  registrarFilaLidoOp,
   salvarTurnoPadrao,
   buscarTurnoPadrao,
   listarTurnosPadrao,
@@ -201,6 +202,7 @@ async function garantirSchemaKanbanProgramacao() {
       WHERE ri = TRUE;
   `);
   await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS estoque_maq_entrada_em TIMESTAMPTZ`);
+  await dbQuery(`ALTER TABLE producao."Kanban_programacao" ADD COLUMN IF NOT EXISTS fila_lido_em TIMESTAMPTZ`);
     kanbanProgSchemaOk = true;
   }
   await devolverOPsEmbalagemParaInspecaoFinal();
@@ -2176,7 +2178,8 @@ router.get('/kanban-programacao', async (req, res) => {
         observacao,
         postos,
         COALESCE(ri, FALSE) AS ri,
-        created_at
+        created_at,
+        fila_lido_em
       FROM producao."Kanban_programacao"
       ORDER BY created_at DESC, id DESC
     `);
@@ -2989,6 +2992,55 @@ router.post('/tempo/ativos-por-ops', express.json(), async (req, res) => {
     return res.json({ success: true, tempos_por_op: tempos });
   } catch (err) {
     console.error('[producao] Erro ao calcular tempos por OP:', err.message);
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+/* ---------------------------------------------------------------
+ * POST /api/producao/fila-lido
+ * Marca leitura da etiqueta na fila do posto (ordem dos cards).
+ * --------------------------------------------------------------- */
+router.post('/fila-lido', express.json(), async (req, res) => {
+  try {
+    await garantirSchemaKanbanProgramacao();
+    const opProducaoId = Number(req.body?.op_producao_id) || 0;
+    const numeroOp = String(req.body?.numero_op || req.body?.lote || '').trim();
+    let kanbanProgramacaoId = Number(req.body?.kanban_programacao_id) || null;
+
+    if (!numeroOp && opProducaoId <= 0 && !kanbanProgramacaoId) {
+      return res.status(400).json({ success: false, error: 'Informe a OP.' });
+    }
+
+    const posto = await registrarFilaLidoOp({ opProducaoId, numeroOp, kanbanProgramacaoId });
+    if (posto.ok) {
+      return res.json({ success: true, ...posto });
+    }
+
+    // Programado (ainda sem tempo de posto): grava na Kanban_programacao
+    if (!kanbanProgramacaoId) {
+      const { rows } = await dbQuery(
+        `SELECT id FROM producao."Kanban_programacao"
+          WHERE ($1::bigint > 0 AND op_producao_id = $1)
+             OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+          ORDER BY created_at DESC, id DESC
+          LIMIT 1`,
+        [opProducaoId || 0, numeroOp || '']
+      );
+      kanbanProgramacaoId = rows[0]?.id || null;
+    }
+    if (!kanbanProgramacaoId) {
+      return res.status(404).json({ success: false, error: 'OP não encontrada na programação.' });
+    }
+    const { rows } = await dbQuery(
+      `UPDATE producao."Kanban_programacao"
+          SET fila_lido_em = NOW()
+        WHERE id = $1
+        RETURNING id, op_producao_id, numero_op, status, fila_lido_em::text AS fila_lido_em`,
+      [kanbanProgramacaoId]
+    );
+    return res.json({ success: true, ok: true, origem: 'programado', registro: rows[0] || null });
+  } catch (err) {
+    console.error('[producao] Erro ao registrar fila lido:', err.message);
     return res.status(500).json({ success: false, error: err.message });
   }
 });

@@ -25865,26 +25865,91 @@ html.light-mode #minhasComprasWrapper {
   color: var(--inactive-color);
 }
 
-/* Linha de produção — visão operador (cards estilo Gemba) */
-#montaProducaoPane #montaOpCards .kanban-prod-grupo {
+/* Linha de produção — cards estilo Gemba (1 OP por card) */
+#montaProducaoPane.monta-modo-operador #montaKanban {
+  display: none !important;
+}
+#montaProducaoPane .gemba-card {
   background: var(--card-bg, #1e2535);
   border: 1px solid var(--border-color, #374151);
   border-radius: 12px;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  cursor: pointer;
+  position: relative;
   transition: box-shadow .2s, transform .2s;
-  height: fit-content;
 }
-#montaProducaoPane #montaOpCards .kanban-prod-grupo:hover {
+#montaProducaoPane .gemba-card:hover {
   box-shadow: 0 8px 24px rgba(0,0,0,.32);
   transform: translateY(-1px);
 }
-#montaProducaoPane #montaOpCards .kanban-prod-grupo-ops {
-  border-top: 1px solid rgba(255,255,255,.08);
-  padding-top: 10px;
-  margin-top: 10px;
+#montaProducaoPane .gemba-card-corner {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 0 26px 26px 0;
+  border-color: transparent #64748b transparent transparent;
 }
-#montaProducaoPane.monta-modo-operador #montaKanban {
-  display: none !important;
+#montaProducaoPane .gemba-card-corner[data-status="aberta"] { border-right-color: #ef4444; }
+#montaProducaoPane .gemba-card-corner[data-status="em_andamento"] { border-right-color: #f59e0b; }
+#montaProducaoPane .gemba-card-corner[data-status="resolvida"] { border-right-color: #22c55e; }
+#montaProducaoPane .gemba-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 28px 8px 12px;
+  border-bottom: 1px solid var(--border-color, #374151);
+}
+#montaProducaoPane .gemba-card-id {
+  background: #0ea5e9;
+  color: #fff;
+  border-radius: 20px;
+  padding: 2px 8px;
+  font-size: 10px;
+  font-weight: 700;
+}
+#montaProducaoPane .gemba-card-date {
+  font-size: 10px;
+  color: var(--inactive-color);
+}
+#montaProducaoPane .gemba-card-dias {
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: rgba(255,255,255,.07);
+  color: #fdba74;
+}
+#montaProducaoPane .gemba-card-status {
+  margin-left: auto;
+  font-size: 10px;
+  border-radius: 6px;
+  padding: 2px 7px;
+  background: rgba(255,255,255,.07);
+  color: #fcd34d;
+}
+#montaProducaoPane .gemba-card-status[data-status="resolvida"] { color: #86efac; }
+#montaProducaoPane .gemba-card-status[data-status="aberta"] { color: #fca5a5; }
+#montaProducaoPane .gemba-card-body {
+  display: block;
+  padding: 10px 12px 14px;
+  min-height: auto;
+}
+#montaProducaoPane .gemba-card-text h3 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: var(--content-title-color, #e5e7eb);
+}
+#montaProducaoPane .gemba-card-text p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--inactive-color);
+  line-height: 1.45;
 }
 #producaoGembaPane .gemba-card, #qualidadeAreaVermelhaPane .gemba-card {
   background: var(--card-bg, #1e2535);

@@ -783,31 +783,81 @@
     const overlay = criarModal(
       'Visão cliente',
       `<div class="nav-admin-field">
-        <label for="navAdminVisaoUser">Usuário</label>
-        <select id="navAdminVisaoUser"><option value="">Carregando...</option></select>
+        <label for="navAdminVisaoUserBusca">Usuário</label>
+        <input type="search" id="navAdminVisaoUserBusca" class="nav-admin-perm-busca" placeholder="Pesquisar usuário..." autocomplete="off">
+        <input type="hidden" id="navAdminVisaoUser" value="">
+        <div id="navAdminVisaoUserLista" class="nav-admin-visao-user-lista">Carregando...</div>
       </div>
       <p style="font-size:12px;color:#94a3b8;margin:0;">Mostra só os botões que o usuário selecionado enxerga.</p>`,
       `<button type="button" class="nav-admin-btn nav-admin-btn-secondary nav-admin-cancelar">Cancelar</button>
        <button type="button" class="nav-admin-btn nav-admin-btn-primary" id="navAdminVisaoAplicar">Aplicar visão</button>`
     );
 
+    const buscaEl = overlay.querySelector('#navAdminVisaoUserBusca');
+    const listaEl = overlay.querySelector('#navAdminVisaoUserLista');
+    const hiddenEl = overlay.querySelector('#navAdminVisaoUser');
+    let usuariosCache = [];
+
+    function labelUsuario(u) {
+      return u.nome ? `${u.username} — ${u.nome}` : String(u.username || '');
+    }
+
+    function renderLista(filtro) {
+      const q = String(filtro || '').trim().toLowerCase();
+      const filtrados = usuariosCache.filter((u) => {
+        if (!q) return true;
+        const hay = `${u.username || ''} ${u.nome || ''}`.toLowerCase();
+        return hay.includes(q);
+      });
+      if (!filtrados.length) {
+        listaEl.innerHTML = '<div class="nav-admin-perm-empty">Nenhum usuário encontrado.</div>';
+        return;
+      }
+      const selId = String(hiddenEl.value || '');
+      listaEl.innerHTML = filtrados.map((u) => {
+        const label = labelUsuario(u);
+        const selected = String(u.id) === selId ? ' is-selected' : '';
+        return `<button type="button" class="nav-admin-visao-user${selected}" data-id="${esc(u.id)}" data-label="${esc(label)}">${esc(label)}</button>`;
+      }).join('');
+    }
+
     overlay.querySelector('.nav-admin-cancelar').addEventListener('click', () => overlay.remove());
+
+    listaEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.nav-admin-visao-user');
+      if (!btn) return;
+      hiddenEl.value = btn.dataset.id || '';
+      hiddenEl.dataset.label = btn.dataset.label || '';
+      listaEl.querySelectorAll('.nav-admin-visao-user.is-selected').forEach((el) => el.classList.remove('is-selected'));
+      btn.classList.add('is-selected');
+    });
+
+    listaEl.addEventListener('dblclick', (e) => {
+      if (e.target.closest('.nav-admin-visao-user')) {
+        overlay.querySelector('#navAdminVisaoAplicar')?.click();
+      }
+    });
+
+    buscaEl.addEventListener('input', () => renderLista(buscaEl.value));
 
     fetch(`${API}/usuarios`, { credentials: 'include' })
       .then((r) => r.json())
       .then((d) => {
-        const sel = overlay.querySelector('#navAdminVisaoUser');
-        sel.innerHTML = (d.usuarios || []).map((u) =>
-          `<option value="${esc(u.id)}">${esc(u.username)}${u.nome ? ' — ' + esc(u.nome) : ''}</option>`
-        ).join('');
+        usuariosCache = d.usuarios || [];
+        renderLista(buscaEl.value);
+        buscaEl.focus();
       })
-      .catch(() => {});
+      .catch(() => {
+        listaEl.innerHTML = '<div class="nav-admin-perm-empty" style="color:#f87171;">Falha ao carregar usuários.</div>';
+      });
 
     overlay.querySelector('#navAdminVisaoAplicar').addEventListener('click', async () => {
-      const sel = overlay.querySelector('#navAdminVisaoUser');
-      const uid = sel.value;
-      if (!uid) return;
-      const username = sel.selectedOptions?.[0]?.textContent?.trim() || '';
+      const uid = hiddenEl.value;
+      if (!uid) {
+        alert('Selecione um usuário na lista.');
+        return;
+      }
+      const username = hiddenEl.dataset.label || '';
       overlay.remove();
       await aplicarVisaoCliente(uid, username);
     });

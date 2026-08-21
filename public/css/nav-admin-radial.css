@@ -464,6 +464,40 @@ body.nav-admin-reorder-mode .sidebar-content .side-menu.nav-drop-target {
   background: #0f172a;
 }
 
+.nav-admin-visao-user-lista {
+  max-height: 240px;
+  overflow: auto;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+}
+
+.nav-admin-visao-user {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid #1e293b;
+  color: #e2e8f0;
+  font-size: 13px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.nav-admin-visao-user:last-child {
+  border-bottom: none;
+}
+
+.nav-admin-visao-user:hover {
+  background: rgba(80, 109, 255, 0.08);
+}
+
+.nav-admin-visao-user.is-selected {
+  background: #2563eb;
+  color: #fff;
+}
+
 .nav-admin-perm-user {
   display: flex;
   align-items: center;

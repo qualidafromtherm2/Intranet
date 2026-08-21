@@ -163,6 +163,8 @@ async function garantirSchemaTempoProducao() {
   await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS turno_snapshot JSONB`);
   await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS parada_parcial BOOLEAN NOT NULL DEFAULT FALSE`);
   await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS congelado_em TIMESTAMPTZ`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS fila_lido_em TIMESTAMPTZ`);
+  await dbQuery(`UPDATE producao."Registro_tempo" SET fila_lido_em = inicio WHERE fila_lido_em IS NULL`);
     schemaMigrado = true;
   }
 }
@@ -478,10 +480,11 @@ async function iniciarRegistroTempo({
   const { rows } = await dbQuery(
     `INSERT INTO producao."Registro_tempo"
        (kanban_programacao_id, op_producao_id, numero_op, posto_origem,
-        tipo_registro, operacao, ri_check_id, usuario_inicio, operadores)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+        tipo_registro, operacao, ri_check_id, usuario_inicio, operadores, fila_lido_em)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, NOW())
      RETURNING id, tipo_registro, posto_origem, numero_op,
-               inicio::text AS inicio, fim::text AS fim, usuario_fim, operadores`,
+               inicio::text AS inicio, fim::text AS fim, usuario_fim, operadores,
+               fila_lido_em::text AS fila_lido_em`,
     [
       kanbanProgramacaoId || null,
       opProducaoId > 0 ? opProducaoId : null,
@@ -638,7 +641,8 @@ async function buscarRegistroPostoAberto({ opProducaoId = 0, numeroOp = '', kanb
   const { rows } = await dbQuery(
     `SELECT id, kanban_programacao_id, op_producao_id, numero_op, posto_origem,
             tipo_registro, operacao, ri_check_id,
-            inicio::text AS inicio, fim::text AS fim
+            inicio::text AS inicio, fim::text AS fim,
+            fila_lido_em::text AS fila_lido_em
        FROM producao."Registro_tempo"
       WHERE fim IS NULL AND tipo_registro = 'posto'
         AND (
@@ -646,11 +650,33 @@ async function buscarRegistroPostoAberto({ opProducaoId = 0, numeroOp = '', kanb
           OR ($2::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
           OR ($3::bigint IS NOT NULL AND kanban_programacao_id = $3)
         )
-      ORDER BY inicio DESC
+      ORDER BY COALESCE(fila_lido_em, inicio) DESC, inicio DESC
       LIMIT 1`,
     [opProducaoId || 0, numeroOp || '', kanbanProgramacaoId || null]
   );
   return rows[0] || null;
+}
+
+/** Marca leitura da etiqueta na fila do posto (sem alterar o início do tempo útil). */
+async function registrarFilaLidoOp({
+  opProducaoId = 0,
+  numeroOp = '',
+  kanbanProgramacaoId = null,
+}) {
+  await garantirSchemaTempoProducao();
+  const aberto = await buscarRegistroPostoAberto({ opProducaoId, numeroOp, kanbanProgramacaoId });
+  if (aberto?.id) {
+    const { rows } = await dbQuery(
+      `UPDATE producao."Registro_tempo"
+          SET fila_lido_em = NOW()
+        WHERE id = $1
+        RETURNING id, op_producao_id, numero_op, posto_origem,
+                  inicio::text AS inicio, fila_lido_em::text AS fila_lido_em`,
+      [aberto.id]
+    );
+    return { ok: true, origem: 'posto', registro: rows[0] || null };
+  }
+  return { ok: false, origem: null, registro: null };
 }
 
 async function buscarRegistrosPostoOp({ opProducaoId = 0, numeroOp = '', kanbanProgramacaoId = null }) {
@@ -1054,6 +1080,7 @@ async function calcularTempoPostoUtil(opRefs) {
       tempo_total_formatado: total.tempo_formatado,
       posto_origem: null,
       inicio: null,
+      fila_lido_em: null,
       qtd_mo: 1,
     };
   }
@@ -1077,6 +1104,7 @@ async function calcularTempoPostoUtil(opRefs) {
     tempo_total_formatado: total.tempo_formatado,
     posto_origem: reg.posto_origem,
     inicio: reg.inicio,
+    fila_lido_em: reg.fila_lido_em || reg.inicio || null,
     qtd_mo: qtdMo,
   };
 }
@@ -1348,6 +1376,7 @@ module.exports = {
   calcularTempoPostoUtil,
   calcularTempoTotalOpUtil,
   calcularTemposPostoPorOps,
+  registrarFilaLidoOp,
   buscarTurnosNoPeriodo,
   formatarDuracao,
   salvarTurnoPadrao,
