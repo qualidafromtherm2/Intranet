@@ -399,14 +399,62 @@ function buildNavItem(node: PermissionNode, childrenByParent: Map<number, Permis
   }
 }
 
+function getItemDedupKey(item: ShellNavItem) {
+  if (item.migrationStatus !== 'migrated' || item.view === null || item.destination === null) return null
+  return `${item.view}::${item.destination}`
+}
+
+function mergeDuplicateNavItems(items: ShellNavItem[]) {
+  const deduped: ShellNavItem[] = []
+  const indexByKey = new Map<string, number>()
+
+  for (const item of items) {
+    const normalizedChildren = mergeDuplicateNavItems(item.children)
+    const normalizedItem = normalizedChildren === item.children
+      ? item
+      : { ...item, children: normalizedChildren }
+    const dedupKey = getItemDedupKey(normalizedItem)
+
+    if (!dedupKey) {
+      deduped.push(normalizedItem)
+      continue
+    }
+
+    const existingIndex = indexByKey.get(dedupKey)
+    if (existingIndex === undefined) {
+      indexByKey.set(dedupKey, deduped.length)
+      deduped.push(normalizedItem)
+      continue
+    }
+
+    const existing = deduped[existingIndex]
+    deduped[existingIndex] = {
+      ...existing,
+      allowed: existing.allowed || normalizedItem.allowed,
+    }
+  }
+
+  return deduped
+}
+
+function collectMigratedDestinations(items: ShellNavItem[], keys = new Set<string>()) {
+  for (const item of items) {
+    const dedupKey = getItemDedupKey(item)
+    if (dedupKey) keys.add(dedupKey)
+    if (item.children.length > 0) collectMigratedDestinations(item.children, keys)
+  }
+
+  return keys
+}
+
 function buildTopSection(nodes: PermissionNode[], childrenByParent: Map<number, PermissionNode[]>): ShellNavSection | null {
-  const topRoots = nodes
+  const topRoots = mergeDuplicateNavItems(nodes
     .filter((node) => node.pos === 'top' && normalizeText(node.selector) !== '#menu-inicio')
     .sort(compareNodes)
     .map((node) => buildNavItem(node, childrenByParent, 'top', 'Topo'))
     // The legacy top area mixes true shortcuts with product-detail tabs.
     // Only expose shortcuts that already have a real Thermo destination.
-    .filter((item): item is ShellNavItem => item !== null && item.migrationStatus === 'migrated' && item.view !== null)
+    .filter((item): item is ShellNavItem => item !== null && item.migrationStatus === 'migrated' && item.view !== null))
 
   if (topRoots.length === 0) return null
 
@@ -438,9 +486,6 @@ export function buildNavigationCatalog(nodes: PermissionNode[]): ShellNavigation
   }
 
   const sections: ShellNavSection[] = []
-  const topSection = buildTopSection(navigationNodes, childrenByParent)
-  if (topSection) sections.push(topSection)
-
   const sideSections = sectionRoots
     .sort((left, right) => {
       const leftIndex = sectionOrder.indexOf(left.key)
@@ -456,12 +501,25 @@ export function buildNavigationCatalog(nodes: PermissionNode[]): ShellNavigation
       label: node.label,
       icon: sectionIconMap[node.key] ?? 'folder',
       order: node.sort ?? 0,
-      children: (childrenByParent.get(node.id) ?? [])
+      children: mergeDuplicateNavItems((childrenByParent.get(node.id) ?? [])
         .sort(compareNodes)
         .map((child) => buildNavItem(child, childrenByParent, node.key, node.label))
-        .filter((item): item is ShellNavItem => item !== null),
+        .filter((item): item is ShellNavItem => item !== null)),
     }))
     .filter((section) => section.children.length > 0)
+
+  const sideDestinationKeys = collectMigratedDestinations(sideSections.flatMap((section) => section.children))
+  const topSection = buildTopSection(navigationNodes, childrenByParent)
+  if (topSection) {
+    const children = topSection.children.filter((item) => {
+      const dedupKey = getItemDedupKey(item)
+      return dedupKey === null || !sideDestinationKeys.has(dedupKey)
+    })
+
+    if (children.length > 0) {
+      sections.push({ ...topSection, children })
+    }
+  }
 
   sections.push(...sideSections)
   return { sections, selectorMap }

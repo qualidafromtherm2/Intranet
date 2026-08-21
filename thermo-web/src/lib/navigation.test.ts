@@ -38,6 +38,45 @@ describe('buildNavigationCatalog', () => {
     expect(catalog.sections.find((section) => section.key === 'top')?.children.map((item) => item.label)).toEqual(['Cadastrar Produto'])
   })
 
+  it('removes migrated top shortcuts when the same destination already exists in a module', () => {
+    const catalog = buildNavigationCatalog([
+      node({ id: 30, key: 'product-list-shortcut', label: 'Lista de produtos', pos: 'top', sort: 1, selector: '#btn-omie-list1' }),
+      node({ id: 31, key: 'side:produtos', label: 'Produtos', sort: 2 }),
+      node({ id: 32, parent_id: 31, key: 'product-list-module', label: 'Lista de produtos', sort: 1, selector: '#menu-lista-produtos' }),
+    ])
+
+    expect(catalog.sections.find((section) => section.key === 'top')).toBeUndefined()
+    expect(catalog.sections.find((section) => section.key === 'side:produtos')?.children.map((item) => item.label)).toEqual(['Lista de produtos'])
+  })
+
+  it('deduplicates alias entries for the same migrated screen and preserves access if any alias is allowed', () => {
+    const catalog = buildNavigationCatalog([
+      node({ id: 40, key: 'side:log', label: 'Logística' }),
+      node({ id: 41, parent_id: 40, key: 'store-materials-main', label: 'Guardar materiais', sort: 1, selector: '#menu-guardar-materiais', allowed: false }),
+      node({ id: 42, parent_id: 40, key: 'store-materials-exp', label: 'Guardar materiais (Expedição)', sort: 2, selector: '#menu-guardar-materiais-expedicao', allowed: true }),
+      node({ id: 43, parent_id: 40, key: 'identify-main', label: 'Identificação', sort: 3, selector: '#menu-identificacao-produto', allowed: true }),
+      node({ id: 44, parent_id: 40, key: 'identify-exp', label: 'Identificação (Expedição)', sort: 4, selector: '#menu-identificacao-produto-expedicao', allowed: false }),
+    ])
+
+    const logistics = catalog.sections.find((section) => section.key === 'side:log')
+    expect(logistics?.children.map((item) => item.label)).toEqual(['Guardar materiais', 'Identificação'])
+    expect(logistics?.children.map((item) => item.allowed)).toEqual([true, true])
+    expect(catalog.selectorMap.get('#menu-guardar-materiais')?.map((item) => item.id)).toEqual([41])
+    expect(catalog.selectorMap.get('#menu-guardar-materiais-expedicao')?.map((item) => item.id)).toEqual([42])
+    expect(catalog.selectorMap.get('#menu-identificacao-produto')?.map((item) => item.id)).toEqual([43])
+    expect(catalog.selectorMap.get('#menu-identificacao-produto-expedicao')?.map((item) => item.id)).toEqual([44])
+  })
+
+  it('keeps receiving and products received as separate destinations', () => {
+    const catalog = buildNavigationCatalog([
+      node({ id: 50, key: 'side:log', label: 'Logística' }),
+      node({ id: 51, parent_id: 50, key: 'receiving', label: 'Recebimento', sort: 1, selector: '#menu-recebimento' }),
+      node({ id: 52, parent_id: 50, key: 'received-products', label: 'Produtos recebidos', sort: 2, selector: '#menu-produto-recebido' }),
+    ])
+
+    expect(catalog.sections.find((section) => section.key === 'side:log')?.children.map((item) => item.view)).toEqual(['receiving', 'products-received'])
+  })
+
   it('keeps real non-migrated destinations visible while hiding empty metadata leaves', () => {
     const catalog = buildNavigationCatalog([
       node({ id: 20, key: 'side:produtos', label: 'Produtos' }),
