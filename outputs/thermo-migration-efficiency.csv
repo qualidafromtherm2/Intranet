@@ -14,3 +14,6 @@ e12867a5756e62324c13a1cf765fda200a7ef2b0,d51fcbb7d5ad9d69602f9d3c2bf1090448e409b
 8aff4be96efd5e7e7fd16c98537f5c7703970e82,9f156c4b6947c27175f567d8958ca3d60391f26a,d3f963f,Ocorrências de Produção,6,"incidents: 7 passed","Ligado a #menu-producao-ocorrencias; escrita conservadoramente bloqueada sem nó explícito",0
 8aff4be96efd5e7e7fd16c98537f5c7703970e82,f86c45c859b9d158d9efd71755ab6d41b20aab58,29c480f,Registro de Inspeção,6,"inspection records: 4 passed","Ligado a #menu-ri-registro-inspecao; lacunas de schema preservadas",0
 8aff4be96efd5e7e7fd16c98537f5c7703970e82,"deb1c8f + 835aa63 + d6a72c2","d5236e7 + 62c6504 + 0adab5f",Mapa de Vendas,5,"sales map: 3 passed","Ligado a #menu-vendas-mapa; somente leitura",0
+032e605aeae2d36e076219f5609f565aaf450771,a079b4aeb7cbc99513f876a8fb7b5c215c7f7234,8621ad7,Preparações,6,"preparations: 5 passed","Ligado a #menu-preparacoes; último posto PP bloqueado sem contrato",0
+032e605aeae2d36e076219f5609f565aaf450771,cbe25b94758593676efb60ebb427c1f97ee74f2c,90802e1,Manuais de Qualidade,6,"quality manuals: 8 passed","Ligado a #menu-qualidade-manuais; gestão e upload bloqueados",0
+032e605aeae2d36e076219f5609f565aaf450771,a53eb55b4a0bef99cd26263cc7f62b3efff77e5c,864da56,Relatório de Produção,5,"production report: 1 passed","Ligado a #menu-producao-relatorio; consulta somente leitura",0

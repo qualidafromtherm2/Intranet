@@ -86,6 +86,9 @@ import { ProductRegistrationScreen } from './features/product-registration'
 import { ProductionRegistrationScreen } from './features/production-registration'
 import { ProductionRecordsScreen } from './features/production-records'
 import { ProductionIncidentsScreen } from './features/production-incidents'
+import { PreparationsScreen } from './features/preparations'
+import { ProductionReportScreen } from './features/production-report'
+import { QualityManualsScreen } from './features/quality-manuals'
 import { SalesReportScreen } from './features/sales-report'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { ShippingScreen } from './features/shipping/ShippingScreen'
@@ -1370,6 +1373,9 @@ function App() {
   const canWriteProductionIncidents = useMemo(() => permissionNodes.some((node) => node.allowed && node.selector === '#menu-producao-ocorrencias' && /(?:write|edit|escrever|editar)/i.test(node.key)), [permissionNodes])
   const canViewInspectionRecords = useMemo(() => isSelectorAllowed('#menu-ri-registro-inspecao', navigation.selectorMap), [navigation.selectorMap])
   const canViewSalesMap = useMemo(() => isSelectorAllowed('#menu-vendas-mapa', navigation.selectorMap), [navigation.selectorMap])
+  const canUsePreparations = useMemo(() => isSelectorAllowed('#menu-preparacoes', navigation.selectorMap), [navigation.selectorMap])
+  const canViewQualityManuals = useMemo(() => isSelectorAllowed('#menu-qualidade-manuais', navigation.selectorMap), [navigation.selectorMap])
+  const canViewProductionReport = useMemo(() => isSelectorAllowed('#menu-producao-relatorio', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1476,6 +1482,12 @@ function App() {
               <InspectionRecordsScreen allowed={canViewInspectionRecords} />
             ) : activeView === 'sales-map' ? (
               canViewSalesMap ? <SalesMapScreen /> : <PermissionDenied feature="Mapa de Vendas" />
+            ) : activeView === 'preparations' ? (
+              <PreparationsScreen username={user.username} allowed={canUsePreparations} />
+            ) : activeView === 'quality-manuals' ? (
+              <QualityManualsScreen allowed={canViewQualityManuals} canManageProducts={false} canUploadMaster={false} />
+            ) : activeView === 'production-report' ? (
+              canViewProductionReport ? <ProductionReportScreen /> : <PermissionDenied feature="Relatório de produção" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}
