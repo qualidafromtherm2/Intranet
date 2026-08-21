@@ -212,6 +212,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-simulador-frete') {
+    return {
+      icon: itemIconMap[selector] ?? 'calculator',
+      migrationStatus: 'migrated',
+      view: 'freight-simulator',
+      destination: '/logistics/freight-simulator',
+    }
+  }
+
   return {
     icon: inferIcon(node, moduleKey),
     migrationStatus: 'pending',

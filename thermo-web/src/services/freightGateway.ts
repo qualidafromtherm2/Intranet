@@ -20,7 +20,7 @@ async function requestJson<T>(path: string, init: RequestInit = {}): Promise<T> 
   }
 }
 
-export const loadFreightStatus = () => requestJson<{ ok: true; origem: { endereco: string; cidade: string; uf: string; cep: string }; tabelas: FreightTable[] }>('/api/frete/status')
+export const loadFreightStatus = () => requestJson<{ ok: true; origem: { endereco?: string; logradouro?: string; numero?: string; cidade: string; uf: string; cep: string }; tabelas: FreightTable[] }>('/api/frete/status')
 export const searchFreightProducts = (query: string, signal?: AbortSignal) => requestJson<{ ok: true; itens: FreightProduct[] }>(`/api/frete/produtos?q=${encodeURIComponent(query)}&limit=20`, { signal })
 export const loadFreightLocations = (uf: string, query = '', signal?: AbortSignal) => requestJson<{ ok: true; itens: FreightLocation[] }>(`/api/frete/localidades?uf=${encodeURIComponent(uf)}&q=${encodeURIComponent(query)}&limit=1000`, { signal })
 export const lookupFreightCep = (cep: string) => requestJson<{ cep?: string; localidade?: string; uf?: string; erro?: boolean }>(`/api/viacep/${encodeURIComponent(cep.replace(/\D/g, ''))}`)

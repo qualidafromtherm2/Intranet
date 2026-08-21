@@ -71,6 +71,7 @@ import {
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
+import { FreightSimulatorScreen } from './features/freight'
 import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
 import { MachineStockScreen } from './features/inventory/MachineStockScreen'
 import { ProductsReceivedScreen, ReceivingScreen } from './features/receiving'
@@ -1313,6 +1314,7 @@ function App() {
   const canViewReceived = useMemo(() => isSelectorAllowed('#menu-produto-recebido', navigation.selectorMap), [navigation.selectorMap])
   const canShip = useMemo(() => isSelectorAllowed('#menu-envio-mercadoria', navigation.selectorMap), [navigation.selectorMap])
   const canViewMachineStock = useMemo(() => isSelectorAllowed('#menu-estoque-maquinas', navigation.selectorMap), [navigation.selectorMap])
+  const canSimulateFreight = useMemo(() => isSelectorAllowed('#menu-simulador-frete', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1383,6 +1385,8 @@ function App() {
               <ProductsReceivedScreen allowed={canViewReceived} />
             ) : activeView === 'shipping' ? (
               <ShippingScreen allowed={canShip} />
+            ) : activeView === 'freight-simulator' ? (
+              <FreightSimulatorScreen allowed={canSimulateFreight} />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}
