@@ -190,6 +190,36 @@ async function listarParadasAbertasPorOps(opsRefs = []) {
   return out;
 }
 
+/** Paradas da OP que podem sobrepor a janela [inicio, fim] (inclui abertas). */
+async function listarParadasParaOp({
+  kanbanProgramacaoId = null,
+  numeroOp = '',
+  inicio = null,
+  fim = null,
+} = {}) {
+  await garantirSchemaParadas();
+  const kpId = Number(kanbanProgramacaoId) || null;
+  const nOp = String(numeroOp || '').trim();
+  if ((!kpId && !nOp) || !inicio || !fim) return [];
+
+  const { rows } = await dbQuery(
+    `SELECT id, kanban_programacao_id, numero_op, usuario, operacao,
+            parada_inicio::text AS parada_inicio,
+            parada_fim::text AS parada_fim,
+            tipo_parada, motivo
+       FROM producao."Paradas"
+      WHERE parada_inicio < $3::timestamptz
+        AND (parada_fim IS NULL OR parada_fim > $4::timestamptz)
+        AND (
+          ($1::bigint IS NOT NULL AND kanban_programacao_id = $1)
+          OR ($2 <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($2)))
+        )
+      ORDER BY parada_inicio ASC, id ASC`,
+    [kpId, nOp, fim, inicio]
+  );
+  return rows;
+}
+
 module.exports = {
   garantirSchemaParadas,
   listarMotivos,
@@ -198,4 +228,5 @@ module.exports = {
   buscarParadaAberta,
   retomarParada,
   listarParadasAbertasPorOps,
+  listarParadasParaOp,
 };

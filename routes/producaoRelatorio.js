@@ -15,7 +15,9 @@ const {
   calcularTempoUtilComMo,
   periodosMoDoPosto,
   dateKeyInTz,
+  congelarRegistroTempo,
 } = require('../utils/tempoProducao');
+const { garantirSchemaParadas } = require('../utils/paradasProducao');
 
 const router = express.Router();
 
@@ -168,7 +170,9 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       `SELECT id, kanban_programacao_id, op_producao_id, numero_op,
               posto_origem, tipo_registro, operacao,
               inicio::text AS inicio, fim::text AS fim,
-              usuario_inicio, usuario_fim
+              usuario_inicio, usuario_fim,
+              tempo_util_ms, tempo_parada_ms, tempo_liquido_ms,
+              parada_parcial, congelado_em::text AS congelado_em
          FROM producao."Registro_tempo"
         WHERE inicio >= $1::date
           AND inicio < $2::date
@@ -176,6 +180,24 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         ORDER BY inicio ASC`,
       [mesInicio, mesFimExclusive]
     );
+
+    // Backfill: congela registros fechados ainda sem snapshot (uma vez).
+    for (const r of regs) {
+      if (r.fim && !r.congelado_em) {
+        try {
+          const frozen = await congelarRegistroTempo(r.id);
+          if (frozen) {
+            r.tempo_util_ms = frozen.tempo_util_ms;
+            r.tempo_parada_ms = frozen.tempo_parada_ms;
+            r.tempo_liquido_ms = frozen.tempo_liquido_ms;
+            r.parada_parcial = frozen.parada_parcial;
+            r.congelado_em = frozen.congelado_em;
+          }
+        } catch (err) {
+          console.warn('[PRODUCAO] backfill congelar', r.id, err.message);
+        }
+      }
+    }
 
     const agora = new Date();
     const periodoFim = new Date(`${mesFimExclusive}T00:00:00-03:00`);
@@ -190,25 +212,47 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       const fimEff = r.fim || agora.toISOString();
       const diaMo = dateKeyInTz(new Date(r.inicio));
       const qtdMo = lookupMo(moMap, diaMo, r.posto_origem);
-      const msBrutoUtil = calcularTempoUtilMs(r.inicio, fimEff, turnos);
-      const msUtil = calcularTempoUtilComMo(
-        r.inicio,
-        fimEff,
-        turnos,
-        periodosMoDoPosto(moPeriodos, r.posto_origem),
-        qtdMo
-      );
+      const congelado = r.congelado_em != null && r.tempo_util_ms != null;
+      const msBrutoUtil = congelado
+        ? Number(r.tempo_util_ms) || 0
+        : calcularTempoUtilMs(r.inicio, fimEff, turnos);
+      const msParada = congelado
+        ? Number(r.tempo_parada_ms) || 0
+        : 0;
+      const msLiquido = congelado
+        ? Math.max(0, Number(r.tempo_liquido_ms) || 0)
+        : Math.max(0, msBrutoUtil - msParada);
+      // Média "no posto" (compat): bruto útil com proporção de MO; parada/líquido sem MO.
+      const msUtil = congelado
+        ? (qtdMo > 1 ? Math.round(msBrutoUtil / qtdMo) : msBrutoUtil)
+        : calcularTempoUtilComMo(
+          r.inicio,
+          fimEff,
+          turnos,
+          periodosMoDoPosto(moPeriodos, r.posto_origem),
+          qtdMo
+        );
       const msBruto = Math.max(0, new Date(fimEff).getTime() - new Date(r.inicio).getTime());
       return {
         ...r,
         aberto: !r.fim,
         qtd_mo: qtdMo,
         ms_util_bruto: msBrutoUtil,
+        ms_parada: msParada,
+        ms_liquido: msLiquido,
         ms_util: msUtil,
         ms_bruto: msBruto,
         h_util: msToHoras(msUtil),
+        h_bruto_util: msToHoras(msBrutoUtil),
+        h_parada: msToHoras(msParada),
+        h_liquido: msToHoras(msLiquido),
         h_bruto: msToHoras(msBruto),
+        teve_parada: msParada > 0,
+        parada_parcial: !!r.parada_parcial,
         tempo_formatado: formatarDuracao(msUtil),
+        tempo_bruto_fmt: formatarDuracao(msBrutoUtil),
+        tempo_parada_fmt: formatarDuracao(msParada),
+        tempo_liquido_fmt: formatarDuracao(msLiquido),
       };
     });
 
@@ -239,15 +283,23 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
           numero_op: r.numero_op || key,
           op_producao_id: r.op_producao_id,
           ms_posto: 0,
+          ms_parada: 0,
+          ms_liquido: 0,
           ms_ri: 0,
           ms_trabalho: 0,
           postos: new Set(),
           ciclos_posto: 0,
+          teve_parada: false,
+          parada_parcial: false,
         });
       }
       const c = cicloPorOp.get(key);
-      c.ms_posto += r.ms_util || 0;
+      c.ms_posto += r.ms_util_bruto || r.ms_util || 0;
+      c.ms_parada += r.ms_parada || 0;
+      c.ms_liquido += r.ms_liquido || 0;
       c.ciclos_posto += 1;
+      if (r.teve_parada) c.teve_parada = true;
+      if (r.parada_parcial) c.parada_parcial = true;
       if (r.posto_origem) c.postos.add(r.posto_origem);
     }
     for (const r of ris) {
@@ -255,7 +307,7 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         ? String(r.numero_op).toUpperCase()
         : (r.op_producao_id ? `ID:${r.op_producao_id}` : null);
       if (!key || !cicloPorOp.has(key)) continue;
-      cicloPorOp.get(key).ms_ri += r.ms_util || 0;
+      cicloPorOp.get(key).ms_ri += r.ms_util_bruto || r.ms_util || 0;
     }
     for (const r of trabalhos) {
       const key = r.numero_op
@@ -271,10 +323,16 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       postos: [...c.postos],
       ciclos_posto: c.ciclos_posto,
       h_posto: msToHoras(c.ms_posto),
+      h_parada: msToHoras(c.ms_parada),
+      h_liquido: msToHoras(c.ms_liquido),
       h_ri: msToHoras(c.ms_ri),
       h_trabalho: msToHoras(c.ms_trabalho),
       h_ciclo: msToHoras(c.ms_posto),
+      teve_parada: c.teve_parada,
+      parada_parcial: c.parada_parcial,
       tempo_posto_fmt: formatarDuracao(c.ms_posto),
+      tempo_parada_fmt: formatarDuracao(c.ms_parada),
+      tempo_liquido_fmt: formatarDuracao(c.ms_liquido),
       tempo_ri_fmt: formatarDuracao(c.ms_ri),
       tempo_trabalho_fmt: formatarDuracao(c.ms_trabalho),
       tempo_ciclo_fmt: formatarDuracao(c.ms_posto),
@@ -288,23 +346,29 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         porPostoMap.set(k, {
           posto: k,
           posto_ms: [],
+          parada_ms: [],
+          liquido_ms: [],
           ri_ms: [],
           trabalho_ms: [],
           ciclos: 0,
           ops: new Set(),
+          ciclos_com_parada: 0,
         });
       }
       return porPostoMap.get(k);
     };
     for (const r of postos) {
       const p = ensurePosto(r.posto_origem);
-      p.posto_ms.push(r.ms_util || 0);
+      p.posto_ms.push(r.ms_util_bruto || r.ms_util || 0);
+      p.parada_ms.push(r.ms_parada || 0);
+      p.liquido_ms.push(r.ms_liquido != null ? r.ms_liquido : (r.ms_util_bruto || 0));
       p.ciclos += 1;
+      if (r.teve_parada) p.ciclos_com_parada += 1;
       if (r.numero_op) p.ops.add(String(r.numero_op).toUpperCase());
     }
     for (const r of ris) {
       const p = ensurePosto(r.posto_origem);
-      p.ri_ms.push(r.ms_util || 0);
+      p.ri_ms.push(r.ms_util_bruto || r.ms_util || 0);
     }
     for (const r of trabalhos) {
       const p = ensurePosto(r.posto_origem);
@@ -314,18 +378,25 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
     const por_posto = [...porPostoMap.values()]
       .map((p) => {
         const mediaPosto = media(p.posto_ms);
+        const mediaParada = media(p.parada_ms);
+        const mediaLiquido = media(p.liquido_ms);
         const mediaRi = media(p.ri_ms);
         const mediaTrab = media(p.trabalho_ms);
         return {
           posto: p.posto,
           ciclos: p.ciclos,
           ops: p.ops.size,
+          ciclos_com_parada: p.ciclos_com_parada,
           media_h_posto: msToHoras(mediaPosto),
+          media_h_parada: msToHoras(mediaParada),
+          media_h_liquido: msToHoras(mediaLiquido),
           media_h_ri: msToHoras(mediaRi),
           media_h_trabalho: msToHoras(mediaTrab),
           mediana_h_posto: msToHoras(mediana(p.posto_ms)),
           mediana_h_ri: msToHoras(mediana(p.ri_ms)),
           tempo_medio_posto_fmt: formatarDuracao(mediaPosto || 0),
+          tempo_medio_parada_fmt: formatarDuracao(mediaParada || 0),
+          tempo_medio_liquido_fmt: formatarDuracao(mediaLiquido || 0),
           tempo_medio_ri_fmt: formatarDuracao(mediaRi || 0),
           tempo_medio_trabalho_fmt: formatarDuracao(mediaTrab || 0),
         };
@@ -335,15 +406,22 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
     const faixasMap = new Map();
     for (const f of ['< 2h', '2–8h', '8–24h', '1–2 dias', '> 2 dias']) faixasMap.set(f, 0);
     for (const r of postos) {
-      const f = faixaCiclo(r.h_util);
+      const f = faixaCiclo(r.h_bruto_util != null ? r.h_bruto_util : r.h_util);
       if (f) faixasMap.set(f, (faixasMap.get(f) || 0) + 1);
     }
     const faixas_posto = [...faixasMap.entries()].map(([faixa, total]) => ({ faixa, total }));
 
-    const mediaPostoMs = media(postos.map((r) => r.ms_util));
-    const mediaRiMs = media(ris.map((r) => r.ms_util));
+    const mediaPostoMs = media(postos.map((r) => r.ms_util_bruto || r.ms_util));
+    const mediaParadaMs = media(postos.map((r) => r.ms_parada || 0));
+    const mediaLiquidoMs = media(postos.map((r) => (r.ms_liquido != null ? r.ms_liquido : (r.ms_util_bruto || 0))));
+    const mediaRiMs = media(ris.map((r) => r.ms_util_bruto || r.ms_util));
     const mediaTrabMs = media(trabalhos.map((r) => r.ms_util));
     const mediaCicloOpMs = media([...cicloPorOp.values()].map((c) => c.ms_posto));
+    const totalParadaMs = postos.reduce((s, r) => s + (r.ms_parada || 0), 0);
+    const totalBrutoMs = postos.reduce((s, r) => s + (r.ms_util_bruto || r.ms_util || 0), 0);
+    const opsComParada = new Set(
+      postos.filter((r) => r.teve_parada).map((r) => String(r.numero_op || r.op_producao_id || '').toUpperCase()).filter(Boolean)
+    );
 
     // Produção: OP liberada na Inspeção final (RI registrada → estoque de máquinas).
     let producao_diaria = listarDiasYmd(mesInicio, mesFimExclusive).map((dia) => ({
@@ -444,15 +522,23 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       aguardando_ri: abertosRi.length,
       maquinas_produzidas: maquinasProduzidas,
       media_h_posto: msToHoras(mediaPostoMs),
+      media_h_parada: msToHoras(mediaParadaMs),
+      media_h_liquido: msToHoras(mediaLiquidoMs),
       media_h_ri: msToHoras(mediaRiMs),
       media_h_trabalho: msToHoras(mediaTrabMs),
       media_h_ciclo_op: msToHoras(mediaCicloOpMs),
-      mediana_h_posto: msToHoras(mediana(postos.map((r) => r.ms_util))),
-      mediana_h_ri: msToHoras(mediana(ris.map((r) => r.ms_util))),
+      mediana_h_posto: msToHoras(mediana(postos.map((r) => r.ms_util_bruto || r.ms_util))),
+      mediana_h_ri: msToHoras(mediana(ris.map((r) => r.ms_util_bruto || r.ms_util))),
       media_posto_fmt: formatarDuracao(mediaPostoMs || 0),
       media_ri_fmt: formatarDuracao(mediaRiMs || 0),
       media_trabalho_fmt: formatarDuracao(mediaTrabMs || 0),
       media_ciclo_op_fmt: formatarDuracao(mediaCicloOpMs || 0),
+      ops_com_parada: opsComParada.size,
+      horas_parada: msToHoras(totalParadaMs),
+      pct_parada: totalBrutoMs > 0
+        ? Math.round((totalParadaMs / totalBrutoMs) * 1000) / 10
+        : 0,
+      paradas_abertas: 0,
     };
 
     // Detalhe recente (últimos 80 ciclos de posto fechados)
@@ -467,7 +553,15 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         inicio: r.inicio,
         fim: r.fim,
         h_util: r.h_util,
+        h_bruto: r.h_bruto_util,
+        h_parada: r.h_parada,
+        h_liquido: r.h_liquido,
         tempo_fmt: r.tempo_formatado,
+        tempo_bruto_fmt: r.tempo_bruto_fmt,
+        tempo_parada_fmt: r.tempo_parada_fmt,
+        tempo_liquido_fmt: r.tempo_liquido_fmt,
+        teve_parada: r.teve_parada,
+        parada_parcial: r.parada_parcial,
         usuario_inicio: r.usuario_inicio,
         usuario_fim: r.usuario_fim,
         operacao: r.operacao,
@@ -484,11 +578,80 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
         posto: r.posto_origem,
         inicio: r.inicio,
         fim: r.fim,
-        h_util: r.h_util,
-        tempo_fmt: r.tempo_formatado,
+        h_util: r.h_bruto_util != null ? r.h_bruto_util : r.h_util,
+        tempo_fmt: r.tempo_bruto_fmt || r.tempo_formatado,
         usuario_fim: r.usuario_fim,
         operacao: r.operacao,
       }));
+
+    // Paradas do período (página dedicada)
+    let paradas = [];
+    let paradas_por_tipo = [];
+    try {
+      await garantirSchemaParadas();
+      const { rows: parRows } = await pool.query(
+        `SELECT id, kanban_programacao_id, numero_op, usuario, operacao,
+                parada_inicio::text AS parada_inicio,
+                parada_fim::text AS parada_fim,
+                tipo_parada, motivo
+           FROM producao."Paradas"
+          WHERE parada_inicio >= $1::date
+            AND parada_inicio < $2::date
+          ORDER BY parada_inicio DESC
+          LIMIT 200`,
+        [mesInicio, mesFimExclusive]
+      );
+      const agoraPar = new Date();
+      let abertas = 0;
+      const tipoMap = new Map();
+      paradas = parRows.map((p) => {
+        const aberta = p.parada_fim == null;
+        if (aberta) abertas += 1;
+        const fimP = aberta ? agoraPar.toISOString() : p.parada_fim;
+        const ms = calcularTempoUtilMs(p.parada_inicio, fimP, turnos);
+        const nOp = String(p.numero_op || '').trim().toUpperCase();
+        const kp = Number(p.kanban_programacao_id) || 0;
+        const postoHit = postos.find((r) => {
+          const sameOp = (nOp && String(r.numero_op || '').toUpperCase() === nOp)
+            || (kp > 0 && Number(r.kanban_programacao_id) === kp);
+          if (!sameOp) return false;
+          const i0 = new Date(r.inicio).getTime();
+          const i1 = new Date(r.fim || agoraPar).getTime();
+          const p0 = new Date(p.parada_inicio).getTime();
+          const p1 = new Date(fimP).getTime();
+          return p0 < i1 && p1 > i0;
+        });
+        const tipo = String(p.tipo_parada || 'Sem tipo').trim() || 'Sem tipo';
+        if (!tipoMap.has(tipo)) tipoMap.set(tipo, { tipo, total: 0, ms: 0 });
+        const t = tipoMap.get(tipo);
+        t.total += 1;
+        t.ms += ms;
+        return {
+          id: p.id,
+          numero_op: p.numero_op,
+          posto: postoHit?.posto_origem || p.operacao || '—',
+          tipo_parada: p.tipo_parada,
+          motivo: p.motivo,
+          inicio: p.parada_inicio,
+          fim: p.parada_fim,
+          aberta,
+          h_util: msToHoras(ms),
+          tempo_fmt: formatarDuracao(ms),
+          usuario: p.usuario,
+        };
+      });
+      kpis.paradas_abertas = abertas;
+      paradas_por_tipo = [...tipoMap.values()]
+        .map((t) => ({
+          tipo: t.tipo,
+          total: t.total,
+          h_util: msToHoras(t.ms),
+          tempo_fmt: formatarDuracao(t.ms),
+        }))
+        .sort((a, b) => (b.h_util || 0) - (a.h_util || 0));
+    } catch (errPar) {
+      console.warn('[PRODUCAO] paradas relatório:', errPar.message);
+    }
 
     const { rows: txtRows } = await pool.query(
       `SELECT plano_acao, conclusao_resumo, conclusao_pontos_criticos, conclusao_oportunidades,
@@ -530,6 +693,8 @@ router.get('/producao/relatorio-gerencial', async (req, res) => {
       ciclos_por_op: ciclosOp.slice(0, 100),
       detalhe_postos,
       detalhe_ri,
+      paradas,
+      paradas_por_tipo,
       evolucao_semanal,
       evolucao_mensal,
       producao_diaria,

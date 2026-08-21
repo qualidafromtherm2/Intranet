@@ -1103,11 +1103,6 @@
               <div id="notifPrefLista" class="notif-pref-lista">
                 <div class="notif-pref-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando…</div>
               </div>
-              <div class="notif-pref-acoes">
-                <button type="button" id="notifPrefSalvar" class="notif-pref-salvar" disabled>
-                  <i class="fa-solid fa-check"></i> Salvar preferências
-                </button>
-              </div>
             </div>
           </div>
         </div>
@@ -3670,44 +3665,57 @@
 
           <div id="qualidadeAreaVermelhaPane" class="tab-pane" style="display:none;">
             <div class="content-wrapper">
-              <div class="content-wrapper-header">
-                <div class="content-wrapper-context">
-                  <h3 class="img-content" style="display:flex;align-items:center;gap:10px;">
-                    <i class="fa-solid fa-ban" style="color:#ef4444;"></i>
-                    <span>Área vermelha</span>
-                  </h3>
-                  <div class="content-text">Produtos reprovados no PIR (ID no armazém 7. AREA VERMELHA) e NIQ registrados na linha de produção / preparações. Não entram em separação.</div>
+              <div class="content-section" style="margin-top:0;">
+                <div class="title-wrapper gemba-page-heading">
+                  <div>
+                    <div class="content-section-title" style="display:flex;align-items:center;gap:8px;">
+                      <i class="fa-solid fa-ban" style="color:#ef4444;"></i>
+                      Área vermelha
+                    </div>
+                    <div class="gemba-page-subtitle">Produtos reprovados no PIR (armazém 7. AREA VERMELHA) e NIQ da linha. Não entram em separação.</div>
+                  </div>
+                  <div class="gemba-heading-actions">
+                    <button id="qualidadeAreaVermelhaRefreshBtn" class="content-button" type="button" title="Atualizar" style="background:#334155;color:#fff;">
+                      <i class="fa-solid fa-rotate"></i>
+                      <span>Atualizar</span>
+                    </button>
+                    <button id="qualidadeAreaVermelhaAddBtn" class="content-button" type="button" title="Registrar NIQ na Área vermelha"
+                      style="background:linear-gradient(135deg,#ef4444 0%,#b91c1c 100%);color:#fff;border:none;">
+                      <i class="fa-solid fa-plus"></i>
+                      <span>Adicionar item</span>
+                    </button>
+                  </div>
                 </div>
+
+                <div class="gemba-toolbar">
+                  <input id="qualidadeAreaVermelhaBusca" type="search" placeholder="Pesquisar código, descrição, NFe, lote, OP ou NIQ..." autocomplete="off" />
+                  <div id="qualidadeAreaVermelhaFiltrosStatus" class="gemba-filtros" role="tablist">
+                    <button type="button" class="gemba-filtro is-active" data-status="">Todas <span data-count="total">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="registrado">Registrado <span data-count="registrado">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="aguardando_aprovacao">Aguardando aprovação <span data-count="aguardando_aprovacao">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="scrap">Scrap <span data-count="scrap">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="retrabalho">Retrabalho <span data-count="retrabalho">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="liberado">Liberado <span data-count="liberado">0</span></button>
+                    <button type="button" class="gemba-filtro" data-status="pir">PIR <span data-count="pir">0</span></button>
+                  </div>
+                </div>
+
+                <div id="qualidadeAreaVermelhaMeta" class="gemba-status-msg" style="display:none;"></div>
+                <div id="qualidadeAreaVermelhaCards" class="gemba-cards"></div>
               </div>
-              <div style="display:flex;gap:10px;margin:12px 0;flex-wrap:wrap;">
-                <input id="qualidadeAreaVermelhaBusca" type="text" placeholder="Pesquisar código, descrição, NFe, lote, OP ou NIQ..." autocomplete="off"
-                  style="flex:1;min-width:220px;max-width:420px;padding:8px 12px;border:1px solid var(--border-color);border-radius:8px;background:var(--content-bg);color:var(--content-color);" />
-                <button id="qualidadeAreaVermelhaAddBtn" class="content-button" type="button" title="Registrar NIQ na Área vermelha"
-                  style="background:linear-gradient(135deg,#ef4444 0%,#b91c1c 100%);color:#fff;border:none;">
-                  <i class="fa-solid fa-plus"></i> Adicionar item
-                </button>
-                <button id="qualidadeAreaVermelhaRefreshBtn" class="content-button" type="button" style="background:#334155;color:#fff;">
-                  <i class="fa-solid fa-rotate-right"></i> Atualizar
-                </button>
-              </div>
-              <div id="qualidadeAreaVermelhaMeta" style="font-size:12px;color:var(--inactive-color);margin-bottom:8px;"></div>
-              <div style="overflow:auto;max-height:calc(100vh - 260px);border:1px solid var(--border-color);border-radius:10px;">
-                <table style="width:100%;border-collapse:collapse;min-width:1100px;font-size:14px;">
-                  <thead>
-                    <tr style="background:#1e293b;color:#fff;">
-                      <th style="padding:10px 12px;text-align:left;">Código</th>
-                      <th style="padding:10px 12px;text-align:left;">Descrição</th>
-                      <th style="padding:10px 12px;text-align:left;">IDs no armazém</th>
-                      <th style="padding:10px 12px;text-align:left;">NFe / Lote</th>
-                      <th style="padding:10px 12px;text-align:left;">Status</th>
-                      <th style="padding:10px 12px;text-align:left;">Motivo da decisão</th>
-                      <th style="padding:10px 12px;text-align:left;">Quem</th>
-                      <th style="padding:10px 12px;text-align:left;">Quando</th>
-                      <th style="padding:10px 12px;text-align:left;">Ações</th>
-                    </tr>
-                  </thead>
-                  <tbody id="qualidadeAreaVermelhaBody"></tbody>
-                </table>
+            </div>
+
+            <div id="avNiqDetalheModal" class="gemba-modal" role="dialog" aria-modal="true" aria-labelledby="avNiqDetalheTitle" hidden>
+              <div class="gemba-modal-card">
+                <div class="gemba-modal-head">
+                  <div>
+                    <i class="fa-solid fa-clipboard-list" style="color:#f87171;"></i>
+                    <strong id="avNiqDetalheTitle">NIQ</strong>
+                  </div>
+                  <button id="avNiqDetalheClose" type="button" title="Fechar"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="gemba-modal-body" id="avNiqDetalheBody"></div>
+                <div class="gemba-modal-actions" id="avNiqDetalheAcoes" style="display:none;"></div>
               </div>
             </div>
           </div>
@@ -17009,9 +17017,6 @@ function attachDropZone(ul) {
 #chatPane .notif-pref-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(0,0,0,.2);color:#cbd5e1;font-size:12px;font-weight:700;cursor:pointer;user-select:none}
 #chatPane .notif-pref-toggle input{accent-color:#10b981;width:15px;height:15px;margin:0;cursor:pointer}
 #chatPane .notif-pref-toggle.is-on{border-color:rgba(16,185,129,.55);background:rgba(16,185,129,.15);color:#a7f3d0}
-#chatPane .notif-pref-acoes{display:flex;justify-content:flex-end;padding-top:4px}
-#chatPane .notif-pref-salvar{min-height:44px;padding:0 18px;border:none;border-radius:10px;background:linear-gradient(135deg,#10b981,#059669);color:#fff;font-size:14px;font-weight:800;cursor:pointer}
-#chatPane .notif-pref-salvar:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:700px){
   #chatPane .notif-pref-item{flex-direction:column;align-items:flex-start}
 }

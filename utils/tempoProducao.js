@@ -157,6 +157,12 @@ async function garantirSchemaTempoProducao() {
       ON producao.mao_obra_linha_hist (data_referencia, posto_key, inicio);
   `);
   await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS operadores JSONB NOT NULL DEFAULT '[]'::jsonb`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS tempo_util_ms BIGINT`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS tempo_parada_ms BIGINT`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS tempo_liquido_ms BIGINT`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS turno_snapshot JSONB`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS parada_parcial BOOLEAN NOT NULL DEFAULT FALSE`);
+  await dbQuery(`ALTER TABLE producao."Registro_tempo" ADD COLUMN IF NOT EXISTS congelado_em TIMESTAMPTZ`);
     schemaMigrado = true;
   }
 }
@@ -389,6 +395,13 @@ async function encerrarRegistrosAbertos({
     if (!skipNotificacao && String(row.tipo_registro || '').trim() === 'posto') {
       dispararNotificacaoRegistroTempo(row.id);
     }
+    if (row.fim && row.id) {
+      try {
+        await congelarRegistroTempo(row.id);
+      } catch (err) {
+        console.error('[tempo_producao] Falha ao congelar registro', row.id, err.message);
+      }
+    }
   }
   return rows;
 }
@@ -488,45 +501,136 @@ async function iniciarRegistroTempo({
   return reg;
 }
 
-/** Entrada no posto (após Programado): inicia tempo total do posto + fase RI. */
+/** Entrada no posto: inicia somente o registro de tempo do posto (RI abre depois, no finalizar). */
 async function iniciarCicloPosto(opts) {
   const { skipNotificacao, ...rest } = opts || {};
-  const base = {
+  const posto = await iniciarRegistroTempo({
     ...rest,
     tipoRegistro: 'posto',
     operacao: rest.operacao || 'Tempo no posto',
     skipNotificacao,
-  };
-  const ri = {
-    ...rest,
-    tipoRegistro: 'ri',
-    operacao: rest.operacao || 'Aguardando RI',
-    skipNotificacao,
-  };
-  const posto = await iniciarRegistroTempo(base);
-  const riReg = await iniciarRegistroTempo(ri);
-  return { posto, ri: riReg };
-}
-
-/** RI registrada: encerra fase RI e inicia trabalho no posto. */
-async function registrarRiConcluida(opts) {
-  const { riCheckId, ...rest } = opts;
-  await encerrarRegistrosAbertos({ ...rest, tipos: ['ri'] });
-  return iniciarRegistroTempo({
-    ...rest,
-    tipoRegistro: 'trabalho',
-    operacao: rest.operacao || 'Trabalho no posto',
-    riCheckId,
   });
+  return { posto, ri: null };
 }
 
-/** Finalizar operação: encerra todos os registros abertos do posto atual. */
+/** RI registrada: encerra e congela fase RI (não abre trabalho). */
+async function registrarRiConcluida(opts) {
+  const { riCheckId: _riCheckId, ...rest } = opts || {};
+  return encerrarRegistrosAbertos({ ...rest, tipos: ['ri'] });
+}
+
+/** Finalizar operação: encerra posto/trabalho do posto atual (RI é aberta em seguida pela rota). */
 async function encerrarCicloPosto(opts) {
   return encerrarRegistrosAbertos({
     ...opts,
-    tipos: ['posto', 'ri', 'trabalho'],
+    tipos: ['posto', 'trabalho'],
     skipNotificacao: opts?.skipNotificacao === true,
   });
+}
+
+/**
+ * Congela tempos úteis de um Registro_tempo já fechado (bruto / parada / líquido + snapshot do turno).
+ * Idempotente: se já tiver congelado_em, devolve o registro sem recalcular.
+ */
+async function congelarRegistroTempo(registroId) {
+  await garantirSchemaTempoProducao();
+  const id = Number(registroId) || 0;
+  if (!id) return null;
+
+  const { rows } = await dbQuery(
+    `SELECT id, kanban_programacao_id, numero_op,
+            inicio, fim, congelado_em,
+            tempo_util_ms, tempo_parada_ms, tempo_liquido_ms,
+            turno_snapshot, parada_parcial
+       FROM producao."Registro_tempo"
+      WHERE id = $1`,
+    [id]
+  );
+  const reg = rows[0];
+  if (!reg) return null;
+  if (!reg.fim || reg.congelado_em) return reg;
+
+  const inicio = new Date(reg.inicio);
+  const fim = new Date(reg.fim);
+  if (!Number.isFinite(inicio.getTime()) || !Number.isFinite(fim.getTime()) || fim <= inicio) {
+    const { rows: updEmpty } = await dbQuery(
+      `UPDATE producao."Registro_tempo"
+          SET tempo_util_ms = 0,
+              tempo_parada_ms = 0,
+              tempo_liquido_ms = 0,
+              turno_snapshot = '[]'::jsonb,
+              parada_parcial = FALSE,
+              congelado_em = NOW()
+        WHERE id = $1
+        RETURNING id, kanban_programacao_id, numero_op, inicio, fim, congelado_em,
+                  tempo_util_ms, tempo_parada_ms, tempo_liquido_ms,
+                  turno_snapshot, parada_parcial`,
+      [id]
+    );
+    return updEmpty[0] || reg;
+  }
+
+  const turnos = await buscarTurnosNoPeriodo(inicio, fim);
+  const bruto = calcularTempoUtilMs(inicio, fim, turnos);
+
+  let paradaMs = 0;
+  let paradaParcial = false;
+  try {
+    const { listarParadasParaOp, garantirSchemaParadas } = require('./paradasProducao');
+    await garantirSchemaParadas();
+    const paradas = await listarParadasParaOp({
+      kanbanProgramacaoId: reg.kanban_programacao_id,
+      numeroOp: reg.numero_op,
+      inicio,
+      fim,
+    });
+    const agora = new Date();
+    for (const p of paradas || []) {
+      const pIni = new Date(p.parada_inicio);
+      let pFim;
+      if (p.parada_fim == null || p.parada_fim === '') {
+        pFim = agora;
+        paradaParcial = true;
+      } else {
+        pFim = new Date(p.parada_fim);
+      }
+      if (!Number.isFinite(pIni.getTime()) || !Number.isFinite(pFim.getTime())) continue;
+      const iStart = new Date(Math.max(inicio.getTime(), pIni.getTime()));
+      const iEnd = new Date(Math.min(fim.getTime(), pFim.getTime()));
+      if (iEnd <= iStart) continue;
+      paradaMs += calcularTempoUtilMs(iStart, iEnd, turnos);
+    }
+  } catch (err) {
+    console.error('[tempo_producao] Falha ao cruzar paradas no congelamento', id, err.message);
+  }
+
+  const liquido = Math.max(0, bruto - paradaMs);
+  const { rows: upd } = await dbQuery(
+    `UPDATE producao."Registro_tempo"
+        SET tempo_util_ms = $2,
+            tempo_parada_ms = $3,
+            tempo_liquido_ms = $4,
+            turno_snapshot = $5::jsonb,
+            parada_parcial = $6,
+            congelado_em = NOW()
+      WHERE id = $1
+      RETURNING id, kanban_programacao_id, numero_op, inicio, fim, congelado_em,
+                tempo_util_ms, tempo_parada_ms, tempo_liquido_ms,
+                turno_snapshot, parada_parcial`,
+    [id, bruto, paradaMs, liquido, JSON.stringify(turnos || []), paradaParcial]
+  );
+  return upd[0] || reg;
+}
+
+async function congelarRegistrosTempo(ids = []) {
+  const list = Array.isArray(ids) ? ids : [];
+  const out = [];
+  for (const rawId of list) {
+    const id = Number(rawId) || 0;
+    if (!id) continue;
+    out.push(await congelarRegistroTempo(id));
+  }
+  return out;
 }
 
 async function buscarRegistroPostoAberto({ opProducaoId = 0, numeroOp = '', kanbanProgramacaoId = null }) {
@@ -1238,6 +1342,8 @@ module.exports = {
   encerrarCicloPosto,
   iniciarRegistroTempo,
   encerrarRegistrosAbertos,
+  congelarRegistroTempo,
+  congelarRegistrosTempo,
   calcularTempoUtilMs,
   calcularTempoPostoUtil,
   calcularTempoTotalOpUtil,

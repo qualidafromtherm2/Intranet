@@ -20,6 +20,7 @@ const { reverterRiCheckNoPosto, registrarRiCheckImpressaoOp } = require('./quali
 const {
   iniciarCicloPosto,
   encerrarCicloPosto,
+  iniciarRegistroTempo,
   calcularTemposPostoPorOps,
   salvarTurnoPadrao,
   buscarTurnoPadrao,
@@ -3243,9 +3244,21 @@ router.post('/finalizar-operacao', express.json(), async (req, res) => {
           skipNotificacao: true,
         });
         postoFechado = (fechados || []).find((r) => String(r.tipo_registro || '').trim() === 'posto') || null;
+
+        // Fluxo sequencial: após fechar o posto, abre a contagem de RI no mesmo posto
+        await iniciarRegistroTempo({
+          kanbanProgramacaoId,
+          opProducaoId,
+          numeroOp,
+          postoOrigem: postoAtual,
+          tipoRegistro: 'ri',
+          operacao: 'Aguardando RI',
+          usuario,
+          skipNotificacao: true,
+        });
       }
     } catch (tempoErr) {
-      console.error('[tempo_producao] Falha ao encerrar ciclo posto:', tempoErr.message);
+      console.error('[tempo_producao] Falha ao encerrar ciclo posto / abrir RI:', tempoErr.message);
     }
 
     const statusGravar = isPostoInspecaoFinal(postoAtual) ? 'Inspeção final' : (postoAtual || statusDb);

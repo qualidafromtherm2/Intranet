@@ -11,6 +11,47 @@ const {
 const router = express.Router();
 
 let _ensureSchemaPromise = null;
+let _cfopSyncAt = 0;
+let _statusSyncAt = 0;
+let _emissaoDtReady = false;
+const CATALOG_SYNC_TTL_MS = 30 * 60 * 1000; // 30 min — evita DISTINCT pesado a cada filtro
+const REPORT_CACHE_TTL_MS = 45 * 1000;
+const _reportCache = new Map();
+
+function _reportCacheKey(query = {}) {
+  const keys = Object.keys(query || {}).sort();
+  const norm = {};
+  for (const k of keys) {
+    const v = query[k];
+    if (v == null || v === '') continue;
+    norm[k] = Array.isArray(v) ? [...v].map(String).sort() : String(v);
+  }
+  return JSON.stringify(norm);
+}
+
+function _getCachedReport(key) {
+  const hit = _reportCache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.at > REPORT_CACHE_TTL_MS) {
+    _reportCache.delete(key);
+    return null;
+  }
+  return hit.payload;
+}
+
+function _setCachedReport(key, payload) {
+  if (_reportCache.size > 80) {
+    const oldest = _reportCache.keys().next().value;
+    _reportCache.delete(oldest);
+  }
+  _reportCache.set(key, { at: Date.now(), payload });
+}
+
+function _invalidateReportCache() {
+  _reportCache.clear();
+  _cfopSyncAt = 0;
+  _statusSyncAt = 0;
+}
 
 function normalizeCfopDigits(value) {
   return String(value || '').replace(/\D/g, '').trim();
@@ -79,7 +120,64 @@ async function ensureVendasRelatorioSchema() {
     );
     ALTER TABLE vendas.vendedores_omie
       ADD COLUMN IF NOT EXISTS atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW();
+
+    -- Acelera filtro por período (data_emissao é texto; coluna date + índice)
+    ALTER TABLE vendas.notas_fiscais_omie
+      ADD COLUMN IF NOT EXISTS data_emissao_dt DATE;
+    ALTER TABLE vendas.notas_fiscais_omie
+      ADD COLUMN IF NOT EXISTS cfop VARCHAR(40);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_data_emissao_dt
+      ON vendas.notas_fiscais_omie (data_emissao_dt)
+      WHERE ativa IS DISTINCT FROM FALSE;
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_status_ultimo
+      ON vendas.notas_fiscais_omie (status_ultimo);
+    CREATE INDEX IF NOT EXISTS idx_notas_fiscais_omie_id_pedido_omie
+      ON vendas.notas_fiscais_omie (id_pedido_omie)
+      WHERE id_pedido_omie IS NOT NULL;
   `);
+
+    try {
+      await pool.query(`
+        CREATE OR REPLACE FUNCTION vendas.trg_nf_set_data_emissao_dt()
+        RETURNS trigger
+        LANGUAGE plpgsql
+        AS $fn$
+        BEGIN
+          NEW.data_emissao_dt := CASE
+            WHEN TRIM(COALESCE(NEW.data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+              THEN LEFT(TRIM(NEW.data_emissao), 10)::date
+            WHEN TRIM(COALESCE(NEW.data_emissao, '')) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
+              THEN to_date(
+                regexp_replace(SUBSTRING(TRIM(NEW.data_emissao) FROM 1 FOR 10), ' .*', ''),
+                'DD/MM/YYYY'
+              )
+            ELSE NULL
+          END;
+          RETURN NEW;
+        END;
+        $fn$;
+      `);
+      await pool.query(`DROP TRIGGER IF EXISTS trg_nf_set_data_emissao_dt ON vendas.notas_fiscais_omie`);
+      try {
+        await pool.query(`
+          CREATE TRIGGER trg_nf_set_data_emissao_dt
+            BEFORE INSERT OR UPDATE OF data_emissao
+            ON vendas.notas_fiscais_omie
+            FOR EACH ROW
+            EXECUTE FUNCTION vendas.trg_nf_set_data_emissao_dt()
+        `);
+      } catch (_) {
+        await pool.query(`
+          CREATE TRIGGER trg_nf_set_data_emissao_dt
+            BEFORE INSERT OR UPDATE OF data_emissao
+            ON vendas.notas_fiscais_omie
+            FOR EACH ROW
+            EXECUTE PROCEDURE vendas.trg_nf_set_data_emissao_dt()
+        `);
+      }
+    } catch (err) {
+      console.warn('[vendas] trigger data_emissao_dt:', err?.message || err);
+    }
   })().catch((err) => {
     _ensureSchemaPromise = null;
     throw err;
@@ -87,9 +185,33 @@ async function ensureVendasRelatorioSchema() {
   return _ensureSchemaPromise;
 }
 
-/** Garante catálogo de CFOPs a partir dos itens de pedido (6905 começa desmarcado). */
-async function syncRelatorioCfopCatalog() {
+/** Preenche data_emissao_dt nas NFs antigas (uma vez por processo). */
+async function ensureDataEmissaoDtBackfill() {
   await ensureVendasRelatorioSchema();
+  if (_emissaoDtReady) return;
+  await pool.query(`
+    UPDATE vendas.notas_fiscais_omie nf
+       SET data_emissao_dt = CASE
+         WHEN TRIM(COALESCE(nf.data_emissao, '')) ~ '^\\d{4}-\\d{2}-\\d{2}'
+           THEN LEFT(TRIM(nf.data_emissao), 10)::date
+         WHEN TRIM(COALESCE(nf.data_emissao, '')) ~ '^\\d{1,2}/\\d{1,2}/\\d{4}'
+           THEN to_date(
+             regexp_replace(SUBSTRING(TRIM(nf.data_emissao) FROM 1 FOR 10), ' .*', ''),
+             'DD/MM/YYYY'
+           )
+         ELSE NULL
+       END
+     WHERE nf.data_emissao_dt IS NULL
+       AND COALESCE(TRIM(nf.data_emissao), '') <> ''
+  `);
+  _emissaoDtReady = true;
+}
+
+/** Garante catálogo de CFOPs a partir dos itens de pedido (6905 começa desmarcado). */
+async function syncRelatorioCfopCatalog(force = false) {
+  await ensureVendasRelatorioSchema();
+  const now = Date.now();
+  if (!force && _cfopSyncAt && (now - _cfopSyncAt) < CATALOG_SYNC_TTL_MS) return;
   await pool.query(`
     INSERT INTO vendas.relatorio_gerencial_cfop (cfop, incluido, descricao)
     SELECT DISTINCT
@@ -113,11 +235,14 @@ async function syncRelatorioCfopCatalog() {
   } catch (_) {
     /* configuracoes.cfop pode não existir em algum ambiente */
   }
+  _cfopSyncAt = now;
 }
 
 /** Catálogo de status NF a partir das notas (Autorizada incluída por padrão). */
-async function syncRelatorioStatusCatalog() {
+async function syncRelatorioStatusCatalog(force = false) {
   await ensureVendasRelatorioSchema();
+  const now = Date.now();
+  if (!force && _statusSyncAt && (now - _statusSyncAt) < CATALOG_SYNC_TTL_MS) return;
   await pool.query(`
     INSERT INTO vendas.relatorio_gerencial_status (status, incluido)
     SELECT DISTINCT
@@ -127,6 +252,7 @@ async function syncRelatorioStatusCatalog() {
     WHERE COALESCE(TRIM(n.status_ultimo), '') <> ''
     ON CONFLICT (status) DO NOTHING
   `);
+  _statusSyncAt = now;
 }
 
 async function syncVendedoresOmieIfNeeded(force = false) {
@@ -216,6 +342,9 @@ const NF_DATA_EMISSAO_SQL = `CASE
   ELSE NULL
 END`;
 
+/** Prefere coluna indexada; cai no parse do texto só se ainda não preenchida. */
+const NF_DATA_EMISSAO_RESOLVED_SQL = `COALESCE(nf.data_emissao_dt, ${NF_DATA_EMISSAO_SQL})`;
+
 /** Faturamento = notas fiscais de saída no período (não depende do pedido ter sido sincronizado). */
 function nfJsonNumSql(...exprs) {
   const parts = exprs.map((expr) =>
@@ -258,8 +387,19 @@ const NF_DET_LATERAL_SQL = `jsonb_array_elements(
   END
 ) AS d`;
 
+const NF_DET_FROM_PAYLOAD_SQL = `jsonb_array_elements(
+  CASE
+    WHEN jsonb_typeof(p.payload_ultimo->'det') = 'array' THEN p.payload_ultimo->'det'
+    ELSE '[]'::jsonb
+  END
+) AS d`;
+
+/**
+ * Expande o JSON de itens UMA vez (antes eram 4–5 correlacionados por NF).
+ * Depois agrega valor/qtd só dos CFOPs incluídos.
+ */
 const VENDAS_CTES = `
-  nf_emitidas AS (
+  nf_periodo AS (
     SELECT
       nf.id,
       nf.numero_nota,
@@ -269,26 +409,12 @@ const VENDAS_CTES = `
       nf.cfop,
       nf.status_ultimo,
       nf.payload_ultimo,
-      ${NF_DATA_EMISSAO_SQL} AS data_emissao_dt,
-      EXISTS (
-        SELECT 1 FROM ${NF_DET_LATERAL_SQL}
-      ) AS tem_itens_payload,
-      (
-        SELECT COALESCE(SUM(GREATEST(0::numeric, ${NF_ITEM_LIQUIDO_SQL})), 0)
-          FROM ${NF_DET_LATERAL_SQL}
-         WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
-      )::numeric(14,2) AS valor_itens_incluidos,
-      (
-        SELECT COALESCE(SUM(
-          COALESCE(NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'), '')::numeric, 0)
-        ), 0)
-          FROM ${NF_DET_LATERAL_SQL}
-         WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
-      )::numeric(14,2) AS qtd_itens_incluidos
+      ${NF_DATA_EMISSAO_RESOLVED_SQL} AS data_emissao_dt
     FROM vendas.notas_fiscais_omie nf
     WHERE nf.ativa IS DISTINCT FROM FALSE
-      AND ${NF_DATA_EMISSAO_SQL} >= $1::date
-      AND ${NF_DATA_EMISSAO_SQL} < $2::date
+      AND nf.data_emissao_dt IS NOT NULL
+      AND nf.data_emissao_dt >= $1::date
+      AND nf.data_emissao_dt < $2::date
       AND COALESCE(nf.payload_ultimo->'ide'->>'tpNF', '1') <> '0'
       -- Inutilizada / cancelada / denegada NÃO entram no faturamento
       AND NULLIF(TRIM(COALESCE(nf.payload_ultimo->'ide'->>'dInut', '')), '') IS NULL
@@ -303,25 +429,68 @@ const VENDAS_CTES = `
         )
         OR NOT EXISTS (SELECT 1 FROM vendas.relatorio_gerencial_status LIMIT 1)
       )
-      AND (
-        -- Regra correta: CFOP do ITEM (não do cabeçalho).
-        -- Ex.: NF 15142 com 6102 (cobra) + 6910 (cortesia) → entra só se houver item incluído.
-        EXISTS (
-          SELECT 1 FROM ${NF_DET_LATERAL_SQL}
-           WHERE ${NF_ITEM_CFOP_INCLUIDO_SQL}
+  ),
+  nf_det_exp AS (
+    SELECT
+      p.id AS nf_id,
+      ${NF_ITEM_CFOP_DIGITS_SQL} AS cfop_digits,
+      GREATEST(0::numeric, ${NF_ITEM_LIQUIDO_SQL}) AS valor_liquido,
+      COALESCE(
+        NULLIF(REGEXP_REPLACE(TRIM(COALESCE(d->'prod'->>'qCom', d->'prod'->>'nQtde', '')), ',', '.', 'g'), '')::numeric,
+        0
+      ) AS qtd,
+      (
+        ${NF_ITEM_CFOP_DIGITS_SQL} = ''
+        OR EXISTS (
+          SELECT 1
+            FROM vendas.relatorio_gerencial_cfop c
+           WHERE c.cfop = ${NF_ITEM_CFOP_DIGITS_SQL}
+             AND c.incluido IS TRUE
         )
-        OR (
-          -- Legado: payload sem itens → usa CFOP do cabeçalho
-          NOT EXISTS (SELECT 1 FROM ${NF_DET_LATERAL_SQL})
-          AND (
-            TRIM(COALESCE(nf.cfop, '')) = ''
-            OR EXISTS (
-              SELECT 1
-                FROM unnest(string_to_array(nf.cfop, ',')) AS raw(cf)
-                JOIN vendas.relatorio_gerencial_cfop c
-                  ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
-                 AND c.incluido IS TRUE
-            )
+      ) AS cfop_incluido
+    FROM nf_periodo p
+    CROSS JOIN LATERAL ${NF_DET_FROM_PAYLOAD_SQL}
+  ),
+  nf_agg AS (
+    SELECT
+      nf_id,
+      TRUE AS tem_itens_payload,
+      COALESCE(SUM(valor_liquido) FILTER (WHERE cfop_incluido), 0)::numeric(14,2) AS valor_itens_incluidos,
+      COALESCE(SUM(qtd) FILTER (WHERE cfop_incluido), 0)::numeric(14,2) AS qtd_itens_incluidos,
+      BOOL_OR(cfop_incluido) AS tem_item_incluido
+    FROM nf_det_exp
+    GROUP BY nf_id
+  ),
+  nf_emitidas AS (
+    SELECT
+      p.id,
+      p.numero_nota,
+      p.numero_pedido,
+      p.id_pedido_omie,
+      p.valor_total,
+      p.cfop,
+      p.status_ultimo,
+      p.payload_ultimo,
+      p.data_emissao_dt,
+      COALESCE(a.tem_itens_payload, FALSE) AS tem_itens_payload,
+      COALESCE(a.valor_itens_incluidos, 0)::numeric(14,2) AS valor_itens_incluidos,
+      COALESCE(a.qtd_itens_incluidos, 0)::numeric(14,2) AS qtd_itens_incluidos
+    FROM nf_periodo p
+    LEFT JOIN nf_agg a ON a.nf_id = p.id
+    WHERE
+      -- Regra correta: CFOP do ITEM (não do cabeçalho).
+      COALESCE(a.tem_item_incluido, FALSE)
+      OR (
+        -- Legado: payload sem itens → usa CFOP do cabeçalho
+        a.nf_id IS NULL
+        AND (
+          TRIM(COALESCE(p.cfop, '')) = ''
+          OR EXISTS (
+            SELECT 1
+              FROM unnest(string_to_array(p.cfop, ',')) AS raw(cf)
+              JOIN vendas.relatorio_gerencial_cfop c
+                ON c.cfop = REGEXP_REPLACE(TRIM(raw.cf), '\\D', '', 'g')
+               AND c.incluido IS TRUE
           )
         )
       )
@@ -473,6 +642,21 @@ function buildItensCte(etapaSql, pedidoSql = '', itemSql = '') {
   `;
 }
 
+/** Monta itens a partir de vend_rel_base já materializada (evita recalcular nf_emitidas). */
+function buildItensFromTempBase(itemSql = '') {
+  const sqlItem = itemSql || '';
+  const fallbackGuard = sqlItem ? 'AND FALSE' : '';
+  const itensBlock = ITENS_CTE
+    .replace(/__ITEM_SQL__/g, sqlItem)
+    .replace(/__FALLBACK_GUARD__/g, fallbackGuard);
+  return `
+    WITH base AS (
+      SELECT * FROM vend_rel_base
+    ),
+    ${itensBlock}
+  `;
+}
+
 function temFiltroItemRelatorio(filtros = {}) {
   const famLista = Array.isArray(filtros.familia) ? filtros.familia : [];
   return !!(
@@ -557,6 +741,8 @@ router.put('/vendas/relatorio-gerencial/config/cfop', async (req, res) => {
       client.release();
     }
 
+    _invalidateReportCache();
+
     const { rows } = await pool.query(`
       SELECT c.cfop, c.incluido, c.descricao, c.atualizado_em, c.atualizado_por
         FROM vendas.relatorio_gerencial_cfop c
@@ -638,6 +824,8 @@ router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
       client.release();
     }
 
+    _invalidateReportCache();
+
     const { rows } = await pool.query(`
       SELECT s.status, s.incluido, s.atualizado_em, s.atualizado_por
         FROM vendas.relatorio_gerencial_status s
@@ -661,8 +849,11 @@ router.put('/vendas/relatorio-gerencial/config/status', async (req, res) => {
 // GET /vendas/relatorio-gerencial/registros — lista dos pedidos do KPI Pedidos/Faturamento
 router.get('/vendas/relatorio-gerencial/registros', async (req, res) => {
   try {
-    await syncRelatorioCfopCatalog();
-    await syncRelatorioStatusCatalog();
+    await ensureDataEmissaoDtBackfill();
+    await Promise.all([
+      syncRelatorioCfopCatalog(),
+      syncRelatorioStatusCatalog(),
+    ]);
     const filtros = parseFiltrosRelatorio(req.query);
     const periodoCfg = calcPeriodoComFiltros(filtros);
     const etapaCfg = buildEtapaFilter(filtros.etapa);
@@ -1067,9 +1258,21 @@ router.get('/vendas/relatorio-gerencial/filtros-opcoes', async (req, res) => {
 
 // GET /vendas/relatorio-gerencial
 router.get('/vendas/relatorio-gerencial', async (req, res) => {
+  const t0 = Date.now();
   try {
-    await syncRelatorioCfopCatalog();
-    await syncRelatorioStatusCatalog();
+    const cacheKey = _reportCacheKey(req.query);
+    const cached = _getCachedReport(cacheKey);
+    if (cached) {
+      res.setHeader('X-Vendas-Relatorio-Cache', 'HIT');
+      res.setHeader('X-Vendas-Relatorio-Ms', String(Date.now() - t0));
+      return res.json(cached);
+    }
+
+    await ensureDataEmissaoDtBackfill();
+    await Promise.all([
+      syncRelatorioCfopCatalog(),
+      syncRelatorioStatusCatalog(),
+    ]);
     const filtros = parseFiltrosRelatorio(req.query);
     const etapaParam = filtros.etapa;
     const periodoCfg = calcPeriodoComFiltros(filtros);
@@ -1088,7 +1291,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
     const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
     const baseCte = buildBaseCte(etapaCfg.sql, pedidoSql);
-    const itensCte = buildItensCte(etapaCfg.sql, pedidoSql, itemSql);
+    const itensFromBaseSql = buildItensFromTempBase(itemSql);
 
     const evolucaoSql = evolucaoTipo === 'mes'
       ? `SELECT
@@ -1128,11 +1331,14 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         ${baseCte}
         SELECT * FROM base
       `, rangeParams);
+      await client.query(`CREATE INDEX ON vend_rel_base (codigo_pedido)`);
       await client.query(`
         CREATE TEMP TABLE vend_rel_itens ON COMMIT DROP AS
-        ${itensCte}
+        ${itensFromBaseSql}
         SELECT * FROM itens
-      `, rangeParams);
+      `);
+      await client.query(`CREATE INDEX ON vend_rel_itens (codigo_pedido)`);
+      await client.query(`CREATE INDEX ON vend_rel_itens (familia)`);
 
       // Com filtro de família/tipo: KPI e vendedores usam só o valor dos itens filtrados
       // (senão o pedido inteiro entrava quando havia produto de outra família no mesmo pedido).
@@ -1322,7 +1528,7 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
 
     const cfgCfop = rCfopCfg.rows[0] || {};
 
-    return res.json({
+    const payload = {
       ok: true,
       mes: mesRaw,
       modo,
@@ -1417,7 +1623,11 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         },
       },
       textos,
-    });
+    };
+    _setCachedReport(cacheKey, payload);
+    res.setHeader('X-Vendas-Relatorio-Cache', 'MISS');
+    res.setHeader('X-Vendas-Relatorio-Ms', String(Date.now() - t0));
+    return res.json(payload);
   } catch (err) {
     console.error('[VENDAS] erro relatorio-gerencial:', err);
     return res.status(500).json({ ok: false, error: err.message });
@@ -1479,6 +1689,7 @@ router.put('/vendas/relatorio-gerencial/textos', async (req, res) => {
     );
 
     const row = rows[0];
+    _invalidateReportCache();
     return res.json({
       ok: true,
       textos: {

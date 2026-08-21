@@ -18,9 +18,10 @@
     { id: 'ri', label: 'Tempo de RI', icon: 'fa-clipboard-check', pg: 4 },
     { id: 'ops', label: 'Ciclo por OP', icon: 'fa-list-ol', pg: 5 },
     { id: 'detalhe', label: 'Detalhe dos Ciclos', icon: 'fa-clock', pg: 6 },
-    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 7 },
-    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 8 },
-    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 9 },
+    { id: 'paradas', label: 'Paradas', icon: 'fa-circle-pause', pg: 7 },
+    { id: 'evolucao', label: 'Evolução', icon: 'fa-chart-column', pg: 8 },
+    { id: 'plano', label: 'Plano de Ação', icon: 'fa-list-check', pg: 9 },
+    { id: 'conclusao', label: 'Conclusão Executiva', icon: 'fa-flag-checkered', pg: 10 },
   ];
 
   function _esc(s) {
@@ -76,6 +77,11 @@
         descricao: `${k.aguardando_ri} OP(s) aguardando liberação via RI`,
         responsavel: '', prazo: '', prioridade: 'alta',
       },
+      (k.ops_com_parada > 0) && {
+        acao: 'Analisar causas de parada',
+        descricao: `${k.ops_com_parada} OP(s) com parada · ${_fmtDuracaoHoras(k.horas_parada)} · ${k.pct_parada || 0}% do tempo bruto`,
+        responsavel: '', prazo: '', prioridade: 'alta',
+      },
       (k.media_h_ri != null && k.media_h_ri > 4) && {
         acao: 'Reduzir tempo de espera de RI',
         descricao: `Média atual de espera RI: ${_fmtDuracaoHoras(k.media_h_ri)}`,
@@ -94,16 +100,16 @@
 
     return {
       plano_acao,
-      conclusao_resumo: `No período ${data.periodo || ''} a produção registrou ${k.ops_com_tempo || 0} OP(s) com tempo controlado, ${k.ciclos_posto_fechados || 0} ciclo(s) de posto finalizado(s) e média de ${_fmtDuracaoHoras(k.media_h_ciclo_op)} por OP (tempo útil de posto).`,
+      conclusao_resumo: `No período ${data.periodo || ''} a produção registrou ${k.ops_com_tempo || 0} OP(s) com tempo controlado, ${k.ciclos_posto_fechados || 0} ciclo(s) de posto finalizado(s), média de ${_fmtDuracaoHoras(k.media_h_ciclo_op)} por OP e ${k.ops_com_parada || 0} OP(s) com parada (${_fmtDuracaoHoras(k.horas_parada)}).`,
       conclusao_pontos_criticos: [
-        `Tempo médio por posto: ${_fmtDuracaoHoras(k.media_h_posto)} · RI: ${_fmtDuracaoHoras(k.media_h_ri)}`,
-        `Em andamento no posto: ${k.em_andamento_posto || 0} · Aguardando RI: ${k.aguardando_ri || 0}`,
+        `Tempo médio por posto (bruto): ${_fmtDuracaoHoras(k.media_h_posto)} · líquido: ${_fmtDuracaoHoras(k.media_h_liquido)} · parada: ${_fmtDuracaoHoras(k.media_h_parada)}`,
+        `Em andamento no posto: ${k.em_andamento_posto || 0} · Aguardando RI: ${k.aguardando_ri || 0} · Paradas abertas: ${k.paradas_abertas || 0}`,
         `Postos com maior tempo médio: ${topTxt}`,
       ].join('\n'),
       conclusao_oportunidades: [
         'Padronizar tempo-alvo por posto (hermética, elétrica, teste, embalagem)',
         'Acompanhar fila de RI para reduzir espera entre finalização e liberação',
-        'Usar o detalhe por OP para estudar equipamentos com ciclo acima da mediana',
+        'Usar a página Paradas e o detalhe por OP para atacar motivos recorrentes',
       ].join('\n'),
     };
   }
@@ -173,13 +179,14 @@
 
     const icons = {
       executivo: 'fa-gauge-high', maquinas: 'fa-gears', postos: 'fa-industry', ri: 'fa-clipboard-check',
-      ops: 'fa-list-ol', detalhe: 'fa-clock', evolucao: 'fa-chart-column',
+      ops: 'fa-list-ol', detalhe: 'fa-clock', paradas: 'fa-circle-pause', evolucao: 'fa-chart-column',
       plano: 'fa-list-check', conclusao: 'fa-flag-checkered',
     };
     const titles = {
       executivo: 'Dashboard Executivo', maquinas: 'Máquinas produzidas',
       postos: 'Tempo por Posto', ri: 'Tempo de RI',
       ops: 'Ciclo por Ordem de Produção', detalhe: 'Detalhe dos Ciclos',
+      paradas: 'Paradas de Produção',
       evolucao: 'Evolução no Período', plano: 'Plano de Ação', conclusao: 'Conclusão Executiva',
     };
 
@@ -187,12 +194,13 @@
       executivo: `
         <div id="prodRelGerKpis" class="at-rel-ger-kpis"></div>
         <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
-          Tempos em <strong>horas úteis</strong> (desconta café/refeição conforme Turno do dia).
-          Se houver MO informada na linha, o tempo do posto é dividido pela quantidade de pessoas.
-          Contagem inicia na impressão da etiqueta / entrada no posto e fecha ao finalizar a operação.
+          Tempos em <strong>horas úteis</strong> (desconta café/refeição conforme Turno do dia),
+          <strong>congelados ao finalizar</strong> a operação/RI.
+          Barra = tempo bruto; dentro: <span style="color:#dc2626;">parada</span> + <span style="color:#0f766e;">líquido</span>.
+          Contagem do posto: início → finalizar operação. RI: após finalizar até fechar a inspeção.
         </p>
         <div class="at-rel-ger-grid-2">
-          <div class="at-rel-ger-card"><h4>Tempo médio por posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartPostoExec"></canvas></div></div>
+          <div class="at-rel-ger-card"><h4>Tempo médio por posto (bruto = parada + líquido)</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartPostoExec"></canvas></div></div>
           <div class="at-rel-ger-card"><h4>Faixas de tempo no posto</h4><div class="at-rel-ger-chart sm"><canvas id="prodRelGerChartFaixasExec"></canvas></div></div>
         </div>`,
       maquinas: `
@@ -216,10 +224,10 @@
       postos: `
         <div id="prodRelGerPostoKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
         <div class="at-rel-ger-grid-2">
-          <div class="at-rel-ger-card"><h4>Média útil por posto</h4><div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartPosto"></canvas></div></div>
+          <div class="at-rel-ger-card"><h4>Média útil por posto (parada + líquido)</h4><div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartPosto"></canvas></div></div>
           <div class="at-rel-ger-card"><h4>Resumo por posto</h4>
             <div style="overflow:auto;max-height:320px;"><table class="at-rel-ger-tbl">
-              <thead><tr><th>Posto</th><th class="r">Ciclos</th><th class="r">OPs</th><th class="r">Média posto</th><th class="r">Mediana</th></tr></thead>
+              <thead><tr><th>Posto</th><th class="r">Ciclos</th><th class="r">OPs</th><th class="r">Bruto</th><th class="r">Parada</th><th class="r">Líquido</th><th class="r">c/ parada</th></tr></thead>
               <tbody id="prodRelGerPostoBody"></tbody>
             </table></div>
           </div>
@@ -227,7 +235,8 @@
       ri: `
         <div id="prodRelGerRiKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
         <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
-          Tempo desde a entrada no posto (início da fase RI) até a liberação da inspeção — antes do trabalho liberado e do avanço ao próximo posto.
+          Tempo desde a <strong>finalização da operação no posto</strong> até a liberação da inspeção (RI).
+          Ao fechar a RI, inicia automaticamente o posto seguinte.
         </p>
         <div class="at-rel-ger-grid-2">
           <div class="at-rel-ger-card"><h4>Tempo médio de RI por posto</h4><div class="at-rel-ger-chart lg"><canvas id="prodRelGerChartRi"></canvas></div></div>
@@ -240,12 +249,13 @@
         </div>`,
       ops: `
         <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
-          Soma do tempo útil nos postos de cada OP no período (estudo de quanto a máquina leva para ser concluída).
+          Soma do tempo útil nos postos de cada OP no período (bruto / parada / líquido).
         </p>
         <div style="overflow:auto;max-height:480px;"><table class="at-rel-ger-tbl">
           <thead><tr>
             <th>OP</th><th>Postos</th><th class="r">Ciclos</th>
-            <th class="r">Tempo posto</th><th class="r">Tempo RI</th><th class="r">Trabalho</th><th class="r">Ciclo OP</th>
+            <th class="r">Bruto</th><th class="r">Parada</th><th class="r">Líquido</th>
+            <th class="r">Tempo RI</th><th>Parada?</th>
           </tr></thead>
           <tbody id="prodRelGerOpsBody"></tbody>
         </table></div>`,
@@ -253,10 +263,30 @@
         <div class="at-rel-ger-card"><h4>Ciclos de posto finalizados</h4>
           <div style="overflow:auto;max-height:420px;"><table class="at-rel-ger-tbl">
             <thead><tr>
-              <th>OP</th><th>Posto</th><th>Início</th><th>Fim</th><th class="r">Tempo útil</th><th>Operador fim</th>
+              <th>OP</th><th>Posto</th><th>Início</th><th>Fim</th>
+              <th class="r">Bruto</th><th class="r">Parada</th><th class="r">Líquido</th><th>Operador fim</th>
             </tr></thead>
             <tbody id="prodRelGerDetalheBody"></tbody>
           </table></div>
+        </div>`,
+      paradas: `
+        <div id="prodRelGerParadaKpis" class="at-rel-ger-kpis" style="margin-bottom:14px;"></div>
+        <p style="font-size:12px;color:#64748b;margin:0 0 12px;">
+          Paradas registradas no período. Se ainda aberta, a duração é parcial (até agora) e aparece com aviso.
+        </p>
+        <div class="at-rel-ger-grid-2">
+          <div class="at-rel-ger-card"><h4>Por tipo de parada</h4>
+            <div style="overflow:auto;max-height:280px;"><table class="at-rel-ger-tbl">
+              <thead><tr><th>Tipo</th><th class="r">Qtd</th><th class="r">Tempo útil</th></tr></thead>
+              <tbody id="prodRelGerParadaTipoBody"></tbody>
+            </table></div>
+          </div>
+          <div class="at-rel-ger-card"><h4>Lista de paradas</h4>
+            <div style="overflow:auto;max-height:280px;"><table class="at-rel-ger-tbl">
+              <thead><tr><th>OP</th><th>Posto</th><th>Tipo</th><th>Motivo</th><th>Início</th><th class="r">Duração</th><th>Status</th></tr></thead>
+              <tbody id="prodRelGerParadaBody"></tbody>
+            </table></div>
+          </div>
         </div>`,
       evolucao: `
         <div class="at-rel-ger-card"><h4 id="prodRelGerEvolTitulo">Máquinas produzidas no período</h4>
@@ -319,14 +349,54 @@
       { label: 'Máquinas produzidas', value: kpis.maquinas_produzidas ?? 0, cor: '#0ea5e9' },
       { label: 'OPs com tempo', value: kpis.ops_com_tempo ?? 0, cor: ACCENT },
       { label: 'Ciclos de posto', value: kpis.ciclos_posto_fechados ?? 0, cor: ACCENT2 },
-      { label: 'Média no posto', value: _fmtDuracaoHoras(kpis.media_h_posto), cor: '#0284c7' },
+      { label: 'Média bruto', value: _fmtDuracaoHoras(kpis.media_h_posto), cor: '#0284c7' },
+      { label: 'Média parada', value: _fmtDuracaoHoras(kpis.media_h_parada), cor: '#dc2626' },
+      { label: 'Média líquido', value: _fmtDuracaoHoras(kpis.media_h_liquido), cor: '#0f766e' },
       { label: 'Média RI', value: _fmtDuracaoHoras(kpis.media_h_ri), cor: '#f59e0b' },
-      { label: 'Média trabalho', value: _fmtDuracaoHoras(kpis.media_h_trabalho), cor: '#8b5cf6' },
-      { label: 'Ciclo médio OP', value: _fmtDuracaoHoras(kpis.media_h_ciclo_op), cor: '#0ea5e9' },
-      { label: 'Em andamento', value: kpis.em_andamento_posto ?? 0, cor: '#d97706' },
-      { label: 'Aguardando RI', value: kpis.aguardando_ri ?? 0, cor: '#dc2626' },
+      { label: 'OPs c/ parada', value: kpis.ops_com_parada ?? 0, cor: '#ef4444' },
+      { label: 'Paradas abertas', value: kpis.paradas_abertas ?? 0, cor: '#b91c1c' },
     ];
     wrap.innerHTML = cards.map((c) => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+  }
+
+  function _renderStackedPosto(canvasId, key, porPosto, horizontal) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas || typeof Chart === 'undefined') return;
+    const rows = (porPosto || []).slice(0, horizontal ? 8 : 12);
+    _destroyChart(key);
+    _charts[key] = new Chart(canvas.getContext('2d'), {
+      type: 'bar',
+      data: {
+        labels: rows.map((r) => r.posto),
+        datasets: [
+          {
+            label: 'Parada',
+            data: rows.map((r) => r.media_h_parada || 0),
+            backgroundColor: '#f87171cc',
+            borderColor: '#dc2626',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+          {
+            label: 'Líquido',
+            data: rows.map((r) => r.media_h_liquido || 0),
+            backgroundColor: '#2dd4bfcc',
+            borderColor: '#0f766e',
+            borderWidth: 1,
+            borderRadius: 4,
+          },
+        ],
+      },
+      options: {
+        ...(horizontal ? _chartOptsBarH() : _chartOptsBarV()),
+        scales: horizontal
+          ? { x: { beginAtZero: true, stacked: true }, y: { stacked: true, ticks: { font: { size: 11 } } } }
+          : { x: { stacked: true }, y: { beginAtZero: true, stacked: true } },
+        plugins: {
+          legend: { display: true, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } },
+        },
+      },
+    });
   }
 
   function _fmtDiaLabel(ymd) {
@@ -446,12 +516,7 @@
     const k = data.kpis || {};
 
     if (sec === 'executivo') {
-      _renderBar(
-        'prodRelGerChartPostoExec', 'postoExec',
-        porPosto.slice(0, 8).map((r) => r.posto),
-        porPosto.slice(0, 8).map((r) => r.media_h_posto || 0),
-        ACCENT2, true
-      );
+      _renderStackedPosto('prodRelGerChartPostoExec', 'postoExec', porPosto, true);
       _renderBar(
         'prodRelGerChartFaixasExec', 'faixasExec',
         faixas.map((r) => r.faixa),
@@ -478,17 +543,12 @@
       if (wrap) {
         wrap.innerHTML = [
           { label: 'Postos distintos', value: k.postos_distintos ?? 0, cor: ACCENT },
-          { label: 'Média geral posto', value: _fmtDuracaoHoras(k.media_h_posto), cor: ACCENT2 },
-          { label: 'Mediana posto', value: _fmtDuracaoHoras(k.mediana_h_posto), cor: '#0284c7' },
-          { label: 'Ciclos fechados', value: k.ciclos_posto_fechados ?? 0, cor: '#64748b' },
+          { label: 'Média bruto', value: _fmtDuracaoHoras(k.media_h_posto), cor: ACCENT2 },
+          { label: 'Média parada', value: _fmtDuracaoHoras(k.media_h_parada), cor: '#dc2626' },
+          { label: 'Média líquido', value: _fmtDuracaoHoras(k.media_h_liquido), cor: '#0f766e' },
         ].map((c) => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
       }
-      _renderBar(
-        'prodRelGerChartPosto', 'posto',
-        porPosto.map((r) => r.posto),
-        porPosto.map((r) => r.media_h_posto || 0),
-        ACCENT, true
-      );
+      _renderStackedPosto('prodRelGerChartPosto', 'posto', porPosto, true);
     }
 
     if (sec === 'ri') {
@@ -507,6 +567,18 @@
         porPosto.map((r) => r.media_h_ri || 0),
         '#f59e0b', true
       );
+    }
+
+    if (sec === 'paradas') {
+      const wrap = document.getElementById('prodRelGerParadaKpis');
+      if (wrap) {
+        wrap.innerHTML = [
+          { label: 'OPs com parada', value: k.ops_com_parada ?? 0, cor: '#ef4444' },
+          { label: 'Horas paradas', value: _fmtDuracaoHoras(k.horas_parada), cor: '#dc2626' },
+          { label: '% do bruto', value: `${k.pct_parada ?? 0}%`, cor: '#b91c1c' },
+          { label: 'Aberto agora', value: k.paradas_abertas ?? 0, cor: '#7f1d1d' },
+        ].map((c) => `<div class="at-rel-ger-kpi" style="--kpi-cor:${c.cor}"><div class="lbl">${c.label}</div><div class="val">${c.value}</div></div>`).join('');
+      }
     }
 
     if (sec === 'evolucao') {
@@ -531,9 +603,11 @@
             <td class="r">${r.ciclos}</td>
             <td class="r">${r.ops}</td>
             <td class="r">${_esc(_fmtDuracaoHoras(r.media_h_posto))}</td>
-            <td class="r">${_esc(_fmtDuracaoHoras(r.mediana_h_posto))}</td>
+            <td class="r">${_esc(_fmtDuracaoHoras(r.media_h_parada))}</td>
+            <td class="r">${_esc(_fmtDuracaoHoras(r.media_h_liquido))}</td>
+            <td class="r">${r.ciclos_com_parada || 0}</td>
           </tr>`).join('')
-        : '<tr><td colspan="5" style="text-align:center;color:#94a3b8;">Sem ciclos no período.</td></tr>';
+        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Sem ciclos no período.</td></tr>';
     }
 
     const riBody = document.getElementById('prodRelGerRiBody');
@@ -554,16 +628,22 @@
     if (opsBody) {
       const rows = data.ciclos_por_op || [];
       opsBody.innerHTML = rows.length
-        ? rows.map((r) => `<tr>
+        ? rows.map((r) => {
+          const badge = r.parada_parcial
+            ? '<span style="color:#b91c1c;font-weight:700;">Aberta</span>'
+            : (r.teve_parada ? '<span style="color:#dc2626;font-weight:600;">Sim</span>' : '—');
+          return `<tr>
             <td>${_esc(r.numero_op || '—')}</td>
             <td>${_esc((r.postos || []).join(', ') || '—')}</td>
             <td class="r">${r.ciclos_posto || 0}</td>
             <td class="r">${_esc(r.tempo_posto_fmt || _fmtDuracaoHoras(r.h_posto))}</td>
+            <td class="r">${_esc(r.tempo_parada_fmt || _fmtDuracaoHoras(r.h_parada))}</td>
+            <td class="r">${_esc(r.tempo_liquido_fmt || _fmtDuracaoHoras(r.h_liquido))}</td>
             <td class="r">${_esc(r.tempo_ri_fmt || _fmtDuracaoHoras(r.h_ri))}</td>
-            <td class="r">${_esc(r.tempo_trabalho_fmt || _fmtDuracaoHoras(r.h_trabalho))}</td>
-            <td class="r">${_esc(r.tempo_ciclo_fmt || _fmtDuracaoHoras(r.h_ciclo))}</td>
-          </tr>`).join('')
-        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Nenhuma OP com tempo no período.</td></tr>';
+            <td>${badge}</td>
+          </tr>`;
+        }).join('')
+        : '<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhuma OP com tempo no período.</td></tr>';
     }
 
     const detBody = document.getElementById('prodRelGerDetalheBody');
@@ -571,14 +651,44 @@
       const rows = data.detalhe_postos || [];
       detBody.innerHTML = rows.length
         ? rows.map((r) => `<tr>
-            <td>${_esc(r.numero_op || '—')}</td>
+            <td>${_esc(r.numero_op || '—')}${r.teve_parada ? ' <i class="fa-solid fa-circle-pause" style="color:#dc2626;font-size:10px;" title="Teve parada"></i>' : ''}</td>
             <td>${_esc(r.posto || '—')}</td>
             <td>${_esc(_fmtDataHora(r.inicio))}</td>
             <td>${_esc(_fmtDataHora(r.fim))}</td>
-            <td class="r">${_esc(r.tempo_fmt || _fmtDuracaoHoras(r.h_util))}</td>
+            <td class="r">${_esc(r.tempo_bruto_fmt || _fmtDuracaoHoras(r.h_bruto || r.h_util))}</td>
+            <td class="r">${_esc(r.tempo_parada_fmt || _fmtDuracaoHoras(r.h_parada))}</td>
+            <td class="r">${_esc(r.tempo_liquido_fmt || _fmtDuracaoHoras(r.h_liquido))}</td>
             <td>${_esc(r.usuario_fim || '—')}</td>
           </tr>`).join('')
-        : '<tr><td colspan="6" style="text-align:center;color:#94a3b8;">Nenhum ciclo finalizado no período.</td></tr>';
+        : '<tr><td colspan="8" style="text-align:center;color:#94a3b8;">Nenhum ciclo finalizado no período.</td></tr>';
+    }
+
+    const parTipoBody = document.getElementById('prodRelGerParadaTipoBody');
+    if (parTipoBody) {
+      const rows = data.paradas_por_tipo || [];
+      parTipoBody.innerHTML = rows.length
+        ? rows.map((r) => `<tr>
+            <td>${_esc(r.tipo)}</td>
+            <td class="r">${r.total}</td>
+            <td class="r">${_esc(r.tempo_fmt || _fmtDuracaoHoras(r.h_util))}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Nenhuma parada no período.</td></tr>';
+    }
+
+    const parBody = document.getElementById('prodRelGerParadaBody');
+    if (parBody) {
+      const rows = data.paradas || [];
+      parBody.innerHTML = rows.length
+        ? rows.map((r) => `<tr>
+            <td>${_esc(r.numero_op || '—')}</td>
+            <td>${_esc(r.posto || '—')}</td>
+            <td>${_esc(r.tipo_parada || '—')}</td>
+            <td>${_esc(r.motivo || '—')}</td>
+            <td>${_esc(_fmtDataHora(r.inicio))}</td>
+            <td class="r">${_esc(r.tempo_fmt || _fmtDuracaoHoras(r.h_util))}</td>
+            <td>${r.aberta ? '<span style="color:#b91c1c;font-weight:700;">Aberta (parcial)</span>' : 'Encerrada'}</td>
+          </tr>`).join('')
+        : '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">Nenhuma parada no período.</td></tr>';
     }
 
     const libBody = document.getElementById('prodRelGerProdLibBody');

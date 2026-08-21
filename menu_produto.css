@@ -5948,7 +5948,7 @@ ul#comprasList,
   ul#cadastroList li,
   ul#financeiroList li,
   ul#pdvList li,
-ul#comprasList li ,
+ul#comprasList li,
   ul#logisticaList li {
     display: flex !important;
   }
@@ -25771,19 +25771,19 @@ html.light-mode #minhasComprasWrapper {
 }
 
 /* Produção — Gemba */
-#producaoGembaPane .gemba-page-heading {
+#producaoGembaPane .gemba-page-heading, #qualidadeAreaVermelhaPane .gemba-page-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
   flex-wrap: wrap;
 }
-#producaoGembaPane .gemba-page-subtitle {
+#producaoGembaPane .gemba-page-subtitle, #qualidadeAreaVermelhaPane .gemba-page-subtitle {
   color: var(--inactive-color);
   font-size: 13px;
   margin-top: 4px;
 }
-#producaoGembaPane .gemba-heading-actions {
+#producaoGembaPane .gemba-heading-actions, #qualidadeAreaVermelhaPane .gemba-heading-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
@@ -25802,13 +25802,14 @@ html.light-mode #minhasComprasWrapper {
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   color: #fff;
 }
-#producaoGembaPane .gemba-toolbar {
+#producaoGembaPane .gemba-toolbar, #qualidadeAreaVermelhaPane .gemba-toolbar {
   display: flex;
   flex-direction: column;
   gap: 12px;
   margin: 16px 0 14px;
 }
-#gembaBusca {
+#gembaBusca,
+#qualidadeAreaVermelhaBusca {
   width: 100%;
   max-width: 520px;
   padding: 9px 12px;
@@ -25817,12 +25818,12 @@ html.light-mode #minhasComprasWrapper {
   background: var(--content-bg, #111827);
   color: var(--content-color, #e5e7eb);
 }
-#producaoGembaPane .gemba-filtros {
+#producaoGembaPane .gemba-filtros, #qualidadeAreaVermelhaPane .gemba-filtros {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
 }
-#producaoGembaPane .gemba-filtro {
+#producaoGembaPane .gemba-filtro, #qualidadeAreaVermelhaPane .gemba-filtro {
   border: 1px solid var(--border-color, #374151);
   background: rgba(255,255,255,.04);
   color: var(--content-color, #e5e7eb);
@@ -25834,36 +25835,36 @@ html.light-mode #minhasComprasWrapper {
   align-items: center;
   gap: 6px;
 }
-#producaoGembaPane .gemba-filtro span {
+#producaoGembaPane .gemba-filtro span, #qualidadeAreaVermelhaPane .gemba-filtro span {
   background: rgba(255,255,255,.08);
   border-radius: 999px;
   padding: 0 7px;
   font-weight: 700;
 }
-#producaoGembaPane .gemba-filtro.is-active {
+#producaoGembaPane .gemba-filtro.is-active, #qualidadeAreaVermelhaPane .gemba-filtro.is-active {
   background: rgba(14,165,233,.16);
   border-color: #0284c7;
   color: #7dd3fc;
 }
-#producaoGembaPane .gemba-status-msg {
+#producaoGembaPane .gemba-status-msg, #qualidadeAreaVermelhaPane .gemba-status-msg {
   margin-bottom: 10px;
   font-size: 13px;
   color: #94a3b8;
 }
-#producaoGembaPane .gemba-status-msg.is-erro { color: #f87171; }
-#producaoGembaPane .gemba-cards {
+#producaoGembaPane .gemba-status-msg.is-erro, #qualidadeAreaVermelhaPane .gemba-status-msg.is-erro { color: #f87171; }
+#producaoGembaPane .gemba-cards, #qualidadeAreaVermelhaPane .gemba-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 14px;
   padding: 6px 0 20px;
 }
-#producaoGembaPane .gemba-empty {
+#producaoGembaPane .gemba-empty, #qualidadeAreaVermelhaPane .gemba-empty {
   grid-column: 1 / -1;
   text-align: center;
   padding: 36px 16px;
   color: var(--inactive-color);
 }
-#producaoGembaPane .gemba-card {
+#producaoGembaPane .gemba-card, #qualidadeAreaVermelhaPane .gemba-card {
   background: var(--card-bg, #1e2535);
   border: 1px solid var(--border-color, #374151);
   border-radius: 12px;
@@ -25874,11 +25875,11 @@ html.light-mode #minhasComprasWrapper {
   position: relative;
   transition: box-shadow .2s, transform .2s;
 }
-#producaoGembaPane .gemba-card:hover {
+#producaoGembaPane .gemba-card:hover, #qualidadeAreaVermelhaPane .gemba-card:hover {
   box-shadow: 0 8px 24px rgba(0,0,0,.32);
   transform: translateY(-1px);
 }
-#producaoGembaPane .gemba-card-corner {
+#producaoGembaPane .gemba-card-corner, #qualidadeAreaVermelhaPane .gemba-card-corner {
   position: absolute;
   top: 0;
   right: 0;
@@ -25888,11 +25889,11 @@ html.light-mode #minhasComprasWrapper {
   border-width: 0 26px 26px 0;
   border-color: transparent #64748b transparent transparent;
 }
-#producaoGembaPane .gemba-card-corner[data-status="aberta"] { border-right-color: #ef4444; }
-#producaoGembaPane .gemba-card-corner[data-status="em_andamento"] { border-right-color: #f59e0b; }
-#producaoGembaPane .gemba-card-corner[data-status="resolvida"] { border-right-color: #22c55e; }
-#producaoGembaPane .gemba-card-corner[data-status="cancelada"] { border-right-color: #94a3b8; }
-#producaoGembaPane .gemba-card-head {
+#producaoGembaPane .gemba-card-corner[data-status="aberta"], #qualidadeAreaVermelhaPane .gemba-card-corner[data-status="aberta"] { border-right-color: #ef4444; }
+#producaoGembaPane .gemba-card-corner[data-status="em_andamento"], #qualidadeAreaVermelhaPane .gemba-card-corner[data-status="em_andamento"] { border-right-color: #f59e0b; }
+#producaoGembaPane .gemba-card-corner[data-status="resolvida"], #qualidadeAreaVermelhaPane .gemba-card-corner[data-status="resolvida"] { border-right-color: #22c55e; }
+#producaoGembaPane .gemba-card-corner[data-status="cancelada"], #qualidadeAreaVermelhaPane .gemba-card-corner[data-status="cancelada"] { border-right-color: #94a3b8; }
+#producaoGembaPane .gemba-card-head, #qualidadeAreaVermelhaPane .gemba-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -25900,7 +25901,7 @@ html.light-mode #minhasComprasWrapper {
   padding: 10px 28px 8px 12px;
   border-bottom: 1px solid var(--border-color, #374151);
 }
-#producaoGembaPane .gemba-card-id {
+#producaoGembaPane .gemba-card-id, #qualidadeAreaVermelhaPane .gemba-card-id {
   background: #0ea5e9;
   color: #fff;
   border-radius: 20px;
@@ -25908,61 +25909,61 @@ html.light-mode #minhasComprasWrapper {
   font-size: 10px;
   font-weight: 700;
 }
-#producaoGembaPane .gemba-card-date {
+#producaoGembaPane .gemba-card-date, #qualidadeAreaVermelhaPane .gemba-card-date {
   font-size: 10px;
   color: var(--inactive-color);
 }
-#producaoGembaPane .gemba-card-dias {
+#producaoGembaPane .gemba-card-dias, #qualidadeAreaVermelhaPane .gemba-card-dias {
   font-size: 10px;
   font-weight: 600;
   border-radius: 6px;
   padding: 2px 7px;
   background: rgba(255,255,255,.07);
 }
-#producaoGembaPane .gemba-card-dias[data-tipo="aberto"] { color: #7dd3fc; }
-#producaoGembaPane .gemba-card-dias[data-tipo="prazo"] { color: #fcd34d; }
-#producaoGembaPane .gemba-card-dias[data-tipo="hoje"] { color: #fdba74; }
-#producaoGembaPane .gemba-card-dias[data-tipo="atraso"] { color: #fca5a5; }
-#producaoGembaPane .gemba-card-status {
+#producaoGembaPane .gemba-card-dias[data-tipo="aberto"], #qualidadeAreaVermelhaPane .gemba-card-dias[data-tipo="aberto"] { color: #7dd3fc; }
+#producaoGembaPane .gemba-card-dias[data-tipo="prazo"], #qualidadeAreaVermelhaPane .gemba-card-dias[data-tipo="prazo"] { color: #fcd34d; }
+#producaoGembaPane .gemba-card-dias[data-tipo="hoje"], #qualidadeAreaVermelhaPane .gemba-card-dias[data-tipo="hoje"] { color: #fdba74; }
+#producaoGembaPane .gemba-card-dias[data-tipo="atraso"], #qualidadeAreaVermelhaPane .gemba-card-dias[data-tipo="atraso"] { color: #fca5a5; }
+#producaoGembaPane .gemba-card-status, #qualidadeAreaVermelhaPane .gemba-card-status {
   font-size: 10px;
   border-radius: 6px;
   padding: 2px 7px;
   background: rgba(255,255,255,.07);
 }
-#producaoGembaPane .gemba-card-status[data-status="aberta"] { color: #fca5a5; }
-#producaoGembaPane .gemba-card-status[data-status="em_andamento"] { color: #fcd34d; }
-#producaoGembaPane .gemba-card-status[data-status="resolvida"] { color: #86efac; }
-#producaoGembaPane .gemba-card-video {
+#producaoGembaPane .gemba-card-status[data-status="aberta"], #qualidadeAreaVermelhaPane .gemba-card-status[data-status="aberta"] { color: #fca5a5; }
+#producaoGembaPane .gemba-card-status[data-status="em_andamento"], #qualidadeAreaVermelhaPane .gemba-card-status[data-status="em_andamento"] { color: #fcd34d; }
+#producaoGembaPane .gemba-card-status[data-status="resolvida"], #qualidadeAreaVermelhaPane .gemba-card-status[data-status="resolvida"] { color: #86efac; }
+#producaoGembaPane .gemba-card-video, #qualidadeAreaVermelhaPane .gemba-card-video {
   margin-left: auto;
   color: #38bdf8;
   font-size: 12px;
 }
-#producaoGembaPane .gemba-card-body {
+#producaoGembaPane .gemba-card-body, #qualidadeAreaVermelhaPane .gemba-card-body {
   display: grid;
   grid-template-columns: 88px 1fr;
   gap: 10px;
   padding: 10px 12px;
   min-height: 110px;
 }
-#producaoGembaPane .gemba-card-thumb {
+#producaoGembaPane .gemba-card-thumb, #qualidadeAreaVermelhaPane .gemba-card-thumb {
   width: 88px;
   height: 88px;
   object-fit: cover;
   border-radius: 8px;
   background: #0f172a;
 }
-#producaoGembaPane .gemba-card-thumb.is-empty {
+#producaoGembaPane .gemba-card-thumb.is-empty, #qualidadeAreaVermelhaPane .gemba-card-thumb.is-empty {
   display: flex;
   align-items: center;
   justify-content: center;
   color: #64748b;
 }
-#producaoGembaPane .gemba-card-text h3 {
+#producaoGembaPane .gemba-card-text h3, #qualidadeAreaVermelhaPane .gemba-card-text h3 {
   margin: 0 0 6px;
   font-size: 14px;
   color: var(--content-title-color, #e5e7eb);
 }
-#producaoGembaPane .gemba-card-text p {
+#producaoGembaPane .gemba-card-text p, #qualidadeAreaVermelhaPane .gemba-card-text p {
   margin: 0;
   font-size: 12px;
   color: var(--inactive-color);
@@ -25971,7 +25972,7 @@ html.light-mode #minhasComprasWrapper {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-#producaoGembaPane .gemba-card-foot {
+#producaoGembaPane .gemba-card-foot, #qualidadeAreaVermelhaPane .gemba-card-foot {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -25980,7 +25981,7 @@ html.light-mode #minhasComprasWrapper {
   font-size: 12px;
   color: var(--inactive-color);
 }
-#producaoGembaPane .gemba-modal {
+#producaoGembaPane .gemba-modal, #qualidadeAreaVermelhaPane .gemba-modal {
   position: fixed;
   inset: 0;
   z-index: 12000;
@@ -25990,8 +25991,8 @@ html.light-mode #minhasComprasWrapper {
   justify-content: center;
   padding: 20px;
 }
-#producaoGembaPane .gemba-modal[hidden] { display: none !important; }
-#producaoGembaPane .gemba-modal-card {
+#producaoGembaPane .gemba-modal[hidden], #qualidadeAreaVermelhaPane .gemba-modal[hidden] { display: none !important; }
+#producaoGembaPane .gemba-modal-card, #qualidadeAreaVermelhaPane .gemba-modal-card {
   width: min(720px, 100%);
   max-height: calc(100vh - 40px);
   overflow: auto;
@@ -26000,7 +26001,7 @@ html.light-mode #minhasComprasWrapper {
   border-radius: 12px;
   box-shadow: 0 20px 50px rgba(0,0,0,.45);
 }
-#producaoGembaPane .gemba-modal-head {
+#producaoGembaPane .gemba-modal-head, #qualidadeAreaVermelhaPane .gemba-modal-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -26008,7 +26009,7 @@ html.light-mode #minhasComprasWrapper {
   padding: 14px 16px;
   border-bottom: 1px solid rgba(255,255,255,.08);
 }
-#producaoGembaPane .gemba-modal-head > div {
+#producaoGembaPane .gemba-modal-head > div, #qualidadeAreaVermelhaPane .gemba-modal-head > div {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -26023,19 +26024,19 @@ html.light-mode #minhasComprasWrapper {
   color: #e5e7eb;
   cursor: pointer;
 }
-#producaoGembaPane .gemba-modal-body {
+#producaoGembaPane .gemba-modal-body, #qualidadeAreaVermelhaPane .gemba-modal-body {
   display: flex;
   flex-direction: column;
   gap: 12px;
   padding: 16px;
 }
-#producaoGembaPane .gemba-guias {
+#producaoGembaPane .gemba-guias, #qualidadeAreaVermelhaPane .gemba-guias {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 2px;
 }
-#producaoGembaPane .gemba-guia {
+#producaoGembaPane .gemba-guia, #qualidadeAreaVermelhaPane .gemba-guia {
   border: 1px solid var(--border-color, #374151);
   background: rgba(255,255,255,.04);
   color: var(--content-color, #e5e7eb);
@@ -26045,34 +26046,34 @@ html.light-mode #minhasComprasWrapper {
   font-weight: 600;
   cursor: pointer;
 }
-#producaoGembaPane .gemba-guia.is-active {
+#producaoGembaPane .gemba-guia.is-active, #qualidadeAreaVermelhaPane .gemba-guia.is-active {
   background: rgba(14,165,233,.16);
   border-color: #0284c7;
   color: #7dd3fc;
 }
-#producaoGembaPane [data-gemba-panel] {
+#producaoGembaPane [data-gemba-panel], #qualidadeAreaVermelhaPane [data-gemba-panel] {
   display: flex;
   flex-direction: column;
   gap: 12px;
 }
-#producaoGembaPane [data-gemba-panel][hidden] {
+#producaoGembaPane [data-gemba-panel][hidden], #qualidadeAreaVermelhaPane [data-gemba-panel][hidden] {
   display: none !important;
 }
-#producaoGembaPane .gemba-midia-hint {
+#producaoGembaPane .gemba-midia-hint, #qualidadeAreaVermelhaPane .gemba-midia-hint {
   font-size: 11px;
   color: #94a3b8;
   margin-top: -4px;
 }
-#producaoGembaPane .gemba-field {
+#producaoGembaPane .gemba-field, #qualidadeAreaVermelhaPane .gemba-field {
   display: flex;
   flex-direction: column;
   gap: 6px;
   font-size: 13px;
   color: #cbd5e1;
 }
-#producaoGembaPane .gemba-field input,
-#producaoGembaPane .gemba-field textarea,
-#producaoGembaPane .gemba-field select {
+#producaoGembaPane .gemba-field input, #qualidadeAreaVermelhaPane .gemba-field input,
+#producaoGembaPane .gemba-field textarea, #qualidadeAreaVermelhaPane .gemba-field textarea,
+#producaoGembaPane .gemba-field select, #qualidadeAreaVermelhaPane .gemba-field select {
   width: 100%;
   padding: 9px 11px;
   border-radius: 8px;
@@ -26080,12 +26081,12 @@ html.light-mode #minhasComprasWrapper {
   background: #111827;
   color: #e5e7eb;
 }
-#producaoGembaPane .gemba-midia-grid {
+#producaoGembaPane .gemba-midia-grid, #qualidadeAreaVermelhaPane .gemba-midia-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12px;
 }
-#producaoGembaPane .gemba-midia-box {
+#producaoGembaPane .gemba-midia-box, #qualidadeAreaVermelhaPane .gemba-midia-box {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -26095,7 +26096,7 @@ html.light-mode #minhasComprasWrapper {
   border-radius: 10px;
   padding: 10px;
 }
-#producaoGembaPane .gemba-preview {
+#producaoGembaPane .gemba-preview, #qualidadeAreaVermelhaPane .gemba-preview {
   min-height: 90px;
   border-radius: 8px;
   background: #0f172a;
@@ -26107,20 +26108,20 @@ html.light-mode #minhasComprasWrapper {
   font-size: 12px;
   text-align: center;
 }
-#producaoGembaPane .gemba-preview img,
-#producaoGembaPane .gemba-preview video {
+#producaoGembaPane .gemba-preview img, #qualidadeAreaVermelhaPane .gemba-preview img,
+#producaoGembaPane .gemba-preview video, #qualidadeAreaVermelhaPane .gemba-preview video {
   width: 100%;
   max-height: 180px;
   object-fit: contain;
   background: #0f172a;
 }
-#producaoGembaPane .gemba-preview img {
+#producaoGembaPane .gemba-preview img, #qualidadeAreaVermelhaPane .gemba-preview img {
   cursor: zoom-in;
 }
-#producaoGembaPane .gemba-user-combo {
+#producaoGembaPane .gemba-user-combo, #qualidadeAreaVermelhaPane .gemba-user-combo {
   position: relative;
 }
-#producaoGembaPane .gemba-user-combo-list {
+#producaoGembaPane .gemba-user-combo-list, #qualidadeAreaVermelhaPane .gemba-user-combo-list {
   position: absolute;
   z-index: 5;
   left: 0;
@@ -26136,7 +26137,7 @@ html.light-mode #minhasComprasWrapper {
   background: #111827;
   box-shadow: 0 12px 28px rgba(0,0,0,.35);
 }
-#producaoGembaPane .gemba-user-combo-item {
+#producaoGembaPane .gemba-user-combo-item, #qualidadeAreaVermelhaPane .gemba-user-combo-item {
   width: 100%;
   text-align: left;
   border: 0;
@@ -26147,53 +26148,55 @@ html.light-mode #minhasComprasWrapper {
   cursor: pointer;
   font-size: 13px;
 }
-#producaoGembaPane .gemba-user-combo-item:hover {
+#producaoGembaPane .gemba-user-combo-item:hover, #qualidadeAreaVermelhaPane .gemba-user-combo-item:hover {
   background: rgba(14,165,233,.16);
 }
-#producaoGembaPane .gemba-user-combo-empty {
+#producaoGembaPane .gemba-user-combo-empty, #qualidadeAreaVermelhaPane .gemba-user-combo-empty {
   padding: 8px 10px;
   font-size: 12px;
   color: #94a3b8;
 }
-#producaoGembaPane .gemba-historico {
+#producaoGembaPane .gemba-historico, #qualidadeAreaVermelhaPane .gemba-historico {
   border-top: 1px solid rgba(255,255,255,.08);
   padding-top: 10px;
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-#producaoGembaPane .gemba-hist-title {
+#producaoGembaPane .gemba-hist-title, #qualidadeAreaVermelhaPane .gemba-hist-title {
   font-size: 12px;
   font-weight: 700;
   color: #94a3b8;
 }
-#producaoGembaPane .gemba-hist-item {
+#producaoGembaPane .gemba-hist-item, #qualidadeAreaVermelhaPane .gemba-hist-item {
   font-size: 12px;
   color: #cbd5e1;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-#producaoGembaPane .gemba-hist-item span,
-#producaoGembaPane .gemba-hist-item em {
+#producaoGembaPane .gemba-hist-item span, #qualidadeAreaVermelhaPane .gemba-hist-item span,
+#producaoGembaPane .gemba-hist-item em, #qualidadeAreaVermelhaPane .gemba-hist-item em {
   color: #94a3b8;
   font-style: normal;
 }
-#producaoGembaPane .gemba-form-erro {
+#producaoGembaPane .gemba-form-erro, #qualidadeAreaVermelhaPane .gemba-form-erro {
   color: #f87171;
   font-size: 13px;
 }
-#producaoGembaPane .gemba-modal-actions {
+#producaoGembaPane .gemba-modal-actions, #qualidadeAreaVermelhaPane .gemba-modal-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
 }
-#producaoGembaPane .gemba-btn-salvar {
+#producaoGembaPane .gemba-btn-salvar, #qualidadeAreaVermelhaPane .gemba-btn-salvar {
   background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
   color: #fff;
 }
 html.light-mode #producaoGembaPane .gemba-card,
-html.light-mode #producaoGembaPane .gemba-modal-card {
+html.light-mode #producaoGembaPane .gemba-modal-card,
+html.light-mode #qualidadeAreaVermelhaPane .gemba-card,
+html.light-mode #qualidadeAreaVermelhaPane .gemba-modal-card {
   background: #fff;
   border-color: #dbe3ee;
 }
@@ -26201,6 +26204,7 @@ html.light-mode #producaoGembaPane .gemba-field input,
 html.light-mode #producaoGembaPane .gemba-field textarea,
 html.light-mode #producaoGembaPane .gemba-field select,
 html.light-mode #gembaBusca,
+html.light-mode #qualidadeAreaVermelhaBusca,
 html.light-mode #producaoGembaPane .gemba-user-combo-list {
   background: #fff;
   color: #0f172a;
@@ -26235,4 +26239,59 @@ html.light-mode #producaoGembaPane .gemba-guia.is-active {
 }
 #maqEstoqueKanban > div:has(#maqKanbanEmbalagem) {
   display: none !important;
+}
+
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="registrado"] { border-right-color: #a855f7; }
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="aguardando_aprovacao"] { border-right-color: #f59e0b; }
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="scrap"] { border-right-color: #ef4444; }
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="retrabalho"] { border-right-color: #f97316; }
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="liberado"] { border-right-color: #22c55e; }
+#qualidadeAreaVermelhaPane .gemba-card-corner[data-status="pir"] { border-right-color: #64748b; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="registrado"] { color: #d8b4fe; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="aguardando_aprovacao"] { color: #fcd34d; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="scrap"] { color: #fca5a5; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="retrabalho"] { color: #fdba74; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="liberado"] { color: #86efac; }
+#qualidadeAreaVermelhaPane .gemba-card-status[data-status="pir"] { color: #cbd5e1; }
+#qualidadeAreaVermelhaPane .av-niq-midia-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 8px;
+}
+#qualidadeAreaVermelhaPane .av-niq-midia-box {
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+  padding: 10px;
+  background: rgba(15,23,42,.45);
+}
+#qualidadeAreaVermelhaPane .av-niq-midia-box span {
+  display: block;
+  font-size: 12px;
+  color: #94a3b8;
+  margin-bottom: 8px;
+}
+#qualidadeAreaVermelhaPane .av-niq-preview img,
+#qualidadeAreaVermelhaPane .av-niq-preview video {
+  width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border-radius: 8px;
+  background: #0f172a;
+  cursor: pointer;
+}
+#qualidadeAreaVermelhaPane .av-niq-kv {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 6px 10px;
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+#qualidadeAreaVermelhaPane .av-niq-kv dt { color: #94a3b8; }
+#qualidadeAreaVermelhaPane .av-niq-kv dd { margin: 0; color: #e2e8f0; }
+#qualidadeAreaVermelhaPane .av-niq-acoes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
