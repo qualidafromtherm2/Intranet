@@ -225,10 +225,17 @@ function parseFiltrosRelatorio(query = {}) {
 /**
  * Cláusulas extras ($3+) para filtros de pedido/item.
  * params já deve conter [inicio, fimExclusive].
+ *
+ * Retorno:
+ * - pedidoSql / itemSql — índices contínuos em `params` (query única, ex.: registros)
+ * - nBaseParams — quantos parâmetros a CTE base usa (datas + filtros de pedido)
+ * - itemSqlStandalone / itemParams — `$1…` próprios (temp table de itens sem datas)
  */
 function appendFiltrosSql(filtros, params) {
   const clausesPedido = [];
   const clausesItem = [];
+  const clausesItemStandalone = [];
+  const itemParams = [];
 
   if (filtros.vendedor) {
     params.push(filtros.vendedor);
@@ -272,6 +279,15 @@ function appendFiltrosSql(filtros, params) {
     );
   }
 
+  const nBaseParams = params.length;
+
+  const pushItemFilter = (value, sqlWithIdx) => {
+    params.push(value);
+    itemParams.push(value);
+    clausesItem.push(sqlWithIdx(params.length));
+    clausesItemStandalone.push(sqlWithIdx(itemParams.length));
+  };
+
   // Família/tipo: só no item (NF + itens do pedido). O relatório depois remove pedidos
   // sem item batendo e recalcula o valor — assim não some pedido que só tem item na NF
   // e não entra o valor cheio do pedido quando mistura famílias.
@@ -280,28 +296,34 @@ function appendFiltrosSql(filtros, params) {
       ? filtros.familia.map((v) => String(v || '').trim()).filter(Boolean)
       : [String(filtros.familia).trim()].filter(Boolean);
     if (familias.length) {
-      params.push(familias);
-      const idx = params.length;
-      clausesItem.push(`AND TRIM(COALESCE(po.codigo_familia::text, '')) = ANY($${idx}::text[])`);
+      pushItemFilter(
+        familias,
+        (idx) => `AND TRIM(COALESCE(po.codigo_familia::text, '')) = ANY($${idx}::text[])`
+      );
     }
   }
 
   if (filtros.familia_nome) {
-    params.push(filtros.familia_nome);
-    const idx = params.length;
-    clausesItem.push(`AND COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $${idx}`);
+    pushItemFilter(
+      filtros.familia_nome,
+      (idx) => `AND COALESCE(NULLIF(TRIM(po.descricao_familia), ''), '(sem família)') = $${idx}`
+    );
   }
 
   if (filtros.tipo) {
     const tipoNorm = String(filtros.tipo).padStart(2, '0');
-    params.push(tipoNorm);
-    const idx = params.length;
-    clausesItem.push(`AND LPAD(TRIM(COALESCE(po.tipoitem, '')), 2, '0') = $${idx}`);
+    pushItemFilter(
+      tipoNorm,
+      (idx) => `AND LPAD(TRIM(COALESCE(po.tipoitem, '')), 2, '0') = $${idx}`
+    );
   }
 
   return {
     pedidoSql: clausesPedido.join('\n        '),
     itemSql: clausesItem.join('\n      '),
+    nBaseParams,
+    itemSqlStandalone: clausesItemStandalone.join('\n      '),
+    itemParams,
   };
 }
 

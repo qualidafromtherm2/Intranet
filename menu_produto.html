@@ -13431,8 +13431,8 @@
             <div id="montaErro" style="display:none;padding:16px;background:#450a0a;border:1px solid #dc2626;border-radius:10px;color:#fca5a5;font-size:13px;margin-bottom:12px;"></div>
 
             <div id="montaPesquisaBar" style="margin-bottom:12px;">
-              <div style="display:flex;align-items:center;gap:8px;max-width:560px;">
-                <div style="position:relative;flex:1;">
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <div style="position:relative;flex:1;min-width:220px;max-width:480px;">
                   <i class="fa-solid fa-magnifying-glass" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#64748b;font-size:13px;pointer-events:none;"></i>
                   <input type="search" id="montaPesquisaInput" autocomplete="off"
                     placeholder="Pesquisar por modelo ou número de OP..."
@@ -13447,9 +13447,16 @@
                   <i class="fa-solid fa-rotate-right"></i> Atualizar
                 </button>
                 <button type="button" id="montaQrOpBtn" title="Ler QR Code da etiqueta OP"
-                  style="flex-shrink:0;width:38px;height:38px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#93c5fd;font-size:16px;cursor:pointer;">
-                  <i class="fa-solid fa-qrcode"></i>
+                  style="flex-shrink:0;height:38px;padding:0 12px;display:inline-flex;align-items:center;justify-content:center;gap:6px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:8px;color:#93c5fd;font-size:12px;font-weight:600;cursor:pointer;">
+                  <i class="fa-solid fa-qrcode" style="font-size:15px;"></i> Ler qrcode da etiqueta OP
                 </button>
+                <div id="montaQuinaLegenda" class="monta-quina-legenda" aria-label="Legenda das cores da quina do card">
+                  <span class="monta-quina-legenda-item"><span class="monta-quina-legenda-corner" data-status="producao"></span>Verde = em produção</span>
+                  <span class="monta-quina-legenda-item"><span class="monta-quina-legenda-corner" data-status="ri"></span>Azul = RI</span>
+                  <span class="monta-quina-legenda-item"><span class="monta-quina-legenda-corner" data-status="notificacao"></span>Vermelho = notificação</span>
+                  <span class="monta-quina-legenda-item"><span class="monta-quina-legenda-corner" data-status="parada"></span>Laranja = parada</span>
+                  <span class="monta-quina-legenda-item"><span class="monta-quina-legenda-corner" data-status="programado"></span>Cinza = programado</span>
+                </div>
               </div>
             </div>
 

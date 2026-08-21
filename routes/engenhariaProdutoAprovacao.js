@@ -862,5 +862,91 @@ module.exports = function engenhariaProdutoAprovacaoRouter() {
     }
   });
 
+  // Anexar/atualizar foto ou vídeo a qualquer momento (registro, análise ou decisão),
+  // sem alterar o status do NIQ — o usuário pode deixar para anexar depois.
+  router.post('/niq-area-vermelha/:id/midia', uploadNiq.fields([
+    { name: 'foto', maxCount: 5 },
+    { name: 'video', maxCount: 5 },
+    { name: 'arquivos', maxCount: 10 },
+  ]), async (req, res) => {
+    try {
+      if (!usuarioEhAdminOuQualidade(req)) {
+        return res.status(403).json({ ok: false, error: 'Somente Admin ou Qualidade podem anexar arquivos no NIQ.' });
+      }
+      await ensureNiqAreaVermelhaTable();
+      const id = Number(req.params.id) || 0;
+      if (!id) return res.status(400).json({ ok: false, error: 'ID inválido.' });
+
+      const etapa = String(req.body?.etapa || '').trim().toLowerCase();
+      if (!['registro', 'analise', 'decisao'].includes(etapa)) {
+        return res.status(400).json({ ok: false, error: 'Informe etapa=registro, analise ou decisao.' });
+      }
+
+      const { rows: atualRows } = await dbQuery(
+        `SELECT id FROM qualidade.niq_area_vermelha WHERE id = $1 LIMIT 1`,
+        [id]
+      );
+      if (!atualRows.length) {
+        return res.status(404).json({ ok: false, error: 'NIQ não encontrada.' });
+      }
+
+      const files = coletarArquivosUpload(req);
+      if (!files.length) {
+        return res.status(400).json({ ok: false, error: 'Selecione ao menos um arquivo.' });
+      }
+
+      const pathKey = etapa === 'registro' ? String(id) : `${id}/${etapa}`;
+      const up = await uploadNiqArquivos(pathKey, files);
+      const anexosJson = JSON.stringify(up.anexos || []);
+
+      let upd;
+      if (etapa === 'registro') {
+        upd = await dbQuery(
+          `UPDATE qualidade.niq_area_vermelha
+              SET foto_url = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE foto_url END,
+                  video_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE video_url END,
+                  anexos = CASE
+                    WHEN $4::text = '[]' THEN anexos
+                    ELSE COALESCE(anexos, '[]'::jsonb) || $4::jsonb
+                  END
+            WHERE id = $1
+            RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
+          [id, up.fotoUrl, up.videoUrl, anexosJson]
+        );
+      } else if (etapa === 'analise') {
+        upd = await dbQuery(
+          `UPDATE qualidade.niq_area_vermelha
+              SET analise_foto_url = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE analise_foto_url END,
+                  analise_video_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE analise_video_url END,
+                  analise_anexos = CASE
+                    WHEN $4::text = '[]' THEN analise_anexos
+                    ELSE COALESCE(analise_anexos, '[]'::jsonb) || $4::jsonb
+                  END
+            WHERE id = $1
+            RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
+          [id, up.fotoUrl, up.videoUrl, anexosJson]
+        );
+      } else {
+        upd = await dbQuery(
+          `UPDATE qualidade.niq_area_vermelha
+              SET decisao_foto_url = CASE WHEN $2::text IS NOT NULL THEN $2 ELSE decisao_foto_url END,
+                  decisao_video_url = CASE WHEN $3::text IS NOT NULL THEN $3 ELSE decisao_video_url END,
+                  decisao_anexos = CASE
+                    WHEN $4::text = '[]' THEN decisao_anexos
+                    ELSE COALESCE(decisao_anexos, '[]'::jsonb) || $4::jsonb
+                  END
+            WHERE id = $1
+            RETURNING ${NIQ_SELECT_COLS.replace(/\bn\./g, '')}`,
+          [id, up.fotoUrl, up.videoUrl, anexosJson]
+        );
+      }
+
+      return res.json({ ok: true, niq: mapearLinhaNiq(upd.rows[0]) });
+    } catch (err) {
+      console.error('[engenharia/niq-area-vermelha midia]', err);
+      return res.status(500).json({ ok: false, error: err.message || 'Falha ao anexar arquivo.' });
+    }
+  });
+
   return router;
 };

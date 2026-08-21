@@ -3364,21 +3364,26 @@ const RETROCEDER_KANBAN_POR_COL_KEY = {
   solicitado: {
     status_destino: null,
     posto_desfeito: 'Montagem hermetica',
+    posto_tempo_remover: 'Montagem hermetica',
     operacoes_desfeitas: ['Montagem hermetica', 'Imprimir OP', 'Iniciar produção'],
   },
   produzindo: {
+    // Volta para hermética aguardando RI; remove só tempos/entrada da elétrica.
     status_destino: 'Montagem hermetica',
     posto_desfeito: 'Montagem hermetica',
+    posto_tempo_remover: 'Montagem eletrica',
     operacoes_desfeitas: ['Montagem eletrica'],
   },
   teste: {
     status_destino: 'Montagem eletrica',
     posto_desfeito: 'Montagem eletrica',
+    posto_tempo_remover: 'Teste',
     operacoes_desfeitas: ['Teste'],
   },
   inspecao_final: {
     status_destino: 'Teste',
     posto_desfeito: 'Teste',
+    posto_tempo_remover: 'Inspeção final',
     operacoes_desfeitas: ['Inspeção final', 'Teste OK', 'Teste final'],
   },
 };
@@ -3440,6 +3445,26 @@ router.post('/retroceder-op', express.json(), async (req, res) => {
                 ri = TRUE
           WHERE id = $2`,
         [cfg.status_destino, kanbanProgramacaoId]
+      );
+    }
+
+    // Remove tempos do posto que está sendo desfeito (ex.: entrada automática na elétrica).
+    const postoTempo = String(cfg.posto_tempo_remover || '').trim();
+    if (postoTempo && (opRefId || kanbanProgramacaoId || numeroOp)) {
+      await dbQuery(
+        `DELETE FROM producao."Registro_tempo"
+          WHERE (
+              ($1::bigint > 0 AND op_producao_id = $1)
+              OR ($2::bigint IS NOT NULL AND kanban_programacao_id = $2)
+              OR ($3::text <> '' AND UPPER(TRIM(COALESCE(numero_op, ''))) = UPPER(TRIM($3)))
+            )
+            AND lower(translate(trim(coalesce(posto_origem, '')),
+                  'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇáàâãäéèêëíìîïóòôõöúùûüç',
+                  'AAAAAEEEEIIIIOOOOOUUUCaaaaaeeeeiiiiooooouuuc'))
+                = lower(translate(trim($4::text),
+                  'ÁÀÂÃÄÉÈÊËÍÌÎÏÓÒÔÕÖÚÙÛÜÇáàâãäéèêëíìîïóòôõöúùûüç',
+                  'AAAAAEEEEIIIIOOOOOUUUCaaaaaeeeeiiiiooooouuuc'))`,
+        [opRefId || 0, kanbanProgramacaoId || null, numeroOp || '', postoTempo]
       );
     }
 

@@ -1287,11 +1287,17 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
       mesRef: mesRaw,
     } = periodoCfg;
     const rangeParams = [mesInicio, mesFimExclusive];
-    const { pedidoSql, itemSql } = appendFiltrosSql(filtros, rangeParams);
+    const {
+      pedidoSql,
+      itemSqlStandalone,
+      nBaseParams,
+      itemParams,
+    } = appendFiltrosSql(filtros, rangeParams);
+    const baseParams = rangeParams.slice(0, nBaseParams);
     const nomesMes = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
     const baseCte = buildBaseCte(etapaCfg.sql, pedidoSql);
-    const itensFromBaseSql = buildItensFromTempBase(itemSql);
+    const itensFromBaseSql = buildItensFromTempBase(itemSqlStandalone);
 
     const evolucaoSql = evolucaoTipo === 'mes'
       ? `SELECT
@@ -1330,13 +1336,13 @@ router.get('/vendas/relatorio-gerencial', async (req, res) => {
         CREATE TEMP TABLE vend_rel_base ON COMMIT DROP AS
         ${baseCte}
         SELECT * FROM base
-      `, rangeParams);
+      `, baseParams);
       await client.query(`CREATE INDEX ON vend_rel_base (codigo_pedido)`);
       await client.query(`
         CREATE TEMP TABLE vend_rel_itens ON COMMIT DROP AS
         ${itensFromBaseSql}
         SELECT * FROM itens
-      `);
+      `, itemParams);
       await client.query(`CREATE INDEX ON vend_rel_itens (codigo_pedido)`);
       await client.query(`CREATE INDEX ON vend_rel_itens (familia)`);
 
