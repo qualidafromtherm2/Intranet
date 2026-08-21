@@ -33,6 +33,7 @@ import {
   Folder,
   Hand,
   History,
+  Headphones,
   Home,
   IdCard,
   Landmark,
@@ -51,6 +52,7 @@ import {
   RefreshCw,
   Search,
   ScanSearch,
+  ScanLine,
   SearchCheck,
   Send,
   Settings2,
@@ -130,6 +132,7 @@ const iconMap = {
   users: Users,
   'id-card': IdCard,
   'address-book': ContactRound,
+  headset: Headphones,
   'palm-tree': Palmtree,
   shield: Shield,
   'file-signature': FileSignature,
@@ -142,6 +145,7 @@ const iconMap = {
   'search-check': SearchCheck,
   bot: Bot,
   'sliders-horizontal': SlidersHorizontal,
+  'scan-line': ScanLine,
   dot: ChevronRight,
 } as const
 
@@ -326,6 +330,7 @@ function LoginScreen({
 }) {
   const [user, setUser] = useState('')
   const [senha, setSenha] = useState('')
+  const displayError = error?.replace(/backend legado/gi, 'serviço de autenticação')
 
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -369,7 +374,7 @@ function LoginScreen({
                 />
               </label>
 
-              {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+              {displayError ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{displayError}</div> : null}
 
               <button className="thermo-button thermo-button-primary w-full justify-center py-3" type="submit" disabled={busy}>
                 Entrar
@@ -395,7 +400,7 @@ function SidebarItem({
   const Icon = getIconComponent(item.icon)
   const isActive = item.view === activeView && item.migrationStatus === 'migrated'
   const isClickable = item.migrationStatus === 'migrated' && item.view !== null
-  const statusText = item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Ainda não migrado'
+  const statusText = isClickable ? 'Disponível' : 'Indisponível nesta tela'
 
   return (
     <button
@@ -417,15 +422,8 @@ function SidebarItem({
       {!collapsed ? (
         <>
           <span className="flex-1 truncate">{item.label}</span>
-          <span
-            className={clsx(
-              'rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]',
-              item.migrationStatus === 'migrated' ? 'bg-emerald-50 text-emerald-700' : item.migrationStatus === 'in_progress' ? 'bg-amber-50 text-amber-800' : 'bg-white/8 text-slate-300',
-            )}
-          >
-            {item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Pendente'}
-          </span>
-          {item.migrationStatus !== 'migrated' ? <Lock className="size-3.5 text-slate-400" /> : null}
+          {!isClickable ? <span className="text-[10px] font-semibold text-slate-400">Indisponível</span> : null}
+          {!isClickable ? <Lock className="size-3.5 text-slate-400" aria-hidden="true" /> : null}
         </>
       ) : (
         <span className="pointer-events-none absolute left-full z-20 ml-3 hidden whitespace-nowrap rounded-lg border border-thermo-border bg-white px-3 py-2 text-xs font-semibold text-thermo-ink shadow-lg group-hover:block group-focus-visible:block">
@@ -710,11 +708,11 @@ function ModulesSection({
   }, [query, sectionIds.join('|')])
 
   return (
-    <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
-      <div className="mb-3 flex items-center justify-between gap-3">
+    <section className="rounded-lg border border-thermo-border bg-white p-3 shadow-sm">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Módulos</div>
-          <h3 className="mt-1 text-base font-bold text-thermo-navy">Áreas permitidas nesta sessão</h3>
+          <h3 className="mt-0.5 text-sm font-bold text-thermo-navy">Áreas disponíveis</h3>
         </div>
         <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
           <button type="button" onClick={accordion.collapseAll}>Recolher todos</button>
@@ -722,36 +720,36 @@ function ModulesSection({
           <button type="button" onClick={accordion.expandAll}>Expandir todos</button>
         </div>
       </div>
-      <label className="mb-3 flex items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2 text-sm text-slate-600">
+      <label className="mb-2 flex items-center gap-2 rounded-lg border border-thermo-border bg-thermo-bg px-3 py-2 text-sm text-slate-600">
         <Search className="size-4 text-slate-400" />
         <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Pesquisar página ou módulo" />
       </label>
-      <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
+      <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
         {filteredSections.map((section) => {
           const Icon = getIconComponent(section.icon)
           const opened = accordion.openIds.includes(section.id)
           const entries = section._entries ?? flattenItems(section.children)
           return (
-            <article key={section.id} className="rounded-2xl border border-thermo-border bg-thermo-bg">
+            <article key={section.id} className="rounded-lg border border-thermo-border bg-thermo-bg">
               <button
                 type="button"
-                className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
                 aria-expanded={opened}
                 onClick={() => accordion.toggle(section.id)}
               >
                 <div className="flex items-center gap-3">
-                  <span className="flex size-9 items-center justify-center rounded-xl border border-thermo-border bg-white text-thermo-navy">
+                  <span className="flex size-8 items-center justify-center rounded-lg border border-thermo-border bg-white text-thermo-navy">
                     <Icon className="size-4" />
                   </span>
                   <div>
-                    <div className="font-semibold text-thermo-navy">{section.label}</div>
+                    <div className="text-sm font-semibold text-thermo-navy">{section.label}</div>
                     <div className="text-xs text-slate-500">{entries.length} página(s)</div>
                   </div>
                 </div>
                 <ChevronRight className={clsx('size-4 text-slate-400 transition-transform', opened && 'rotate-90')} />
               </button>
               {opened ? (
-                <div className="space-y-2 border-t border-thermo-border px-3 py-3">
+                <div className="space-y-1 border-t border-thermo-border p-2">
                   {entries.map((item) => {
                     const ItemIcon = getIconComponent(item.icon)
                     const clickable = item.migrationStatus === 'migrated' && item.view !== null
@@ -761,7 +759,7 @@ function ModulesSection({
                         key={item.id}
                         type="button"
                         className={clsx(
-                          'flex w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-sm',
+                          'flex w-full items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm',
                           clickable ? 'border-transparent bg-white text-thermo-ink hover:border-thermo-border' : 'cursor-not-allowed border-transparent bg-slate-100 text-slate-500',
                           active && 'border-red-200 bg-red-50 text-red-700',
                         )}
@@ -773,9 +771,7 @@ function ModulesSection({
                       >
                         <ItemIcon className="size-4 shrink-0" />
                         <span className="flex-1 truncate">{item.label}</span>
-                        <span className={clsx('rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]', item.migrationStatus === 'migrated' ? 'bg-emerald-50 text-emerald-700' : item.migrationStatus === 'in_progress' ? 'bg-amber-50 text-amber-800' : 'bg-slate-200 text-slate-600')}>
-                          {item.migrationStatus === 'migrated' ? 'Migrado' : item.migrationStatus === 'in_progress' ? 'Em migração' : 'Pendente'}
-                        </span>
+                        {!clickable ? <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-slate-500"><Lock className="size-3" aria-hidden="true" />Indisponível</span> : null}
                       </button>
                     )
                   })}
@@ -892,8 +888,8 @@ function HomeScreen({
       <section className="rounded-3xl border border-thermo-border bg-white px-4 py-4 shadow-sm md:px-5">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Home operacional</div>
-            <h1 className="mt-1 text-xl font-bold text-thermo-navy">Calendário de reuniões e atalhos reais</h1>
+            <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Visão geral</div>
+            <h1 className="mt-1 text-xl font-bold text-thermo-navy">Agenda e indicadores</h1>
           </div>
           <div className="flex flex-wrap gap-2">
             <button className="thermo-button thermo-button-primary" type="button" onClick={() => onNavigate('products')}>
@@ -902,15 +898,15 @@ function HomeScreen({
             </button>
             <a className="thermo-button thermo-button-secondary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              Agenda legado
+              Abrir agenda
             </a>
           </div>
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      <section className="grid min-w-0 gap-4 xl:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="space-y-4">
-          <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
+          <section className="min-w-0 rounded-lg border border-thermo-border bg-white p-3 shadow-sm md:p-4">
             <div className="mb-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
               <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Reuniões hoje</div>
@@ -927,7 +923,7 @@ function HomeScreen({
               <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Em compra</div>
                 <div className="mt-2 text-2xl font-bold text-thermo-navy">{kpi.inPurchase ?? '—'}</div>
-                {kpi.purchaseUnavailable ? <div className="mt-1 text-[11px] text-amber-700">Endpoint auxiliar indisponível</div> : null}
+                {kpi.purchaseUnavailable ? <div className="mt-1 text-[11px] text-amber-700">Dado indisponível</div> : null}
               </article>
             </div>
 
@@ -983,7 +979,7 @@ function HomeScreen({
             {calendarError ? <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{calendarError}</div> : null}
             {loadingCalendar ? <div className="mb-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-500">Carregando agenda real…</div> : null}
 
-            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500 md:gap-2 md:text-[11px]">
+            <div className="grid min-w-0 grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500 md:gap-2 md:text-[11px]">
               {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
                 <div key={label} className="px-1 py-2">
                   {label}
@@ -1030,7 +1026,7 @@ function HomeScreen({
                       else setBridgeDay(day.iso)
                     }}
                     className={clsx(
-                      'aspect-[1/1.1] min-h-[68px] rounded-xl border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40 md:min-h-[92px] md:rounded-2xl md:p-2',
+                      'min-w-0 min-h-[62px] rounded-lg border p-1 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40 md:min-h-[92px] md:p-2',
                       selected ? 'border-thermo-navy bg-slate-50' : 'border-thermo-border bg-thermo-bg hover:border-thermo-navy/30',
                       day.out && 'opacity-35',
                       isPast && 'opacity-55',
@@ -1086,7 +1082,7 @@ function HomeScreen({
                           {overflowCount > 0 ? `+${overflowCount}` : `${dayReservations.length + dayReminders.length} item(ns)`}
                         </div>
                       ) : (
-                        <div className="text-[10px] font-medium text-slate-400">Reservar</div>
+                        <div className="text-[10px] font-medium text-slate-400">Livre</div>
                       )}
                     </div>
                   </button>
@@ -1181,7 +1177,7 @@ function HomeScreen({
           <div className="flex flex-wrap gap-2">
             <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              Abrir Agenda legado
+              Abrir agenda
             </a>
             <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setDetailDay(null)}>
               Fechar
@@ -1193,18 +1189,18 @@ function HomeScreen({
       <ModalShell
         open={Boolean(bridgeDay)}
         title={bridgeDay ? `Reservar · ${formatDateLabel(bridgeDay)}` : 'Reservar'}
-        description="Ponte explícita para o fluxo legado de agenda."
+        description="A reserva é registrada na Agenda."
         onClose={() => setBridgeDay(null)}
         panelStyle={{ width: 'min(92vw, 32rem)', maxWidth: '32rem', flexShrink: 0 }}
       >
         <div className="space-y-4">
           <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-            A criação e edição de reservas ainda não foram migradas com segurança. Continue no calendário legado para registrar a reserva desta data.
+            Para registrar uma reserva nesta data, continue na Agenda.
           </div>
           <div className="flex flex-wrap gap-2">
             <a className="thermo-button thermo-button-primary" href={buildLegacyUrl('/menu_produto.html')} target="_blank" rel="noreferrer">
               <ExternalLink className="size-4" />
-              Abrir Agenda legado
+              Abrir agenda
             </a>
             <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setBridgeDay(null)}>
               Fechar

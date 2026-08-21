@@ -52,6 +52,9 @@ describe('App stability', () => {
       expect(screen.getByText('Calendário de reuniões')).toBeInTheDocument()
     })
 
+    expect(screen.getByRole('heading', { name: 'Agenda e indicadores' })).toBeInTheDocument()
+    expect(screen.queryByText(/migrad|pendente|legado|atalhos reais|home operacional/i)).not.toBeInTheDocument()
+
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('Maximum update depth exceeded'))
     expect(consoleError.mock.calls.flat().join(' ')).not.toContain('Maximum update depth exceeded')
 
