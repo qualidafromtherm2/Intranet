@@ -293,6 +293,7 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
   if (selector === '#menu-producao-ocorrencias') return { icon: itemIconMap[selector] ?? 'triangle-alert', migrationStatus: 'migrated', view: 'production-incidents', destination: '/production/incidents' }
+  if (selector === '#menu-producao-3d') return { icon: itemIconMap[selector] ?? 'scan-search', migrationStatus: 'migrated', view: 'production-3d', destination: '/production/3d' }
   if (selector === '#menu-producao-gemba') return { icon: itemIconMap[selector] ?? 'binoculars', migrationStatus: 'migrated', view: 'production-gemba', destination: '/production/gemba' }
   if (selector === '#menu-preparacoes') return { icon: itemIconMap[selector] ?? 'package-search', migrationStatus: 'migrated', view: 'preparations', destination: '/production/preparations' }
   if (selector === '#menu-producao-testes') return { icon: itemIconMap[selector] ?? 'flask-conical', migrationStatus: 'migrated', view: 'production-tests', destination: '/production/tests' }
@@ -334,6 +335,8 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
   if (selector === '#menu-sac-at-relatorio') return { icon: itemIconMap[selector] ?? 'file-chart-column', migrationStatus: 'migrated', view: 'sac-report', destination: '/sac/report' }
   if (selector === '#menu-engenharia-alteracoes') return { icon: itemIconMap[selector] ?? 'history', migrationStatus: 'migrated', view: 'engineering-changes', destination: '/engineering/changes' }
   if (selector === '#menu-chatbot-monitor') return { icon: itemIconMap[selector] ?? 'bot', migrationStatus: 'migrated', view: 'chatbot-monitor', destination: '/chatbot/monitor' }
+  if (selector === '#menu-engenharia-codigos-erro') return { icon: itemIconMap[selector] ?? 'bug', migrationStatus: 'migrated', view: 'engineering-error-codes', destination: '/engineering/error-codes' }
+  if (selector === '#menu-engenharia-desenho-tecnico') return { icon: itemIconMap[selector] ?? 'drafting', migrationStatus: 'migrated', view: 'technical-drawings', destination: '/engineering/technical-drawings' }
 
   if (selector === '#menu-log-relatorio') {
     return {

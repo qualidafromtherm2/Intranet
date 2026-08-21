@@ -23,3 +23,6 @@ e12867a5756e62324c13a1cf765fda200a7ef2b0,d51fcbb7d5ad9d69602f9d3c2bf1090448e409b
 953effff72557bb8bb967f49f9b413c6e9b70775,2c7c08340cf5cfd3cb9e2c4e162affa4f1ddc70f,19b0534,Gemba de Produção,5,"production Gemba: 2 passed","Ligado a #menu-producao-gemba; GET-only e contrato items[] estrito",1
 953effff72557bb8bb967f49f9b413c6e9b70775,15cc86347463803e3ca60607b5bb545c49fe52ee,08a8824,Alterações de Engenharia,4,"engineering changes: 2 passed","Ligado a #menu-engenharia-alteracoes; consulta somente leitura",0
 953effff72557bb8bb967f49f9b413c6e9b70775,34d771499f21891acd95308009e928c9937e0126,1edc01d,Monitor do Chatbot,5,"chatbot monitor: 2 passed","Ligado a #menu-chatbot-monitor; endpoints GET-only",0
+5d20878e922289cd2ed9c30e963227a40d92f695,f683c28ee51dd703274dcf9901acfa0679b381ea,fc20b6b,Códigos de erro,5,"error codes: 1 passed","Ligado a #menu-engenharia-codigos-erro; consulta GET-only",0
+5d20878e922289cd2ed9c30e963227a40d92f695,10649be9340d9ee678911b7faa5a94419a288ccd,c28f165,Desenhos técnicos,4,"technical drawings: 2 passed","Ligado a #menu-engenharia-desenho-tecnico; download seguro somente leitura",0
+5d20878e922289cd2ed9c30e963227a40d92f695,09bae6988670ce2d63f662594f351f5735800eb7,f44fdf2,Produção 3D,5,"production 3d: 2 passed","Ligado a #menu-producao-3d; contrato total + itens[] estrito",1

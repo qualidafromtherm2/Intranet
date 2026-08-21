@@ -74,6 +74,7 @@ import { ProductListScreen } from './features/ProductListScreen'
 import { CalendarScreen } from './features/calendar'
 import { ChatbotMonitorScreen } from './features/chatbot-monitor'
 import { EngineeringChangesScreen } from './features/engineering-changes/EngineeringChangesScreen'
+import { EngineeringErrorCodesScreen } from './features/engineering-error-codes'
 import { FreightSimulatorScreen } from './features/freight'
 import { FirstPieceScreen } from './features/first-piece'
 import { InspectionRecordsScreen } from './features/inspection-records'
@@ -89,6 +90,7 @@ import { ProductionRegistrationScreen } from './features/production-registration
 import { ProductionRecordsScreen } from './features/production-records'
 import { ProductionIncidentsScreen } from './features/production-incidents'
 import { ProductionGembaScreen } from './features/production-gemba'
+import { Production3dScreen } from './features/production-3d'
 import { PreparationsScreen } from './features/preparations'
 import { ProductionReportScreen } from './features/production-report'
 import { ProductionTestsScreen } from './features/production-tests'
@@ -105,6 +107,7 @@ import { SalesMapScreen } from './features/sales-map'
 import { SacReportScreen } from './features/sac-report'
 import { SacShippingRequestScreen } from './features/sac-shipping-request'
 import { StockAdjustmentScreen } from './features/stock-adjustment'
+import { TechnicalDrawingsScreen } from './features/technical-drawings/TechnicalDrawingsScreen'
 import { WarehouseScreen } from './features/warehouses'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
 import { buildNavigationCatalog, isSelectorAllowed } from './lib/navigation'
@@ -1395,6 +1398,9 @@ function App() {
   const canViewProductionGemba = useMemo(() => isSelectorAllowed('#menu-producao-gemba', navigation.selectorMap), [navigation.selectorMap])
   const canViewEngineeringChanges = useMemo(() => isSelectorAllowed('#menu-engenharia-alteracoes', navigation.selectorMap), [navigation.selectorMap])
   const canViewChatbotMonitor = useMemo(() => isSelectorAllowed('#menu-chatbot-monitor', navigation.selectorMap), [navigation.selectorMap])
+  const canViewEngineeringErrorCodes = useMemo(() => isSelectorAllowed('#menu-engenharia-codigos-erro', navigation.selectorMap), [navigation.selectorMap])
+  const canViewTechnicalDrawings = useMemo(() => isSelectorAllowed('#menu-engenharia-desenho-tecnico', navigation.selectorMap), [navigation.selectorMap])
+  const canViewProduction3d = useMemo(() => isSelectorAllowed('#menu-producao-3d', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1525,6 +1531,12 @@ function App() {
               canViewEngineeringChanges ? <EngineeringChangesScreen /> : <PermissionDenied feature="Alterações de engenharia" />
             ) : activeView === 'chatbot-monitor' ? (
               canViewChatbotMonitor ? <ChatbotMonitorScreen /> : <PermissionDenied feature="Monitor do chatbot" />
+            ) : activeView === 'engineering-error-codes' ? (
+              canViewEngineeringErrorCodes ? <EngineeringErrorCodesScreen /> : <PermissionDenied feature="Códigos de erro" />
+            ) : activeView === 'technical-drawings' ? (
+              canViewTechnicalDrawings ? <TechnicalDrawingsScreen /> : <PermissionDenied feature="Desenhos técnicos" />
+            ) : activeView === 'production-3d' ? (
+              canViewProduction3d ? <Production3dScreen /> : <PermissionDenied feature="Produção 3D" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

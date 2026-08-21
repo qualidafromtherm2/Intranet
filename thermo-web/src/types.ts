@@ -174,7 +174,7 @@ export interface PermissionTreeResponse {
   nodes: PermissionNode[]
 }
 
-export type AppView = 'home' | 'calendar' | 'products' | 'product-registration' | 'separation' | 'store-materials' | 'identify-product' | 'receiving' | 'products-received' | 'shipping' | 'machine-stock' | 'freight-simulator' | 'pir' | 'sales-report' | 'print-agent-config' | 'warehouses' | 'stock-adjustment' | 'logistics-report' | 'minimum-stock' | 'production-registration' | 'sales-control' | 'first-piece' | 'production-records' | 'sales-charts' | 'production-incidents' | 'inspection-records' | 'sales-map' | 'preparations' | 'quality-manuals' | 'production-report' | 'production-tests' | 'red-area' | 'purchase-accounts' | 'purchase-settings' | 'sac-shipping-request' | 'sac-report' | 'production-gemba' | 'engineering-changes' | 'chatbot-monitor'
+export type AppView = 'home' | 'calendar' | 'products' | 'product-registration' | 'separation' | 'store-materials' | 'identify-product' | 'receiving' | 'products-received' | 'shipping' | 'machine-stock' | 'freight-simulator' | 'pir' | 'sales-report' | 'print-agent-config' | 'warehouses' | 'stock-adjustment' | 'logistics-report' | 'minimum-stock' | 'production-registration' | 'sales-control' | 'first-piece' | 'production-records' | 'sales-charts' | 'production-incidents' | 'inspection-records' | 'sales-map' | 'preparations' | 'quality-manuals' | 'production-report' | 'production-tests' | 'red-area' | 'purchase-accounts' | 'purchase-settings' | 'sac-shipping-request' | 'sac-report' | 'production-gemba' | 'engineering-changes' | 'chatbot-monitor' | 'engineering-error-codes' | 'technical-drawings' | 'production-3d'
 
 export type ShellNavStatus = 'migrated' | 'in_progress' | 'pending'
 
