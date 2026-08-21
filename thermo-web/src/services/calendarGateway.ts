@@ -7,8 +7,8 @@ export type CalendarReservation = {
 };
 export type ReservationPayload = {
   data: string; tipo: string; tema: string; inicio: string; fim: string; repetir: boolean;
-  repetirTodosMeses: boolean; diasSemana: string[]; cafe: boolean; avisoEmail: false;
-  avisoWhatsapp: false; criadoPor: string; participantes: string[];
+  repetirTodosMeses: boolean; diasSemana: string[]; cafe: boolean; avisoEmail: boolean;
+  avisoWhatsapp: boolean; criadoPor: string; participantes: string[];
   participantesAvisos: Record<string, { email: boolean; whatsapp: boolean }>;
   descricao: string | null; visitantes: string | null; linkReuniao: string | null;
   anexoUrl: null; anexoNome: null; aplicarEm?: 'este_dia' | 'todos_futuros';

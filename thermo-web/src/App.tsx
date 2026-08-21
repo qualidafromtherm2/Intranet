@@ -68,7 +68,7 @@ import {
   Wrench,
   X,
 } from 'lucide-react'
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useMemo, useState, type FormEvent } from 'react'
 import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
 import { CalendarScreen } from './features/calendar'
@@ -127,6 +127,7 @@ import type {
 
 const sidebarStateKey = 'thermo.shell.sidebar.collapsed'
 const todayIso = new Date().toISOString().slice(0, 10)
+type CalendarFocus = { date?: string; reservationId?: number; requestId: number }
 
 const iconMap = {
   home: Home,
@@ -837,17 +838,17 @@ function HomeScreen({
   user,
   sections,
   onNavigate,
+  onOpenCalendar,
 }: {
   user: AuthUser
   sections: ShellNavSection[]
   onNavigate: (view: AppView) => void
+  onOpenCalendar: (focus?: { date?: string; reservationId?: number }) => void
 }) {
   const { monthRef, setMonthRef, reservations, reminders, activities, activeUsers, calendarError, activityError, loadingCalendar, loadingActivity, kpi } = useHomeData(user)
   const [selectedDate, setSelectedDate] = useState(todayIso)
   const [onlyMine, setOnlyMine] = useState(false)
   const [selectedUser, setSelectedUser] = useState('')
-  const [detailDay, setDetailDay] = useState<string | null>(null)
-  const [bridgeDay, setBridgeDay] = useState<string | null>(null)
 
   const filteredReservations = useMemo(() => {
     const currentUser = user.username.toLowerCase()
@@ -924,8 +925,6 @@ function HomeScreen({
     }).length
   }, [filteredReservations])
 
-  const dayDetails = detailDay ? countsByDay.get(detailDay) : null
-
   useEffect(() => {
     const monthKey = `${monthRef.getFullYear()}-${String(monthRef.getMonth() + 1).padStart(2, '0')}`
     if (!selectedDate.startsWith(monthKey)) setSelectedDate(`${monthKey}-01`)
@@ -944,7 +943,7 @@ function HomeScreen({
               <Boxes className="size-4" />
               Lista de Produtos
             </button>
-            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onNavigate('calendar')}>
+            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onOpenCalendar()}>
               <ExternalLink className="size-4" />
               Abrir agenda
             </button>
@@ -1070,8 +1069,9 @@ function HomeScreen({
                     type="button"
                     onClick={() => {
                       setSelectedDate(day.iso)
-                      if (dayReservations.length > 0 || dayReminders.length > 0) setDetailDay(day.iso)
-                      else setBridgeDay(day.iso)
+                      // A Home é um resumo: o trabalho acontece no mesmo modal da Agenda,
+                      // já focado na data livre ou na primeira reunião daquele dia.
+                      onOpenCalendar({ date: day.iso, reservationId: dayReservations[0]?.id })
                     }}
                     className={clsx(
                       'min-w-0 min-h-[62px] rounded-lg border p-1 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40 md:min-h-[92px] md:p-2',
@@ -1169,93 +1169,6 @@ function HomeScreen({
         </aside>
       </section>
 
-      <ModalShell
-        open={Boolean(detailDay)}
-        title={detailDay ? `Detalhes do dia · ${formatDateLabel(detailDay)}` : 'Detalhes do dia'}
-        description="Dados reais de reuniões e lembretes para a data selecionada."
-        onClose={() => setDetailDay(null)}
-        panelStyle={{ width: 'min(96vw, 44rem)', maxWidth: '44rem', flexShrink: 0 }}
-      >
-        <div className="space-y-4">
-          {(dayDetails?.reservations ?? []).map((item) => (
-            <article key={`${item.id}-${item.data}`} className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-base font-bold text-thermo-navy">{item.tema || 'Sem tema'}</div>
-                  <div className="mt-1 text-sm text-slate-600">
-                    {formatTime(item.inicio)}–{formatTime(item.fim)} · {getReservationTypeLabel(item)}
-                  </div>
-                </div>
-                <span className={clsx('rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]', getReservationTypeTone(item))}>
-                  {item.cancelada ? 'Cancelada' : item.realizada ? 'Realizada' : 'Programada'}
-                </span>
-              </div>
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Organizador</div>
-                  <div className="mt-1 text-sm text-thermo-ink">{item.criadoPor || '—'}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Participantes</div>
-                  <div className="mt-1 text-sm text-thermo-ink">{item.participantes.length ? item.participantes.join(', ') : '—'}</div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Avisos</div>
-                  <div className="mt-1 text-sm text-thermo-ink">
-                    {[item.avisoEmail ? 'E-mail' : null, item.avisoWhatsapp ? 'WhatsApp' : null].filter(Boolean).join(' · ') || '—'}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Participação</div>
-                  <div className="mt-1 text-sm text-thermo-ink">
-                    {item.participantes.some((name) => name.toLowerCase() === user.username.toLowerCase()) ? 'Você é participante' : 'Sem participação direta'}
-                  </div>
-                </div>
-              </div>
-            </article>
-          ))}
-
-          {(dayDetails?.reminders ?? []).map((item) => (
-            <article key={`rem-${item.id}`} className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4">
-              <div className="text-base font-bold text-amber-900">{item.texto}</div>
-              <div className="mt-1 text-sm text-amber-800">Criado por {item.criadoPor || '—'} · {item.destinatarios.join(', ') || 'Sem destinatários'}</div>
-            </article>
-          ))}
-
-          <div className="flex flex-wrap gap-2">
-            <button className="thermo-button thermo-button-primary" type="button" onClick={() => { setDetailDay(null); onNavigate('calendar') }}>
-              <ExternalLink className="size-4" />
-              Abrir agenda
-            </button>
-            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setDetailDay(null)}>
-              Fechar
-            </button>
-          </div>
-        </div>
-      </ModalShell>
-
-      <ModalShell
-        open={Boolean(bridgeDay)}
-        title={bridgeDay ? `Reservar · ${formatDateLabel(bridgeDay)}` : 'Reservar'}
-        description="A reserva é registrada na Agenda."
-        onClose={() => setBridgeDay(null)}
-        panelStyle={{ width: 'min(92vw, 32rem)', maxWidth: '32rem', flexShrink: 0 }}
-      >
-        <div className="space-y-4">
-          <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-            Para registrar uma reserva nesta data, continue na Agenda.
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button className="thermo-button thermo-button-primary" type="button" onClick={() => { setBridgeDay(null); onNavigate('calendar') }}>
-              <ExternalLink className="size-4" />
-              Abrir agenda
-            </button>
-            <button className="thermo-button thermo-button-secondary" type="button" onClick={() => setBridgeDay(null)}>
-              Fechar
-            </button>
-          </div>
-        </div>
-      </ModalShell>
     </div>
   )
 }
@@ -1286,6 +1199,7 @@ function App() {
   const [authError, setAuthError] = useState<string | null>(null)
   const [user, setUser] = useState<AuthUser | null>(null)
   const [activeView, setActiveView] = useState<AppView>('home')
+  const [calendarFocus, setCalendarFocus] = useState<CalendarFocus | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [permissionError, setPermissionError] = useState<string | null>(null)
   const [permissionNodes, setPermissionNodes] = useState<PermissionNode[]>([])
@@ -1358,6 +1272,16 @@ function App() {
     }
   }
 
+  const navigateToView = useCallback((view: AppView) => {
+    setCalendarFocus(null)
+    setActiveView(view)
+  }, [])
+
+  const openCalendar = useCallback((focus?: Omit<CalendarFocus, 'requestId'>) => {
+    setCalendarFocus({ ...focus, requestId: Date.now() })
+    setActiveView('calendar')
+  }, [])
+
   const navigation = useMemo(() => buildNavigationCatalog(permissionNodes), [permissionNodes])
   const canOpenCart = useMemo(() => isSelectorAllowed('#cart-icon', navigation.selectorMap), [navigation.selectorMap])
   const canOpenSeparation = useMemo(() => isSelectorAllowed('#menu-solicitacao-transferencia', navigation.selectorMap), [navigation.selectorMap])
@@ -1415,7 +1339,7 @@ function App() {
           activeView={activeView}
           onClose={() => setMenuOpen(false)}
           onNavigate={(view) => {
-            setActiveView(view)
+            navigateToView(view)
             setMenuOpen(false)
           }}
           navigation={navigation}
@@ -1447,10 +1371,11 @@ function App() {
               <HomeScreen
                 user={user}
                 sections={navigation.sections}
-                onNavigate={(view) => setActiveView(view)}
+                onNavigate={navigateToView}
+                onOpenCalendar={openCalendar}
               />
             ) : activeView === 'calendar' ? (
-              <CalendarScreen currentUser={user.username} />
+              <CalendarScreen currentUser={user.username} focus={calendarFocus} />
             ) : activeView === 'products' ? (
               <ProductListScreen
                 permissions={{
