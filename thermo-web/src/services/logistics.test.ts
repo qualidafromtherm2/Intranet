@@ -3,6 +3,7 @@ import {
   deleteReceiptIdentification,
   extractPrintedReceiptId,
   loadPrintedReceipts,
+  loadIdentificationPhoto,
   loadReceiptIdentifications,
   printReceiptIdentifications,
   printSplitReceiptIdentification,
@@ -95,6 +96,12 @@ describe('logistics gateway', () => {
       '/api/etiquetas/recebimento/pendentes?q=LT-24&mostrar_ocultos=1&sem_mp=1&fluxo=recebimento',
       expect.objectContaining({ credentials: 'include' }),
     )
+  })
+
+  it('loads the first real active product photo for identification', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(jsonResponse({ fotos: [{ pos: 0, url_imagem: 'https://cdn.example/foto.jpg' }] }))
+    await expect(loadIdentificationPhoto('07.MP.N.70005')).resolves.toBe('https://cdn.example/foto.jpg')
+    expect(fetchMock).toHaveBeenCalledWith('/api/produtos/07.MP.N.70005/fotos', expect.objectContaining({ credentials: 'include' }))
   })
 
   it('keeps hide and Jair-only deletion on their audited endpoints', async () => {

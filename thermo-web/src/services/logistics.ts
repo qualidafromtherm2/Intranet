@@ -34,6 +34,8 @@ export type ReceiptIdentification = {
   id_impresso: number | null
 }
 
+export type IdentificationPhoto = { url_imagem: string | null; pos: number }
+
 export type PrintedReceiptDetail = {
   id: number
   id_rotulo: string | null
@@ -190,6 +192,13 @@ export async function loadReceiptIdentifications(input: {
   return requestJson<{ etiquetas: ReceiptIdentification[]; filtro: string }>(
     `/api/etiquetas/recebimento/pendentes${query ? `?${query}` : ''}`,
   )
+}
+
+export async function loadIdentificationPhoto(code: string) {
+  const response = await requestJson<{ fotos?: IdentificationPhoto[] }>(
+    `/api/produtos/${encodeURIComponent(code)}/fotos`,
+  )
+  return (response.fotos || []).find((photo) => Boolean(photo.url_imagem))?.url_imagem || null
 }
 
 export async function setReceiptIdentificationHidden(id: number, hidden: boolean) {

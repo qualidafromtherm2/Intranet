@@ -5,6 +5,7 @@ import { IdentifyProductScreen, calculateDivision } from './IdentifyProductScree
 import {
   deleteReceiptIdentification,
   loadPrinterSetup,
+  loadIdentificationPhoto,
   loadReceiptIdentifications,
   printReceiptIdentifications,
   printSplitReceiptIdentification,
@@ -16,6 +17,7 @@ vi.mock('../../services/logistics', async (importOriginal) => {
     ...actual,
     deleteReceiptIdentification: vi.fn(),
     loadPrinterSetup: vi.fn(),
+    loadIdentificationPhoto: vi.fn(),
     loadReceiptIdentifications: vi.fn(),
     printReceiptIdentifications: vi.fn(),
     printSplitReceiptIdentification: vi.fn(),
@@ -48,6 +50,7 @@ describe('IdentifyProductScreen', () => {
       defaultValue: '__AGENT__:PC-LOG:Zebra P',
       options: [{ value: '__AGENT__:PC-LOG:Zebra P', label: 'Zebra P (PC-LOG)', kind: 'agent' }],
     })
+    vi.mocked(loadIdentificationPhoto).mockReset().mockResolvedValue('https://cdn.example/produto.jpg')
     vi.mocked(printReceiptIdentifications).mockReset().mockResolvedValue({ kind: 'queued', quantity: 1 })
     vi.mocked(printSplitReceiptIdentification).mockReset().mockResolvedValue({ kind: 'queued', quantity: 4 })
     vi.mocked(deleteReceiptIdentification).mockReset().mockResolvedValue({ ok: true, identificacao: identification })
@@ -72,6 +75,7 @@ describe('IdentifyProductScreen', () => {
     expect(await screen.findByText('Compressor scroll 4TR')).toBeInTheDocument()
     expect(screen.getByText('LT-24')).toBeInTheDocument()
     expect(screen.getByText('NF-e Nº 4582')).toBeInTheDocument()
+    expect(await screen.findByRole('img', { name: 'Foto de Compressor scroll 4TR' })).toHaveAttribute('src', 'https://cdn.example/produto.jpg')
     await user.click(screen.getByRole('checkbox', { name: 'Selecionar 07.MP.N.70005' }))
     await user.click(screen.getByRole('button', { name: 'Imprimir 1 etiqueta' }))
 
@@ -82,6 +86,17 @@ describe('IdentifyProductScreen', () => {
     }))
   })
 
+  it('alternates lista e grade without reloading or duplicating the source', async () => {
+    const user = userEvent.setup()
+    render(<IdentifyProductScreen username="operador" />)
+    await screen.findByText('Compressor scroll 4TR')
+    const calls = vi.mocked(loadReceiptIdentifications).mock.calls.length
+    await user.click(screen.getByRole('button', { name: 'Visualização em grade' }))
+    expect(screen.getByRole('button', { name: 'Visualização em grade' })).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.getAllByTestId('identification-row')).toHaveLength(1)
+    expect(loadReceiptIdentifications).toHaveBeenCalledTimes(calls)
+  })
+
   it('preserves quantity-per-package semantics when splitting volumes', async () => {
     const user = userEvent.setup()
     render(<IdentifyProductScreen username="operador" />)
@@ -89,6 +104,7 @@ describe('IdentifyProductScreen', () => {
 
     await user.click(screen.getByRole('button', { name: 'Dividir volumes' }))
     await user.click(screen.getByLabelText(/Quantidade por embalagem/))
+    expect(screen.getByLabelText('Sugestões de divisão')).toBeInTheDocument()
     await user.type(screen.getByRole('spinbutton'), '6')
     expect(await screen.findByText(/4 etiqueta\(s\)/)).toBeInTheDocument()
     await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Imprimir etiquetas' }))

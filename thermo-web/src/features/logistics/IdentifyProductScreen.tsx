@@ -7,6 +7,8 @@ import {
   EyeOff,
   Filter,
   ImageOff,
+  LayoutGrid,
+  List,
   LoaderCircle,
   LockKeyhole,
   PackageX,
@@ -24,6 +26,7 @@ import {
   errorMessage,
   isPermissionFailure,
   loadPrinterSetup,
+  loadIdentificationPhoto,
   loadReceiptIdentifications,
   printReceiptIdentifications,
   printSplitReceiptIdentification,
@@ -47,6 +50,22 @@ function dateTime(value?: string | null) {
 
 function isWholeUnit(unit?: string | null) {
   return /^(UN|UND|PC|PCS|PÇ|PÇS|PEÇA|PEÇAS|CT)$/i.test(String(unit || '').trim())
+}
+
+function divisionSuggestions(total: number, mode: 'etiquetas' | 'embalagem', unit?: string | null) {
+  if (!(total > 0)) return []
+  const whole = isWholeUnit(unit)
+  if (mode === 'etiquetas') {
+    return Array.from({ length: Math.min(12, Math.floor(total)) }, (_, index) => index + 1)
+      .filter((labels) => !whole || Number.isInteger(total / labels))
+      .slice(0, 6)
+  }
+  const limit = Math.min(12, Math.floor(total))
+  return Array.from({ length: limit }, (_, index) => index + 1)
+    .map((labels) => Number((total / labels).toFixed(4)))
+    .filter((size) => !whole || Number.isInteger(size))
+    .filter((size, index, all) => size > 0 && all.indexOf(size) === index)
+    .slice(0, 6)
 }
 
 export function calculateDivision(
@@ -119,6 +138,10 @@ function DivisionDialog({
     () => receipt ? calculateDivision(Number(receipt.qtd) || 0, mode, Number(value), receipt.unidade) : null,
     [mode, receipt, value],
   )
+  const suggestions = useMemo(
+    () => receipt ? divisionSuggestions(Number(receipt.qtd) || 0, mode, receipt.unidade) : [],
+    [mode, receipt],
+  )
 
   const submit = async () => {
     if (!receipt || !division?.valid || !printer) {
@@ -163,6 +186,7 @@ function DivisionDialog({
           <span className="mb-1.5 block text-xs font-bold uppercase tracking-[0.14em] text-slate-500">{mode === 'etiquetas' ? 'Quantas etiquetas deseja imprimir?' : `Quantidade em cada embalagem (${receipt?.unidade || 'UN'})`}</span>
           <input value={value} onChange={(event) => setValue(event.target.value)} type="number" min="1" step={mode === 'etiquetas' ? '1' : 'any'} className="min-h-11 w-full rounded-xl border border-thermo-border bg-white px-3 py-2 text-base outline-none focus:border-thermo-navy" />
         </label>
+        {suggestions.length ? <div className="flex flex-wrap gap-2" aria-label="Sugestões de divisão">{suggestions.map((suggestion) => <button key={suggestion} type="button" className="thermo-chip min-h-10" onClick={() => setValue(String(suggestion))}>{suggestion}</button>)}</div> : null}
 
         {division ? (
           <div className={clsx('rounded-xl border px-4 py-3 text-sm', division.valid ? 'border-sky-200 bg-sky-50 text-sky-900' : 'border-red-200 bg-red-50 text-red-700')} role={division.valid ? 'status' : 'alert'}>
@@ -191,10 +215,12 @@ export function IdentifyProductScreen({
   flow = 'recebimento',
   allowed = true,
   username,
+  onReadyToStore,
 }: {
   flow?: LogisticsFlow
   allowed?: boolean
   username: string
+  onReadyToStore?: (ids: number[]) => void
 }) {
   const [items, setItems] = useState<ReceiptIdentification[]>([])
   const [query, setQuery] = useState('')
@@ -213,6 +239,7 @@ export function IdentifyProductScreen({
   const [divisionReceipt, setDivisionReceipt] = useState<ReceiptIdentification | null>(null)
   const [deleteReceipt, setDeleteReceipt] = useState<ReceiptIdentification | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
+  const [view, setView] = useState<'list' | 'grid'>('list')
 
   const canDelete = String(username || '').trim().toLowerCase() === 'jair.r'
 
@@ -249,11 +276,14 @@ export function IdentifyProductScreen({
     loadPrinterSetup(username)
       .then((setup) => {
         setPrinters(setup.options)
-        setPrinter(setup.defaultValue || '')
+        const saved = sessionStorage.getItem('thermo-identification-printer')
+        setPrinter(saved && setup.options.some((option) => option.value === saved) ? saved : setup.defaultValue || '')
         setPrinterError(setup.options.length ? null : 'Nenhuma impressora online ou configurada foi encontrada.')
       })
       .catch((loadError) => setPrinterError(errorMessage(loadError, 'Falha ao carregar impressoras.')))
   }, [allowed, username])
+
+  useEffect(() => { if (printer) sessionStorage.setItem('thermo-identification-printer', printer) }, [printer])
 
   const updateItem = async (item: ReceiptIdentification, action: 'hidden' | 'reopen') => {
     const key = `${action}:${item.id}`
@@ -290,6 +320,7 @@ export function IdentifyProductScreen({
       if (result.kind === 'download') triggerDownload(result)
       const count = result.kind === 'queued' ? result.quantity : ids.length
       setNotice(`${count} etiqueta(s) ${result.kind === 'download' ? 'gerada(s) em PDF' : 'enviada(s) para impressão'}.`)
+      onReadyToStore?.(ids)
       setSelected(new Set())
       void load(query)
     } catch (printError) {
@@ -321,7 +352,8 @@ export function IdentifyProductScreen({
         <div className="mt-3 flex flex-wrap items-center gap-2">
           <button className={clsx('thermo-chip min-h-11', showHidden && 'thermo-chip-active')} type="button" aria-pressed={showHidden} onClick={() => setShowHidden((current) => !current)}>{showHidden ? <Eye className="size-3.5" /> : <EyeOff className="size-3.5" />}{showHidden ? 'Ver itens ativos' : 'Exibir itens ocultos'}</button>
           <button className={clsx('thermo-chip min-h-11', withoutMp && 'thermo-chip-active')} type="button" aria-pressed={withoutMp} onClick={() => setWithoutMp((current) => !current)}><Filter className="size-3.5" />{withoutMp ? 'Ver todos' : 'Exibir sem MP'}</button>
-          <span className="ml-auto text-xs text-slate-500">{items.length} etiqueta(s) · {selected.size} selecionada(s)</span>
+          <div className="ml-auto flex items-center gap-1" aria-label="Visualização"><button className={clsx('thermo-icon-button', view === 'list' && 'bg-thermo-navy text-white')} type="button" aria-label="Visualização em lista" aria-pressed={view === 'list'} onClick={() => setView('list')}><List className="size-4" /></button><button className={clsx('thermo-icon-button', view === 'grid' && 'bg-thermo-navy text-white')} type="button" aria-label="Visualização em grade" aria-pressed={view === 'grid'} onClick={() => setView('grid')}><LayoutGrid className="size-4" /></button></div>
+          <span className="text-xs text-slate-500">{items.length} etiqueta(s) · {selected.size} selecionada(s)</span>
         </div>
       </div>
 
@@ -331,16 +363,16 @@ export function IdentifyProductScreen({
       {!permissionDenied && error ? <div className="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700" role="alert"><AlertCircle className="mt-0.5 size-4 shrink-0" /><span>{error}</span><button className="ml-auto font-semibold underline" type="button" onClick={() => void load(query)}>Tentar novamente</button></div> : null}
 
       <div className="overflow-hidden rounded-xl border border-thermo-border bg-white shadow-sm">
-        <div className="hidden grid-cols-[2.5rem_3.5rem_minmax(12rem,1.2fr)_minmax(7rem,.55fr)_minmax(10rem,.8fr)_minmax(8rem,.6fr)_minmax(16rem,1.2fr)] gap-3 border-b border-thermo-border bg-thermo-bg px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid"><span /><span>Foto</span><span>Produto</span><span>Lote</span><span>Origem</span><span>Quantidade</span><span>Ações</span></div>
+        {view === 'list' ? <div className="hidden grid-cols-[2.5rem_3.5rem_minmax(12rem,1.2fr)_minmax(7rem,.55fr)_minmax(10rem,.8fr)_minmax(8rem,.6fr)_minmax(16rem,1.2fr)] gap-3 border-b border-thermo-border bg-thermo-bg px-4 py-2.5 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500 lg:grid"><span /><span>Foto</span><span>Produto</span><span>Lote</span><span>Origem</span><span>Quantidade</span><span>Ações</span></div> : null}
         {loading && items.length === 0 ? <div className="space-y-3 p-4" aria-label="Carregando identificações"><div className="h-20 animate-pulse rounded-xl bg-slate-100" /><div className="h-20 animate-pulse rounded-xl bg-slate-100" /></div> : null}
         {!loading && !error && items.length === 0 ? <div className="px-6 py-14 text-center"><Boxes className="mx-auto size-8 text-slate-300" /><h2 className="mt-3 font-bold text-thermo-navy">Nenhuma etiqueta pendente encontrada</h2><p className="mt-1 text-sm text-slate-500">Ajuste a busca ou os filtros.</p></div> : null}
-        {items.map((item) => {
+        <div className={clsx(view === 'grid' && 'grid gap-3 p-3 sm:grid-cols-2 xl:grid-cols-3')}>{items.map((item) => {
           const selectable = !item.impressa
           const checked = selected.has(item.id)
           return (
-            <article key={item.id} className={clsx('grid gap-3 border-b border-thermo-border px-4 py-4 last:border-b-0 lg:grid-cols-[2.5rem_3.5rem_minmax(12rem,1.2fr)_minmax(7rem,.55fr)_minmax(10rem,.8fr)_minmax(8rem,.6fr)_minmax(16rem,1.2fr)] lg:items-center', checked && 'bg-sky-50/60')} data-testid="identification-row">
+            <article key={item.id} className={clsx('grid gap-3 px-4 py-4', view === 'list' ? 'border-b border-thermo-border last:border-b-0 lg:grid-cols-[2.5rem_3.5rem_minmax(12rem,1.2fr)_minmax(7rem,.55fr)_minmax(10rem,.8fr)_minmax(8rem,.6fr)_minmax(16rem,1.2fr)] lg:items-center' : 'rounded-lg border border-thermo-border sm:grid-cols-[auto_3.5rem_1fr]', checked && 'bg-sky-50/60')} data-testid="identification-row">
               <label className="flex min-h-11 items-center"><span className="sr-only">Selecionar {item.codigo_produto}</span><input type="checkbox" disabled={!selectable} checked={checked} onChange={(event) => setSelected((current) => { const next = new Set(current); if (event.target.checked) next.add(item.id); else next.delete(item.id); return next })} className="size-5 accent-thermo-navy" /></label>
-              <div className="flex size-11 items-center justify-center rounded-xl border border-dashed border-thermo-border bg-thermo-bg text-slate-400" aria-label={`Foto de ${item.codigo_produto || 'produto'} indisponível nesta lista`}><ImageOff className="size-4" /></div>
+              <IdentificationPhoto code={item.codigo_produto} description={item.descricao_produto} />
               <div><div className="font-mono text-xs font-semibold text-slate-500">{item.codigo_produto || '—'}</div><div className="mt-1 text-sm font-bold text-thermo-navy">{item.descricao_produto || 'Produto sem descrição'}</div><span className="mt-1 block text-xs text-slate-500">Recebido em {dateTime(item.criado_em)}</span></div>
               <div><span className="lg:hidden text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Lote · </span><strong className="font-mono text-sm">{item.lote || '—'}</strong></div>
               <div className="text-sm"><strong className="block">{item.numero_nfe ? `NF-e Nº ${item.numero_nfe}` : item.numero_pedido ? `Pedido Nº ${item.numero_pedido}` : 'Sem documento'}</strong>{item.data_emissao ? <span className="text-xs text-slate-500">Emissão: {item.data_emissao}</span> : null}</div>
@@ -352,7 +384,7 @@ export function IdentifyProductScreen({
               </div>
             </article>
           )
-        })}
+        })}</div>
       </div>
 
       <DivisionDialog receipt={divisionReceipt} printers={printers} selectedPrinter={printer} username={username} onClose={() => setDivisionReceipt(null)} onPrinted={(message) => { setNotice(message); setSelected(new Set()); void load(query) }} />
@@ -376,4 +408,10 @@ export function IdentifyProductScreen({
       </ModalShell>
     </section>
   )
+}
+
+function IdentificationPhoto({ code, description }: { code: string | null; description: string | null }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => { if (code) void loadIdentificationPhoto(code).then(setUrl).catch(() => setUrl(null)) }, [code])
+  return url ? <img className="size-11 rounded-lg border border-thermo-border object-cover" src={url} alt={`Foto de ${description || code || 'produto'}`} /> : <div className="flex size-11 items-center justify-center rounded-lg border border-dashed border-thermo-border bg-thermo-bg text-slate-400" aria-label={`Foto de ${code || 'produto'} indisponível`}><ImageOff className="size-4" /></div>
 }
