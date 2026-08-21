@@ -817,7 +817,7 @@
       listaEl.innerHTML = filtrados.map((u) => {
         const label = labelUsuario(u);
         const selected = String(u.id) === selId ? ' is-selected' : '';
-        return `<button type="button" class="nav-admin-visao-user${selected}" data-id="${esc(u.id)}" data-label="${esc(label)}">${esc(label)}</button>`;
+        return `<button type="button" class="nav-admin-visao-user${selected}" data-id="${esc(u.id)}" data-username="${esc(u.username || '')}" data-label="${esc(label)}">${esc(label)}</button>`;
       }).join('');
     }
 
@@ -827,6 +827,7 @@
       const btn = e.target.closest('.nav-admin-visao-user');
       if (!btn) return;
       hiddenEl.value = btn.dataset.id || '';
+      hiddenEl.dataset.username = btn.dataset.username || '';
       hiddenEl.dataset.label = btn.dataset.label || '';
       listaEl.querySelectorAll('.nav-admin-visao-user.is-selected').forEach((el) => el.classList.remove('is-selected'));
       btn.classList.add('is-selected');
@@ -857,7 +858,8 @@
         alert('Selecione um usuário na lista.');
         return;
       }
-      const username = hiddenEl.dataset.label || '';
+      // Usar só o username de login (não o rótulo "user — Nome"), senão o filtro do Informar MO não bate.
+      const username = hiddenEl.dataset.username || '';
       overlay.remove();
       await aplicarVisaoCliente(uid, username);
     });
@@ -946,7 +948,8 @@
 
       visaoClienteAtiva = true;
       visaoClienteUserId = String(d.userId || userId);
-      visaoClienteUsername = username || d.username || '';
+      // Preferir username da API; nunca usar rótulo "user — Nome Completo".
+      visaoClienteUsername = String(d.username || username || '').trim();
       const userVisao = montarUserVisaoCliente(d);
       aplicarIdentidadeVisaoCliente(userVisao);
       publicarVisaoCliente({
