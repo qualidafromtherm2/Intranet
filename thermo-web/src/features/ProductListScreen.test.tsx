@@ -329,4 +329,72 @@ describe('ProductListScreen', () => {
     expect(screen.queryByText('Locais:')).not.toBeInTheDocument()
     expect(screen.getByText(/0%/i)).toBeInTheDocument()
   })
+
+  it('does not infer a negative warehouse from an aggregate expedition flag', () => {
+    hookState = {
+      ...hookState,
+      filtered: [{ ...baseProduct, expedicao_negativa: true, saldo_expedicao: -3 }],
+      paginated: [{ ...baseProduct, expedicao_negativa: true, saldo_expedicao: -3 }],
+    }
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    expect(screen.queryByText(/Expedição negativa/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/Estoque negativo/i)).not.toBeInTheDocument()
+  })
+
+  it('keeps a single actionable purchase status with the real status in its tooltip', () => {
+    const product = { ...baseProduct, purchaseState: 'em_compra' as const, compraStatus: 'Pedido aprovado' }
+    hookState = { ...hookState, filtered: [product], paginated: [product] }
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    const purchase = screen.getByRole('button', { name: 'Pedido aprovado' })
+    expect(purchase).toHaveAttribute('title', expect.stringContaining('Situação real da compra: Pedido aprovado'))
+    expect(screen.getAllByText('Pedido aprovado')).toHaveLength(1)
+  })
+
+  it('reports the exact visible range and supports first and last page navigation', async () => {
+    const user = userEvent.setup()
+    const products = Array.from({ length: 101 }, (_, index) => ({ ...baseProduct, codigo_produto: index + 1, codigo: `P${index + 1}` }))
+    hookState = { ...hookState, filtered: products, paginated: [products[50]!], page: 2, pageCount: 3, pageSize: 50 }
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    expect(screen.getByText(/51–100 de 101/)).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: 'Primeira' }))
+    await user.click(screen.getByRole('button', { name: 'Última' }))
+    expect(setPage).toHaveBeenNthCalledWith(1, 1)
+    expect(setPage).toHaveBeenNthCalledWith(2, 3)
+  })
 })

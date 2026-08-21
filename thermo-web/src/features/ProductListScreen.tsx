@@ -183,8 +183,6 @@ function buildStatusFlags(product: ProductRecord) {
       tone: 'red',
       label: negativeLines.length === 1 ? `${negativeLines[0]!.label} negativo` : 'Estoque negativo',
     })
-  } else if (product.expedicao_negativa && toNumber(product.saldo_expedicao) < 0) {
-    flags.push({ key: 'expedicao-negativa', tone: 'red', label: 'Expedição negativa' })
   }
 
   if (product.saldo_endereco_sem_omie) {
@@ -195,15 +193,12 @@ function buildStatusFlags(product: ProductRecord) {
     flags.push({ key: 'saldo-divergente-endereco', tone: 'red', label: 'Omie diferente dos endereços' })
   }
 
-  if (product.estoque_minimo > 0) {
-    flags.push({
-      key: 'estoque-minimo',
-      tone: product.abaixo_minimo ? 'red' : 'green',
-      label: product.abaixo_minimo ? `Abaixo do mínimo · ${quantity(product.estoque_minimo, product.unidade)}` : `Mínimo · ${quantity(product.estoque_minimo, product.unidade)}`,
-    })
-  }
-
   return flags
+}
+
+function purchaseTooltip(product: ProductRecord) {
+  const status = String(product.compraStatus || 'Em compra').trim()
+  return `Situação real da compra: ${status}. Clique para consultar os pedidos.`
 }
 
 function StatusBadge({ tone, children }: { tone: 'green' | 'amber' | 'red' | 'slate'; children: string }) {
@@ -268,7 +263,7 @@ function ProductCard({
   const minimum = minimumHealth(product)
 
   return (
-    <article className="flex h-full flex-col rounded-xl border border-thermo-border bg-white shadow-sm" data-testid="product-card">
+    <article className="flex h-full flex-col rounded-lg border border-thermo-border bg-white shadow-sm" data-testid="product-card">
       <div className="flex items-start gap-3 border-b border-thermo-border px-3 py-2.5">
         {product.imageUrl ? (
           <img
@@ -288,7 +283,6 @@ function ProductCard({
           <div className="font-mono text-[11px] font-semibold text-slate-500">{product.codigo}</div>
           <h3 className="mt-0.5 line-clamp-2 text-[13px] leading-4 font-bold text-thermo-navy">{product.descricao}</h3>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {product.purchaseState === 'em_compra' ? <StatusBadge tone="amber">{product.compraStatus || 'Em compra'}</StatusBadge> : null}
             {statusFlags.map((flag) => (
               <StatusBadge key={flag.key} tone={flag.tone === 'green' ? tone : flag.tone}>{flag.label}</StatusBadge>
             ))}
@@ -327,9 +321,9 @@ function ProductCard({
             type="button"
             className="inline-flex min-h-9 items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800"
             onClick={() => onOpenPurchase(product)}
-            title="Ver detalhes reais da compra"
+            title={purchaseTooltip(product)}
           >
-            Em compra
+            {product.compraStatus || 'Em compra'}
           </button>
         ) : <span />}
         <button className="thermo-button thermo-button-secondary shrink-0 px-3 py-1.5 text-xs" type="button" onClick={() => onOpenActions(product)}>
@@ -351,20 +345,18 @@ function ProductTable({
   onOpenActions: (product: ProductRecord) => void
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-thermo-border">
-      <table className="min-w-full border-collapse text-sm">
+    <div className="overflow-x-auto rounded-lg border border-thermo-border">
+      <table className="w-full table-fixed border-collapse text-xs md:min-w-[56rem]">
         <thead className="sticky top-0 z-10 bg-thermo-bg text-left text-[10px] uppercase tracking-[0.14em] text-slate-500">
           <tr>
-            <th className="px-3 py-2.5">Foto</th>
-            <th className="px-3 py-2.5">Código</th>
-            <th className="px-3 py-2.5">Descrição</th>
-            <th className="px-3 py-2.5">Compra</th>
-            <th className="px-3 py-2.5">Exceção</th>
-            <th className="px-3 py-2.5">Saldo / mínimo</th>
-            <th className="px-3 py-2.5">#ALMOX</th>
-            <th className="px-3 py-2.5">Demais armazéns</th>
-            <th className="px-3 py-2.5">Mínimo</th>
-            <th className="px-3 py-2.5">Ação</th>
+            <th className="hidden w-14 px-2 py-2 md:table-cell">Foto</th>
+            <th className="w-24 px-2 py-2 md:w-32">Código</th>
+            <th className="px-2 py-2">Descrição / alertas</th>
+            <th className="hidden w-28 px-2 py-2 md:table-cell">Compra</th>
+            <th className="hidden w-44 px-2 py-2 md:table-cell">Saldo / mínimo</th>
+            <th className="w-20 px-2 py-2 md:w-28">#ALMOX</th>
+            <th className="hidden w-40 px-2 py-2 md:table-cell">Outros armazéns</th>
+            <th className="w-16 px-2 py-2 md:w-24">Ação</th>
           </tr>
         </thead>
         <tbody>
@@ -387,7 +379,7 @@ function ProductTable({
                 const stockLines = renderStockLines(product)
                 return (
                   <>
-              <td className="px-3 py-2.5">
+              <td className="hidden px-2 py-2 md:table-cell">
                 {product.imageUrl ? (
                   <img src={product.imageUrl} alt="" className="h-10 w-10 rounded-md border border-thermo-border object-cover" />
                 ) : (
@@ -396,8 +388,8 @@ function ProductTable({
                   </div>
                 )}
               </td>
-              <td className="px-3 py-2.5 font-mono text-xs font-semibold text-slate-600">{product.codigo}</td>
-              <td className="px-3 py-2.5">
+              <td className="break-all px-2 py-2 font-mono text-[11px] font-semibold text-slate-600">{product.codigo}</td>
+              <td className="px-2 py-2">
                 <div className="font-semibold text-thermo-navy">{product.descricao}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   {buildStatusFlags(product).map((flag) => (
@@ -405,7 +397,7 @@ function ProductTable({
                   ))}
                 </div>
               </td>
-              <td className="px-3 py-2.5 text-slate-600">
+              <td className="hidden px-2 py-2 text-slate-600 md:table-cell">
                 {product.purchaseState === 'em_compra' ? (
                   <button
                     type="button"
@@ -414,6 +406,7 @@ function ProductTable({
                       event.stopPropagation()
                       onOpenPurchase(product)
                     }}
+                    title={purchaseTooltip(product)}
                   >
                     {product.compraStatus || 'Em compra'}
                   </button>
@@ -421,8 +414,7 @@ function ProductTable({
                   '—'
                 )}
               </td>
-              <td className="px-3 py-2.5 text-slate-600">{buildStatusFlags(product).filter((flag) => flag.key !== 'estoque-minimo').map((flag) => flag.label).join(' · ') || '—'}</td>
-              <td className="px-3 py-2.5 text-xs">
+              <td className="hidden px-2 py-2 text-xs md:table-cell">
                 {minimum ? (
                   <div className={clsx('font-semibold', minimum.textTone)}>
                     {quantity(minimum.saldo, product.unidade)} / mín {quantity(minimum.minimo, product.unidade)} · {Math.round(minimum.percentual)}%
@@ -434,8 +426,8 @@ function ProductTable({
                   <span className="text-slate-500">Sem mínimo</span>
                 )}
               </td>
-              <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
-              <td className="px-3 py-2.5 text-xs text-slate-600">
+              <td className="px-2 py-2 font-mono text-slate-600">{stockLines.find((line) => line.isAlmox)?.value}</td>
+              <td className="hidden px-2 py-2 text-[11px] text-slate-600 md:table-cell">
                 {stockLines.filter((line) => !line.isAlmox).length > 0 ? (
                   <div className="space-y-1">
                     {stockLines.filter((line) => !line.isAlmox).map((line) => (
@@ -446,8 +438,7 @@ function ProductTable({
                   </div>
                 ) : '—'}
               </td>
-              <td className="px-3 py-2.5 font-mono text-slate-600">{product.estoque_minimo > 0 ? quantity(product.estoque_minimo, product.unidade) : '—'}</td>
-              <td className="px-3 py-2.5">
+              <td className="px-2 py-2">
                 <button
                   className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs"
                   type="button"
@@ -457,7 +448,7 @@ function ProductTable({
                   }}
                 >
                   <Info className="size-4" />
-                  Ações
+                  <span className="hidden md:inline">Ações</span>
                 </button>
               </td>
                   </>
@@ -485,16 +476,22 @@ function Pagination({
   onChange: (page: number) => void
 }) {
   return (
-    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm">
+    <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-thermo-border bg-thermo-bg px-3 py-2 text-sm">
       <div className="text-slate-600">
-        Página <strong>{page}</strong> de <strong>{pageCount}</strong> · {total} produto(s) · {pageSize} por página
+        {total > 0 ? `${(page - 1) * pageSize + 1}–${Math.min(total, page * pageSize)} de ${total}` : 'Nenhum produto'} · Página <strong>{page}</strong>/<strong>{pageCount}</strong> · {pageSize} por página
       </div>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onChange(1)} disabled={page <= 1}>
+          Primeira
+        </button>
         <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onChange(Math.max(1, page - 1))} disabled={page <= 1}>
           Anterior
         </button>
         <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onChange(Math.min(pageCount, page + 1))} disabled={page >= pageCount}>
           Próxima
+        </button>
+        <button className="thermo-button thermo-button-secondary" type="button" onClick={() => onChange(pageCount)} disabled={page >= pageCount}>
+          Última
         </button>
       </div>
     </div>
