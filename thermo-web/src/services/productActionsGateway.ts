@@ -70,6 +70,8 @@ export interface QuickEditPayload {
   peso_bruto: number
 }
 
+export type ProductMarker = 'OBSOLETO' | 'ENGENHARIA'
+
 export interface ProductPurchaseHistoryItem {
   d_rec: string | null
   c_nome_fornecedor: string | null
@@ -386,6 +388,28 @@ export async function saveQuickEdit(product: ProductRecord, current: ProductDeta
   return local
 }
 
+export async function zeroProductMinimumEverywhere(product: ProductRecord) {
+  const productId = Number(product.codigo_produto)
+  if (!Number.isFinite(productId) || productId <= 0) throw new Error('Produto sem ID numérico da Omie.')
+  const result = await requestJson<{ ok: boolean; error?: string; locais_atualizados?: number }>('/api/omie/estoque/minimo-produto', {
+    method: 'POST',
+    body: jsonBody({ id_prod: productId, codigo: product.codigo, quan_min: 0 }),
+  })
+  if (!result.ok) throw new Error(result.error || 'Falha ao zerar os estoques mínimos.')
+  return result
+}
+
+export const setProductLimited = (codigo: string, item_limitado: boolean) =>
+  requestJson<{ ok: boolean; codigo: string; item_limitado: boolean }>(`/api/produtos/${encodeURIComponent(codigo)}/item-limitado`, {
+    method: 'PUT',
+    body: jsonBody({ item_limitado }),
+  })
+
+export function applyProductMarker(description: string, marker: ProductMarker) {
+  const clean = String(description || '').trim().replace(/^(OBSOLETO|ENGENHARIA)\s*-\s*/i, '')
+  return `${marker} - ${clean}`
+}
+
 export async function uploadProductPhoto(product: ProductRecord, file: File, description: string) {
   const form = new FormData()
   form.append('foto', file)
@@ -426,6 +450,18 @@ export const moveProductAddress = (codigo: string, origem: string, destino: stri
     method: 'PATCH',
     body: jsonBody({ origem, destino, ...(quantidade == null ? {} : { quantidade }) }),
   })
+
+export function buildBoxAddress(origin: string, boxCode: string) {
+  const prefix = String(origin || '').trim().toUpperCase().split('-').slice(0, 3).join('-')
+  const box = String(boxCode || '').trim().toUpperCase()
+  if (!/^[A-Z]\d{2}$/.test(box)) throw new Error('Informe o código da caixa com uma letra e dois números, por exemplo P01.')
+  const destination = `${prefix}-${box}`
+  if (!/^[A-Z0-9]+-[A-Z0-9]+-[A-Z0-9]+-[A-Z]\d{2}$/.test(destination)) throw new Error('O endereço de origem não possui corredor, nível e posição válidos.')
+  return destination
+}
+
+export const changeProductBox = (codigo: string, origem: string, boxCode: string) =>
+  moveProductAddress(codigo, origem, buildBoxAddress(origem, boxCode))
 
 export const deleteProductAddress = (codigo: string, endereco: string) =>
   requestJson<{ ok: boolean }>(`/api/logistica/produtos/${encodeURIComponent(codigo)}/enderecos`, {
@@ -512,6 +548,46 @@ export const loadMovementHistory = (product: ProductRecord) => {
     ajuste_estoque_lista?: Array<Record<string, unknown>>
     saldos_atuais?: Array<{ local_codigo: string; local_nome: string; saldo: number }>
   }>(`/api/ajustes/historico-omie?${query}`)
+}
+
+export type MovementCategory = 'receiving' | 'separation' | 'transfer' | 'adjustment'
+
+export function classifyMovement(row: Record<string, unknown>): MovementCategory {
+  const type = String(row.tipo || '').toUpperCase()
+  const source = String(row.origem || '').toUpperCase()
+  const text = `${row.obs || ''} ${row.motivo || ''}`.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+  if (/\bsep(?:-|\s)|separacao|saida por separacao/.test(text)) return 'separation'
+  if (/nfe|nf-e|nota fiscal|recebimento|fornecedor|entrada sem/.test(text) || source === 'NFE') return 'receiving'
+  if (type === 'TRF') return 'transfer'
+  return 'adjustment'
+}
+
+export function reconcileMovementBalances(
+  rows: Array<Record<string, unknown>>,
+  official: Array<{ local_codigo: string; saldo: number }>,
+) {
+  const current = new Map(official.map((item) => [String(item.local_codigo), Number(item.saldo || 0)]))
+  return rows.map((row) => {
+    const type = String(row.tipo || '').toUpperCase()
+    const source = String(row.codigo_local_estoque || row.local_codigo || row.origem || '').trim()
+    const destination = String(row.codigo_local_estoque_destino || row.local_destino_codigo || row.destino || '').trim()
+    const quantity = Math.abs(Number(row.quantidade ?? row.qtd ?? row.quan) || 0)
+    const describe = (code: string, before: number, after: number) => `${code || 'Local'}: ${before} → ${after}`
+    const details: string[] = []
+    if (type === 'TRF' && source && destination) {
+      const sourceAfter = current.get(source) ?? 0
+      const destinationAfter = current.get(destination) ?? 0
+      details.push(describe(source, sourceAfter + quantity, sourceAfter), describe(destination, destinationAfter - quantity, destinationAfter))
+      current.set(source, sourceAfter + quantity)
+      current.set(destination, destinationAfter - quantity)
+    } else if (source) {
+      const after = current.get(source) ?? 0
+      const before = type === 'ENT' ? after - quantity : after + quantity
+      details.push(describe(source, before, after))
+      current.set(source, before)
+    }
+    return details.join(' | ')
+  })
 }
 
 export async function loadMovementSetup(product: ProductRecord) {

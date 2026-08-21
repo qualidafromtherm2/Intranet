@@ -2,12 +2,19 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AuthUser, PermissionNode, ProductRecord } from '../types'
 import {
   addProductToCart,
+  applyProductMarker,
+  buildBoxAddress,
+  changeProductBox,
+  classifyMovement,
+  reconcileMovementBalances,
   createManualReceipt,
   deriveProductActionAccess,
   executeDispatch,
   reprintIdentification,
   requestSeparation,
   saveProductMultiple,
+  setProductLimited,
+  zeroProductMinimumEverywhere,
 } from './productActionsGateway'
 
 const product = {
@@ -186,5 +193,38 @@ describe('productActionsGateway', () => {
       destino_agente: 'PC-LOG',
       impressora: 'Zebra',
     })
+  })
+
+  it('preserva os contratos P1 de mínimo global, limite e alteração de caixa', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ ok: true, item_limitado: true, locais_atualizados: 4 }), { status: 200 })))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await zeroProductMinimumEverywhere(product)
+    await setProductLimited(product.codigo, true)
+    await changeProductBox(product.codigo, 'A01-B02-C03-D04', 'P01')
+
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/omie/estoque/minimo-produto')
+    expect(JSON.parse(String(fetchMock.mock.calls[0]![1].body))).toEqual({ id_prod: 101, codigo: product.codigo, quan_min: 0 })
+    expect(fetchMock.mock.calls[1]![0]).toBe(`/api/produtos/${encodeURIComponent(product.codigo)}/item-limitado`)
+    expect(JSON.parse(String(fetchMock.mock.calls[1]![1].body))).toEqual({ item_limitado: true })
+    expect(fetchMock.mock.calls[2]![0]).toBe(`/api/logistica/produtos/${encodeURIComponent(product.codigo)}/enderecos`)
+    expect(JSON.parse(String(fetchMock.mock.calls[2]![1].body))).toEqual({ origem: 'A01-B02-C03-D04', destino: 'A01-B02-C03-P01' })
+  })
+
+  it('valida caixa, marcadores e categorias conforme o legado', () => {
+    expect(buildBoxAddress('A01-B02-C03-D04', 'p01')).toBe('A01-B02-C03-P01')
+    expect(() => buildBoxAddress('A01-B02-C03-D04', '12')).toThrow(/letra e dois números/)
+    expect(applyProductMarker('OBSOLETO - Motor', 'ENGENHARIA')).toBe('ENGENHARIA - Motor')
+    expect(classifyMovement({ tipo: 'SAI', obs: 'SEP-42 por jair.r' })).toBe('separation')
+    expect(classifyMovement({ tipo: 'ENT', origem: 'NFE' })).toBe('receiving')
+    expect(classifyMovement({ tipo: 'TRF' })).toBe('transfer')
+    expect(classifyMovement({ tipo: 'SAI', motivo: 'Inventário' })).toBe('adjustment')
+    expect(reconcileMovementBalances([
+      { tipo: 'TRF', codigo_local_estoque: '1', codigo_local_estoque_destino: '2', quan: 2 },
+      { tipo: 'ENT', codigo_local_estoque: '1', quan: 5 },
+    ], [{ local_codigo: '1', saldo: 8 }, { local_codigo: '2', saldo: 4 }])).toEqual([
+      '1: 10 → 8 | 2: 2 → 4',
+      '1: 5 → 10',
+    ])
   })
 })

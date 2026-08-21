@@ -31,6 +31,11 @@ import {
   applyStockAudit,
   createManualReceipt,
   deleteProductAddress,
+  applyProductMarker,
+  buildBoxAddress,
+  changeProductBox,
+  classifyMovement,
+  reconcileMovementBalances,
   executeDispatch,
   executeMovement,
   loadIdentificationHistory,
@@ -51,6 +56,8 @@ import {
   requestSeparation,
   saveProductMultiple,
   saveQuickEdit,
+  setProductLimited,
+  zeroProductMinimumEverywhere,
   uploadProductManual,
   uploadProductPhoto,
 } from '../../services/productActionsGateway'
@@ -426,6 +433,7 @@ function QuickEditAction({ product, onChanged }: { product: ProductRecord; onCha
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
+  const [limited, setLimited] = useState(false)
 
   useEffect(() => {
     if (!detail) return
@@ -438,6 +446,7 @@ function QuickEditAction({ product, onChanged }: { product: ProductRecord; onCha
       profundidade: Number(detail.profundidade || 0),
       peso_bruto: Number(detail.peso_bruto ?? detail.peso_liq ?? 0),
     })
+    setLimited(detail.item_limitado === true || detail.item_limitado === 'true')
   }, [detail, product.descricao])
 
   const setNumber = (key: keyof QuickEditPayload, raw: string) => setValues((current) => current ? { ...current, [key]: raw === '' ? 0 : Number(raw.replace(',', '.')) } : current)
@@ -464,6 +473,33 @@ function QuickEditAction({ product, onChanged }: { product: ProductRecord; onCha
     }
   }
 
+  const zeroMinimum = async () => {
+    if (!values || !window.confirm('Zerar o estoque mínimo deste produto em todos os armazéns? Esta alteração será enviada à Omie.')) return
+    setSaving(true); setError(null); setMessage(null)
+    try { await zeroProductMinimumEverywhere(product); setValues({ ...values, estoque_minimo: 0 }); setMessage('Estoques mínimos zerados em todos os armazéns.'); await onChanged() }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Falha ao zerar estoques mínimos.') }
+    finally { setSaving(false) }
+  }
+
+  const mark = async (marker: 'OBSOLETO' | 'ENGENHARIA', label: string) => {
+    if (!detail || !values || !window.confirm(`Tornar este item ${label}? A descrição será alterada na Omie.`)) return
+    const next = { ...values, descricao: applyProductMarker(values.descricao, marker) }
+    setSaving(true); setError(null); setMessage(null)
+    try { await saveQuickEdit(product, detail, next); setValues(next); setMessage(`Produto marcado como ${label}.`); await onChanged() }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Falha ao alterar situação do produto.') }
+    finally { setSaving(false) }
+  }
+
+  const toggleLimited = async () => {
+    const next = !limited
+    const question = next ? 'Tornar este item limitado? Ele deixará de aparecer no filtro Sem estoque mínimo.' : 'Remover a marcação de item limitado?'
+    if (!window.confirm(question)) return
+    setSaving(true); setError(null); setMessage(null)
+    try { const result = await setProductLimited(product.codigo, next); setLimited(result.item_limitado); setMessage(result.item_limitado ? 'Item marcado como limitado.' : 'Marcação de item limitado removida.'); await onChanged() }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Falha ao atualizar item limitado.') }
+    finally { setSaving(false) }
+  }
+
   return (
     <ActionSection title="Editar produto">
       <AsyncFeedback state={detailState} loadingLabel="Carregando produto…" />
@@ -474,6 +510,7 @@ function QuickEditAction({ product, onChanged }: { product: ProductRecord; onCha
             <NumberField label="Estoque mínimo" value={values.estoque_minimo} onChange={(value) => setNumber('estoque_minimo', value)} />
             <NumberField label="Lead time (dias)" value={values.lead_time} onChange={(value) => setNumber('lead_time', value)} />
           </div>
+          <button type="button" className="thermo-button border border-red-200 bg-red-50 text-red-700" onClick={() => void zeroMinimum()} disabled={saving}>Zerar mínimos em todos os armazéns</button>
           <div className="grid gap-3 sm:grid-cols-2">
             <NumberField label="Altura (cm)" value={values.altura} onChange={(value) => setNumber('altura', value)} />
             <NumberField label="Largura (cm)" value={values.largura} onChange={(value) => setNumber('largura', value)} />
@@ -484,6 +521,11 @@ function QuickEditAction({ product, onChanged }: { product: ProductRecord; onCha
             <input aria-label="Foto do produto" type="file" accept="image/*" onChange={(event) => setPhoto(event.target.files?.[0] || null)} className="block w-full text-sm text-slate-600" />
             <p className="mt-1 text-xs text-slate-500">Opcional. O envio substitui a foto principal, como no legado.</p>
           </Field>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <button type="button" className="thermo-button border border-red-200 bg-red-50 text-red-700" onClick={() => void mark('OBSOLETO', 'obsoleto')} disabled={saving}>Tornar obsoleto</button>
+            <button type="button" className="thermo-button border border-amber-200 bg-amber-50 text-amber-800" onClick={() => void mark('ENGENHARIA', 'de engenharia')} disabled={saving}>Item de engenharia</button>
+            <button type="button" className="thermo-button thermo-button-secondary sm:col-span-2" onClick={() => void toggleLimited()} disabled={saving}>{limited ? 'Remover item limitado' : 'Tornar item limitado'}</button>
+          </div>
           <Feedback error={error} message={message} />
           <button type="button" className="thermo-button thermo-button-primary" onClick={() => void save()} disabled={saving}>
             {saving ? <LoaderCircle className="size-4 animate-spin" /> : <Pencil className="size-4" />}
@@ -622,6 +664,8 @@ function AddressesAction({ product, onChanged }: { product: ProductRecord; onCha
   const [selected, setSelected] = useState<ProductAddressItem | null>(null)
   const [destination, setDestination] = useState('')
   const [quantity, setQuantity] = useState('')
+  const [boxAddress, setBoxAddress] = useState<ProductAddressItem | null>(null)
+  const [boxCode, setBoxCode] = useState('P01')
   const [submitting, setSubmitting] = useState(false)
 
   const reload = async () => {
@@ -685,6 +729,17 @@ function AddressesAction({ product, onChanged }: { product: ProductRecord; onCha
     }
   }
 
+  const changeBox = async () => {
+    if (!boxAddress) return
+    let destination: string
+    try { destination = buildBoxAddress(boxAddress.endereco, boxCode) } catch (caught) { return setError(caught instanceof Error ? caught.message : 'Caixa inválida.') }
+    if (!window.confirm(`Mover todo o saldo de ${boxAddress.endereco} para ${destination}?`)) return
+    setSubmitting(true); setError(null)
+    try { await changeProductBox(product.codigo, boxAddress.endereco, boxCode); setMessage(`Caixa alterada para ${destination}.`); setBoxAddress(null); await reload(); await onChanged() }
+    catch (caught) { setError(caught instanceof Error ? caught.message : 'Falha ao alterar a caixa.') }
+    finally { setSubmitting(false) }
+  }
+
   return (
     <ActionSection title="Endereços do produto">
       {loading ? <LoadingState label="Carregando endereços…" /> : null}
@@ -697,6 +752,7 @@ function AddressesAction({ product, onChanged }: { product: ProductRecord; onCha
               <div className="font-mono text-sm font-bold text-thermo-navy">{formatQuantity(address.saldo, address.unidade || unit)}</div>
               <div className="flex gap-2">
                 <button type="button" className="thermo-button thermo-button-secondary" disabled={address.saldo <= 0 || submitting} onClick={() => beginMove(address)}><ArrowLeftRight className="size-4" />Trocar endereço</button>
+                <button type="button" className="thermo-button thermo-button-secondary" disabled={address.saldo <= 0 || submitting} onClick={() => { setBoxAddress(address); setBoxCode('P01'); setSelected(null); setError(null) }}>Alterar caixa</button>
                 <button type="button" className="thermo-button border border-red-200 bg-red-50 text-red-700" disabled={address.saldo > 0 || submitting} onClick={() => void remove(address)}><Trash2 className="size-4" />Excluir</button>
               </div>
             </div>
@@ -705,6 +761,14 @@ function AddressesAction({ product, onChanged }: { product: ProductRecord; onCha
                 <Field label="Novo endereço de destino"><input className="thermo-input" value={destination} onChange={(event) => setDestination(event.target.value)} placeholder="Bipe ou digite o destino" /></Field>
                 <Field label="Quantidade a mover"><input className="thermo-input" value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" /></Field>
                 <div className="flex gap-2 sm:col-span-2"><button type="button" className="thermo-button thermo-button-secondary" onClick={() => setSelected(null)}>Cancelar</button><button type="button" className="thermo-button thermo-button-primary" onClick={() => void move()} disabled={submitting}>Confirmar transferência</button></div>
+              </div>
+            ) : null}
+            {boxAddress?.endereco === address.endereco ? (
+              <div className="mt-4 grid gap-3 border-t border-thermo-border pt-4 sm:grid-cols-2">
+                <InfoLine label="Base do endereço" value={address.endereco.split('-').slice(0, 3).join('-')} />
+                <Field label="Código da caixa"><input className="thermo-input uppercase" value={boxCode} maxLength={3} onChange={(event) => setBoxCode(event.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3))} placeholder="P01" /></Field>
+                <div className="sm:col-span-2 text-sm text-slate-600">Novo endereço: <strong className="font-mono">{address.endereco.split('-').slice(0, 3).join('-')}-{boxCode || '—'}</strong></div>
+                <div className="flex gap-2 sm:col-span-2"><button type="button" className="thermo-button thermo-button-secondary" onClick={() => setBoxAddress(null)}>Cancelar</button><button type="button" className="thermo-button thermo-button-primary" onClick={() => void changeBox()} disabled={submitting}>Confirmar alteração da caixa</button></div>
               </div>
             ) : null}
           </article>
@@ -912,23 +976,34 @@ function MovementHistoryAction({ product }: { product: ProductRecord }) {
     `${product.codigo}\u0000${product.codigo_produto || ''}`,
   )
   const rows = state.value?.ajuste_estoque_lista || []
+  const balances = state.value?.saldos_atuais || []
+  const reconciledBalances = reconcileMovementBalances(rows, balances)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState<'all' | ReturnType<typeof classifyMovement>>('all')
+  const filteredRows = rows.filter((row) => (category === 'all' || classifyMovement(row) === category) && (!query.trim() || JSON.stringify(row).toLowerCase().includes(query.trim().toLowerCase())))
   return (
     <ActionSection title="Histórico de movimentação">
       <AsyncFeedback state={state} loadingLabel="Consultando histórico na Omie…" />
       {!state.loading && !state.error && rows.length === 0 ? <EmptyState label="Nenhuma movimentação encontrada no período consultado." /> : null}
       {state.value?.periodo ? <div className="text-xs text-slate-500">Período: {state.value.periodo.de || '—'} a {state.value.periodo.ate || '—'}</div> : null}
+      {balances.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{balances.map((balance) => <div key={balance.local_codigo} className="rounded-lg border border-thermo-border bg-white p-3"><InfoLine label={balance.local_nome || balance.local_codigo} value={`${formatNumber(balance.saldo)} ${product.unidade || 'UN'}`} /></div>)}</div> : null}
+      <div className="grid gap-2 sm:grid-cols-[1fr_auto]"><Field label="Buscar no histórico"><input type="search" className="thermo-input" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="SEP, NF-e, usuário ou destino" /></Field><Field label="Categoria"><select className="thermo-input" value={category} onChange={(event) => setCategory(event.target.value as typeof category)}><option value="all">Todos</option><option value="receiving">Recebimentos</option><option value="separation">Saídas SEP</option><option value="transfer">Transferências</option><option value="adjustment">Ajustes</option></select></Field></div>
       <div className="space-y-2">
-        {rows.map((row, index) => (
-          <article key={`${displayValue(row.id_ajuste)}-${index}`} className="rounded-xl border border-thermo-border bg-thermo-bg px-4 py-3">
+        {filteredRows.map((row) => {
+          const originalIndex = rows.indexOf(row)
+          return (
+          <article key={`${displayValue(row.id_ajuste)}-${originalIndex}`} className="rounded-xl border border-thermo-border bg-thermo-bg px-4 py-3">
             <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <InfoLine label="Data" value={displayValue(row.data || row.data_movimento)} />
               <InfoLine label="Tipo" value={displayValue(row.tipo || row.tipo_operacao || row.motivo)} />
               <InfoLine label="Local" value={displayValue(row.local_estoque || row.codigo_local_estoque || row.local)} />
               <InfoLine label="Quantidade" value={displayValue(row.quantidade || row.qtd || row.quan)} />
+              <div className="sm:col-span-2"><InfoLine label="Antes → depois (reconciliado do saldo oficial)" value={reconciledBalances[originalIndex] || '—'} /></div>
               <div className="sm:col-span-2 lg:col-span-4"><InfoLine label="Observação" value={displayValue(row.obs || row.observacao || row.descricao)} /></div>
             </div>
           </article>
-        ))}
+          )
+        })}
       </div>
     </ActionSection>
   )
