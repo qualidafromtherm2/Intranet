@@ -14,6 +14,7 @@ const { execFile } = require('child_process');
 const { promisify } = require('util');
 const JSZip = require('jszip');
 const supabase = require('../utils/supabase');
+const { listarAgentesPublicos, resolverAgente } = require('../utils/aiAgents');
 
 const OPENAI_URL = 'https://api.openai.com/v1/chat/completions';
 const REPORT_MAX_ROWS = 200;
@@ -738,7 +739,8 @@ async function tentarResponderComManuaisQualidade({
   apiKey,
   pergunta,
   memoria = {},
-  manualMediaMode = 'none'
+  manualMediaMode = 'none',
+  model = 'gpt-4o-mini'
 }) {
   if (!perguntaPedeManualQualidade(pergunta) && !(perguntaDependeDeContextoCurto(pergunta) && String(memoria?.ultimo_assunto?.assunto || '') === 'manuais_qualidade')) {
     return null;
@@ -812,7 +814,7 @@ async function tentarResponderComManuaisQualidade({
   const response = await chamarOpenAiComRetry(
     apiKey,
     {
-      model: 'gpt-4o-mini',
+      model: String(model || 'gpt-4o-mini').trim() || 'gpt-4o-mini',
       temperature: 0.1,
       max_tokens: 800,
       frequency_penalty: 0.2,
@@ -2743,7 +2745,8 @@ async function tentarResponderComManuais({
   pergunta,
   forceManual = false,
   messages = [],
-  manualMediaMode = 'none'
+  manualMediaMode = 'none',
+  model = 'gpt-4o-mini'
 }) {
   if (!dbPool || (!forceManual && !perguntaPedeManualBombaCalor(pergunta))) return null;
 
@@ -2857,7 +2860,7 @@ async function tentarResponderComManuais({
   const response = await chamarOpenAiComRetry(
     apiKey,
     {
-      model: 'gpt-4o-mini',
+      model: String(model || 'gpt-4o-mini').trim() || 'gpt-4o-mini',
       temperature: 0.1,
       max_tokens: 800,
       frequency_penalty: 0.2,
@@ -3913,7 +3916,7 @@ async function gerarPlanoSql(apiKey, pergunta, opts = {}) {
   const response = await chamarOpenAiComRetry(
     apiKey,
     {
-      model: 'gpt-4o-mini',
+      model: String(opts.model || 'gpt-4o-mini').trim() || 'gpt-4o-mini',
       temperature: 0.1,
       max_tokens: 1024,
       frequency_penalty: 0.1,
@@ -4154,7 +4157,7 @@ async function tentarConsultaDiretaConhecida(pergunta, req) {
   return null;
 }
 
-async function tentarResponderComSqlAuto({ apiKey, pergunta, req }) {
+async function tentarResponderComSqlAuto({ apiKey, pergunta, req, model = 'gpt-4o-mini' }) {
   if (!dbPool) return null;
 
   // 1) Atalhos determinísticos para perguntas recorrentes
@@ -4164,7 +4167,10 @@ async function tentarResponderComSqlAuto({ apiKey, pergunta, req }) {
   if (!perguntaPedeConsultaDados(pergunta)) return null;
 
   // 2) Geração SQL assistida por IA para perguntas gerais de dados
-  const plano = await gerarPlanoSql(apiKey, pergunta, { qualidade: isUsuarioQualidade(req) });
+  const plano = await gerarPlanoSql(apiKey, pergunta, {
+    qualidade: isUsuarioQualidade(req),
+    model
+  });
   let sql = normalizarSql(plano.sql);
   sql = aplicarLimiteSql(sql, REPORT_MAX_ROWS);
 
@@ -4919,7 +4925,7 @@ router.post('/manual-chat/finalize', express.json({ limit: '10kb' }), async (req
   }
 });
 
-async function tentarResponderComoTecnicoQualidade({ apiKey, pergunta, messages, memoriaPrompt, req }) {
+async function tentarResponderComoTecnicoQualidade({ apiKey, pergunta, messages, memoriaPrompt, req, model = 'gpt-4o-mini' }) {
   if (!isUsuarioQualidade(req) || !dbPool || !pergunta) return null;
 
   // 1) Intenção determinística (série / NF / análise)
@@ -4948,7 +4954,7 @@ async function tentarResponderComoTecnicoQualidade({ apiKey, pergunta, messages,
   const response = await chamarOpenAiComRetry(
     apiKey,
     {
-      model: 'gpt-4o-mini',
+      model: String(model || 'gpt-4o-mini').trim() || 'gpt-4o-mini',
       messages: [
         { role: 'developer', content: TECH_QUALIDADE_PROMPT },
         ...(memoriaPrompt ? [{ role: 'developer', content: `Contexto de memória curta do usuário:\n${memoriaPrompt}` }] : []),
@@ -5007,10 +5013,32 @@ router.get('/tech-mode', (req, res) => {
   });
 });
 
+// ─── GET /api/ai/agents ───────────────────────────────────────────────────────
+router.get('/agents', (req, res) => {
+  if (!req.session?.user?.id) {
+    return res.status(401).json({ ok: false, error: 'Não autenticado.' });
+  }
+  const agents = listarAgentesPublicos();
+  return res.json({
+    ok: true,
+    defaultAgent: 'auto',
+    agents
+  });
+});
+
 // ─── POST /api/ai/chat ────────────────────────────────────────────────────────
 router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
   const { messages } = req.body || {};
   const startedAt = Date.now();
+  const agente = resolverAgente(req.body?.agent);
+  const llmModel = String(agente.model || 'gpt-4o-mini').trim() || 'gpt-4o-mini';
+  const llmMaxTokens = Number(agente.maxTokens || 1024);
+  const llmTemperature = Number.isFinite(Number(agente.temperature)) ? Number(agente.temperature) : 0.4;
+  const jsonChat = (payload) => res.json({
+    ...payload,
+    agent: agente.id,
+    agentLabel: agente.label
+  });
 
   if (!Array.isArray(messages) || messages.length === 0) {
     logAiChatInfo('payload-invalido', { motivo: 'messages_ausente_ou_vazio' });
@@ -5065,7 +5093,9 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
     priorizarManuaisPorContexto,
     perguntaPedeManualAtual,
     priorizarManuais,
-    modoTecnicoQualidade
+    modoTecnicoQualidade,
+    agent: agente.id,
+    model: llmModel
   });
 
   // Modo Assistente Técnico Qualidade (série / NF / análise) — antes de FAQ/manuais genéricos
@@ -5076,7 +5106,8 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
         pergunta: perguntaContextual || perguntaAtual,
         messages: sanitizedMessages,
         memoriaPrompt,
-        req
+        req,
+        model: llmModel
       });
       if (respostaTech?.content) {
         await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
@@ -5088,7 +5119,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           respostaChars: respostaTech.content.length,
           tool: respostaTech.tool || null
         });
-        return res.json({
+        return jsonChat({
           content: respostaTech.content,
           techMode: true,
           tool: respostaTech.tool || null
@@ -5105,7 +5136,8 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
         apiKey,
         pergunta: perguntaContextual || perguntaAtual,
         memoria: memoriaUsuario,
-        manualMediaMode
+        manualMediaMode,
+        model: llmModel
       });
       if (respostaManualQualidade?.content) {
         await salvarMemoriaUsuarioChatbot(req, [
@@ -5121,7 +5153,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           manuais: Array.isArray(respostaManualQualidade.manuaisQualidade) ? respostaManualQualidade.manuaisQualidade.length : 0,
           previews: Array.isArray(respostaManualQualidade.manualPreviews) ? respostaManualQualidade.manualPreviews.length : 0
         });
-        return res.json({
+        return jsonChat({
           content: respostaManualQualidade.content,
           manualPreviews: Array.isArray(respostaManualQualidade.manualPreviews) ? respostaManualQualidade.manualPreviews : []
         });
@@ -5145,7 +5177,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           duracaoMs: Date.now() - startedAt,
           respostaChars: respostaDireta.length
         });
-        return res.json({ content: respostaDireta });
+        return jsonChat({ content: respostaDireta });
       }
     } catch (errDireta) {
       console.warn('[AI/Chat] Fallback para FAQ (consulta direta de agenda falhou):', errDireta?.message || errDireta);
@@ -5166,7 +5198,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           faqId: respostaFaq.id || null,
           area: respostaFaq.area || null
         });
-        return res.json({ content: respostaFaq.content });
+        return jsonChat({ content: respostaFaq.content });
       }
     } catch (errFaq) {
       console.warn('[AI/Chat] Fallback para próximas fontes (FAQ falhou):', errFaq?.message || errFaq);
@@ -5179,7 +5211,8 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
         apiKey,
         pergunta: perguntaContextual || perguntaAtual,
         messages: sanitizedMessages,
-        manualMediaMode
+        manualMediaMode,
+        model: llmModel
       });
       if (respostaManual?.content) {
         await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
@@ -5206,7 +5239,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           trechos: Array.isArray(respostaManual.trechos) ? respostaManual.trechos.length : 0,
           previews: Array.isArray(respostaManual.manualPreviews) ? respostaManual.manualPreviews.length : 0
         });
-        return res.json({
+        return jsonChat({
           content: respostaManual.content,
           manualPreviews: Array.isArray(respostaManual.manualPreviews) ? respostaManual.manualPreviews : []
         });
@@ -5230,7 +5263,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           faqId: respostaFaq.id || null,
           area: respostaFaq.area || null
         });
-        return res.json({ content: respostaFaq.content });
+        return jsonChat({ content: respostaFaq.content });
       }
     } catch (errFaq) {
       console.warn('[AI/Chat] Fallback para próximas fontes (FAQ falhou):', errFaq?.message || errFaq);
@@ -5239,7 +5272,12 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
 
   if (perguntaAtual && dbPool) {
     try {
-      const respostaSql = await tentarResponderComSqlAuto({ apiKey, pergunta: perguntaContextual || perguntaAtual, req });
+      const respostaSql = await tentarResponderComSqlAuto({
+        apiKey,
+        pergunta: perguntaContextual || perguntaAtual,
+        req,
+        model: llmModel
+      });
       if (respostaSql) {
         await salvarMemoriaUsuarioChatbot(req, extrairMemoriaCurtaDaConversa({
           pergunta: perguntaAtual,
@@ -5268,7 +5306,7 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
           duracaoMs: Date.now() - startedAt,
           respostaChars: respostaSql.length
         });
-        return res.json({ content: respostaSql });
+        return jsonChat({ content: respostaSql });
       }
     } catch (errSqlAuto) {
       console.warn('[AI/Chat] Fallback para modo conversa (auto-SQL falhou):', errSqlAuto?.message || errSqlAuto);
@@ -5279,14 +5317,14 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
     const response = await chamarOpenAiComRetry(
       apiKey,
       {
-        model: 'gpt-4o-mini',
+        model: llmModel,
         messages: [
           { role: 'developer', content: SYSTEM_PROMPT },
           ...(memoriaPrompt ? [{ role: 'developer', content: `Contexto de memória curta do usuário:\n${memoriaPrompt}` }] : []),
           ...sanitizedMessages
         ],
-        max_tokens: 1024,
-        temperature: 0.4,
+        max_tokens: Number.isFinite(llmMaxTokens) && llmMaxTokens > 0 ? llmMaxTokens : 1024,
+        temperature: llmTemperature,
         frequency_penalty: 0.3,
         presence_penalty: 0.1
       },
@@ -5340,9 +5378,11 @@ router.post('/chat', express.json({ limit: '50kb' }), async (req, res) => {
     }
     logAiChatInfo('sucesso-openai', {
       duracaoMs: Date.now() - startedAt,
-      respostaChars: content.length
+      respostaChars: content.length,
+      agent: agente.id,
+      model: llmModel
     });
-    return res.json({ content });
+    return jsonChat({ content });
 
   } catch (err) {
     return responderErroOpenAI(res, err, 'AI/Chat', req);
