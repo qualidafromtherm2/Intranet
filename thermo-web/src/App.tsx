@@ -55,7 +55,6 @@ import {
   Send,
   Settings2,
   Shield,
-  ShieldCheck,
   ShoppingCart,
   SlidersHorizontal,
   Sparkles,
@@ -334,34 +333,16 @@ function LoginScreen({
   }
 
   return (
-    <div className="min-h-screen bg-thermo-bg px-4 py-8">
-      <div className="mx-auto grid min-h-[calc(100vh-4rem)] max-w-6xl gap-8 lg:grid-cols-[minmax(0,1fr)_26rem]">
-        <section className="hidden rounded-[32px] border border-thermo-border bg-thermo-navy px-8 py-10 text-white shadow-xl lg:flex lg:flex-col lg:justify-between">
-          <div>
-            <img src="/branding/thermo-logo-fundo-escuro.png" alt="Thermo" className="h-10 w-auto" />
-            <div className="mt-8 max-w-xl text-4xl font-bold">Thermo usando backend, sessão e dados reais da Intranet atual.</div>
-          </div>
-          <div className="grid gap-3 text-sm text-slate-200 md:grid-cols-2">
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-              <div className="font-semibold text-white">Catálogo real</div>
-              <div className="mt-1">Menu e permissões vêm da árvore atual do sistema.</div>
-            </div>
-            <div className="rounded-2xl border border-white/10 bg-white/5 px-4 py-4">
-              <div className="font-semibold text-white">Migração limitada</div>
-              <div className="mt-1">Só a Lista de Produtos está navegável como tela migrada.</div>
-            </div>
-          </div>
-        </section>
-
-        <section className="flex items-center">
-          <div className="w-full rounded-[28px] border border-thermo-border bg-white p-6 shadow-sm md:p-8">
-            <div className="mb-6 flex items-center justify-between gap-4">
-              <img src="/branding/thermo-logo-principal.png" alt="Thermo" className="h-9 w-auto" />
-              <img src="/branding/thermo-simbolo.png" alt="" className="size-10 rounded-2xl object-cover" />
+    <div className="flex min-h-screen items-center justify-center bg-thermo-bg px-4 py-8">
+      <section className="w-full max-w-sm">
+          <div className="w-full rounded-2xl border border-thermo-border bg-white p-6 shadow-sm md:p-8">
+            <div className="mb-7 flex justify-center">
+              <div className="relative h-[62px] w-[220px] overflow-hidden" role="img" aria-label="Thermo — Sistema de Gestão">
+                <img src="/branding/thermo-logo-principal.png" alt="" className="absolute left-0 top-[-30px] w-[220px] max-w-none" />
+              </div>
             </div>
             <div className="mb-6">
-              <h1 className="text-2xl font-bold text-thermo-navy">Entrar</h1>
-              <p className="mt-2 text-sm text-slate-500">Use o mesmo usuário e senha da Intranet atual.</p>
+              <h1 className="text-center text-xl font-bold text-thermo-navy">Acessar o sistema</h1>
             </div>
 
             <form className="space-y-4" onSubmit={submit}>
@@ -370,7 +351,7 @@ function LoginScreen({
                 <input
                   value={user}
                   onChange={(event) => setUser(event.target.value)}
-                  className="w-full rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 outline-none focus:border-thermo-navy"
+                  className="w-full rounded-lg border border-thermo-border bg-white px-4 py-3 outline-none focus:border-thermo-navy focus:ring-2 focus:ring-thermo-navy/10"
                   autoComplete="username"
                   required
                 />
@@ -382,21 +363,20 @@ function LoginScreen({
                   type="password"
                   value={senha}
                   onChange={(event) => setSenha(event.target.value)}
-                  className="w-full rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 outline-none focus:border-thermo-navy"
+                  className="w-full rounded-lg border border-thermo-border bg-white px-4 py-3 outline-none focus:border-thermo-navy focus:ring-2 focus:ring-thermo-navy/10"
                   autoComplete="current-password"
                   required
                 />
               </label>
 
-              {error ? <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
+              {error ? <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div> : null}
 
               <button className="thermo-button thermo-button-primary w-full justify-center py-3" type="submit" disabled={busy}>
                 Entrar
               </button>
             </form>
           </div>
-        </section>
-      </div>
+      </section>
     </div>
   )
 }
@@ -567,9 +547,14 @@ function Sidebar({
   const content = (
     <aside className={clsx('flex h-full flex-col bg-thermo-navy text-slate-100 transition-[width] duration-150', collapsed ? 'w-[88px]' : 'w-[320px]')}>
       <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-4">
-        <div className={clsx('flex items-center gap-3 overflow-hidden', collapsed && 'justify-center')}>
-          <img src="/branding/thermo-simbolo.png" alt="" className="size-9 shrink-0 rounded-2xl" />
-          {!collapsed ? <img src="/branding/thermo-logo-fundo-escuro.png" alt="Thermo" className="h-7 w-auto" /> : null}
+        <div className={clsx('flex min-w-0 items-center overflow-hidden', collapsed && 'justify-center')}>
+          {collapsed ? (
+            <img src="/branding/thermo-simbolo.png" alt="Thermo" className="size-9 shrink-0 object-contain" />
+          ) : (
+            <div className="relative h-12 w-[168px] overflow-hidden" role="img" aria-label="Thermo — Sistema de Gestão">
+              <img src="/branding/thermo-logo-fundo-escuro.png" alt="" className="absolute left-0 top-[-20px] w-[168px] max-w-none" />
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -1326,12 +1311,6 @@ function App() {
   const canStoreMaterials = useMemo(() => isSelectorAllowed('#menu-guardar-materiais', navigation.selectorMap) || isSelectorAllowed('#menu-guardar-materiais-expedicao', navigation.selectorMap), [navigation.selectorMap])
   const canIdentifyProduct = useMemo(() => isSelectorAllowed('#menu-identificacao-produto', navigation.selectorMap) || isSelectorAllowed('#menu-identificacao-produto-expedicao', navigation.selectorMap), [navigation.selectorMap])
 
-  const topRightLabel = useMemo(() => {
-    if (!user) return null
-    const role = user.funcao_nome || user.roles[0] || 'Sessão ativa'
-    return `${role}${user.setor ? ` · ${user.setor}` : ''}`
-  }, [user])
-
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
 
@@ -1353,40 +1332,25 @@ function App() {
 
         <div className="min-w-0 flex-1">
           <header className="border-b border-thermo-border bg-white">
-            <div className="mx-auto flex max-w-[1760px] items-center justify-between gap-4 px-4 py-4 md:px-6 xl:px-8">
+            <div className="mx-auto flex h-14 max-w-[1760px] items-center justify-between gap-3 px-4 md:px-6 xl:px-8">
               <div className="flex items-center gap-3">
-                <button className="rounded-xl border border-thermo-border p-2 md:hidden" type="button" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
+                <button className="rounded-lg border border-thermo-border p-2 md:hidden" type="button" onClick={() => setMenuOpen(true)} aria-label="Abrir navegação">
                   <Menu className="size-4 text-thermo-navy" />
                 </button>
-                <img src="/branding/thermo-logo-principal.png" alt="Thermo" className="h-8 w-auto md:h-9" />
               </div>
 
-              <div className="flex items-center gap-3">
-                <div className="hidden rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-2 text-right md:block">
-                  <div className="text-sm font-semibold text-thermo-navy">{user.username}</div>
-                  <div className="text-xs text-slate-500">{topRightLabel}</div>
-                </div>
-                <button className="thermo-button thermo-button-secondary" type="button" onClick={() => void doLogout()}>
+              <div className="flex items-center gap-2">
+                <span className="hidden text-sm font-semibold text-thermo-navy sm:inline">{user.username}</span>
+                <button className="inline-flex h-9 items-center gap-2 rounded-lg border border-thermo-border bg-white px-3 text-sm font-semibold text-thermo-navy hover:bg-slate-50" type="button" onClick={() => void doLogout()}>
                   <LogOut className="size-4" />
-                  Sair
+                  <span className="hidden sm:inline">Sair</span>
                 </button>
               </div>
             </div>
           </header>
 
-          <main className="mx-auto max-w-[1760px] px-4 py-5 md:px-6 xl:px-8">
+          <main className="mx-auto max-w-[1760px] px-4 py-4 md:px-6 xl:px-8">
             {permissionError ? <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">{permissionError}</div> : null}
-
-            <div className="mb-5 flex flex-wrap items-center gap-2">
-              <span className="thermo-chip">
-                <ShieldCheck className="size-4 text-emerald-600" />
-                Sessão real ativa
-              </span>
-              <span className="thermo-chip">
-                <Lock className="size-4 text-slate-600" />
-                Itens não migrados ficam visíveis, mas bloqueados
-              </span>
-            </div>
 
             {activeView === 'home' ? (
               <HomeScreen
