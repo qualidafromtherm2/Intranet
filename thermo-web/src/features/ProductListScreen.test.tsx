@@ -208,4 +208,47 @@ describe('ProductListScreen', () => {
     await user.click(screen.getByRole('button', { name: /filtrar produtos/i }))
     expect(screen.getByLabelText(/estoque negativo/i)).toBeChecked()
   })
+
+  it('keeps only #ALMOX when secondary balances are zero and does not render false negative badges', () => {
+    hookState = {
+      ...hookState,
+      filtered: [
+        {
+          ...baseProduct,
+          codigo: '07.MP.N.70005',
+          saldo_almox: 12300,
+          saldo_expedicao: 0,
+          saldo_enderecado: 12300,
+          estoque_negativo: true,
+        },
+      ],
+      paginated: [
+        {
+          ...baseProduct,
+          codigo: '07.MP.N.70005',
+          saldo_almox: 12300,
+          saldo_expedicao: 0,
+          saldo_enderecado: 12300,
+          estoque_negativo: true,
+        },
+      ],
+    }
+
+    render(
+      <ProductListScreen
+        permissions={{
+          canOpenCart: true,
+          canOpenSeparation: true,
+          canEditCatalog: true,
+          cartReason: null,
+          separationReason: null,
+        }}
+      />,
+    )
+
+    expect(screen.getByText('#ALMOX')).toBeInTheDocument()
+    expect(screen.queryByText('Endereçado')).not.toBeInTheDocument()
+    expect(screen.queryByText('Locais:')).not.toBeInTheDocument()
+    expect(screen.queryAllByText(/Estoque negativo/i)).toHaveLength(0)
+  })
 })

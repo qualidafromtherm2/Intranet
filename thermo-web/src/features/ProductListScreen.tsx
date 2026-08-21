@@ -102,28 +102,62 @@ function describeAppliedFilters(filters: FiltersState) {
 
 function statusTone(product: ProductRecord) {
   if (product.saldo_endereco_sem_omie || product.saldo_divergente_endereco) return 'red'
-  if (product.expedicao_negativa || product.estoque_negativo) return 'red'
+  if (hasNegativeStock(product).length > 0) return 'red'
   if (product.abaixo_minimo) return 'amber'
   return 'green'
 }
 
-function statusLabel(product: ProductRecord) {
-  if (product.saldo_endereco_sem_omie) return 'Saldo em endereço sem Omie'
-  if (product.saldo_divergente_endereco) return 'Omie diferente dos endereços'
-  if (product.expedicao_negativa) return 'Expedição negativa'
-  if (product.estoque_negativo) return 'Estoque negativo'
-  if (product.abaixo_minimo) return 'Abaixo do estoque mínimo'
-  return 'Saldo estável'
+function toNumber(value: number | null | undefined) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }
 
 function renderStockLines(product: ProductRecord) {
   const lines = [
-    { label: '#ALMOX', value: quantity(product.saldo_almox, product.unidade), priority: true },
-    { label: 'Expedição', value: quantity(product.saldo_expedicao, product.unidade), priority: false },
-    { label: 'Endereçado', value: quantity(product.saldo_enderecado, product.unidade), priority: false },
+    { key: 'almox', label: '#ALMOX', numeric: toNumber(product.saldo_almox), priority: true },
+    { key: 'expedicao', label: 'Expedição', numeric: toNumber(product.saldo_expedicao), priority: false },
   ]
 
-  return lines
+  return lines.filter((line) => line.priority || line.numeric !== 0).map((line) => ({
+    ...line,
+    value: quantity(line.numeric, product.unidade),
+  }))
+}
+
+function hasNegativeStock(product: ProductRecord) {
+  return renderStockLines(product).filter((line) => line.numeric < 0)
+}
+
+function buildStatusFlags(product: ProductRecord) {
+  const flags: Array<{ key: string; tone: 'green' | 'amber' | 'red' | 'slate'; label: string }> = []
+  const negativeLines = hasNegativeStock(product)
+
+  if (negativeLines.length > 0) {
+    flags.push({
+      key: 'estoque-negativo',
+      tone: 'red',
+      label: negativeLines.length === 1 ? `${negativeLines[0]!.label} negativo` : 'Estoque negativo',
+    })
+  } else if (product.expedicao_negativa && toNumber(product.saldo_expedicao) < 0) {
+    flags.push({ key: 'expedicao-negativa', tone: 'red', label: 'Expedição negativa' })
+  }
+
+  if (product.saldo_endereco_sem_omie) {
+    flags.push({ key: 'saldo-endereco-sem-omie', tone: 'red', label: 'Saldo em endereço sem Omie' })
+  }
+
+  if (product.saldo_divergente_endereco) {
+    flags.push({ key: 'saldo-divergente-endereco', tone: 'red', label: 'Omie diferente dos endereços' })
+  }
+
+  if (product.estoque_minimo > 0) {
+    flags.push({
+      key: 'estoque-minimo',
+      tone: product.abaixo_minimo ? 'red' : 'green',
+      label: product.abaixo_minimo ? `Abaixo do mínimo · ${quantity(product.estoque_minimo, product.unidade)}` : `Mínimo · ${quantity(product.estoque_minimo, product.unidade)}`,
+    })
+  }
+
+  return flags
 }
 
 function StatusBadge({ tone, children }: { tone: 'green' | 'amber' | 'red' | 'slate'; children: string }) {
@@ -183,21 +217,21 @@ function ProductCard({
   onOpenActions: (product: ProductRecord) => void
 }) {
   const tone = statusTone(product)
-  const localSummary = product.locaisPositivos.length > 0 ? product.locaisPositivos.map((item) => item.nome).join(' · ') : 'Sem estoque por local'
   const stockLines = renderStockLines(product)
+  const statusFlags = buildStatusFlags(product)
 
   return (
     <article className="flex h-full flex-col rounded-xl border border-thermo-border bg-white shadow-sm" data-testid="product-card">
-      <div className="flex items-start gap-3 border-b border-thermo-border px-3 py-3">
+      <div className="flex items-start gap-3 border-b border-thermo-border px-3 py-2.5">
         {product.imageUrl ? (
           <img
             src={product.imageUrl}
             alt={`Imagem do produto ${product.codigo}`}
-            className="h-14 w-14 rounded-lg border border-thermo-border object-cover"
+            className="h-12 w-12 rounded-lg border border-thermo-border object-cover"
           />
         ) : (
           <div
-            className="flex h-14 w-14 items-center justify-center rounded-lg border border-dashed border-thermo-border bg-slate-50 text-slate-400"
+            className="flex h-12 w-12 items-center justify-center rounded-lg border border-dashed border-thermo-border bg-slate-50 text-slate-400"
             aria-label={`Produto ${product.codigo} sem imagem`}
           >
             <ImageOff className="size-5" />
@@ -207,13 +241,15 @@ function ProductCard({
           <div className="font-mono text-[11px] font-semibold text-slate-500">{product.codigo}</div>
           <h3 className="mt-0.5 line-clamp-2 text-[13px] leading-4 font-bold text-thermo-navy">{product.descricao}</h3>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
-            {(product.estoque_negativo || product.expedicao_negativa || product.saldo_endereco_sem_omie || product.saldo_divergente_endereco || product.abaixo_minimo) ? <StatusBadge tone={tone}>{statusLabel(product)}</StatusBadge> : null}
             {product.purchaseState === 'em_compra' ? <StatusBadge tone="amber">{product.compraStatus || 'Em compra'}</StatusBadge> : null}
+            {statusFlags.map((flag) => (
+              <StatusBadge key={flag.key} tone={flag.tone === 'green' ? tone : flag.tone}>{flag.label}</StatusBadge>
+            ))}
           </div>
         </div>
       </div>
 
-      <div className="space-y-2 px-3 py-3">
+      <div className="space-y-2 px-3 py-2.5">
         <div className="space-y-1.5">
           {stockLines.map((line) => (
             <div key={line.label} className={clsx('flex items-center justify-between rounded-md px-2 py-1 text-[11px]', line.priority ? 'bg-slate-100 text-slate-900' : 'bg-white text-slate-600')}>
@@ -221,33 +257,21 @@ function ProductCard({
               <span className={clsx('font-mono', line.priority ? 'font-extrabold' : 'font-semibold')}>{line.value}</span>
             </div>
           ))}
-          <div className="rounded-md border border-dashed border-thermo-border px-2 py-1 text-[11px] text-slate-500">
-            <span className="font-semibold text-slate-600">Locais:</span> {localSummary}
-          </div>
-        </div>
-
-        <div className="flex flex-wrap gap-1.5">
-          {product.estoque_minimo > 0 ? (
-            <StatusBadge tone={product.abaixo_minimo ? 'red' : 'green'}>{`Mínimo: ${quantity(product.estoque_minimo, product.unidade)}`}</StatusBadge>
-          ) : null}
-          {product.purchaseState === 'em_compra' ? (
-            <button
-              type="button"
-              className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800"
-              onClick={() => onOpenPurchase(product)}
-              title="Ver detalhes reais da compra"
-            >
-              Em compra
-            </button>
-          ) : null}
-          {(product.estoque_negativo || product.expedicao_negativa || product.saldo_endereco_sem_omie || product.saldo_divergente_endereco) && (
-            <StatusBadge tone={tone}>{statusLabel(product)}</StatusBadge>
-          )}
         </div>
       </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2 border-t border-thermo-border px-3 py-3">
-        <button className="thermo-button thermo-button-secondary shrink-0 px-3 py-2 text-xs" type="button" onClick={() => onOpenActions(product)}>
+      <div className="mt-auto flex items-center justify-between gap-2 border-t border-thermo-border px-3 py-2.5">
+        {product.purchaseState === 'em_compra' ? (
+          <button
+            type="button"
+            className="inline-flex min-h-9 items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800"
+            onClick={() => onOpenPurchase(product)}
+            title="Ver detalhes reais da compra"
+          >
+            Em compra
+          </button>
+        ) : <span />}
+        <button className="thermo-button thermo-button-secondary shrink-0 px-3 py-1.5 text-xs" type="button" onClick={() => onOpenActions(product)}>
           <Info className="size-4" />
           Ações
         </button>
@@ -276,9 +300,7 @@ function ProductTable({
             <th className="px-3 py-2.5">Exceção</th>
             <th className="px-3 py-2.5">#ALMOX</th>
             <th className="px-3 py-2.5">Exp.</th>
-            <th className="px-3 py-2.5">End.</th>
             <th className="px-3 py-2.5">Mínimo</th>
-            <th className="px-3 py-2.5">Locais</th>
             <th className="px-3 py-2.5">Ação</th>
           </tr>
         </thead>
@@ -301,12 +323,10 @@ function ProductTable({
                   '—'
                 )}
               </td>
-              <td className="px-3 py-2.5 text-slate-600">{(product.estoque_negativo || product.expedicao_negativa || product.saldo_endereco_sem_omie || product.saldo_divergente_endereco || product.abaixo_minimo) ? statusLabel(product) : '—'}</td>
+              <td className="px-3 py-2.5 text-slate-600">{buildStatusFlags(product).filter((flag) => flag.key !== 'estoque-minimo').map((flag) => flag.label).join(' · ') || '—'}</td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
-              <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_expedicao, product.unidade)}</td>
-              <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_enderecado, product.unidade)}</td>
+              <td className="px-3 py-2.5 font-mono text-slate-600">{toNumber(product.saldo_expedicao) !== 0 ? quantity(product.saldo_expedicao, product.unidade) : '—'}</td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{product.estoque_minimo > 0 ? quantity(product.estoque_minimo, product.unidade) : '—'}</td>
-              <td className="px-3 py-2.5 text-xs text-slate-500">{product.locaisPositivos.length > 0 ? product.locaisPositivos.map((location) => location.nome).join(' · ') : '—'}</td>
               <td className="px-3 py-2.5">
                 <button className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs" type="button" onClick={() => onOpenActions(product)}>
                   <Info className="size-4" />
@@ -513,18 +533,18 @@ export function ProductListScreen({
   return (
     <>
       <section className="rounded-[28px] border border-thermo-border bg-white shadow-sm">
-        <div className="border-b border-thermo-border px-4 py-4 md:px-6">
+        <div className="border-b border-thermo-border px-4 py-3 md:px-6">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-xl bg-thermo-navy px-4 py-2 text-sm font-semibold text-white">
+            <span className="inline-flex items-center gap-2 rounded-xl bg-thermo-navy px-3.5 py-1.5 text-sm font-semibold text-white">
               Lista de produtos
               <span className="rounded-full bg-white/15 px-2 py-0.5 text-xs">{filtered.length}</span>
             </span>
           </div>
         </div>
 
-        <div className="border-b border-thermo-border px-4 py-4 md:px-6">
-          <div className="flex flex-wrap items-center gap-2.5">
-            <label className="flex min-w-[18rem] flex-1 items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2.5">
+        <div className="border-b border-thermo-border px-4 py-3 md:px-6">
+          <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+            <label className="flex min-w-[15rem] flex-1 items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2">
               <Search className="size-4 text-slate-400" />
               <input
                 value={filters.search}
@@ -540,39 +560,39 @@ export function ProductListScreen({
               ) : null}
             </label>
 
-            <button className="thermo-toolbar-button" type="button" title="Ler QR Code" aria-label="Ler QR Code" onClick={() => openBridge('qr')}>
+            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Ler QR Code" aria-label="Ler QR Code" onClick={() => openBridge('qr')}>
               <QrCode className="size-4" />
               <span>QR</span>
             </button>
-            <button className="thermo-toolbar-button" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={openFilters}>
+            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={openFilters}>
               <Filter className="size-4" />
               <span>Filtrar</span>
               {appliedFilterCount > 0 ? <span className="rounded-full bg-thermo-red px-2 py-0.5 text-xs text-white">{appliedFilterCount}</span> : null}
             </button>
-            <button className="thermo-toolbar-button" type="button" title="Atualizar produtos" aria-label="Atualizar produtos" onClick={() => void reload()}>
+            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Atualizar produtos" aria-label="Atualizar produtos" onClick={() => void reload()}>
               <RefreshCw className={clsx('size-4', loading && 'animate-spin')} />
               <span>Atualizar</span>
             </button>
-            <button className="thermo-toolbar-button" type="button" title="Editar em massa" aria-label="Editar em massa" onClick={() => openBridge('bulk')}>
+            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Editar em massa" aria-label="Editar em massa" onClick={() => openBridge('bulk')}>
               <SquarePen className="size-4" />
               <span>Em massa</span>
             </button>
-            <button className={clsx('thermo-toolbar-button', viewMode === 'grid' && 'thermo-icon-button-active')} type="button" title="Visualização em cartões" aria-label="Visualização em cartões" onClick={() => setViewMode('grid')}>
+            <button className={clsx('thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm', viewMode === 'grid' && 'thermo-icon-button-active')} type="button" title="Visualização em cartões" aria-label="Visualização em cartões" onClick={() => setViewMode('grid')}>
               <Grid2X2 className="size-4" />
               <span>Cartões</span>
             </button>
-            <button className={clsx('thermo-toolbar-button', viewMode === 'list' && 'thermo-icon-button-active')} type="button" title="Visualização em lista" aria-label="Visualização em lista" onClick={() => setViewMode('list')}>
+            <button className={clsx('thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm', viewMode === 'list' && 'thermo-icon-button-active')} type="button" title="Visualização em lista" aria-label="Visualização em lista" onClick={() => setViewMode('list')}>
               <List className="size-4" />
               <span>Lista</span>
             </button>
-            <button className="thermo-toolbar-button disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('cart')} disabled={!permissions.canOpenCart} title={permissions.cartReason || 'Abrir painel de compras legado'}>
+            <button className="thermo-toolbar-button min-h-10 whitespace-nowrap px-3 py-1.5 text-xs md:text-sm disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('cart')} disabled={!permissions.canOpenCart} title={permissions.cartReason || 'Abrir painel de compras legado'}>
                 <ShoppingCart className="size-4" />
-                Compras
+                <span>Compras</span>
                 <span className="rounded-full bg-thermo-navy px-2 py-0.5 text-xs text-white">{cartCount}</span>
             </button>
-            <button className="thermo-toolbar-button disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('separation')} disabled={!permissions.canOpenSeparation} title={permissions.separationReason || 'Abrir separações legadas'}>
+            <button className="thermo-toolbar-button min-h-10 whitespace-nowrap px-3 py-1.5 text-xs md:text-sm disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('separation')} disabled={!permissions.canOpenSeparation} title={permissions.separationReason || 'Abrir separações legadas'}>
                 <ClipboardList className="size-4" />
-                Separações
+                <span>Separações</span>
                 <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">{permissions.canOpenSeparation ? 'Legado' : 'Bloqueado'}</span>
             </button>
           </div>
