@@ -1,0 +1,7 @@
+export type PirMode = 'mp' | 'sem_mp' | 'eng'
+export interface PirPendingItem { id: number; numero_nfe?: string; numero_pedido?: string; lote?: string; codigo_produto?: string; descricao_produto?: string; qtd?: number | string; unidade?: string; criado_em?: string; motivo_sem_nfe?: string; produto_url_imagem?: string; primeira_vez?: boolean; fornecedor_mudou?: boolean; fornecedor_anterior?: string; fornecedor_atual?: string; produto_customizado?: boolean; pir_vai_direto_identificacao?: boolean; necessario_eng?: boolean; necessario_eng_liberado?: boolean; pir_eng_status?: string | null; tem_alteracao?: boolean; qtd_alteracoes?: number; po_codigo_produto?: string | number }
+export interface PirInspectionInput { cod_produto: string; nfe: string; frequencia: string; quantidade_ok: number; quantidade_nok: number | null }
+export interface PirPlanItem { id: number; id_omie: string | number; codigo: string; frequencia: number; o_que_verificar: string; foto_url?: string | null }
+export interface PirProductOption { codigo?: string; codigo_produto?: string | number; descricao?: string; url_imagem?: string }
+export interface PirReportItem { id: number; cod_produto?: string; data_inspecao?: string; nfe?: string; frequencia?: string; status?: string; quantidade_ok?: number | string; quantidade_nok?: number | string }
+export interface PirCodeSummary { codigo: string; descricao: string; pir: boolean }
