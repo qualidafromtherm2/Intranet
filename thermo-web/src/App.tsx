@@ -73,6 +73,7 @@ import { ModalShell } from './components/ModalShell'
 import { ProductListScreen } from './features/ProductListScreen'
 import { CalendarScreen } from './features/calendar'
 import { FreightSimulatorScreen } from './features/freight'
+import { FirstPieceScreen } from './features/first-piece'
 import { IdentifyProductScreen, StoreMaterialsScreen } from './features/logistics'
 import { MachineStockScreen } from './features/inventory/MachineStockScreen'
 import { LogisticsReportScreen } from './features/logistics-report/LogisticsReportScreen'
@@ -82,10 +83,12 @@ import { PirScreen } from './features/pir'
 import { PrintAgentConfigScreen } from './features/print-agent-config'
 import { ProductRegistrationScreen } from './features/product-registration'
 import { ProductionRegistrationScreen } from './features/production-registration'
+import { ProductionRecordsScreen } from './features/production-records'
 import { SalesReportScreen } from './features/sales-report'
 import { SeparationWorkspace } from './features/separation/SeparationWorkspace'
 import { ShippingScreen } from './features/shipping/ShippingScreen'
 import { SalesControlScreen } from './features/sales-control'
+import { SalesChartsScreen } from './features/sales-charts'
 import { StockAdjustmentScreen } from './features/stock-adjustment'
 import { WarehouseScreen } from './features/warehouses'
 import { getPilotDataCacheState, prefetchPilotData } from './hooks/usePilotData'
@@ -1357,6 +1360,9 @@ function App() {
   const canViewMinimumStock = useMemo(() => isSelectorAllowed('#menu-estoque-minimo', navigation.selectorMap), [navigation.selectorMap])
   const canRegisterProduction = useMemo(() => isSelectorAllowed('#menu-registrar-producao', navigation.selectorMap), [navigation.selectorMap])
   const canViewSalesControl = useMemo(() => isSelectorAllowed('#menu-vendas-controle', navigation.selectorMap), [navigation.selectorMap])
+  const canUseFirstPiece = useMemo(() => isSelectorAllowed('#menu-producao-primeira-peca-ok', navigation.selectorMap), [navigation.selectorMap])
+  const canViewProductionRecords = useMemo(() => isSelectorAllowed('#menu-registro-producao', navigation.selectorMap), [navigation.selectorMap])
+  const canViewSalesCharts = useMemo(() => isSelectorAllowed('#menu-vendas-graficos', navigation.selectorMap), [navigation.selectorMap])
 
   if (busy && !user && !authError) return <LoadingShell message="Validando sessão real…" />
   if (!user) return <LoginScreen busy={busy} error={authError} onSubmit={loginSubmit} />
@@ -1451,6 +1457,12 @@ function App() {
               <ProductionRegistrationScreen username={user.username} allowed={canRegisterProduction} />
             ) : activeView === 'sales-control' ? (
               <SalesControlScreen allowed={canViewSalesControl} />
+            ) : activeView === 'first-piece' ? (
+              <FirstPieceScreen allowed={canUseFirstPiece} />
+            ) : activeView === 'production-records' ? (
+              canViewProductionRecords ? <ProductionRecordsScreen /> : <PermissionDenied feature="Registro de produção" />
+            ) : activeView === 'sales-charts' ? (
+              canViewSalesCharts ? <SalesChartsScreen /> : <PermissionDenied feature="Gráficos de Vendas" />
             ) : (
               <MachineStockScreen allowed={canViewMachineStock} />
             )}

@@ -275,6 +275,24 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
     }
   }
 
+  if (selector === '#menu-producao-primeira-peca-ok') {
+    return {
+      icon: itemIconMap[selector] ?? 'badge-check',
+      migrationStatus: 'migrated',
+      view: 'first-piece',
+      destination: '/production/first-piece',
+    }
+  }
+
+  if (selector === '#menu-registro-producao') {
+    return {
+      icon: itemIconMap[selector] ?? 'clipboard-list',
+      migrationStatus: 'migrated',
+      view: 'production-records',
+      destination: '/production/records',
+    }
+  }
+
   if (selector === '#menu-vendas-relatorio') {
     return {
       icon: itemIconMap[selector] ?? 'file-chart-column',
@@ -290,6 +308,15 @@ function inferMeta(node: PermissionNode, moduleKey: string): NavMeta {
       migrationStatus: 'migrated',
       view: 'sales-control',
       destination: '/sales/orders',
+    }
+  }
+
+  if (selector === '#menu-vendas-graficos') {
+    return {
+      icon: itemIconMap[selector] ?? 'chart-column',
+      migrationStatus: 'migrated',
+      view: 'sales-charts',
+      destination: '/sales/charts',
     }
   }
 
