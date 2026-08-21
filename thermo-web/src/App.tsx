@@ -49,6 +49,7 @@ import {
   Printer,
   Receipt,
   RefreshCw,
+  Search,
   ScanSearch,
   SearchCheck,
   Send,
@@ -456,11 +457,15 @@ function SidebarItem({
 function SidebarSection({
   section,
   collapsed,
+  opened,
+  onToggle,
   activeView,
   onNavigate,
 }: {
   section: ShellNavSection
   collapsed: boolean
+  opened: boolean
+  onToggle: () => void
   activeView: AppView
   onNavigate: (view: AppView) => void
 }) {
@@ -468,11 +473,19 @@ function SidebarSection({
 
   return (
     <section className="space-y-2">
-      <div className={clsx('flex items-center gap-2 px-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400', collapsed && 'justify-center px-0')}>
-        <SectionIcon className="size-3.5" />
-        {!collapsed ? <span>{section.label}</span> : null}
-      </div>
-      <div className="space-y-1">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={opened}
+        className={clsx('flex w-full items-center gap-2 px-2 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-400', collapsed ? 'justify-center px-0' : 'justify-between')}
+      >
+        <span className="flex items-center gap-2">
+          <SectionIcon className="size-3.5" />
+          {!collapsed ? <span>{section.label}</span> : null}
+        </span>
+        {!collapsed ? <ChevronRight className={clsx('size-3.5 transition-transform', opened && 'rotate-90')} /> : null}
+      </button>
+      {opened ? <div className="space-y-1">
         {section.children.map((item) => (
           <div key={item.id} className="space-y-1">
             <SidebarItem item={item} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
@@ -485,9 +498,41 @@ function SidebarSection({
             ) : null}
           </div>
         ))}
-      </div>
+      </div> : null}
     </section>
   )
+}
+
+function useAccordionState(storageKey: string, ids: string[]) {
+  const [openIds, setOpenIds] = useState<string[]>(() => {
+    if (typeof window === 'undefined') return ids
+    try {
+      const raw = window.sessionStorage.getItem(storageKey)
+      if (!raw) return ids
+      const parsed = JSON.parse(raw) as string[]
+      return Array.isArray(parsed) ? parsed : ids
+    } catch {
+      return ids
+    }
+  })
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      window.sessionStorage.setItem(storageKey, JSON.stringify(openIds))
+    }
+  }, [openIds, storageKey])
+
+  useEffect(() => {
+    setOpenIds((current) => current.filter((id) => ids.includes(id)))
+  }, [ids])
+
+  return {
+    openIds,
+    setOpenIds,
+    toggle: (id: string) => setOpenIds((current) => (current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id])),
+    collapseAll: () => setOpenIds([]),
+    expandAll: () => setOpenIds(ids),
+  }
 }
 
 function Sidebar({
@@ -507,6 +552,9 @@ function Sidebar({
   onNavigate: (view: AppView) => void
   navigation: ShellNavigationCatalog
 }) {
+  const sectionIds = navigation.sections.filter((section) => section.key !== 'top').map((section) => section.id)
+  const accordion = useAccordionState('thermo.sidebar.sections', sectionIds)
+
   const content = (
     <aside className={clsx('flex h-full flex-col bg-thermo-navy text-slate-100 transition-[width] duration-150', collapsed ? 'w-[88px]' : 'w-[320px]')}>
       <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-4">
@@ -548,9 +596,25 @@ function Sidebar({
         </button>
       </div>
 
+      {!collapsed ? (
+        <div className="flex items-center justify-end gap-2 px-3 pb-2 text-[11px] font-semibold text-slate-300">
+          <button type="button" onClick={accordion.collapseAll}>Recolher todos</button>
+          <span>·</span>
+          <button type="button" onClick={accordion.expandAll}>Expandir todos</button>
+        </div>
+      ) : null}
+
       <div className="flex-1 space-y-5 overflow-y-auto px-3 pb-6">
         {navigation.sections.filter((section) => section.key !== 'top').map((section) => (
-          <SidebarSection key={section.id} section={section} collapsed={collapsed} activeView={activeView} onNavigate={onNavigate} />
+          <SidebarSection
+            key={section.id}
+            section={section}
+            collapsed={collapsed}
+            opened={accordion.openIds.includes(section.id)}
+            onToggle={() => accordion.toggle(section.id)}
+            activeView={activeView}
+            onNavigate={onNavigate}
+          />
         ))}
       </div>
     </aside>
@@ -559,8 +623,57 @@ function Sidebar({
   if (!open) return <div className="hidden h-full md:block">{content}</div>
 
   return (
-    <ModalShell open title="Navegação operacional" onClose={onClose} panelStyle={{ width: 'min(92vw, 24rem)', maxWidth: '24rem', flexShrink: 0 }} panelClassName="bg-transparent">
-      <div className="-mx-5 -my-4 h-[calc(100%+2rem)]">{content}</div>
+    <ModalShell open title="Navegação" onClose={onClose} panelStyle={{ width: 'min(88vw, 360px)', maxWidth: '360px', minHeight: '100dvh', flexShrink: 0 }} panelClassName="bg-transparent">
+      <aside className="-mx-5 -my-4 flex h-[100dvh] w-[min(88vw,360px)] flex-col bg-thermo-navy text-slate-100">
+        <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
+          <div className="flex items-center gap-3">
+            <img src="/branding/thermo-simbolo.png" alt="" className="size-9 rounded-2xl" />
+            <div>
+              <div className="text-sm font-bold text-white">Navegação</div>
+              <div className="text-xs text-slate-400">Menu</div>
+            </div>
+          </div>
+          <button className="flex size-11 items-center justify-center rounded-xl border border-white/10" type="button" onClick={onClose} aria-label="Fechar navegação">
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="border-t border-white/8 px-3 py-3">
+          <button
+            type="button"
+            onClick={() => {
+              onNavigate('home')
+              onClose()
+            }}
+            className={clsx(
+              'flex w-full items-center gap-3 rounded-xl border px-3 py-3 text-left text-sm',
+              activeView === 'home' ? 'border-red-400/40 bg-red-500/15 text-white' : 'border-transparent text-slate-100',
+            )}
+          >
+            <Home className="size-5 shrink-0" />
+            <span className="flex-1">Página inicial</span>
+          </button>
+        </div>
+        <div className="flex items-center justify-between px-3 pb-2 text-[11px] font-semibold text-slate-300">
+          <button type="button" onClick={accordion.collapseAll}>Recolher todos</button>
+          <button type="button" onClick={accordion.expandAll}>Expandir todos</button>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto px-3 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          {navigation.sections.filter((section) => section.key !== 'top').map((section) => (
+            <SidebarSection
+              key={`mobile-${section.id}`}
+              section={section}
+              collapsed={false}
+              opened={accordion.openIds.includes(section.id)}
+              onToggle={() => accordion.toggle(section.id)}
+              activeView={activeView}
+              onNavigate={(view) => {
+                onNavigate(view)
+                onClose()
+              }}
+            />
+          ))}
+        </div>
+      </aside>
     </ModalShell>
   )
 }
@@ -574,7 +687,33 @@ function ModulesSection({
   activeView: AppView
   onNavigate: (view: AppView) => void
 }) {
-  const [openSection, setOpenSection] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  type SectionWithEntries = ShellNavSection & { _entries?: ReturnType<typeof flattenItems> }
+  const filteredSections = useMemo(() => {
+    const search = query.trim().toLowerCase()
+    if (!search) return sections
+    return sections
+      .map((section) => {
+        const children = flattenItems(section.children).filter((item) => item.label.toLowerCase().includes(search))
+        return { ...section, _entries: children }
+      })
+      .filter((section) => section._entries.length > 0)
+  }, [query, sections]) as SectionWithEntries[]
+  const sectionIds = filteredSections.map((section) => section.id)
+  const accordion = useAccordionState('thermo.home.modules', sectionIds)
+
+  useEffect(() => {
+    const currentSection = sections.find((section) => flattenItems(section.children).some((item) => item.view === activeView && item.migrationStatus === 'migrated'))
+    if (currentSection) {
+      accordion.setOpenIds((current) => (current.includes(currentSection.id) ? current : [...current, currentSection.id]))
+    }
+  }, [activeView, sections])
+
+  useEffect(() => {
+    if (query.trim()) {
+      accordion.expandAll()
+    }
+  }, [query, sectionIds.join('|')])
 
   return (
     <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
@@ -583,19 +722,28 @@ function ModulesSection({
           <div className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Módulos</div>
           <h3 className="mt-1 text-base font-bold text-thermo-navy">Áreas permitidas nesta sessão</h3>
         </div>
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+          <button type="button" onClick={accordion.collapseAll}>Recolher todos</button>
+          <span>·</span>
+          <button type="button" onClick={accordion.expandAll}>Expandir todos</button>
+        </div>
       </div>
+      <label className="mb-3 flex items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2 text-sm text-slate-600">
+        <Search className="size-4 text-slate-400" />
+        <input value={query} onChange={(event) => setQuery(event.target.value)} className="min-w-0 flex-1 bg-transparent outline-none" placeholder="Pesquisar página ou módulo" />
+      </label>
       <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-        {sections.map((section) => {
+        {filteredSections.map((section) => {
           const Icon = getIconComponent(section.icon)
-          const opened = openSection === section.id
-          const entries = flattenItems(section.children)
+          const opened = accordion.openIds.includes(section.id)
+          const entries = section._entries ?? flattenItems(section.children)
           return (
             <article key={section.id} className="rounded-2xl border border-thermo-border bg-thermo-bg">
               <button
                 type="button"
                 className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
                 aria-expanded={opened}
-                onClick={() => setOpenSection((current) => (current === section.id ? null : section.id))}
+                onClick={() => accordion.toggle(section.id)}
               >
                 <div className="flex items-center gap-3">
                   <span className="flex size-9 items-center justify-center rounded-xl border border-thermo-border bg-white text-thermo-navy">
@@ -769,7 +917,7 @@ function HomeScreen({
       <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="space-y-4">
           <section className="rounded-3xl border border-thermo-border bg-white p-4 shadow-sm">
-            <div className="mb-3 grid gap-3 md:grid-cols-4">
+            <div className="mb-3 grid grid-cols-2 gap-3 xl:grid-cols-4">
               <article className="rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3">
                 <div className="text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">Reuniões hoje</div>
                 <div className="mt-2 text-2xl font-bold text-thermo-navy">{meetingsToday}</div>
@@ -841,7 +989,7 @@ function HomeScreen({
             {calendarError ? <div className="mb-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{calendarError}</div> : null}
             {loadingCalendar ? <div className="mb-4 rounded-2xl border border-thermo-border bg-thermo-bg px-4 py-3 text-sm text-slate-500">Carregando agenda real…</div> : null}
 
-            <div className="grid grid-cols-7 gap-2 text-center text-[11px] font-bold uppercase tracking-[0.14em] text-slate-500">
+            <div className="grid grid-cols-7 gap-1 text-center text-[10px] font-bold uppercase tracking-[0.08em] text-slate-500 md:gap-2 md:text-[11px]">
               {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
                 <div key={label} className="px-1 py-2">
                   {label}
@@ -853,6 +1001,18 @@ function HomeScreen({
                 const dayReminders = dayData?.reminders ?? []
                 const selected = selectedDate === day.iso
                 const isToday = day.iso === todayIso
+                const isPast = day.iso < todayIso
+                const toneCounts = {
+                  violets: dayReservations.filter((item) => String(item.tipo || '').toLowerCase().includes('audit')).length,
+                  greens: dayReservations.filter((item) => {
+                    const type = String(item.tipo || '').toLowerCase()
+                    return !type.includes('audit') && !type.includes('online') && !type.includes('visita') && !type.includes('evento')
+                  }).length,
+                  skies: dayReservations.filter((item) => String(item.tipo || '').toLowerCase().includes('online')).length,
+                  oranges: dayReservations.filter((item) => String(item.tipo || '').toLowerCase().includes('visita')).length,
+                  pinks: dayReservations.filter((item) => String(item.tipo || '').toLowerCase().includes('evento')).length,
+                  reminders: dayReminders.length,
+                }
                 return (
                   <button
                     key={day.iso}
@@ -863,31 +1023,37 @@ function HomeScreen({
                       else setBridgeDay(day.iso)
                     }}
                     className={clsx(
-                      'min-h-[132px] rounded-2xl border p-2 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40',
+                      'aspect-[1/1.1] min-h-[68px] rounded-xl border p-1.5 text-left transition focus:outline-none focus:ring-2 focus:ring-thermo-navy/40 md:min-h-[92px] md:rounded-2xl md:p-2',
                       selected ? 'border-thermo-navy bg-slate-50' : 'border-thermo-border bg-thermo-bg hover:border-thermo-navy/30',
-                      day.out && 'opacity-40',
+                      day.out && 'opacity-35',
+                      isPast && 'opacity-55',
                       isToday && 'ring-1 ring-thermo-red/50',
                     )}
+                    title={[
+                      formatDateLabel(day.iso),
+                      ...dayReservations.slice(0, 3).map((item) => `${formatTime(item.inicio)} ${item.tema || getReservationTypeLabel(item)} · ${getReservationTypeLabel(item)}`),
+                      ...dayReminders.slice(0, 1).map((item) => `Lembrete · ${item.texto}`),
+                    ].join('\n')}
                   >
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-bold text-thermo-navy">{day.day}</span>
-                      {isToday ? <span className="rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-bold text-red-700">Hoje</span> : null}
+                    <div className="mb-1 flex items-center justify-between">
+                      <span className="text-xs font-bold text-thermo-navy md:text-sm">{day.day}</span>
+                      {isToday ? <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">Hoje</span> : null}
                     </div>
 
-                    <div className="space-y-1">
-                      {dayReservations.slice(0, 3).map((item) => (
-                        <div key={`${item.id}-${item.data}`} className={clsx('rounded-lg border px-2 py-1 text-[11px] leading-tight', getReservationTypeTone(item))}>
-                          <div className="font-bold">{formatTime(item.inicio)} {item.tema || getReservationTypeLabel(item)}</div>
-                          <div className="truncate opacity-80">{getReservationTypeLabel(item)}</div>
-                        </div>
-                      ))}
-                      {dayReminders.slice(0, 1).map((item) => (
-                        <div key={`rem-${item.id}`} className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
-                          Lembrete · {item.texto}
-                        </div>
-                      ))}
-                      {dayReservations.length + dayReminders.length === 0 ? <div className="pt-6 text-[11px] font-medium text-slate-400">Reservar</div> : null}
-                      {dayReservations.length + dayReminders.length > 3 ? <div className="text-[11px] font-semibold text-slate-500">+{dayReservations.length + dayReminders.length - 3}</div> : null}
+                    <div className="mt-auto flex min-h-[32px] flex-col justify-end gap-1 md:min-h-[44px]">
+                      <div className="flex flex-wrap gap-1">
+                        {toneCounts.violets > 0 ? <span className="size-2 rounded-full bg-violet-500" aria-label={`Auditório ${toneCounts.violets}`} /> : null}
+                        {toneCounts.greens > 0 ? <span className="size-2 rounded-full bg-emerald-500" aria-label={`Sala ${toneCounts.greens}`} /> : null}
+                        {toneCounts.skies > 0 ? <span className="size-2 rounded-full bg-sky-500" aria-label={`Online ${toneCounts.skies}`} /> : null}
+                        {toneCounts.oranges > 0 ? <span className="size-2 rounded-full bg-orange-500" aria-label={`Visita ${toneCounts.oranges}`} /> : null}
+                        {toneCounts.pinks > 0 ? <span className="size-2 rounded-full bg-pink-500" aria-label={`Evento ${toneCounts.pinks}`} /> : null}
+                        {toneCounts.reminders > 0 ? <span className="size-2 rounded-full bg-amber-400" aria-label={`Lembrete ${toneCounts.reminders}`} /> : null}
+                      </div>
+                      {dayReservations.length + dayReminders.length > 0 ? (
+                        <div className="text-[10px] font-semibold text-slate-500 md:text-[11px]">+{dayReservations.length + dayReminders.length}</div>
+                      ) : (
+                        <div className="text-[10px] font-medium text-slate-400">Reservar</div>
+                      )}
                     </div>
                   </button>
                 )
