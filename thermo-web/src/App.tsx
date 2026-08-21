@@ -1002,6 +1002,19 @@ function HomeScreen({
                 const selected = selectedDate === day.iso
                 const isToday = day.iso === todayIso
                 const isPast = day.iso < todayIso
+                const visibleDayItems = [
+                  ...dayReservations.slice(0, 2).map((item) => ({
+                    key: `reservation-${item.id}-${item.data}`,
+                    label: `${formatTime(item.inicio)} ${item.tema || getReservationTypeLabel(item)}`,
+                    tone: getReservationTypeTone(item),
+                  })),
+                  ...dayReminders.slice(0, 1).map((item) => ({
+                    key: `reminder-${item.id}`,
+                    label: `Lembrete ${item.texto}`,
+                    tone: 'border-amber-200 bg-amber-50 text-amber-800',
+                  })),
+                ].slice(0, 2)
+                const overflowCount = Math.max(dayReservations.length + dayReminders.length - visibleDayItems.length, 0)
                 const toneCounts = {
                   violets: dayReservations.filter((item) => String(item.tipo || '').toLowerCase().includes('audit')).length,
                   greens: dayReservations.filter((item) => {
@@ -1040,7 +1053,32 @@ function HomeScreen({
                       {isToday ? <span className="rounded-full bg-red-50 px-1.5 py-0.5 text-[9px] font-bold text-red-700">Hoje</span> : null}
                     </div>
 
-                    <div className="mt-auto flex min-h-[32px] flex-col justify-end gap-1 md:min-h-[44px]">
+                    <div className="flex min-h-[32px] flex-1 flex-col justify-end gap-1 md:min-h-[44px]">
+                      {visibleDayItems.length > 0 ? (
+                        <div className="space-y-1">
+                          {visibleDayItems.slice(0, 1).map((item) => (
+                            <div
+                              key={item.key}
+                              className={clsx(
+                                'truncate rounded-md border px-1.5 py-0.5 text-[9px] font-semibold leading-tight md:text-[10px]',
+                                item.tone,
+                              )}
+                            >
+                              {item.label}
+                            </div>
+                          ))}
+                          {visibleDayItems.length > 1 ? (
+                            <div
+                              className={clsx(
+                                'hidden truncate rounded-md border px-1.5 py-0.5 text-[10px] font-semibold leading-tight md:block',
+                                visibleDayItems[1]?.tone,
+                              )}
+                            >
+                              {visibleDayItems[1]?.label}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
                       <div className="flex flex-wrap gap-1">
                         {toneCounts.violets > 0 ? <span className="size-2 rounded-full bg-violet-500" aria-label={`Auditório ${toneCounts.violets}`} /> : null}
                         {toneCounts.greens > 0 ? <span className="size-2 rounded-full bg-emerald-500" aria-label={`Sala ${toneCounts.greens}`} /> : null}
@@ -1050,7 +1088,9 @@ function HomeScreen({
                         {toneCounts.reminders > 0 ? <span className="size-2 rounded-full bg-amber-400" aria-label={`Lembrete ${toneCounts.reminders}`} /> : null}
                       </div>
                       {dayReservations.length + dayReminders.length > 0 ? (
-                        <div className="text-[10px] font-semibold text-slate-500 md:text-[11px]">+{dayReservations.length + dayReminders.length}</div>
+                        <div className="text-[10px] font-semibold text-slate-500 md:text-[11px]">
+                          {overflowCount > 0 ? `+${overflowCount}` : `${dayReservations.length + dayReminders.length} item(ns)`}
+                        </div>
                       ) : (
                         <div className="text-[10px] font-medium text-slate-400">Reservar</div>
                       )}
