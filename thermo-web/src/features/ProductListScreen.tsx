@@ -3,6 +3,7 @@ import {
   ArrowLeftRight,
   CheckCircle2,
   ClipboardList,
+  Ellipsis,
   ExternalLink,
   Filter,
   Grid2X2,
@@ -355,8 +356,9 @@ function ProductTable({
   return (
     <div className="overflow-x-auto rounded-xl border border-thermo-border">
       <table className="min-w-full border-collapse text-sm">
-        <thead className="bg-thermo-bg text-left text-[10px] uppercase tracking-[0.14em] text-slate-500">
+        <thead className="sticky top-0 z-10 bg-thermo-bg text-left text-[10px] uppercase tracking-[0.14em] text-slate-500">
           <tr>
+            <th className="px-3 py-2.5">Foto</th>
             <th className="px-3 py-2.5">Código</th>
             <th className="px-3 py-2.5">Descrição</th>
             <th className="px-3 py-2.5">Compra</th>
@@ -370,20 +372,52 @@ function ProductTable({
         </thead>
         <tbody>
           {rows.map((product) => (
-            <tr key={product.codigo} className="border-t border-thermo-border align-top">
+            <tr
+              key={product.codigo}
+              className="cursor-pointer border-t border-thermo-border align-top transition hover:bg-slate-50 focus-within:bg-slate-50"
+              tabIndex={0}
+              aria-label={`Abrir ações do produto ${product.codigo}`}
+              onClick={() => onOpenActions(product)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onOpenActions(product)
+                }
+              }}
+            >
               {(() => {
                 const minimum = minimumHealth(product)
                 const stockLines = renderStockLines(product)
                 return (
                   <>
+              <td className="px-3 py-2.5">
+                {product.imageUrl ? (
+                  <img src={product.imageUrl} alt="" className="h-10 w-10 rounded-md border border-thermo-border object-cover" />
+                ) : (
+                  <div className="flex h-10 w-10 items-center justify-center rounded-md border border-dashed border-thermo-border bg-slate-50 text-slate-400">
+                    <ImageOff className="size-4" />
+                  </div>
+                )}
+              </td>
               <td className="px-3 py-2.5 font-mono text-xs font-semibold text-slate-600">{product.codigo}</td>
               <td className="px-3 py-2.5">
                 <div className="font-semibold text-thermo-navy">{product.descricao}</div>
-                <div className="mt-1 text-xs text-slate-500">{product.imageUrl ? 'Com foto' : 'Sem foto'}</div>
+                <div className="mt-1 flex flex-wrap gap-1.5">
+                  {buildStatusFlags(product).map((flag) => (
+                    <StatusBadge key={flag.key} tone={flag.tone}>{flag.label}</StatusBadge>
+                  ))}
+                </div>
               </td>
               <td className="px-3 py-2.5 text-slate-600">
                 {product.purchaseState === 'em_compra' ? (
-                  <button type="button" className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800" onClick={() => onOpenPurchase(product)}>
+                  <button
+                    type="button"
+                    className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-bold text-sky-800"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      onOpenPurchase(product)
+                    }}
+                  >
                     {product.compraStatus || 'Em compra'}
                   </button>
                 ) : (
@@ -395,6 +429,9 @@ function ProductTable({
                 {minimum ? (
                   <div className={clsx('font-semibold', minimum.textTone)}>
                     {quantity(minimum.saldo, product.unidade)} / mín {quantity(minimum.minimo, product.unidade)} · {Math.round(minimum.percentual)}%
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-slate-200">
+                      <div className={clsx('h-full rounded-full', minimum.tone)} style={{ width: `${minimum.progress}%` }} />
+                    </div>
                   </div>
                 ) : (
                   <span className="text-slate-500">Sem mínimo</span>
@@ -402,11 +439,26 @@ function ProductTable({
               </td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{quantity(product.saldo_almox, product.unidade)}</td>
               <td className="px-3 py-2.5 text-xs text-slate-600">
-                {stockLines.filter((line) => !line.isAlmox).length > 0 ? stockLines.filter((line) => !line.isAlmox).map((line) => `${line.label}: ${line.value}`).join(' · ') : '—'}
+                {stockLines.filter((line) => !line.isAlmox).length > 0 ? (
+                  <div className="space-y-1">
+                    {stockLines.filter((line) => !line.isAlmox).map((line) => (
+                      <div key={line.key} className="whitespace-nowrap">
+                        <span className="font-semibold">{line.label}:</span> {line.value}
+                      </div>
+                    ))}
+                  </div>
+                ) : '—'}
               </td>
               <td className="px-3 py-2.5 font-mono text-slate-600">{product.estoque_minimo > 0 ? quantity(product.estoque_minimo, product.unidade) : '—'}</td>
               <td className="px-3 py-2.5">
-                <button className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs" type="button" onClick={() => onOpenActions(product)}>
+                <button
+                  className="thermo-button thermo-button-secondary whitespace-nowrap px-3 py-2 text-xs"
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onOpenActions(product)
+                  }}
+                >
                   <Info className="size-4" />
                   Ações
                 </button>
@@ -522,6 +574,7 @@ export function ProductListScreen({
   const [purchaseError, setPurchaseError] = useState<string | null>(null)
   const [purchaseItems, setPurchaseItems] = useState<ProductPurchaseDetailItem[]>([])
   const [actionProduct, setActionProduct] = useState<ProductRecord | null>(null)
+  const [moreOpen, setMoreOpen] = useState(false)
 
   const appliedFilterCount = useMemo(() => countAppliedFilters(filters), [filters])
   const appliedFilterSummary = useMemo(() => describeAppliedFilters(filters), [filters])
@@ -604,6 +657,7 @@ export function ProductListScreen({
       if (event.key === 'Escape') {
         setFiltersOpen(false)
         setBridgeState(null)
+        setMoreOpen(false)
       }
     }
 
@@ -624,7 +678,7 @@ export function ProductListScreen({
         </div>
 
         <div className="border-b border-thermo-border px-4 py-3 md:px-6">
-          <div className="flex flex-wrap items-center gap-2 xl:flex-nowrap">
+          <div className="flex flex-wrap items-center gap-2">
             <label className="flex min-w-[15rem] flex-1 items-center gap-2 rounded-xl border border-thermo-border bg-thermo-bg px-3 py-2">
               <Search className="size-4 text-slate-400" />
               <input
@@ -641,10 +695,6 @@ export function ProductListScreen({
               ) : null}
             </label>
 
-            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Ler QR Code" aria-label="Ler QR Code" onClick={() => openBridge('qr')}>
-              <QrCode className="size-4" />
-              <span>QR</span>
-            </button>
             <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Filtrar produtos" aria-label="Filtrar produtos" onClick={openFilters}>
               <Filter className="size-4" />
               <span>Filtrar</span>
@@ -654,28 +704,67 @@ export function ProductListScreen({
               <RefreshCw className={clsx('size-4', loading && 'animate-spin')} />
               <span>Atualizar</span>
             </button>
-            <button className="thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm" type="button" title="Editar em massa" aria-label="Editar em massa" onClick={() => openBridge('bulk')}>
-              <SquarePen className="size-4" />
-              <span>Em massa</span>
-            </button>
             <button className={clsx('thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm', viewMode === 'grid' && 'thermo-icon-button-active')} type="button" title="Visualização em cartões" aria-label="Visualização em cartões" onClick={() => setViewMode('grid')}>
               <Grid2X2 className="size-4" />
-              <span>Cartões</span>
+              <span>Card</span>
             </button>
             <button className={clsx('thermo-toolbar-button min-h-10 px-3 py-1.5 text-xs md:text-sm', viewMode === 'list' && 'thermo-icon-button-active')} type="button" title="Visualização em lista" aria-label="Visualização em lista" onClick={() => setViewMode('list')}>
               <List className="size-4" />
               <span>Lista</span>
             </button>
-            <button className="thermo-toolbar-button min-h-10 whitespace-nowrap px-3 py-1.5 text-xs md:text-sm disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('cart')} disabled={!permissions.canOpenCart} title={permissions.cartReason || 'Abrir painel de compras legado'}>
-                <ShoppingCart className="size-4" />
-                <span>Compras</span>
-                <span className="rounded-full bg-thermo-navy px-2 py-0.5 text-xs text-white">{cartCount}</span>
-            </button>
-            <button className="thermo-toolbar-button min-h-10 whitespace-nowrap px-3 py-1.5 text-xs md:text-sm disabled:cursor-not-allowed disabled:opacity-60" type="button" onClick={() => openBridge('separation')} disabled={!permissions.canOpenSeparation} title={permissions.separationReason || 'Abrir separações legadas'}>
-                <ClipboardList className="size-4" />
-                <span>Separações</span>
-                <span className="rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">{permissions.canOpenSeparation ? 'Legado' : 'Bloqueado'}</span>
-            </button>
+            <div className="relative ml-auto">
+              <button
+                className="thermo-toolbar-button min-h-10 whitespace-nowrap px-3 py-1.5 text-xs md:text-sm"
+                type="button"
+                aria-haspopup="menu"
+                aria-expanded={moreOpen}
+                aria-label="Mais ações da lista de produtos"
+                onClick={() => setMoreOpen((current) => !current)}
+              >
+                <Ellipsis className="size-4" />
+                <span>Mais</span>
+              </button>
+              {moreOpen ? (
+                <div className="absolute right-0 top-full z-20 mt-2 min-w-56 rounded-xl border border-thermo-border bg-white p-2 shadow-lg">
+                  <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-thermo-ink hover:bg-thermo-bg" type="button" onClick={() => { setMoreOpen(false); openBridge('qr') }}>
+                    <QrCode className="size-4" />
+                    QR legado
+                  </button>
+                  <button className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-thermo-ink hover:bg-thermo-bg" type="button" onClick={() => { setMoreOpen(false); openBridge('bulk') }}>
+                    <SquarePen className="size-4" />
+                    Editar em massa
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-thermo-ink hover:bg-thermo-bg disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    disabled={!permissions.canOpenCart}
+                    onClick={() => {
+                      setMoreOpen(false)
+                      openBridge('cart')
+                    }}
+                    title={permissions.cartReason || 'Abrir painel de compras legado'}
+                  >
+                    <ShoppingCart className="size-4" />
+                    Compras
+                    <span className="ml-auto rounded-full bg-thermo-navy px-2 py-0.5 text-xs text-white">{cartCount}</span>
+                  </button>
+                  <button
+                    className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm text-thermo-ink hover:bg-thermo-bg disabled:cursor-not-allowed disabled:opacity-50"
+                    type="button"
+                    disabled={!permissions.canOpenSeparation}
+                    onClick={() => {
+                      setMoreOpen(false)
+                      openBridge('separation')
+                    }}
+                    title={permissions.separationReason || 'Abrir separações legadas'}
+                  >
+                    <ClipboardList className="size-4" />
+                    Separações
+                    <span className="ml-auto rounded-full bg-amber-500 px-2 py-0.5 text-xs text-white">{permissions.canOpenSeparation ? 'Legado' : 'Bloq.'}</span>
+                  </button>
+                </div>
+              ) : null}
+            </div>
           </div>
 
           <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-600">
