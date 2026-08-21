@@ -6,7 +6,7 @@ import * as gateway from '../../services/receivingGateway'
 
 vi.mock('../../services/receivingGateway', async () => {
   const actual = await vi.importActual<typeof import('../../services/receivingGateway')>('../../services/receivingGateway')
-  return { ...actual, loadPendingReceipts: vi.fn(), loadReceivedProducts: vi.fn(), previewNfeAssociation: vi.fn(), confirmNfeAssociation: vi.fn(), loadActivePurchaseCategories: vi.fn() }
+  return { ...actual, loadPendingReceipts: vi.fn(), loadReceivedProducts: vi.fn(), locateNfe: vi.fn(), locatePurchaseOrder: vi.fn(), previewNfeAssociation: vi.fn(), confirmNfeAssociation: vi.fn(), loadActivePurchaseCategories: vi.fn() }
 })
 
 describe('ReceivingScreen states', () => {
@@ -40,5 +40,29 @@ describe('ReceivingScreen states', () => {
     const confirm = await screen.findByRole('button', { name: 'Confirmar associação' }); expect(confirm).toBeDisabled()
     await user.selectOptions(screen.getByLabelText('Item do pedido para sequência 1'), '9'); expect(confirm).toBeDisabled(); expect(screen.getByText(/Regenere a prévia/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Regerar prévia' })); await waitFor(()=>expect(screen.getByRole('button', { name: 'Confirmar associação' })).toBeEnabled()); expect(gateway.confirmNfeAssociation).not.toHaveBeenCalled()
+  })
+
+  it('localiza NF-e, ordena sugestões deterministicamente e abre a prévia do pedido escolhido', async () => {
+    const user = userEvent.setup()
+    vi.mocked(gateway.loadPendingReceipts).mockResolvedValue([])
+    vi.mocked(gateway.locateNfe).mockResolvedValue({ ok: true, nfe: { c_numero_nfe: '372', c_nome_fornecedor: 'Fornecedor A', n_valor_nfe: 100, c_etapa: '40' }, itens: [{ codigo: 'A', descricao: 'Bomba calor', qtd: 1, unidade: 'UN', vlr_item: 100 }], pedidos_sugeridos: [{ n_cod_ped: 2, cnumero: 'P-2', fornecedor: 'Outro', itens: [{ produto_descricao: 'Item diferente', quantidade: 9, valor_item: 400 }] }, { n_cod_ped: 1, cnumero: 'P-1', fornecedor: 'Fornecedor A', itens: [{ n_cod_item: 11, produto_codigo: 'A', produto_descricao: 'Bomba calor', quantidade: 1, unidade: 'UN', valor_item: 100 }] }] })
+    render(<ReceivingScreen />)
+    await user.type(screen.getByPlaceholderText('Número ou chave da NF-e'), '372')
+    await user.click(screen.getByRole('button', { name: 'Buscar' }))
+    const suggestions = await screen.findAllByRole('button', { name: /Pedido P-/ })
+    expect(suggestions[0]).toHaveTextContent('Pedido P-1')
+    await user.click(suggestions[0]!)
+    expect(screen.getByRole('dialog', { name: 'Associar NF-e ao pedido P-1' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Número da NF-e')).toHaveValue('372')
+  })
+
+  it('mantém notas recebidas e concluídas somente para consulta', async () => {
+    const user = userEvent.setup()
+    vi.mocked(gateway.loadPendingReceipts).mockResolvedValue([])
+    vi.mocked(gateway.locateNfe).mockResolvedValue({ ok: true, nfe: { c_numero_nfe: '10', c_recebido: 'S', c_etapa: '80' }, itens: [], pedidos_sugeridos: [{ n_cod_ped: 1, cnumero: 'P-1' }] })
+    render(<ReceivingScreen />)
+    await user.type(screen.getByPlaceholderText('Número ou chave da NF-e'), '10'); await user.click(screen.getByRole('button', { name: 'Buscar' }))
+    expect(await screen.findByText('Somente consulta')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Pedido P-1/ })).not.toBeInTheDocument()
   })
 })

@@ -73,6 +73,58 @@ export interface AssociationItemOverride { n_sequencia: number; nIdItPedidoExist
 export interface AssociationPreviewItem { n_sequencia?: number; nf_codigo_produto?: string; nf_descricao_produto?: string; nf_qtde?: number; nf_unidade?: string; nf_valor_unitario?: number; pedido_item_encontrado?: boolean; requer_revisao?: boolean; criterio_match?: string; pedido_n_cod_item?: number; pedido_n_cod_ped?: number; pedido_numero?: string; pedido_codigo_produto?: string; pedido_descricao_produto?: string; pedido_qtde?: number; pedido_unidade?: string; pedido_c_unidade?: string; pedido_valor_unitario?: number; conversao_unidade_manual?: boolean; conversao_unidade_necessaria?: boolean; item_servico?: boolean; nIdProdutoServico?: number }
 export interface PurchaseCategory { codigo: string; descricao?: string; conta_inativa?: string; categoria_superior?: string }
 
+export interface ReceivingLocatorItem {
+  codigo?: string | null
+  descricao?: string | null
+  qtd?: number | string | null
+  unidade?: string | null
+  vlr_unit?: number | string | null
+  vlr_item?: number | string | null
+  n_id_pedido?: number | null
+}
+
+export interface ReceivingLocatorOrderItem {
+  n_cod_item?: number | null
+  produto_codigo?: string | null
+  produto_descricao?: string | null
+  quantidade?: number | string | null
+  unidade?: string | null
+  valor_item?: number | string | null
+}
+
+export interface ReceivingLocatorOrder {
+  n_cod_ped: number
+  cnumero: string
+  fornecedor?: string | null
+  d_inc_data?: string | null
+  observacao?: string | null
+  itens?: ReceivingLocatorOrderItem[]
+}
+
+export interface ReceivingLocatorNfe {
+  n_id_receb?: number | null
+  c_chave_nfe?: string | null
+  c_numero_nfe?: string | null
+  c_serie_nfe?: string | null
+  c_nome_fornecedor?: string | null
+  c_cnpj_cpf_fornecedor?: string | null
+  d_emissao_nfe?: string | null
+  d_rec?: string | null
+  n_valor_nfe?: number | string | null
+  c_etapa?: string | null
+  c_recebido?: string | null
+  c_cancelada?: string | null
+}
+
+export interface LocateNfeResponse {
+  ok: boolean
+  nfe: ReceivingLocatorNfe
+  itens: ReceivingLocatorItem[]
+  pedidos_sugeridos: ReceivingLocatorOrder[]
+}
+
+export interface LocateOrderResponse { ok: boolean; pedido: ReceivingLocatorOrder }
+
 export interface AssociationPreviewResponse {
   ok: boolean
   preview: {

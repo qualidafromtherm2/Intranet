@@ -5,6 +5,8 @@ import type {
   NfeDetailsResponse,
   ReceivingRow,
   PurchaseCategory,
+  LocateNfeResponse,
+  LocateOrderResponse,
 } from '../features/receiving/types'
 
 const apiBase = import.meta.env.VITE_API_BASE_URL || ''
@@ -63,6 +65,22 @@ export function loadNfeDetails(chaveNfe: string, numeroNfe = '') {
   const query = new URLSearchParams({ chave_nfe: chaveNfe.replace(/\D/g, '') })
   if (numeroNfe.trim()) query.set('numero_nfe', numeroNfe.trim())
   return requestJson<NfeDetailsResponse>(`/api/compras/nfe-xml-detalhes?${query}`)
+}
+
+export function locateNfe(numeroOuChave: string) {
+  const value = numeroOuChave.trim()
+  if (value.replace(/\D/g, '').length === 44) {
+    return requestJson<{ ok: true; recebimento: Record<string, unknown> }>('/api/compras/pedidos-omie/nfe-associar-pedido/consultar', {
+      method: 'POST', body: JSON.stringify({ chave_nfe: value.replace(/\D/g, '') }),
+    })
+  }
+  const query = new URLSearchParams({ numero: value })
+  return requestJson<LocateNfeResponse>(`/api/compras/localizar-nfe-por-numero?${query}`)
+}
+
+export function locatePurchaseOrder(numero: string) {
+  const query = new URLSearchParams({ numero: numero.trim() })
+  return requestJson<LocateOrderResponse>(`/api/compras/buscar-pedido-compra?${query}`)
 }
 
 export function previewNfeAssociation(input: AssociationInput) {

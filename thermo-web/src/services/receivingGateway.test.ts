@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { confirmNfeAssociation, findNfeKey, loadActivePurchaseCategories, loadNfeDetails, loadPendingReceipts, loadReceivedProducts, previewNfeAssociation } from './receivingGateway'
+import { confirmNfeAssociation, findNfeKey, loadActivePurchaseCategories, loadNfeDetails, loadPendingReceipts, loadReceivedProducts, locateNfe, locatePurchaseOrder, previewNfeAssociation } from './receivingGateway'
 
 const response = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
 
@@ -47,5 +47,14 @@ describe('receivingGateway', () => {
     await confirmNfeAssociation(input)
     expect(fetchMock.mock.calls[0]![0]).toBe('/api/compras/categorias')
     expect(fetchMock.mock.calls[1]![1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }))
+  })
+
+  it('localiza NF-e por número, chave e pedido nos contratos reais', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async () => response({ ok: true, nfe: {}, itens: [], pedidos_sugeridos: [], recebimento: {}, pedido: {} }))
+    await locateNfe('00372'); await locateNfe('1'.repeat(44)); await locatePurchaseOrder('3138')
+    expect(fetchMock.mock.calls[0]![0]).toBe('/api/compras/localizar-nfe-por-numero?numero=00372')
+    expect(fetchMock.mock.calls[1]![0]).toBe('/api/compras/pedidos-omie/nfe-associar-pedido/consultar')
+    expect(fetchMock.mock.calls[1]![1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ chave_nfe: '1'.repeat(44) }) }))
+    expect(fetchMock.mock.calls[2]![0]).toBe('/api/compras/buscar-pedido-compra?numero=3138')
   })
 })
