@@ -1,0 +1,10 @@
+import type { AdjustmentInput, MovementRule, TransferInput, WarehouseLocation, WarehouseStock } from '../features/warehouses/types'
+const base=import.meta.env.VITE_API_BASE_URL||''
+export class WarehouseGatewayError extends Error { readonly status?:number; constructor(message:string,status?:number){super(message);this.status=status} }
+async function request<T>(path:string,init:RequestInit={}){const headers=new Headers(init.headers);headers.set('Accept','application/json');if(init.body)headers.set('Content-Type','application/json');let response:Response;try{response=await fetch(`${base}${path}`,{...init,headers,credentials:'include',cache:'no-store'})}catch(e){throw new WarehouseGatewayError(e instanceof Error?e.message:'Falha de conexão.')}const raw=await response.text();let data:Record<string,unknown>={};try{data=raw?JSON.parse(raw):{}}catch{data={error:raw}}if(!response.ok||data.ok===false)throw new WarehouseGatewayError(typeof data.error==='string'?data.error:`Falha HTTP ${response.status}`,response.status);return data as T}
+export function loadWarehouseLocations(force=false){return request<{ok:boolean;locais:WarehouseLocation[];fonte?:string}>(`/api/armazem/locais${force?'?force=1':''}`)}
+export function loadWarehouseStock(local:string){return request<{ok:boolean;local:string;dados:WarehouseStock[]}>('/api/armazem/almoxarifado',{method:'POST',body:JSON.stringify({pagina:1,local})})}
+export function loadMovementPermission(){return request<{ok:boolean;regra:MovementRule|null}>('/api/movimentacoes/permissao-atual')}
+export function searchWarehouseProducts(query:string){return request<{data:Array<{codigo:string;descricao?:string}>}>(`/api/produtos/search?q=${encodeURIComponent(query.trim())}&limit=40`)}
+export function requestTransfer(input:TransferInput){return request<{ok:boolean;ids?:number[]}>('/api/transferencias',{method:'POST',body:JSON.stringify(input)})}
+export function requestAdjustment(input:AdjustmentInput){return request<{ok:boolean;ids?:number[]}>('/api/ajustes',{method:'POST',body:JSON.stringify(input)})}
