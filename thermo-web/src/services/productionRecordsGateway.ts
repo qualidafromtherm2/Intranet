@@ -1,0 +1,4 @@
+import type { ProductionDetail,ProductionRecord } from '../features/production-records/types'
+async function request<T>(path:string){const r=await fetch(path,{credentials:'include',cache:'no-store',headers:{Accept:'application/json'}});const p=await r.json().catch(()=>({}));if(!r.ok||p.success===false)throw new Error(p.error||`HTTP ${r.status}`);return p as T}
+export function searchProductionRecords(q='',limit=50){const p=new URLSearchParams({limit:String(limit)});if(q.trim())p.set('q',q.trim());return request<{success:true;q:string;itens:ProductionRecord[]}>(`/api/producao/registro-producao?${p}`)}
+export function loadProductionRecordDetail(id?:number,numeroOp?:string){const p=new URLSearchParams();if(id)p.set('id',String(id));if(numeroOp)p.set('numero_op',numeroOp);return request<ProductionDetail>(`/api/producao/registro-producao/detalhe?${p}`)}

@@ -1,0 +1,5 @@
+import type { MinimumStockFilters, MinimumStockResponse } from '../features/minimum-stock/types'
+async function request<T>(path:string){const r=await fetch(path,{credentials:'include',cache:'no-store',headers:{Accept:'application/json'}});const p=await r.json().catch(()=>({}));if(!r.ok||p.ok===false)throw new Error(p.error||`HTTP ${r.status}`);return p as T}
+export function loadMinimumStock(filters:MinimumStockFilters={}){const p=new URLSearchParams({inativo:'N',limit:String(filters.limit||500),page:String(filters.page||1)});if(filters.query?.trim())p.set('q',filters.query.trim());return request<MinimumStockResponse>(`/api/produtos/lista?${p}`)}
+export function loadBelowMinimum(){return request<MinimumStockResponse>('/api/produtos/no-minimo')}
+export function classifyMinimumStock(item:{estoque_minimo?:number;saldo_almox?:number;saldo?:number},nearPercent=10){const minimum=Number(item.estoque_minimo||0),saldo=Number(item.saldo_almox??item.saldo??0);if(minimum<=0)return 'sem-minimo' as const;if(saldo<minimum)return 'abaixo' as const;if(saldo<=minimum*(1+nearPercent/100))return 'proximo' as const;return 'acima' as const}

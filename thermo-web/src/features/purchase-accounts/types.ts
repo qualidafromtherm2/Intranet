@@ -1,0 +1,1 @@
+export type PurchaseAccount={descricao?:string;codigo_banco?:string;codigo_agencia?:string;numero_conta_corrente?:string;tipo_conta_corrente?:string;nome_gerente?:string;observacao?:string;nCodCC?:string}

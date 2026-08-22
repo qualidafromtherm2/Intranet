@@ -1,0 +1,1 @@
+export type EngineeringChange={id:number;data?:string;codigo_omie?:string;codigo_interno?:string;antes?:string;depois?:string;referencia?:string;foto_antes?:string;foto_depois?:string;video?:string;arquivo?:string;criado_por?:string}

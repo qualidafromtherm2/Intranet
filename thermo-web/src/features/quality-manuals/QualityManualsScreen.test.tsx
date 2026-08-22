@@ -1,0 +1,14 @@
+import "@testing-library/jest-dom/vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as api from "../../services/qualityManualsGateway";
+import { QualityManualsScreen } from "./QualityManualsScreen";
+vi.mock("../../services/qualityManualsGateway");
+describe("QualityManualsScreen",()=>{
+  beforeEach(()=>{vi.mocked(api.loadMainManuals).mockResolvedValue({ok:true,itens:[{codigo:"MQ-01",titulo:"Manual da Qualidade",public_url:"/manual.pdf"}]});vi.mocked(api.loadProductManuals).mockResolvedValue({ok:true,total:1,manuais:[{id:2,nome:"Produto X",produtos:[{codigo_produto:"P1",descricao:"Peça"}]}]});vi.mocked(api.loadMasterDocuments).mockResolvedValue({ok:true,itens:[{id:3,numero_formulario:"FM-01",descricao:"Inspeção",numero_revisao:"02",documento:"x"}]});});
+  it("denies the screen when navigation permission is absent",()=>{render(<QualityManualsScreen allowed={false}/>);expect(screen.getByText("Acesso não permitido")).toBeInTheDocument();expect(api.loadMainManuals).not.toHaveBeenCalled();});
+  it("loads and filters all three real categories",async()=>{const user=userEvent.setup();render(<QualityManualsScreen/>);expect(await screen.findByText("Manual da Qualidade")).toBeInTheDocument();await user.click(screen.getByRole("button",{name:"Manuais de produtos"}));expect(screen.getByText("Produto X")).toBeInTheDocument();await user.click(screen.getByRole("button",{name:"Lista mestra"}));expect(screen.getByText("Inspeção")).toBeInTheDocument();await user.type(screen.getByPlaceholderText(/Buscar título/),"inexistente");expect(screen.getByText("Nenhum item encontrado.")).toBeInTheDocument();});
+  it("keeps product mutation controls hidden without permission",async()=>{const user=userEvent.setup();render(<QualityManualsScreen/>);await user.click(screen.getByRole("button",{name:"Manuais de produtos"}));await user.click(screen.getByRole("button",{name:"Produtos vinculados"}));expect(screen.getByText(/não alterá-los/)).toBeInTheDocument();expect(screen.queryByRole("button",{name:/Remover/})).not.toBeInTheDocument();});
+  it("loads version history read-only",async()=>{vi.mocked(api.loadMasterDocumentFile).mockResolvedValue({ok:true,item:{id:3,numero_formulario:"FM-01",documento:"x"},historico:[{id:8,numero_revisao:"01",documento:"old"}]});const user=userEvent.setup();render(<QualityManualsScreen/>);await user.click(screen.getByRole("button",{name:"Lista mestra"}));await user.click(screen.getByRole("button",{name:/Documento e versões/}));await waitFor(()=>expect(api.loadMasterDocumentFile).toHaveBeenCalledWith(3));expect(await screen.findByText("Rev. 01")).toBeInTheDocument();expect(screen.getByText(/API não oferece exclusão/)).toBeInTheDocument();});
+});

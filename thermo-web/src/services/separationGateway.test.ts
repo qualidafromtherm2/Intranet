@@ -1,0 +1,89 @@
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { assumeSeparation, cancelSeparation, clearSeparationCart, declineSeparationItem, deleteSeparation, deleteSeparationItem, loadRequesterSeparationKanban, loadSeparationItems, loadSeparationKanban, loadSeparationOperationalData, loadSeparationOperatorContext, loadSeparationPlan, printSeparationLabels, registerManualSeparationQuantity, returnCompletedSeparationItem, reverseCheckedItem, reverseSeparatedItem, separateItem, separateItemPartially, startSeparation, submitSeparation, swapSeparationProduct, updateSeparationCartQuantity } from './separationGateway'
+
+const jsonResponse = (payload: unknown, status = 200) => new Response(JSON.stringify(payload), { status, headers: { 'Content-Type': 'application/json' } })
+afterEach(() => vi.unstubAllGlobals())
+
+describe('separationGateway', () => {
+  it('uses the audited global kanban and detail query names', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true, colunas: {} })).mockResolvedValueOnce(jsonResponse({ ok: true, itens: [] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await loadSeparationKanban('SEP 1042')
+    await loadSeparationItems('SEP-1042', { includeDerived: true })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/logistica/solicitacoes-kanban?q=SEP+1042', expect.objectContaining({ credentials: 'include', cache: 'no-store' }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/kanban/itens?n_solic=SEP-1042&escopo=global&include_derivados=1', expect.objectContaining({ credentials: 'include' }))
+  })
+
+  it('sends exact legacy mutation payloads', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse({ ok: true })).mockResolvedValueOnce(jsonResponse({ ok: true, atualizados: 2 })).mockResolvedValueOnce(jsonResponse({ ok: true, deleted: 2 }))
+    vi.stubGlobal('fetch', fetchMock)
+    await updateSeparationCartQuantity(31, 2.5)
+    await startSeparation([91, 92])
+    await clearSeparationCart()
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/logistica/carrinho/31/quantidade', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ quantidade: 2.5 }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/itens_solicitados/separacao', expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ solic_ids: [91, 92] }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/logistica/carrinho', expect.objectContaining({ method: 'DELETE' }))
+  })
+
+  it('submits the real cart contract without inferred fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true, total: 2, n_solic: 'SEP-1042', reutilizada: false }))
+    vi.stubGlobal('fetch', fetchMock)
+    const input = { solicitado_para: 'Jair', local_estoque: '10717096386', local_estoque_nome: 'Almoxarifado', data_prevista: '2026-08-21', horario: '14:30', observacao: 'Retirada no balcão' }
+    await submitSeparation(input)
+    expect(fetchMock).toHaveBeenCalledWith('/api/logistica/separacao/enviar', expect.objectContaining({ method: 'POST', body: JSON.stringify(input) }))
+  })
+
+  it('surfaces backend errors with endpoint context', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(jsonResponse({ ok: false, error: 'Não autenticado.' }, 401)))
+    await expect(loadSeparationKanban()).rejects.toThrow('Falha ao acessar o fluxo real de separação por /api/logistica/solicitacoes-kanban. Não autenticado.')
+  })
+
+  it('loads the authenticated operator and exact destination restriction', async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ loggedIn: true, user: { id: 7, username: 'Jair' } }))
+      .mockResolvedValueOnce(jsonResponse({ user_id: '7', restringir_destinos: true, destinos_codigos: ['10'], destinos_chaves: ['10|Expedição'] }))
+    vi.stubGlobal('fetch', fetchMock)
+    await expect(loadSeparationOperatorContext()).resolves.toEqual({ id: '7', username: 'Jair', restringir_destinos: true, destinos_codigos: ['10'], destinos_chaves: ['10|Expedição'] })
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/colaboradores/7/separacao-permissao', expect.objectContaining({ credentials: 'include' }))
+  })
+
+  it('preserves all audited operational payloads without real mutations', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
+    vi.stubGlobal('fetch', fetchMock)
+    const execution = { solic_ids: [91], carr_ids: [31], cod_local_origem: '10717096386', codigo_produto: '07.MP.N.70005', etq_enderecos: [{ etq_id: 44, endereco: 'A-01', qtd: 2 }], etq_id: 44, endereco_origem: 'A-01' }
+    const quantity = { ...execution, carr_ids: [31], quantidade_separada: 1.5, motivo: 'Faltou saldo' }
+    await assumeSeparation([91]); await cancelSeparation([91]); await registerManualSeparationQuantity(quantity)
+    await separateItem(execution); await separateItemPartially(quantity); await declineSeparationItem(91, 'Produto danificado')
+    await swapSeparationProduct({ solic_id: 91, codigo_novo: 'NOVO', descricao_novo: 'Produto novo', unidade_novo: 'UN', quantidade_nova: 2 })
+    await reverseSeparatedItem([91]); await reverseCheckedItem([91]); await deleteSeparationItem(91); await deleteSeparation('SEP-1042')
+    const calls = fetchMock.mock.calls.map(([url, init]) => [url, (init as RequestInit).method, (init as RequestInit).body])
+    expect(calls).toEqual([
+      ['/api/logistica/itens_solicitados/assumir-separacao', 'PATCH', JSON.stringify({ solic_ids: [91] })],
+      ['/api/logistica/itens_solicitados/cancelar-separacao', 'PATCH', JSON.stringify({ solic_ids: [91] })],
+      ['/api/logistica/itens_solicitados/registrar-qtd-manual', 'POST', JSON.stringify(quantity)],
+      ['/api/logistica/itens_solicitados/separar', 'PATCH', JSON.stringify(execution)],
+      ['/api/logistica/itens_solicitados/separar-parcial', 'POST', JSON.stringify(quantity)],
+      ['/api/logistica/itens_solicitados/nao-separar', 'POST', JSON.stringify({ solic_id: 91, justificativa: 'Produto danificado' })],
+      ['/api/logistica/itens_solicitados/trocar', 'POST', JSON.stringify({ solic_id: 91, codigo_novo: 'NOVO', descricao_novo: 'Produto novo', unidade_novo: 'UN', quantidade_nova: 2 })],
+      ['/api/logistica/itens_solicitados/reverter-separacao', 'PATCH', JSON.stringify({ solic_ids: [91] })],
+      ['/api/logistica/itens_solicitados/reverter-conferido', 'PATCH', JSON.stringify({ solic_ids: [91] })],
+      ['/api/logistica/itens_solicitados/91/sep', 'DELETE', undefined],
+      ['/api/logistica/sep/SEP-1042', 'DELETE', undefined],
+    ])
+  })
+
+  it('uses the requester-scoped board and audited operational reads', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true, colunas: {}, dados: {}, itens: [], codigos: [] })))
+    vi.stubGlobal('fetch', fetchMock)
+    await loadRequesterSeparationKanban(); await loadSeparationOperationalData(['A 1']); await loadSeparationPlan('SEP-10')
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual(['/api/logistica/kanban', '/api/logistica/estoque/batch?codigos=A%201', '/api/logistica/endereco-pp/batch?codigos=A%201', '/api/etiquetas/rec-impresso/ids-fifo-batch?codigos=A%201', '/api/logistica/planejar-sep/codigos?n_solic=SEP-10'])
+  })
+
+  it('preserves print and return payloads without reaching a real backend', async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(jsonResponse({ ok: true })))
+    vi.stubGlobal('fetch', fetchMock)
+    await printSeparationLabels([44], 'Jair'); await returnCompletedSeparationItem({ solic_id: 91, quantidade: 1, motivo: 'Código incorreto', etq_modo: 'mesmo_id' })
+    expect(fetchMock).toHaveBeenNthCalledWith(1, '/api/etiquetas/rec-impresso/imprimir-ids', expect.objectContaining({ method: 'POST', body: JSON.stringify({ ids: [44], usuario: 'Jair', via_fila: true }) }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/logistica/itens_solicitados/devolver', expect.objectContaining({ method: 'POST', body: JSON.stringify({ solic_id: 91, quantidade: 1, motivo: 'Código incorreto', etq_modo: 'mesmo_id' }) }))
+  })
+})

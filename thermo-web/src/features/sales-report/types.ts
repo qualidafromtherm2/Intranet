@@ -1,0 +1,6 @@
+export type SalesReportFilters = { modo?: 'mes' | 'trimestre' | 'periodo'; ano?: string; mes?: string; trimestre?: string; data_inicio?: string; data_fim?: string; tipo?: string; estado?: string; vendedor?: string; familia?: string; familia_nome?: string; cliente?: string; etapa_pedido?: string }
+export type SalesRow = Record<string, string | number | null | undefined>
+export type SalesAction = { acao: string; descricao: string; responsavel: string; prazo: string; prioridade: 'alta' | 'media' | 'baixa' }
+export type SalesTexts = { salvo?: boolean; plano_acao: SalesAction[]; conclusao_resumo: string; conclusao_pontos_criticos: string; conclusao_oportunidades: string; editado_em?: string; editado_por?: string }
+export type SalesReport = { ok: true; periodo?: string; etapa?: string; mes?: string; kpis?: Record<string, number>; por_estado?: SalesRow[]; por_familia?: SalesRow[]; por_cliente?: SalesRow[]; por_vendedor?: SalesRow[]; por_etapa?: SalesRow[]; evolucao?: SalesRow[]; pareto?: SalesRow[]; financeiro?: SalesRow[]; itens_por_mes_familia?: SalesRow[]; textos?: SalesTexts; [key: string]: unknown }
+export type SalesFilterOptions = { vendedores?: { codigo: string; nome: string }[]; familias?: { codigo: string; descricao: string }[]; estados?: string[]; tipos?: { codigo: string; label: string }[]; anos?: Array<string | number> }
