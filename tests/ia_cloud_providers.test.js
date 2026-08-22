@@ -10,6 +10,7 @@ const {
   isRetiredGroqModel,
   mapRetiredGroqModel,
   geminiModelCandidates,
+  redactProviderError,
 } = require('../utils/iaCloudProviders');
 
 test('normalizePreferredProvider', () => {
@@ -52,6 +53,21 @@ test('groq llama aposentado vira gpt-oss', () => {
   assert.equal(mapRetiredGroqModel('llama-3.3-70b-versatile'), 'openai/gpt-oss-120b');
   assert.equal(mapRetiredGroqModel('llama-3.3-70b-versatile', { light: true }), 'openai/gpt-oss-20b');
   assert.equal(mapRetiredGroqModel('openai/gpt-oss-120b'), 'openai/gpt-oss-120b');
+});
+
+test('redactProviderError esconde chave do Gemini no chip nok', () => {
+  const raw =
+    "Permission denied: Consumer 'api_key:AIzaSyDUMMYKEYVALUE000000000000000000' has no access";
+  const clean = redactProviderError(raw);
+  assert.equal(clean.includes('AIza'), false);
+  assert.match(clean, /api_key:\[redacted\]/);
+  const board = buildProviderStatusBoard({
+    configured: [{ id: 'gemini', model: 'gemini-3.5-flash', kind: 'gemini' }],
+    attempts: [{ id: 'gemini', ok: false, error: raw }],
+  });
+  const gemini = board.providers.find((p) => p.id === 'gemini');
+  assert.equal(gemini.status, 'nok');
+  assert.equal(String(gemini.detail).includes('AIza'), false);
 });
 
 test('withCursorStatus atualiza só o Cursor e cria board se faltar', () => {
