@@ -197,6 +197,8 @@ const legendItems = [
   { icon: Sparkles, label: 'Evento', tone: 'text-pink-700' },
 ] as const
 
+const thermoAsset = (assetPath: string) => `${import.meta.env.BASE_URL}${assetPath.replace(/^\//, '')}`
+
 function getIconComponent(icon: string) {
   return iconMap[icon as keyof typeof iconMap] ?? iconMap.dot
 }
@@ -380,7 +382,7 @@ function LoginScreen({
           <div className="w-full rounded-2xl border border-thermo-border bg-white p-6 shadow-sm md:p-8">
             <div className="mb-7 flex justify-center">
               <div className="relative h-[62px] w-[220px] overflow-hidden" role="img" aria-label="Thermo — Sistema de Gestão">
-                <img src="/branding/thermo-logo-principal.png" alt="" className="absolute left-0 top-[-30px] w-[220px] max-w-none" />
+                <img src={thermoAsset('branding/thermo-logo-principal.png')} alt="" className="absolute left-0 top-[-30px] w-[220px] max-w-none" />
               </div>
             </div>
             <div className="mb-6">
@@ -585,10 +587,10 @@ function Sidebar({
       <div className="flex items-center justify-between gap-3 border-b border-white/8 px-4 py-4">
         <div className={clsx('flex min-w-0 items-center overflow-hidden', collapsed && 'justify-center')}>
           {collapsed ? (
-            <img src="/branding/thermo-simbolo.png" alt="Thermo" className="size-9 shrink-0 object-contain" />
+            <img src={thermoAsset('branding/thermo-simbolo.png')} alt="Thermo" className="size-9 shrink-0 object-contain" />
           ) : (
             <div className="relative h-12 w-[168px] overflow-hidden" role="img" aria-label="Thermo — Sistema de Gestão">
-              <img src="/branding/thermo-logo-fundo-escuro.png" alt="" className="absolute left-0 top-[-20px] w-[168px] max-w-none" />
+              <img src={thermoAsset('branding/thermo-logo-fundo-escuro.png')} alt="" className="absolute left-0 top-[-20px] w-[168px] max-w-none" />
             </div>
           )}
         </div>
@@ -663,7 +665,7 @@ function Sidebar({
       <aside className="-mx-5 -my-4 flex h-[100dvh] w-[min(88vw,360px)] flex-col bg-thermo-navy text-slate-100">
         <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="flex items-center gap-3">
-            <img src="/branding/thermo-simbolo.png" alt="" className="size-9 rounded-2xl" />
+            <img src={thermoAsset('branding/thermo-simbolo.png')} alt="" className="size-9 rounded-2xl" />
             <div>
               <div className="text-sm font-bold text-white">Navegação</div>
               <div className="text-xs text-slate-400">Menu</div>
@@ -1177,7 +1179,7 @@ function LoadingShell({ message }: { message: string }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-thermo-bg px-4">
       <div className="rounded-[28px] border border-thermo-border bg-white px-6 py-8 text-center shadow-sm">
-        <img src="/branding/thermo-logo-principal.png" alt="Thermo" className="mx-auto h-10 w-auto" />
+        <img src={thermoAsset('branding/thermo-logo-principal.png')} alt="Thermo" className="mx-auto h-10 w-auto" />
         <div className="mt-4 text-sm text-slate-500">{message}</div>
       </div>
     </div>
