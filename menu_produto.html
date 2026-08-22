@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260822-atalhos-v2"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822i"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822m"/>
   <link rel="stylesheet" href="/public/css/chamado-ia-chat.css?v=20260822a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
@@ -10392,19 +10392,20 @@
                 <img class="cursor-chat-title-bot" src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="" width="40" height="40">
                 <div>
                   <h3>Chatbot</h3>
-                  <p>Mesmo modo do Cursor — conversa contínua. Só admin.</p>
+                  <p class="cursor-chat-header-sub">Mesmo modo do Cursor — conversa contínua. Só admin.</p>
                 </div>
               </div>
               <div class="cursor-chat-header-actions">
+                <button type="button" class="cursor-chat-btn cursor-chat-hist-toggle" id="cursorChatHistToggle" data-no-global-spinner="1" title="Lista de conversas" aria-expanded="false" aria-controls="cursorChatSidebar">Conversas</button>
                 <span id="cursorChatBadge" class="cursor-chat-badge">Chatbot</span>
-                <button type="button" class="cursor-chat-btn" id="cursorChatRefresh">Atualizar</button>
+                <button type="button" class="cursor-chat-btn" id="cursorChatRefresh" title="Atualizar">Atualizar</button>
                 <button type="button" class="cursor-chat-btn warn" id="cursorChatStop" title="Cancela o run RUNNING" style="display:none;">Parar</button>
-                <button type="button" class="cursor-chat-btn primary" id="cursorChatNew">Nova conversa</button>
+                <button type="button" class="cursor-chat-btn primary" id="cursorChatNew" title="Nova conversa">Nova conversa</button>
                 <button type="button" class="cursor-chat-btn danger" id="cursorChatDelete" title="Exclui conversa e fotos" style="display:none;">Excluir</button>
                 <span id="cursorChatPublishBar" class="cursor-chat-publish-bar" hidden>
                   <button type="button" class="cursor-chat-btn warn" id="cursorChatTestPr" data-no-global-spinner="1" title="Sobe o preview no Render (GitHub + label render-preview)">Testar PR</button>
-                  <button type="button" class="cursor-chat-btn success" id="cursorChatApprove" title="Merge na main → Render">Publicar no site</button>
-                  <button type="button" class="cursor-chat-btn danger" id="cursorChatReject">Descartar PR</button>
+                  <button type="button" class="cursor-chat-btn success" id="cursorChatApprove" title="Merge na main → Render">Publicar</button>
+                  <button type="button" class="cursor-chat-btn danger" id="cursorChatReject" title="Fecha o PR sem publicar">Descartar</button>
                 </span>
               </div>
             </header>
@@ -10413,6 +10414,7 @@
                 <div class="cursor-chat-hist-tabs" role="tablist">
                   <button type="button" class="cursor-chat-hist-tab active" id="cursorChatTabAtual" role="tab" aria-selected="true">Atual</button>
                   <button type="button" class="cursor-chat-hist-tab" id="cursorChatTabFavorito" role="tab" aria-selected="false">Favorito</button>
+                  <button type="button" class="cursor-chat-btn cursor-chat-hist-close" id="cursorChatHistClose" data-no-global-spinner="1" title="Fechar lista" aria-label="Fechar lista">×</button>
                 </div>
                 <div id="cursorChatAgentList"></div>
                 <div id="cursorChatFavoriteList" hidden></div>
@@ -10471,19 +10473,29 @@
           </div>
           <div class="cursor-chat-config-body" style="padding:14px 16px 18px;display:grid;gap:10px;">
             <button type="button" class="cursor-chat-btn primary" id="cursorChatCfgAgents" data-no-global-spinner="1">Escolher especialista (Agentes)</button>
-            <button type="button" class="cursor-chat-btn" id="cursorChatCfgNew" data-no-global-spinner="1">Nova conversa (+)</button>
             <button type="button" class="cursor-chat-btn" id="cursorChatCfgClearSpec" data-no-global-spinner="1">Remover especialista ativo</button>
-            <div class="cursor-chat-config-divider">Revisão desta conversa</div>
-            <button type="button" class="cursor-chat-btn warn" id="cursorChatCfgTest" data-no-global-spinner="1" title="Sobe o preview no Render (mesmo do botão Testar PR no topo)">Testar PR</button>
-            <button type="button" class="cursor-chat-btn success" id="cursorChatCfgApprove" data-no-global-spinner="1" title="Aprovar a proposta e publicar no site">Aprovar</button>
-            <button type="button" class="cursor-chat-btn success" id="cursorChatCfgPublish" data-no-global-spinner="1" title="Merge na main → Render">Publicar</button>
-            <button type="button" class="cursor-chat-btn danger" id="cursorChatCfgDiscard" data-no-global-spinner="1" title="Fecha o PR sem publicar">Descartar</button>
+            <div class="cursor-chat-config-divider">Histórico do PR</div>
+            <button type="button" class="cursor-chat-btn" id="cursorChatCfgPrHistory" data-no-global-spinner="1" disabled title="Mostra a descrição do PR (GitHub, sem IA)">Ver histórico do PR</button>
             <p id="cursorChatCfgPrHint" class="cursor-chat-config-hint">Ainda sem PR nesta conversa.</p>
             <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.4;">
-              No topo: <strong>Testar PR#…</strong> dispara GitHub + Render; quando o site de teste existir vira <strong>Abrir PR#…</strong> (precisa Previews = Manual no Render).
-              Publicar / descartar também ficam no topo. O Assistente SGF não tem esses botões.
-              Mensagens seguem na mesma conversa até Nova conversa.
+              Testar / Publicar / Descartar ficam no topo do Chatbot. O histórico do PR vem do GitHub (sem gastar token de IA).
             </p>
+          </div>
+        </div>
+      </div>
+
+      <div id="cursorChatPrHistoryModal" class="cursor-chat-agents-modal" hidden>
+        <div class="cursor-chat-agents-dialog cursor-chat-pr-history-dialog" role="dialog" aria-modal="true" aria-labelledby="cursorChatPrHistoryTitle">
+          <div class="cursor-chat-agents-head">
+            <div>
+              <strong id="cursorChatPrHistoryTitle">Histórico do PR</strong>
+              <div class="cursor-chat-agents-sub" id="cursorChatPrHistorySub">Descrição no GitHub (sem IA)</div>
+            </div>
+            <button type="button" class="cursor-chat-btn" id="cursorChatPrHistoryClose">&times;</button>
+          </div>
+          <div id="cursorChatPrHistoryBody" class="cursor-chat-pr-history-body md-body">Carregando…</div>
+          <div class="cursor-chat-pr-history-foot">
+            <a id="cursorChatPrHistoryLink" class="cursor-chat-btn" href="#" target="_blank" rel="noopener noreferrer" hidden>Abrir no GitHub</a>
           </div>
         </div>
       </div>
@@ -14492,11 +14504,10 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260822-atalhos-v2"></script>
-  <script type="module" src="menu_produto.js?v=20260822-cal-boot"></script>
+  <script type="module" src="menu_produto.js?v=20260822-shell-fix1"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260822i"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260822m"></script>
   <script defer src="/public/js/chamado-ia-chat.js?v=20260822a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260822a"></script>
@@ -21892,14 +21903,9 @@ body.dev-agent-preview-mode { padding-top: 44px; }
   <span id="dev-agent-preview-banner-text">Use Conf. sistema → Chatbot para publicar PRs.</span>
 </div>
 
-<div id="cursor-chat-preview-banner" role="status">
-  <span id="cursorChatPreviewText">Preview do Chatbot — cópia temporária no Render (ainda NÃO na main).</span>
-  <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    <button type="button" class="cursor-chat-btn warn" id="cursorChatBannerOpen" style="display:none;">Abrir preview</button>
-    <button type="button" class="cursor-chat-btn success" id="cursorChatBannerApprove">Publicar</button>
-    <button type="button" class="cursor-chat-btn danger" id="cursorChatBannerDiscard">Descartar</button>
-    <button type="button" class="cursor-chat-btn" id="cursorChatBannerExit">Fechar aviso</button>
-  </div>
+<!-- Faixa laranja do preview desativada: o aviso vai na statusline (#cursorChatStatus). Botões ficam no topo do Chatbot. -->
+<div id="cursor-chat-preview-banner" role="status" hidden aria-hidden="true">
+  <span id="cursorChatPreviewText"></span>
 </div>
 
 <div id="sgf-ai-participants-panel" role="dialog" aria-label="Selecionar participantes da reserva">

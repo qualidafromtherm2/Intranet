@@ -17,6 +17,7 @@
     prNumber: null,
     prUrl: null,
     branch: null,
+    prDone: false,
     pollTimer: null,
     tickTimer: null,
     eventSource: null,
@@ -25,6 +26,7 @@
     lastEventAt: null,
     lastActivity: '',
     statusPinned: '',
+    statusKind: '',
     lastUiError: '',
     liveBubble: null,
     pendingImages: [],
@@ -674,6 +676,9 @@
     } else {
       line.textContent = state.statusPinned || state.lastActivity || 'Pronto';
     }
+    line.classList.toggle('is-err', state.statusKind === 'err');
+    line.classList.toggle('is-warn', state.statusKind === 'warn');
+    line.classList.toggle('is-ok', state.statusKind === 'ok');
 
     // status colado debaixo da bolha que está respondendo
     if (state.liveBubble) {
@@ -700,6 +705,7 @@
       );
     if (!ephemeral) state.statusPinned = t;
     state.lastActivity = t;
+    state.statusKind = kind || '';
     const badge = $('cursorChatBadge');
     if (badge) {
       badge.className = 'cursor-chat-badge' + (kind ? ` ${kind}` : '');
@@ -821,7 +827,7 @@
   }
 
   function isTestMode() {
-    return document.body.classList.contains('cursor-chat-preview-mode');
+    return Boolean(state.previewStatus && state.previewStatus !== 'idle');
   }
 
   function stopPreviewPoll() {
@@ -831,19 +837,21 @@
     }
   }
 
-  function setPreviewBanner({ text, showOpen, showApprove }) {
-    document.body.classList.add('cursor-chat-preview-mode');
-    const el = $('cursorChatPreviewText');
-    if (el) el.textContent = text || '';
-    const openBtn = $('cursorChatBannerOpen');
-    if (openBtn) {
-      openBtn.hidden = !showOpen || !state.previewUrl;
-      openBtn.style.display = showOpen && state.previewUrl ? '' : 'none';
-    }
-    const approveBtn = $('cursorChatBannerApprove');
-    if (approveBtn) {
-      approveBtn.hidden = showApprove === false;
-      approveBtn.style.display = showApprove === false ? 'none' : '';
+  /** Aviso de preview na statusline (onde antes aparecia “Preview falhou”). Sem faixa laranja. */
+  function setPreviewBanner({ text, showOpen, showApprove, kind }) {
+    void showOpen;
+    void showApprove;
+    document.body.classList.remove('cursor-chat-preview-mode');
+    const msg = String(text || '').trim();
+    if (msg) {
+      const k =
+        kind ||
+        (state.previewStatus === 'failed'
+          ? 'err'
+          : state.previewStatus === 'live'
+            ? 'ok'
+            : 'warn');
+      setStatus(msg, k);
     }
     updateTestPrButtons();
   }
@@ -852,10 +860,44 @@
     return state.previewStatus === 'live' && Boolean(state.previewUrl);
   }
 
+  function markPrDone(n, { merged = false, detail = '' } = {}) {
+    state.prDone = true;
+    state.previewStatus = 'done';
+    state.previewUrl = null;
+    stopPreviewPoll();
+    document.body.classList.remove('cursor-chat-preview-mode');
+    const msg =
+      detail ||
+      (merged
+        ? `PR #${n} já foi publicada no site.`
+        : `PR #${n} já foi encerrada — nada para publicar.`);
+    setStatus(msg, 'ok');
+    saveCloudSession({ previewStatus: 'done', previewUrl: null });
+    updatePublishBar();
+    updateTestPrButtons();
+    updateConfigActions();
+  }
+
+  function looksLikePrAlreadyDone(data) {
+    const st = String(data?.status || '').toLowerCase();
+    if (st === 'merged' || st === 'closed' || st === 'done') return true;
+    if (data?.merged === true) return true;
+    const blob = `${data?.error || ''} ${data?.detail || ''} ${data?.message || ''}`.toLowerCase();
+    return /\b(merged|closed|fechad|já foi publicada|ja foi publicada)\b/.test(blob);
+  }
+
   function applyPreviewPayload(data, prNumber) {
     const n = prNumber || data?.prNumber || state.prNumber;
     if (data?.previewUrl) state.previewUrl = data.previewUrl;
+    if (looksLikePrAlreadyDone(data)) {
+      markPrDone(n, {
+        merged: data?.status === 'merged' || data?.merged === true,
+        detail: data?.detail || data?.message || '',
+      });
+      return 'done';
+    }
     if (data?.status === 'live' && data.previewUrl) {
+      state.prDone = false;
       state.previewStatus = 'live';
       setPreviewBanner({
         text:
@@ -863,8 +905,8 @@
           `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
         showOpen: true,
         showApprove: true,
+        kind: 'ok',
       });
-      setStatus(`Abrir PR#${n}`, 'ok');
       saveCloudSession({ previewUrl: state.previewUrl, previewStatus: 'live' });
       return 'live';
     }
@@ -874,12 +916,13 @@
         text: `Falha no preview do PR #${n}: ${data.error || 'erro desconhecido'}. Confira Previews Manual no Render.`,
         showOpen: false,
         showApprove: true,
+        kind: 'err',
       });
-      setStatus('Preview falhou', 'err');
       saveCloudSession({ previewStatus: 'failed' });
       return 'failed';
     }
     if (data?.triggered || data?.status === 'pending') {
+      state.prDone = false;
       state.previewStatus = 'pending';
       setPreviewBanner({
         text:
@@ -887,6 +930,7 @@
           `Aviso: o preview usa o mesmo banco do site ao vivo.`,
         showOpen: Boolean(data?.previewUrl),
         showApprove: true,
+        kind: 'warn',
       });
       saveCloudSession({ previewUrl: state.previewUrl, previewStatus: 'pending' });
       return 'pending';
@@ -913,61 +957,75 @@
 
   function updateTestPrButtons() {
     const hasPr = Boolean(state.prNumber);
+    const done = Boolean(state.prDone) || state.previewStatus === 'done';
     const n = state.prNumber || '…';
     const pending = state.previewStatus === 'pending';
     const live = previewReady();
     const label = !hasPr
       ? 'Testar PR'
-      : live
-        ? `Abrir PR#${n}`
-        : pending
-          ? `Subindo PR#${n}…`
-          : `Testar PR#${n}`;
+      : done
+        ? `PR#${n} ok`
+        : live
+          ? `Abrir PR#${n}`
+          : pending
+            ? `Subindo PR#${n}…`
+            : `Testar PR#${n}`;
     const title = !hasPr
       ? 'Espere o agent abrir um PR'
-      : live
-        ? 'Abre o site de teste (preview Render) em nova aba'
-        : pending
-          ? 'Aguardando GitHub + Render liberar o link do preview'
-          : 'Dispara label render-preview no GitHub e sobe o preview no Render';
-    const disabled = !hasPr || state.busy || pending;
-    [ $('cursorChatTestPr'), $('cursorChatCfgTest') ].forEach((btn) => {
-      if (!btn) return;
+      : done
+        ? 'Este PR já foi publicado ou fechado'
+        : live
+          ? 'Abre o site de teste (preview Render) em nova aba'
+          : pending
+            ? 'Aguardando GitHub + Render liberar o link do preview'
+            : 'Dispara label render-preview no GitHub e sobe o preview no Render';
+    const disabled = !hasPr || state.busy || pending || done;
+    const btn = $('cursorChatTestPr');
+    if (btn) {
       btn.textContent = label;
       btn.title = title;
       btn.disabled = disabled;
-      btn.classList.toggle('is-on', live || pending);
-      btn.classList.toggle('success', live);
-      btn.classList.toggle('warn', !live);
-    });
+      btn.classList.toggle('is-on', (live || pending) && !done);
+      btn.classList.toggle('success', live || done);
+      btn.classList.toggle('warn', !live && !done);
+      btn.hidden = done;
+    }
   }
 
   function updateConfigActions() {
     const hasPr = Boolean(state.prNumber);
-    const approveBtn = $('cursorChatCfgApprove');
-    const publishBtn = $('cursorChatCfgPublish');
-    const discardBtn = $('cursorChatCfgDiscard');
+    const done = Boolean(state.prDone) || state.previewStatus === 'done';
     const hint = $('cursorChatCfgPrHint');
+    const histBtn = $('cursorChatCfgPrHistory');
     updateTestPrButtons();
-    [approveBtn, publishBtn, discardBtn].forEach((btn) => {
-      if (btn) btn.disabled = !hasPr || state.busy;
-    });
+    if (histBtn) {
+      histBtn.disabled = !hasPr || state.busy;
+      histBtn.textContent = hasPr
+        ? `Ver histórico — #${state.prNumber}`
+        : 'Ver histórico do PR';
+    }
     if (hint) {
-      if (hasPr) {
+      if (hasPr && done) {
+        hint.textContent =
+          `PR #${state.prNumber} já aplicada — Testar / Publicar / Descartar ficam ocultos. Você ainda pode ver o histórico.`;
+      } else if (hasPr) {
         const branch = state.branch ? ` · ${state.branch}` : '';
         if (previewReady()) {
           hint.textContent =
-            `PR #${state.prNumber}${branch} — preview pronto. Use “Abrir PR#${state.prNumber}” para ver. Depois Publicar ou Descartar.`;
+            `PR #${state.prNumber}${branch} — preview pronto. Use “Abrir PR#${state.prNumber}” no topo. Depois Publicar ou Descartar.`;
         } else if (state.previewStatus === 'pending') {
           hint.textContent =
-            `PR #${state.prNumber}${branch} — subindo preview no Render (label render-preview). Quando liberar, o botão vira Abrir.`;
+            `PR #${state.prNumber}${branch} — subindo preview no Render. Quando liberar, o botão do topo vira Abrir.`;
+        } else if (state.previewStatus === 'failed') {
+          hint.textContent =
+            `PR #${state.prNumber}${branch} — falha no preview. Veja o aviso na barra de status acima das mensagens.`;
         } else {
           hint.textContent =
-            `PR #${state.prNumber}${branch} pronto. Clique em “Testar PR#${state.prNumber}” para subir o preview (mesmo banco do site ao vivo).`;
+            `PR #${state.prNumber}${branch} pronto. Use “Testar PR#${state.prNumber}” no topo para subir o preview.`;
         }
       } else {
         hint.textContent =
-          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Testar / Publicar / Descartar ficam disponíveis no topo.';
+          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Testar / Publicar / Descartar ficam no topo.';
       }
     }
   }
@@ -978,6 +1036,63 @@
     state.previewOpenedOnce = false;
     if (state.previewStatus === 'pending') state.previewStatus = 'idle';
     updateConfigActions();
+  }
+
+  function closePrHistoryModal() {
+    const modal = $('cursorChatPrHistoryModal');
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.removeProperty('display');
+  }
+
+  async function openPrHistoryModal() {
+    if (!state.prNumber) {
+      appendBubble('error', 'Ainda sem PR nesta conversa.');
+      return;
+    }
+    const modal = $('cursorChatPrHistoryModal');
+    const titleEl = $('cursorChatPrHistoryTitle');
+    const subEl = $('cursorChatPrHistorySub');
+    const bodyEl = $('cursorChatPrHistoryBody');
+    const linkEl = $('cursorChatPrHistoryLink');
+    if (!modal || !bodyEl) return;
+    closeConfigModal();
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    showAgentsModalEl(modal);
+    if (titleEl) titleEl.textContent = `PR #${state.prNumber}`;
+    if (subEl) subEl.textContent = 'Carregando do GitHub…';
+    bodyEl.textContent = 'Carregando…';
+    if (linkEl) {
+      linkEl.hidden = true;
+      linkEl.removeAttribute('href');
+    }
+    try {
+      const data = await api(`/pulls/${encodeURIComponent(state.prNumber)}`);
+      const title = String(data.title || '').trim() || `PR #${state.prNumber}`;
+      if (titleEl) titleEl.textContent = `${title} — #${state.prNumber}`;
+      if (subEl) {
+        const bits = [];
+        if (data.state) bits.push(data.state);
+        if (data.draft) bits.push('draft');
+        if (data.merged) bits.push('merged');
+        if (data.branch) bits.push(data.branch);
+        if (data.user) bits.push(`por ${data.user}`);
+        subEl.textContent = bits.length ? bits.join(' · ') : 'Descrição no GitHub (sem IA)';
+      }
+      const body = String(data.body || '').trim();
+      bodyEl.innerHTML = body
+        ? renderMarkdown(body)
+        : '<p class="cursor-chat-config-hint">Este PR não tem descrição no GitHub.</p>';
+      if (linkEl && data.htmlUrl) {
+        linkEl.href = data.htmlUrl;
+        linkEl.hidden = false;
+      }
+    } catch (e) {
+      bodyEl.textContent = e.message || 'Não foi possível carregar o PR.';
+      if (subEl) subEl.textContent = 'Erro';
+    }
   }
 
   function openPreviewTab() {
@@ -1015,8 +1130,8 @@
             `No Dashboard: serviço da intranet → Previews → Pull Request Previews = Manual. Depois clique de novo em Testar.`,
           showOpen: false,
           showApprove: true,
+          kind: 'err',
         });
-        setStatus('Preview não subiu', 'err');
         saveCloudSession({ previewStatus: 'failed' });
         return;
       }
@@ -1030,8 +1145,8 @@
         text: `Erro ao consultar preview: ${e.message || 'falha'}`,
         showOpen: false,
         showApprove: true,
+        kind: 'err',
       });
-      setStatus(e.message || 'Erro no preview', 'err');
     }
   }
 
@@ -1048,8 +1163,8 @@
       text: `Pedindo preview do PR #${state.prNumber} no Render… (Manual: label render-preview)`,
       showOpen: false,
       showApprove: true,
+      kind: 'warn',
     });
-    setStatus(`Subindo PR#${state.prNumber}…`, 'warn');
     saveCloudSession({ previewStatus: 'pending', previewUrl: null });
     try {
       const data = await api('/preview', {
@@ -1068,9 +1183,9 @@
         text: `Não foi possível iniciar o preview: ${e.message || 'erro'}`,
         showOpen: false,
         showApprove: true,
+        kind: 'err',
       });
       appendBubble('error', e.message || 'Falha ao iniciar preview');
-      setStatus(e.message || 'Erro no preview', 'err');
     }
   }
 
@@ -1078,13 +1193,19 @@
     const bar = $('cursorChatPublishBar');
     const del = $('cursorChatDelete');
     const stop = $('cursorChatStop');
+    const done = Boolean(state.prDone) || state.previewStatus === 'done';
     if (del) del.style.display = state.conversationId || state.agentId ? '' : 'none';
     if (stop) stop.style.display = state.agentId && (state.busy || state.eventSource) ? '' : 'none';
     if (bar) {
-      bar.hidden = !state.prNumber;
+      bar.hidden = !state.prNumber || done;
     }
     updateConfigActions();
-    if (state.prNumber && state.previewSyncedFor !== state.prNumber && state.previewStatus === 'idle') {
+    if (
+      state.prNumber &&
+      !done &&
+      state.previewSyncedFor !== state.prNumber &&
+      state.previewStatus === 'idle'
+    ) {
       state.previewSyncedFor = state.prNumber;
       void syncPreviewFromServer();
     }
@@ -1887,12 +2008,32 @@
     }
   }
 
+  function setHistoryDrawerOpen(open) {
+    const side = $('cursorChatSidebar');
+    const page = document.querySelector('.cursor-chat-page');
+    const btn = $('cursorChatHistToggle');
+    if (!side) return;
+    side.classList.toggle('is-open-mobile', Boolean(open));
+    page?.classList.toggle('is-hist-open', Boolean(open));
+    if (btn) {
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+      btn.classList.toggle('is-on', Boolean(open));
+    }
+  }
+
+  function toggleHistoryDrawer() {
+    const side = $('cursorChatSidebar');
+    if (!side) return;
+    setHistoryDrawerOpen(!side.classList.contains('is-open-mobile'));
+  }
+
   async function openConversation(conversationId) {
     stopWorkWatchers();
     state.conversationId = conversationId;
     markHistoryActive();
     clearStickyError();
     hideBannerExtras();
+    setHistoryDrawerOpen(false);
     setStatus('Carregando histórico…', 'warn');
     try {
       const data = await api(`/conversations/${encodeURIComponent(conversationId)}`);
@@ -1900,6 +2041,10 @@
       state.prNumber = data.prNumber || null;
       state.prUrl = data.prUrl || null;
       state.branch = data.branch || null;
+      state.prDone = false;
+      state.previewStatus = 'idle';
+      state.previewUrl = null;
+      state.previewSyncedFor = null;
       state.specialistId = data.specialistId || null;
       if (state.specialistId) {
         try {
@@ -2419,8 +2564,10 @@
     state.prNumber = null;
     state.prUrl = null;
     state.branch = null;
+    state.prDone = false;
     state.previewUrl = null;
     state.previewStatus = 'idle';
+    state.previewSyncedFor = null;
     state.specialistId = null;
     state.specialistName = null;
     state.previousAssistantText = '';
@@ -2514,6 +2661,7 @@
   function openConfigModal() {
     const modal = $('cursorChatConfigModal');
     if (!modal) return;
+    updateConfigActions();
     showAgentsModalEl(modal);
   }
 
@@ -2532,6 +2680,10 @@
     const cfgModal = $('cursorChatConfigModal');
     if (cfgModal && cfgModal.parentElement !== document.body) {
       document.body.appendChild(cfgModal);
+    }
+    const histModal = $('cursorChatPrHistoryModal');
+    if (histModal && histModal.parentElement !== document.body) {
+      document.body.appendChild(histModal);
     }
 
     $('cursorChatSend')?.addEventListener('click', () => {
@@ -2565,10 +2717,6 @@
     $('cursorChatConfigModal')?.addEventListener('click', (e) => {
       if (e.target === $('cursorChatConfigModal')) closeConfigModal();
     });
-    $('cursorChatCfgNew')?.addEventListener('click', () => {
-      closeConfigModal();
-      newChat();
-    });
     $('cursorChatCfgClearSpec')?.addEventListener('click', () => {
       state.specialistId = null;
       state.specialistName = null;
@@ -2576,24 +2724,32 @@
       updateSpecialistChip();
       closeConfigModal();
     });
-    $('cursorChatCfgTest')?.addEventListener('click', () => {
-      closeConfigModal();
-      onTestPrClick();
+    $('cursorChatCfgPrHistory')?.addEventListener('click', () => {
+      void openPrHistoryModal();
+    });
+    $('cursorChatPrHistoryClose')?.addEventListener('click', closePrHistoryModal);
+    $('cursorChatPrHistoryModal')?.addEventListener('click', (e) => {
+      if (e.target === $('cursorChatPrHistoryModal')) closePrHistoryModal();
     });
     $('cursorChatTestPr')?.addEventListener('click', () => {
       onTestPrClick();
     });
-    $('cursorChatCfgApprove')?.addEventListener('click', () => {
-      closeConfigModal();
-      void approve();
+    $('cursorChatHistToggle')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleHistoryDrawer();
     });
-    $('cursorChatCfgPublish')?.addEventListener('click', () => {
-      closeConfigModal();
-      void approve();
+    $('cursorChatHistClose')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      setHistoryDrawerOpen(false);
     });
-    $('cursorChatCfgDiscard')?.addEventListener('click', () => {
-      closeConfigModal();
-      void reject();
+    document.querySelector('.cursor-chat-page')?.addEventListener('click', (e) => {
+      const page = document.querySelector('.cursor-chat-page');
+      if (!page?.classList.contains('is-hist-open')) return;
+      const t = e.target;
+      if (!(t instanceof Element)) return;
+      if (t.closest('#cursorChatSidebar') || t.closest('#cursorChatHistToggle')) return;
+      setHistoryDrawerOpen(false);
     });
     $('cursorChatAgentsClose')?.addEventListener('click', closeAgentsModal);
     $('cursorChatAgentsModal')?.addEventListener('click', (e) => {
@@ -2607,6 +2763,8 @@
         if (voice.active) stopVoiceInput(false);
         closeAgentsModal();
         closeConfigModal();
+        closePrHistoryModal();
+        setHistoryDrawerOpen(false);
       }
     });
     $('cursorChatInput')?.addEventListener('keydown', (e) => {
@@ -2660,18 +2818,6 @@
     });
     $('cursorChatReject')?.addEventListener('click', () => {
       void reject();
-    });
-    $('cursorChatBannerApprove')?.addEventListener('click', () => {
-      void approve();
-    });
-    $('cursorChatBannerOpen')?.addEventListener('click', () => {
-      openPreviewTab();
-    });
-    $('cursorChatBannerDiscard')?.addEventListener('click', () => {
-      void reject();
-    });
-    $('cursorChatBannerExit')?.addEventListener('click', () => {
-      exitTestMode();
     });
   }
 

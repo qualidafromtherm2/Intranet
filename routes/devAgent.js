@@ -2150,6 +2150,37 @@ router.post('/agents/:id/cancel', requireAdminOrMobile, async (req, res) => {
   }
 });
 
+/** Detalhe do PR (título + body) — nativo GitHub, sem LLM. */
+router.get('/pulls/:number', requireAdminOrMobile, async (req, res) => {
+  try {
+    const { owner, repo } = githubCfg();
+    const n = String(req.params.number || '').replace(/\D/g, '');
+    if (!n) {
+      return res.status(400).json({ ok: false, error: 'Número do PR inválido.' });
+    }
+    const pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${encodeURIComponent(n)}`);
+    if (!pr || pr.message === 'Not Found') {
+      return res.status(404).json({ ok: false, error: `PR #${n} não encontrado.` });
+    }
+    return res.json({
+      ok: true,
+      prNumber: pr.number || Number(n),
+      title: pr.title || '',
+      body: pr.body || '',
+      state: pr.state || null,
+      draft: Boolean(pr.draft),
+      merged: Boolean(pr.merged),
+      htmlUrl: pr.html_url || null,
+      branch: pr.head?.ref || null,
+      user: pr.user?.login || null,
+      createdAt: pr.created_at || null,
+      updatedAt: pr.updated_at || null,
+    });
+  } catch (err) {
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/pulls/:number/files', requireAdminOrMobile, async (req, res) => {
   try {
     const { owner, repo } = githubCfg();
@@ -2468,14 +2499,19 @@ async function getPrPreviewStatus(prNumber) {
     throw err;
   }
   if (pr.state !== 'open') {
+    const merged = Boolean(pr.merged || pr.merged_at);
     return {
       ok: true,
-      status: 'failed',
+      status: merged ? 'merged' : 'closed',
       prNumber,
       previewUrl: null,
-      error: `PR #${prNumber} está ${pr.state} — abra/reabra o PR ou peça outro.`,
+      merged,
+      state: pr.state,
       branch: pr.head?.ref || null,
       sha: pr.head?.sha || null,
+      detail: merged
+        ? `PR #${prNumber} já foi publicada no site.`
+        : `PR #${prNumber} está fechada — sem preview.`,
     };
   }
   const lookGh = await lookupPreviewFromDeployments(owner, repo, pr.head?.sha);
