@@ -12085,6 +12085,14 @@ function requireSessionOrAgentForStatic(req, res, next) {
   return res.sendStatus(401);
 }
 
+const { mountThermoFrontend } = require('./utils/thermoFrontend');
+const thermoFrontend = mountThermoFrontend(app, {
+  enabled: String(process.env.THERMO_FRONTEND_ENABLED || '').toLowerCase() === 'true',
+  distRoot: path.join(__dirname, 'thermo-web', 'dist'),
+  requireSession: requireSessionForStatic,
+});
+console.log('[thermo] frontend', thermoFrontend);
+
 app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRoot, {
   etag: false,
   maxAge: 0,

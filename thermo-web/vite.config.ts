@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => {
   const useProxy = effectiveMode === 'proxy'
 
   return {
+    base: '/thermo/',
     plugins: [react(), tailwindcss()],
     server: {
       host: '127.0.0.1',
