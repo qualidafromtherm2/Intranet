@@ -1,0 +1,4 @@
+import type { LogisticsReport, LogisticsReportMode } from '../features/logistics-report/types'
+async function request<T>(path: string, init: RequestInit = {}) { const response = await fetch(path, { ...init, credentials: 'include', cache: 'no-store', headers: { Accept: 'application/json', ...init.headers } }); const payload = await response.json().catch(() => ({})) as T & { ok?: boolean; error?: string }; if (!response.ok || payload.ok === false) throw new Error(payload.error || `HTTP ${response.status}`); return payload }
+export const logisticsReportQuery = (modo: LogisticsReportMode = 'mes') => new URLSearchParams({ modo }).toString()
+export const loadLogisticsReport = (modo: LogisticsReportMode = 'mes', signal?: AbortSignal) => request<LogisticsReport>(`/api/sac/logistica/relatorio-gerencial?${logisticsReportQuery(modo)}`, { signal })

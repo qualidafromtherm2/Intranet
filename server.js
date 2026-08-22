@@ -12085,6 +12085,14 @@ function requireSessionOrAgentForStatic(req, res, next) {
   return res.sendStatus(401);
 }
 
+const { mountThermoFrontend } = require('./utils/thermoFrontend');
+const thermoFrontend = mountThermoFrontend(app, {
+  enabled: String(process.env.THERMO_FRONTEND_ENABLED || '').toLowerCase() === 'true',
+  distRoot: path.join(__dirname, 'thermo-web', 'dist'),
+  requireSession: requireSessionForStatic,
+});
+console.log('[thermo] frontend', thermoFrontend);
+
 app.use('/etiquetas', requireSessionOrAgentForStatic, express.static(etiquetasRoot, {
   etag: false,
   maxAge: 0,
@@ -29101,6 +29109,10 @@ function sendStorageHtml(res, filename) {
   res.setHeader('Expires', '0');
   const filePath = path.join(__dirname, filename);
   let html = injectStoragePublicUrls(fs.readFileSync(filePath, 'utf8'));
+  if (filename === 'menu_produto.html') {
+    const { injectLegacyThermoSwitch } = require('./utils/thermoFrontend');
+    html = injectLegacyThermoSwitch(html, thermoFrontend.enabled && thermoFrontend.mounted);
+  }
   // Etiquetas de saída SEP — script externo (evita conflito de edição em menu_produto.*)
   if (filename === 'menu_produto.html' && !html.includes('sep-etiquetas-saida.js')) {
     html = html.replace(

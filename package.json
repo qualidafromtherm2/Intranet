@@ -4,6 +4,8 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:thermo-routing": "node --test tests/thermoFrontend.test.js",
+    "build:thermo": "npm ci --prefix thermo-web && npm run build --prefix thermo-web",
     "start": "node server.js",
     "dev": "nodemon server.js",
     "sync:cfop": "node scripts/sync_cfop_tabela_local.js",
