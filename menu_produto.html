@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260822-etq-copias"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260822-header-atalhos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
   <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822c"/>
@@ -180,18 +180,19 @@
   data-nav-selector="#menu-registros">Registros</a>
 </nav>
 
-  <!-- Atalhos no topo: gerenciar primeiro, depois os ativados -->
-  <div id="headerShortcutsBar" class="header-shortcuts-bar" aria-label="Atalhos">
-    <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn" title="Gerenciar atalhos" aria-label="Gerenciar atalhos">
-      <i class="fa-solid fa-sliders"></i>
-    </button>
-    <div id="shortcutItemsContainer" class="shortcut-items-container header-shortcuts-items"></div>
-  </div>
+  <!-- Atalhos colados à esquerda do nome do usuário (nunca ao lado da logo) -->
+  <div class="header-user-cluster">
+    <div id="headerShortcutsBar" class="header-shortcuts-bar" aria-label="Atalhos">
+      <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn" title="Gerenciar atalhos" aria-label="Gerenciar atalhos">
+        <i class="fa-solid fa-sliders"></i>
+      </button>
+      <div id="shortcutItemsContainer" class="shortcut-items-container header-shortcuts-items"></div>
+    </div>
 
-  <!-- Campo de busca -->
-<div class="user-badge">
-  <span id="userNameDisplay" class="user-name">Usuário</span>
-</div>
+    <div class="user-badge">
+      <span id="userNameDisplay" class="user-name">Usuário</span>
+    </div>
+  </div>
 
 
   <!-- Ícones da direita -->
