@@ -63,6 +63,11 @@ async function ensureIaCursorSchema() {
       CREATE INDEX IF NOT EXISTS ia_cursor_msg_conv_idx
         ON ia_cursor.messages (conversation_id, id)
     `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS ia_cursor_msg_assistant_idx
+        ON ia_cursor.messages (conversation_id, created_at DESC)
+        WHERE role = 'assistant'
+    `);
     // colunas novas em bases já criadas
     await pool.query(`ALTER TABLE ia_cursor.conversations ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
     await pool.query(`ALTER TABLE ia_cursor.messages ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
@@ -75,17 +80,30 @@ async function ensureIaCursorSchema() {
 
 async function listConversations({ userId, limit = 40 } = {}) {
   await ensureIaCursorSchema();
+  // Posição no histórico = última resposta da IA (assistant), não o início da conversa.
+  // Sem resposta ainda: cai em updated_at (ex.: run em andamento).
   const { rows } = await pool.query(
-    `SELECT id, title, cursor_agent_id, status, branch, pr_url, pr_number, agent_url,
-            specialist_id, created_at, updated_at
-       FROM ia_cursor.conversations
-      WHERE deleted_at IS NULL
-        AND ($1::int IS NULL OR user_id = $1)
-      ORDER BY updated_at DESC
+    `SELECT c.id, c.title, c.cursor_agent_id, c.status, c.branch, c.pr_url, c.pr_number, c.agent_url,
+            c.specialist_id, c.created_at, c.updated_at,
+            la.last_assistant_at
+       FROM ia_cursor.conversations c
+       LEFT JOIN LATERAL (
+         SELECT MAX(m.created_at) AS last_assistant_at
+           FROM ia_cursor.messages m
+          WHERE m.conversation_id = c.id
+            AND m.role = 'assistant'
+       ) la ON TRUE
+      WHERE c.deleted_at IS NULL
+        AND ($1::int IS NULL OR c.user_id = $1)
+      ORDER BY COALESCE(la.last_assistant_at, c.updated_at, c.created_at) DESC
       LIMIT $2`,
     [userId || null, Math.min(Number(limit) || 40, 100)]
   );
-  return rows;
+  // API usa updated_at na lista — espelha a última resposta da IA para ordenação/exibição
+  return rows.map((r) => ({
+    ...r,
+    updated_at: r.last_assistant_at || r.updated_at,
+  }));
 }
 
 async function getConversation(id) {

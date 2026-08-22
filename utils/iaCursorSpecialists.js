@@ -115,6 +115,15 @@ const CURATED = [
     blurb: 'Grep antes de ler, contexto mínimo',
     skill: 'cursor-token-economia',
   },
+  {
+    id: 'chamado-ia',
+    name: 'Chamado IA',
+    group: 'Suporte',
+    blurb: 'Dúvidas SQL (só leitura) e abrir chamado — sem alterar o sistema',
+    skill: 'chamado-ia',
+    modalOnly: true,
+    restricted: true,
+  },
 ];
 
 function parseFrontmatter(raw) {
@@ -205,6 +214,25 @@ function truncate(text, max) {
 function buildActivationPrompt(specialist) {
   const raw = readSkillMarkdown(specialist.skill || specialist.id) || '';
   const skillBody = truncate(raw, 14000);
+  if (specialist.restricted || specialist.id === 'chamado-ia') {
+    return [
+      `Você é o agente "${specialist.name}" no modal Chamado IA (intranet Fromtherm).`,
+      '',
+      'REGRAS INEGOCIÁVEIS (este modo NÃO altera o sistema):',
+      '1. Só tire dúvidas com SELECT no SQL e/ou abra chamado de suporte.',
+      '2. Proibido editar código, schema, dados (INSERT/UPDATE/DELETE/DDL), PR, commit, push, deploy.',
+      '3. SQL: POST /api/dev-agent/sql com header X-Chamado-Ia: 1 e JSON {"chamadoIa":true,"sql":"..."}.',
+      '4. Abrir chamado: POST /api/dev-agent/abrir-chamado (veja a skill).',
+      '5. Português simples. Se pedirem mudança no sistema, recuse e ofereça consultar SQL ou abrir chamado.',
+      '6. Siga a skill abaixo.',
+      '',
+      'Confirme em UMA frase que está no Chamado IA (só consulta + chamado) e atenda o pedido se já veio na mensagem.',
+      '',
+      '=== SKILL ===',
+      skillBody,
+      '=== FIM SKILL ===',
+    ].join('\n');
+  }
   return [
     `Você é o especialista "${specialist.name}" na intranet Fromtherm (Cloud Agent).`,
     '',
@@ -232,6 +260,15 @@ function buildActivationPrompt(specialist) {
  */
 function buildUserPromptWithSpecialist(userText, specialist) {
   if (!specialist) return userText;
+  if (specialist.restricted || specialist.id === 'chamado-ia') {
+    return [
+      `[Chamado IA ativo (id=${specialist.id}) — SOMENTE consulta SQL + abrir chamado]`,
+      'Proibido alterar código, dados ou o sistema. Se pedirem mudança, recuse e ofereça chamado.',
+      '',
+      'Pedido do usuário:',
+      userText || '(sem texto — veja imagens se houver)',
+    ].join('\n');
+  }
   const tip = [
     `[Especialista ativo: ${specialist.name} (id=${specialist.id})]`,
     `Continue estritamente neste papel. Skill: .agents/skills/${specialist.skill || specialist.id}/SKILL.md`,
@@ -243,10 +280,17 @@ function buildUserPromptWithSpecialist(userText, specialist) {
   return tip;
 }
 
+function isChamadoIaSpecialist(specialistOrId) {
+  if (!specialistOrId) return false;
+  if (typeof specialistOrId === 'string') return specialistOrId === 'chamado-ia';
+  return Boolean(specialistOrId.restricted || specialistOrId.id === 'chamado-ia');
+}
+
 module.exports = {
   listSpecialists,
   getSpecialist,
   buildActivationPrompt,
   buildUserPromptWithSpecialist,
+  isChamadoIaSpecialist,
   CURATED,
 };

@@ -24,7 +24,7 @@
   const ACTIONS_MENU = ['chamado', 'mover', 'renomear', 'historico', 'visao', 'permissoes'];
   const ACTIONS_PAGINA = ['chamado', 'historico', 'visao', 'permissoes'];
   const ACTION_DEFS = {
-    chamado: { icon: 'fa-headset', label: 'Abrir chamado' },
+    chamado: { icon: 'fa-robot', label: 'Chamado IA' },
     mover: { icon: 'fa-arrows-up-down-left-right', label: 'Alterar posição' },
     renomear: { icon: 'fa-pen', label: 'Editar botão' },
     historico: { icon: 'fa-clock-rotate-left', label: 'Abrir histórico' },
@@ -539,10 +539,6 @@
 
   async function abrirChamadoDoBotao(ctx) {
     await carregarBotoes();
-    if (typeof window.abrirChamadoSuporteComBotao !== 'function') {
-      alert('Modal de chamado indisponível.');
-      return;
-    }
     const opts = {
       nav_key: ctx.navKey,
       nav_label: ctx.navLabel,
@@ -552,6 +548,14 @@
     };
     if (!chaveMenuValida(ctx.navKey)) {
       opts.nav_key = '';
+    }
+    if (typeof window.abrirChamadoIaModal === 'function') {
+      window.abrirChamadoIaModal(opts);
+      return;
+    }
+    if (typeof window.abrirChamadoSuporteComBotao !== 'function') {
+      alert('Modal de chamado indisponível.');
+      return;
     }
     window.abrirChamadoSuporteComBotao(opts);
   }

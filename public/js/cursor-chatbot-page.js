@@ -1287,6 +1287,12 @@
         list.innerHTML = '<div class="cursor-chat-bubble meta">Nenhuma conversa ainda.</div>';
         return;
       }
+      // Mais novo → mais antigo pela última resposta da IA (não pelo início da conversa)
+      items.sort((a, b) => {
+        const ta = new Date(a.updatedAt || 0).getTime() || 0;
+        const tb = new Date(b.updatedAt || 0).getTime() || 0;
+        return tb - ta;
+      });
       list.innerHTML = '';
       items.forEach((c) => {
         const cid = c.conversationId || c.id || null;

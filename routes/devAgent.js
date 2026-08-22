@@ -15,6 +15,7 @@ const {
   getSpecialist,
   buildActivationPrompt,
   buildUserPromptWithSpecialist,
+  isChamadoIaSpecialist,
 } = require('../utils/iaCursorSpecialists');
 const {
   stripPreviousAssistantPrefix,
@@ -46,10 +47,14 @@ function agentAuthSecret() {
   ).trim();
 }
 
-function mintSqlTicket(ttlSec = 7 * 24 * 3600) {
+function mintSqlTicket(ttlSec = 7 * 24 * 3600, { readOnly = false } = {}) {
   const secret = agentAuthSecret();
   if (!secret) return null;
   const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  if (readOnly) {
+    const sig = crypto.createHmac('sha256', secret).update(`devsql.ro.${exp}`).digest('hex');
+    return `ro.${exp}.${sig}`;
+  }
   const sig = crypto.createHmac('sha256', secret).update(`devsql.${exp}`).digest('hex');
   return `${exp}.${sig}`;
 }
@@ -57,25 +62,43 @@ function mintSqlTicket(ttlSec = 7 * 24 * 3600) {
 function verifySqlTicket(ticket) {
   const secret = agentAuthSecret();
   const raw = String(ticket || '').trim();
-  if (!secret || !raw) return false;
+  if (!secret || !raw) return null;
   const parts = raw.split('.');
-  if (parts.length !== 2) return false;
+  // Novo: ro.exp.sig (somente leitura — Chamado IA)
+  if (parts.length === 3 && parts[0] === 'ro') {
+    const exp = Number(parts[1]);
+    const sig = parts[2];
+    if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
+    const expect = crypto.createHmac('sha256', secret).update(`devsql.ro.${exp}`).digest('hex');
+    try {
+      const a = Buffer.from(String(sig), 'utf8');
+      const b = Buffer.from(expect, 'utf8');
+      if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) return null;
+      return { ok: true, readOnly: true };
+    } catch {
+      return null;
+    }
+  }
+  // Legado: exp.sig (leitura/escrita)
+  if (parts.length !== 2) return null;
   const exp = Number(parts[0]);
   const sig = parts[1];
-  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return null;
   const expect = crypto.createHmac('sha256', secret).update(`devsql.${exp}`).digest('hex');
   try {
     const a = Buffer.from(String(sig), 'utf8');
     const b = Buffer.from(expect, 'utf8');
-    if (a.length !== b.length) return false;
-    return crypto.timingSafeEqual(a, b);
+    if (a.length !== b.length) return null;
+    if (!crypto.timingSafeEqual(a, b)) return null;
+    return { ok: true, readOnly: false };
   } catch {
-    return false;
+    return null;
   }
 }
 
-function markDevAgentAuth(req, username = 'cloud-agent') {
+function markDevAgentAuth(req, username = 'cloud-agent', { sqlReadOnly = false } = {}) {
   req.devAgentMobile = true;
+  req.devAgentSqlReadOnly = Boolean(sqlReadOnly);
   req.session = req.session || {};
   req.session.user = req.session.user || {
     id: null,
@@ -84,26 +107,62 @@ function markDevAgentAuth(req, username = 'cloud-agent') {
   };
 }
 
+function wantsChamadoIa(req) {
+  if (req.chamadoIaMode) return true;
+  if (String(req.headers['x-chamado-ia'] || '') === '1') return true;
+  if (String(req.query?.chamadoIa || '') === '1') return true;
+  if (req.body?.chamadoIa === true || req.body?.chamadoIa === '1') return true;
+  if (isChamadoIaSpecialist(req.body?.specialistId)) return true;
+  return false;
+}
+
+function isReadOnlySelectSql(sql) {
+  const stripped = String(sql || '')
+    .replace(/\/\*[\s\S]*?\*\//g, ' ')
+    .replace(/--[^\n]*/g, ' ')
+    .trim();
+  if (!stripped) return false;
+  if (!/^(WITH\b|SELECT\b)/i.test(stripped)) return false;
+  if (
+    /\b(INSERT|UPDATE|DELETE|DROP|ALTER|CREATE|TRUNCATE|GRANT|REVOKE|CALL|EXECUTE|COPY|MERGE|VACUUM|REINDEX|CLUSTER|COMMENT|SECURITY\s+LABEL)\b/i.test(
+      stripped
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
 function requireAdminOrMobile(req, res, next) {
   const mobileToken = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
   const hdr = String(req.headers['x-dev-agent-token'] || req.headers['x-cursor-chat-token'] || '').trim();
   const ticketHdr = String(req.headers['x-dev-agent-ticket'] || '').trim();
   if (mobileToken && hdr && hdr === mobileToken) {
-    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'mobile');
+    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'mobile', {
+      sqlReadOnly: wantsChamadoIa(req),
+    });
     return next();
   }
   // Ticket assinado (ou o próprio valor injetado em $DEV_AGENT_MOBILE_TOKEN na VM)
-  if (verifySqlTicket(hdr) || verifySqlTicket(ticketHdr)) {
-    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'cloud-agent');
+  const ticketInfo = verifySqlTicket(hdr) || verifySqlTicket(ticketHdr);
+  if (ticketInfo?.ok) {
+    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'cloud-agent', {
+      sqlReadOnly: Boolean(ticketInfo.readOnly) || wantsChamadoIa(req),
+    });
     return next();
   }
   if (!req.session?.user?.id) {
     return res.status(401).json({ ok: false, error: 'Não autenticado.' });
   }
-  if (!listRoles(req).includes('admin')) {
-    return res.status(403).json({ ok: false, error: 'Acesso restrito a administradores.' });
+  if (listRoles(req).includes('admin')) {
+    return next();
   }
-  return next();
+  // Modal Chamado IA: qualquer usuário logado (escopo restrito no backend)
+  if (wantsChamadoIa(req)) {
+    req.chamadoIaMode = true;
+    return next();
+  }
+  return res.status(403).json({ ok: false, error: 'Acesso restrito a administradores.' });
 }
 
 function cursorKey() {
@@ -275,21 +334,66 @@ function intranetPublicUrl() {
 }
 
 /** Env injetado na VM do Cloud Agent (acesso SQL via API da intranet). */
-function cloudAgentEnvVars() {
+function cloudAgentEnvVars({ readOnlySql = false } = {}) {
   const out = {};
   const base = intranetPublicUrl();
   const fixed = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
-  const ticket = mintSqlTicket();
   if (base) out.INTRANET_PUBLIC_URL = base;
-  // Prefer token fixo do Render; senão ticket assinado (válido ~7 dias)
-  if (fixed) out.DEV_AGENT_MOBILE_TOKEN = fixed;
-  else if (ticket) out.DEV_AGENT_MOBILE_TOKEN = ticket;
+  if (readOnlySql) {
+    const roTicket = mintSqlTicket(7 * 24 * 3600, { readOnly: true });
+    if (roTicket) out.DEV_AGENT_MOBILE_TOKEN = roTicket;
+    else if (fixed) out.DEV_AGENT_MOBILE_TOKEN = fixed;
+    out.CHAMADO_IA_MODE = '1';
+  } else {
+    const ticket = mintSqlTicket();
+    // Prefer token fixo do Render; senão ticket assinado (válido ~7 dias)
+    if (fixed) out.DEV_AGENT_MOBILE_TOKEN = fixed;
+    else if (ticket) out.DEV_AGENT_MOBILE_TOKEN = ticket;
+  }
   return Object.keys(out).length ? out : null;
 }
 
-function sqlAccessPreamble() {
+function sqlAccessPreamble({ readOnly = false } = {}) {
   const base = intranetPublicUrl() || 'https://SEU-SITE.onrender.com';
-  const ticket = mintSqlTicket();
+  const ticket = mintSqlTicket(7 * 24 * 3600, { readOnly });
+  if (readOnly) {
+    const lines = [
+      '## Chamado IA — Postgres somente LEITURA',
+      'Neste modo você SÓ pode SELECT. Proibido INSERT/UPDATE/DELETE/DDL e qualquer mudança no sistema.',
+      'Sempre envie header X-Chamado-Ia: 1 e JSON {"chamadoIa":true,"sql":"..."}.',
+      '',
+      'Autenticação: header X-Dev-Agent-Token com $DEV_AGENT_MOBILE_TOKEN.',
+    ];
+    if (ticket) {
+      lines.push(
+        `Se $DEV_AGENT_MOBILE_TOKEN estiver vazio nesta sessão, use exatamente este valor no header: ${ticket}`
+      );
+    }
+    lines.push(
+      '',
+      'Consultar:',
+      '```bash',
+      `curl -sS -X POST "${base}/api/dev-agent/sql" \\`,
+      '  -H "Content-Type: application/json" \\',
+      '  -H "X-Dev-Agent-Token: $DEV_AGENT_MOBILE_TOKEN" \\',
+      '  -H "X-Chamado-Ia: 1" \\',
+      '  -d \'{"chamadoIa":true,"sql":"SELECT current_database(), current_user;"}\'',
+      '```',
+      '',
+      'Abrir chamado:',
+      '```bash',
+      `curl -sS -X POST "${base}/api/dev-agent/abrir-chamado" \\`,
+      '  -H "Content-Type: application/json" \\',
+      '  -H "X-Dev-Agent-Token: $DEV_AGENT_MOBILE_TOKEN" \\',
+      '  -H "X-Chamado-Ia: 1" \\',
+      '  -d \'{"conversationId":0,"descricao":"...","criticidade":"normal"}\'',
+      '```',
+      '',
+      'Não imprima tokens/senhas. Não altere código nem o banco.',
+      ''
+    );
+    return lines.join('\n');
+  }
   const lines = [
     '## Acesso ao Postgres (intranet)',
     'Você pode criar schemas/tabelas, alterar colunas e consultar o banco via API (o agent NÃO usa DATABASE_URL direto no Render interno).',
@@ -322,7 +426,7 @@ function sqlAccessPreamble() {
   return lines.join('\n');
 }
 
-function wrapPromptForCursor(prompt, { followUp = false } = {}) {
+function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } = {}) {
   const text = String(prompt?.text || '');
   const followUpHint = followUp
     ? [
@@ -335,7 +439,7 @@ function wrapPromptForCursor(prompt, { followUp = false } = {}) {
     : '\n';
   const wrapped = {
     ...prompt,
-    text: `${sqlAccessPreamble()}\n---\n${followUpHint}${text}`,
+    text: `${sqlAccessPreamble({ readOnly: readOnlySql })}\n---\n${followUpHint}${text}`,
   };
   return wrapped;
 }
@@ -449,8 +553,13 @@ async function persistUserTurn({
 function resolvePromptFromBody(req) {
   const text = String(req.body?.prompt || req.body?.text || '').trim();
   const images = normalizePromptImages(req.body?.images || req.body?.promptImages);
-  const specialistId = String(req.body?.specialistId || '').trim() || null;
+  let specialistId = String(req.body?.specialistId || '').trim() || null;
   const activateSpecialist = Boolean(req.body?.activateSpecialist);
+  const chamadoIa = wantsChamadoIa(req);
+  if (chamadoIa) {
+    specialistId = 'chamado-ia';
+    req.chamadoIaMode = true;
+  }
   const specialist = specialistId ? getSpecialist(specialistId) : null;
 
   if (activateSpecialist) {
@@ -467,6 +576,7 @@ function resolvePromptFromBody(req) {
       displayText: specialist.name,
       cursorText: buildActivationPrompt(specialist),
       activateSpecialist: true,
+      chamadoIa: isChamadoIaSpecialist(specialist),
     };
   }
 
@@ -477,18 +587,50 @@ function resolvePromptFromBody(req) {
   }
 
   const displayText = text || '(imagem anexada)';
-  const cursorText = specialist
+  let cursorText = specialist
     ? buildUserPromptWithSpecialist(text || displayText, specialist)
     : text || displayText;
+
+  if (chamadoIa || isChamadoIaSpecialist(specialist)) {
+    const spec = specialist || getSpecialist('chamado-ia');
+    const ctx = req.body?.contextoChamadoIa || {};
+    const navKey = String(ctx.nav_key || req.body?.nav_key || '').trim();
+    const navLabel = String(ctx.nav_label || req.body?.nav_label || '').trim();
+    const convHint = Number(req.body?.conversationId) || null;
+    const isFirstTurn = !convHint;
+    const parts = [];
+    if (isFirstTurn && spec) {
+      parts.push(buildActivationPrompt(spec), '---', 'Pedido atual do usuário (atenda agora):');
+    } else {
+      parts.push(
+        `[Chamado IA ativo — SOMENTE consulta SQL + abrir chamado]`,
+        'Proibido alterar código, dados ou o sistema.',
+        'Pedido do usuário:'
+      );
+    }
+    parts.push(
+      '[Contexto Chamado IA]',
+      convHint
+        ? `conversationId (use ao abrir chamado): ${convHint}`
+        : 'conversationId: será o da conversa criada — use o retornado pela API nas próximas chamadas.',
+      navKey ? `nav_key: ${navKey}` : null,
+      navLabel ? `nav_label: ${navLabel}` : null,
+      `Usuário da sessão: ${actorLabel(req)}`,
+      '',
+      text || displayText
+    );
+    cursorText = parts.filter((x) => x != null && x !== '').join('\n');
+  }
 
   return {
     text,
     images,
-    specialist,
-    specialistId: specialist?.id || null,
+    specialist: specialist || (chamadoIa ? getSpecialist('chamado-ia') : null),
+    specialistId: specialist?.id || (chamadoIa ? 'chamado-ia' : null),
     displayText,
     cursorText,
     activateSpecialist: false,
+    chamadoIa: chamadoIa || isChamadoIaSpecialist(specialist),
   };
 }
 
@@ -607,20 +749,39 @@ router.get('/sql/catalog', requireAdminOrMobile, async (req, res) => {
 /**
  * Executa SQL no Postgres da intranet (DDL/DML/SELECT).
  * Cloud Agent chama com X-Dev-Agent-Token — sem DATABASE_URL na VM.
+ * Chamado IA: somente SELECT (ticket ro / header / body.chamadoIa).
  */
 router.post('/sql', requireAdminOrMobile, express.json({ limit: '2mb' }), async (req, res) => {
   const sql = String(req.body?.sql || req.body?.query || '').trim();
   if (!sql) return res.status(400).json({ ok: false, error: 'Campo sql obrigatório.' });
   if (!pool) return res.status(503).json({ ok: false, error: 'DATABASE_URL não configurada.' });
 
+  const readOnly =
+    Boolean(req.devAgentSqlReadOnly) ||
+    wantsChamadoIa(req) ||
+    req.body?.chamadoIa === true ||
+    req.body?.chamadoIa === '1';
+  if (readOnly && !isReadOnlySelectSql(sql)) {
+    return res.status(403).json({
+      ok: false,
+      error:
+        'Chamado IA: somente SELECT é permitido. Para alterar o sistema, use o Chatbot admin ou abra um chamado.',
+    });
+  }
+
   const params = Array.isArray(req.body?.params) ? req.body.params : [];
   const who = actorLabel(req);
-  console.log(`[dev-agent] SQL by ${who}:`, sql.slice(0, 400).replace(/\s+/g, ' '));
+  console.log(`[dev-agent] SQL by ${who}${readOnly ? ' [RO]' : ''}:`, sql.slice(0, 400).replace(/\s+/g, ' '));
 
   const client = await pool.connect();
   try {
     await client.query(`SET statement_timeout = ${Number(SQL_TIMEOUT_MS)}`);
+    if (readOnly) {
+      await client.query('BEGIN');
+      await client.query('SET TRANSACTION READ ONLY');
+    }
     const result = await client.query(sql, params);
+    if (readOnly) await client.query('COMMIT');
     const rows = Array.isArray(result.rows) ? result.rows.slice(0, SQL_MAX_ROWS) : [];
     return res.json({
       ok: true,
@@ -629,8 +790,14 @@ router.post('/sql', requireAdminOrMobile, express.json({ limit: '2mb' }), async 
       truncated: Array.isArray(result.rows) && result.rows.length > rows.length,
       fields: (result.fields || []).map((f) => f.name),
       rows,
+      readOnly: Boolean(readOnly),
     });
   } catch (err) {
+    if (readOnly) {
+      try {
+        await client.query('ROLLBACK');
+      } catch (_) {}
+    }
     console.error('[dev-agent] SQL error:', err.message);
     return res.status(400).json({
       ok: false,
@@ -644,10 +811,86 @@ router.post('/sql', requireAdminOrMobile, express.json({ limit: '2mb' }), async 
   }
 });
 
+/**
+ * Abre chamado de suporte (modo Chamado IA / Cloud Agent).
+ * Usa o usuário da conversa (conversationId) — não inventa autor.
+ */
+router.post('/abrir-chamado', requireAdminOrMobile, express.json({ limit: '100kb' }), async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ ok: false, error: 'DATABASE_URL não configurada.' });
+
+    const descricao = String(req.body?.descricao || req.body?.description || '')
+      .trim()
+      .slice(0, 4000);
+    if (!descricao) {
+      return res.status(400).json({ ok: false, error: 'Informe a descrição do chamado.' });
+    }
+
+    let criticidade = String(req.body?.criticidade || 'normal').trim().toLowerCase();
+    if (!['urgente', 'normal', 'baixa'].includes(criticidade)) criticidade = 'normal';
+
+    const navKey = String(req.body?.nav_key || '').trim().slice(0, 200) || null;
+    const navLabel = String(req.body?.nav_label || '').trim().slice(0, 200) || null;
+
+    let criadoPor = '';
+    let criadoPorNome = '';
+    const conversationId = Number(req.body?.conversationId || req.body?.conversation_id);
+    if (Number.isFinite(conversationId) && conversationId > 0) {
+      const conv = await iaDb.getConversation(conversationId);
+      if (conv) {
+        criadoPor = String(conv.username || '').trim();
+        criadoPorNome = criadoPor;
+      }
+    }
+
+    if (!criadoPor && req.session?.user && !req.devAgentMobile) {
+      criadoPor = String(req.session.user.username || req.session.user.id || '').trim();
+      criadoPorNome = String(
+        req.session.user.nome || req.session.user.name || req.session.user.username || ''
+      ).trim();
+    }
+
+    if (!criadoPor) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Informe conversationId da sessão Chamado IA para identificar o autor.',
+      });
+    }
+
+    const { rows } = await pool.query(
+      `INSERT INTO suporte."Chamado"
+         (descricao, criticidade, status, anexos, criado_por, criado_por_nome, nav_key, nav_label)
+       VALUES ($1, $2, 'aberto', '[]'::jsonb, $3, $4, $5, $6)
+       RETURNING id, descricao, criticidade, status, criado_por, criado_por_nome, nav_key, nav_label, criado_em`,
+      [descricao, criticidade, criadoPor, criadoPorNome || criadoPor, navKey, navLabel]
+    );
+
+    const chamado = rows[0];
+    if (navKey) {
+      try {
+        const { registrarHistoricoNav } = require('./navAdmin');
+        await registrarHistoricoNav({
+          navKey,
+          navLabel: navLabel || navKey,
+          tipo: 'chamado',
+          descricao: `Chamado #${chamado.id} aberto (Chamado IA)`,
+          referenciaId: chamado.id,
+          req,
+        });
+      } catch (_) {}
+    }
+
+    return res.json({ ok: true, chamado });
+  } catch (err) {
+    console.error('[dev-agent] abrir-chamado', err.message);
+    return res.status(500).json({ ok: false, error: err.message || 'Falha ao abrir chamado' });
+  }
+});
+
 /** Catálogo de especialistas (módulos + botões). */
 router.get('/specialists', requireAdminOrMobile, (req, res) => {
   try {
-    const items = listSpecialists();
+    const items = listSpecialists().filter((s) => !s.modalOnly);
     const groups = {};
     for (const s of items) {
       if (!groups[s.group]) groups[s.group] = [];
@@ -785,13 +1028,28 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     const conv = await iaDb.createConversation({
       userId: user.id || null,
       username: user.username || null,
-      title: titleFromPrompt(titleSeed) || String(req.body?.name || '').trim() || 'Nova conversa',
+      title:
+        resolved.chamadoIa
+          ? `Chamado IA: ${titleFromPrompt(titleSeed)}`
+          : titleFromPrompt(titleSeed) || String(req.body?.name || '').trim() || 'Nova conversa',
     });
+
+    // Reaplica contexto com conversationId real (abrir chamado)
+    let cursorText = resolved.cursorText;
+    if (resolved.chamadoIa) {
+      cursorText = String(cursorText || '').replace(
+        /conversationId: será o da conversa criada[^\n]*/i,
+        `conversationId (use ao abrir chamado): ${conv.id}`
+      );
+      if (!/conversationId \(use ao abrir chamado\):/i.test(cursorText)) {
+        cursorText = `[Contexto Chamado IA]\nconversationId (use ao abrir chamado): ${conv.id}\n\n${cursorText}`;
+      }
+    }
 
     const { prompt, attachments } = await persistUserTurn({
       conversationId: conv.id,
       displayText: resolved.displayText,
-      cursorText: resolved.cursorText,
+      cursorText,
       imagesBase64: resolved.images,
       specialistId: resolved.specialistId,
     });
@@ -801,19 +1059,40 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     }
 
     const { branch } = githubCfg();
-    const envVars = cloudAgentEnvVars();
+    const envVars = cloudAgentEnvVars({ readOnlySql: Boolean(resolved.chamadoIa) });
     const body = {
-      prompt: wrapPromptForCursor(prompt),
+      prompt: wrapPromptForCursor(prompt, { readOnlySql: Boolean(resolved.chamadoIa) }),
       name:
         String(req.body?.name || '').trim() ||
-        (resolved.specialist ? `Esp: ${resolved.specialist.name}` : titleFromPrompt(resolved.displayText)),
+        (resolved.chamadoIa
+          ? `Chamado IA`
+          : resolved.specialist
+            ? `Esp: ${resolved.specialist.name}`
+            : titleFromPrompt(resolved.displayText)),
       repos: [{ url: repoHttpsUrl(), startingRef: branch }],
-      autoCreatePR: req.body?.autoCreatePR !== false,
-      mode: req.body?.mode === 'plan' ? 'plan' : 'agent',
+      autoCreatePR: resolved.chamadoIa ? false : req.body?.autoCreatePR !== false,
+      // ask = sem editar código; fallback plan se a API rejeitar ask
+      mode: resolved.chamadoIa
+        ? req.body?.mode === 'plan'
+          ? 'plan'
+          : 'ask'
+        : req.body?.mode === 'plan'
+          ? 'plan'
+          : 'agent',
       ...(envVars ? { envVars } : {}),
     };
 
-    const data = await cursorFetch('/agents', { method: 'POST', body });
+    let data;
+    try {
+      data = await cursorFetch('/agents', { method: 'POST', body });
+    } catch (err) {
+      if (resolved.chamadoIa && body.mode === 'ask') {
+        body.mode = 'plan';
+        data = await cursorFetch('/agents', { method: 'POST', body });
+      } else {
+        throw err;
+      }
+    }
     const summary = summarizeAgent(data?.agent, data?.run);
     await iaDb.touchConversation(conv.id, {
       cursor_agent_id: summary.agentId,
@@ -830,6 +1109,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       conversationId: conv.id,
       specialistId: resolved.specialistId,
       specialistName: resolved.specialist?.name || null,
+      chamadoIa: Boolean(resolved.chamadoIa),
       ...summary,
       attachments,
       raw: data,
@@ -874,6 +1154,10 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       await iaDb.touchConversation(conv.id, { cursor_agent_id: agentId });
     }
 
+    const chamadoIa =
+      Boolean(resolved.chamadoIa) || isChamadoIaSpecialist(conv.specialist_id);
+    if (chamadoIa) req.chamadoIaMode = true;
+
     if (cancelledBusy) {
       try {
         await iaDb.addMessage({
@@ -884,23 +1168,30 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       } catch (_) {}
     }
 
+    let cursorText = resolved.cursorText;
+    if (chamadoIa && !/conversationId \(use ao abrir chamado\):/i.test(String(cursorText || ''))) {
+      cursorText = `[Contexto Chamado IA]\nconversationId (use ao abrir chamado): ${conv.id}\n\n${cursorText}`;
+    }
+
     const { prompt, attachments } = await persistUserTurn({
       conversationId: conv.id,
       displayText: resolved.displayText,
-      cursorText: resolved.cursorText,
+      cursorText,
       imagesBase64: resolved.images,
-      specialistId: resolved.specialistId,
+      specialistId: resolved.specialistId || (chamadoIa ? 'chamado-ia' : null),
     });
 
-    if (resolved.specialistId) {
-      await iaDb.touchConversation(conv.id, { specialist_id: resolved.specialistId });
+    if (resolved.specialistId || chamadoIa) {
+      await iaDb.touchConversation(conv.id, {
+        specialist_id: resolved.specialistId || 'chamado-ia',
+      });
     }
 
     let data;
     try {
       data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
         method: 'POST',
-        body: { prompt: wrapPromptForCursor(prompt, { followUp: true }) },
+        body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
       });
     } catch (runErr) {
       // Corrida: ainda busy → tenta cancelar de novo e recria 1x
@@ -908,7 +1199,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         await cancelActiveRunIfBusy(agentId);
         data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
           method: 'POST',
-          body: { prompt: wrapPromptForCursor(prompt, { followUp: true }) },
+          body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
         });
       } else {
         throw runErr;
@@ -922,8 +1213,9 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     return res.json({
       ok: true,
       conversationId: conv.id,
-      specialistId: resolved.specialistId,
-      specialistName: resolved.specialist?.name || null,
+      specialistId: resolved.specialistId || (chamadoIa ? 'chamado-ia' : null),
+      specialistName: resolved.specialist?.name || (chamadoIa ? 'Chamado IA' : null),
+      chamadoIa,
       run,
       runId: run?.id || null,
       cancelledBusy,
@@ -931,7 +1223,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     });
   } catch (err) {
     console.error('[dev-agent] follow-up', err.message);
-    return res.status(err.status || 500).json({ ok: false, error: err.message, busy: err.status === 409 });
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
 });
 
