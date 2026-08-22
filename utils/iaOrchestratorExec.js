@@ -3,7 +3,7 @@
  */
 'use strict';
 
-const { chatCompletion } = require('./iaCloudProviders');
+const { chatCompletion, buildProviderStatusBoard, listConfiguredProviders } = require('./iaCloudProviders');
 const { isReadOnlySelectSql } = require('./iaOrchestrator');
 
 const SQL_MAX_ROWS = Math.min(Number(process.env.DEV_AGENT_SQL_MAX_ROWS || 500), 2000);
@@ -83,6 +83,7 @@ async function freeChat({ action, prompt, context = '' }) {
     content: result.content,
     provider: result.provider,
     model: result.model,
+    attempts: result.attempts || [],
   };
 }
 
@@ -109,9 +110,20 @@ async function executeLightTasks({
 }) {
   const tasks = (plan?.tasks || []).filter((t) => t.assignee === 'ops' || t.assignee === 'free');
   const results = [];
+  const allAttempts = [];
+  let opsUsed = false;
+
+  const mergeAttempts = (attempts) => {
+    for (const a of attempts || []) {
+      const prev = allAttempts.find((x) => x.id === a.id);
+      if (!prev) allAttempts.push({ ...a });
+      else if (a.ok && !prev.ok) Object.assign(prev, a);
+    }
+  };
 
   const runOne = async (task, priorResults = []) => {
     if (task.assignee === 'ops') {
+      opsUsed = true;
       if (task.action === 'list_conversations') {
         const userId = req.devAgentMobile ? null : req.session?.user?.id;
         const items = await iaDb.listConversations({ userId, limit: 30 });
@@ -199,12 +211,14 @@ async function executeLightTasks({
               { role: 'user', content: task.prompt || userText },
             ],
           });
+          mergeAttempts(drafted.attempts);
           sql = String(drafted.content || '')
             .replace(/```sql/gi, '')
             .replace(/```/g, '')
             .trim()
             .replace(/;+\s*$/, '');
         } catch (e) {
+          mergeAttempts(e.attempts);
           return {
             taskId: task.id,
             action: task.action,
@@ -233,6 +247,7 @@ async function executeLightTasks({
         prompt: task.prompt || userText,
         context: contextBits,
       });
+      mergeAttempts(chat.attempts);
       const isDraft = task.action === 'draft_html_css';
       let content = chat.content;
       if (isDraft && !/responda ["']?aplicar/i.test(content)) {
@@ -248,6 +263,7 @@ async function executeLightTasks({
         isDraft,
       };
     } catch (e) {
+      mergeAttempts(e.attempts);
       return {
         taskId: task.id,
         action: task.action,
@@ -283,10 +299,21 @@ async function executeLightTasks({
     .filter(Boolean)
     .join('\n\n---\n\n');
 
+  const routing = buildProviderStatusBoard({
+    configured: listConfiguredProviders(),
+    attempts: allAttempts,
+    engine: null,
+    cursorStatus: 'idle',
+    opsUsed,
+  });
+
   return {
     results,
     assistantMessage,
     hasDraft: results.some((r) => r.isDraft || r.action === 'draft_html_css'),
+    attempts: allAttempts,
+    opsUsed,
+    routing,
   };
 }
 

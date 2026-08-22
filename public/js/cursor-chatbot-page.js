@@ -33,6 +33,7 @@
     specialistsCache: null,
     previousAssistantText: '',
     histTab: 'atual',
+    routing: null,
     previewUrl: null,
     previewPollTimer: null,
     previewOpenedOnce: false,
@@ -1589,6 +1590,74 @@
     return map[name] || name || 'ferramenta';
   }
 
+  function providerShortLabel(id) {
+    const map = {
+      gemini: 'Gemini',
+      groq: 'Groq',
+      openrouter: 'OpenRouter',
+      deepseek: 'DeepSeek',
+      mistral: 'Mistral',
+      ops: 'Ops',
+      cursor: 'Cursor',
+    };
+    return map[id] || String(id || '?');
+  }
+
+  function providerIconLetter(id) {
+    const map = {
+      gemini: 'Ge',
+      groq: 'Gq',
+      openrouter: 'OR',
+      deepseek: 'DS',
+      mistral: 'Mi',
+      ops: 'Op',
+      cursor: 'Cu',
+    };
+    return map[id] || String(id || '?').slice(0, 2).toUpperCase();
+  }
+
+  function statusCaption(status) {
+    if (status === 'ok') return 'utilizado / ok';
+    if (status === 'nok') return 'não utilizado / nok';
+    if (status === 'running') return 'utilizado / rodando';
+    return 'não utilizado';
+  }
+
+  function renderProviders(routing) {
+    const box = $('cursorChatProviders');
+    if (!box) return;
+    state.routing = routing || null;
+    box.innerHTML = '';
+    const providers = Array.isArray(routing?.providers) ? routing.providers : [];
+    if (!providers.length) return;
+    providers.forEach((p) => {
+      const st = p.status || 'idle';
+      const chip = el(
+        'span',
+        `cursor-chat-prov is-${st}` + (st === 'running' ? ' is-running' : ''),
+        null
+      );
+      chip.dataset.id = p.id || '';
+      chip.title = `${providerShortLabel(p.id)} — ${p.detail || statusCaption(st)}`;
+      const ico = document.createElement('span');
+      ico.className = 'cursor-chat-prov-ico';
+      ico.textContent = providerIconLetter(p.id);
+      const lab = document.createElement('span');
+      lab.className = 'cursor-chat-prov-label';
+      lab.textContent =
+        st === 'ok'
+          ? `${providerShortLabel(p.id)} · ok`
+          : st === 'nok'
+            ? `${providerShortLabel(p.id)} · nok`
+            : st === 'running'
+              ? `${providerShortLabel(p.id)} · …`
+              : providerShortLabel(p.id);
+      chip.appendChild(ico);
+      chip.appendChild(lab);
+      box.appendChild(chip);
+    });
+  }
+
   async function refreshAgentList() {
     const list = $('cursorChatAgentList');
     if (!list) return;
@@ -1776,6 +1845,7 @@
       }
       updateSpecialistChip();
       renderSqlMessages(data.messages || []);
+      renderProviders(data.routing || null);
       updatePublishBar();
       saveCloudSession();
       markHistoryActive();
@@ -2095,6 +2165,7 @@
       if (orchUi) {
         appendBubble('meta', orchUi);
       }
+      if (data.routing) renderProviders(data.routing);
 
       // Resposta imediata da IA grátis / ops (sem stream do Cursor)
       if (data.assistantMessage && !runId) {

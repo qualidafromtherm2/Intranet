@@ -205,27 +205,93 @@ async function chatCompletion(opts = {}) {
     err.code = 'NO_FREE_PROVIDER';
     throw err;
   }
-  const errors = [];
+  const attempts = [];
   for (const provider of order) {
     try {
-      if (provider.kind === 'gemini') {
-        return await chatGemini(provider, opts);
-      }
-      return await chatOpenAiCompatible(provider, opts);
+      const result =
+        provider.kind === 'gemini'
+          ? await chatGemini(provider, opts)
+          : await chatOpenAiCompatible(provider, opts);
+      attempts.push({ id: provider.id, ok: true, error: null });
+      // provedores não tentados ficam de fora — o caller marca idle
+      return {
+        ...result,
+        attempts,
+      };
     } catch (e) {
-      errors.push(`${provider.id}: ${e.message}`);
-      const st = Number(e.status || 0);
-      // 401/403 = chave inválida; 429 = rate limit — tenta próximo
-      if (st && st !== 401 && st !== 403 && st !== 429 && st < 500) {
-        // erro de cliente não recuperável neste provedor; ainda assim tenta próximo
-      }
+      attempts.push({
+        id: provider.id,
+        ok: false,
+        error: e.message || String(e),
+        status: Number(e.status || 0) || null,
+      });
     }
   }
-  const err = new Error(`Todos os provedores falharam: ${errors.join(' | ')}`);
+  const err = new Error(
+    `Todos os provedores falharam: ${attempts.map((a) => `${a.id}: ${a.error}`).join(' | ')}`
+  );
   err.status = 502;
   err.code = 'ALL_PROVIDERS_FAILED';
-  err.details = errors;
+  err.details = attempts;
+  err.attempts = attempts;
   throw err;
+}
+
+/**
+ * Monta status visual de todas as IAs configuradas + Cursor.
+ * status: ok | nok | idle
+ */
+function buildProviderStatusBoard({
+  configured = listConfiguredProviders(),
+  attempts = [],
+  engine = null,
+  cursorStatus = 'idle',
+  opsUsed = false,
+} = {}) {
+  const attemptMap = new Map((attempts || []).map((a) => [a.id, a]));
+  const providers = (configured || []).map((p) => {
+    const a = attemptMap.get(p.id);
+    if (a?.ok) return { id: p.id, label: p.id, status: 'ok', detail: 'utilizado / ok' };
+    if (a && a.ok === false) {
+      return {
+        id: p.id,
+        label: p.id,
+        status: 'nok',
+        detail: `não utilizado / nok${a.error ? `: ${String(a.error).slice(0, 80)}` : ''}`,
+      };
+    }
+    return { id: p.id, label: p.id, status: 'idle', detail: 'não utilizado' };
+  });
+
+  const extras = [
+    {
+      id: 'ops',
+      label: 'ops',
+      status: opsUsed ? 'ok' : 'idle',
+      detail: opsUsed ? 'utilizado / ok' : 'não utilizado',
+    },
+    {
+      id: 'cursor',
+      label: 'cursor',
+      status: cursorStatus === 'ok' || cursorStatus === 'running' || cursorStatus === 'nok'
+        ? cursorStatus
+        : 'idle',
+      detail:
+        cursorStatus === 'ok'
+          ? 'utilizado / ok'
+          : cursorStatus === 'running'
+            ? 'utilizado / rodando'
+            : cursorStatus === 'nok'
+              ? 'não utilizado / nok'
+              : 'não utilizado',
+    },
+  ];
+
+  return {
+    engine: engine || null,
+    providers: [...providers, ...extras],
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 module.exports = {
@@ -233,4 +299,5 @@ module.exports = {
   listConfiguredProviders,
   hasAnyFreeProvider,
   chatCompletion,
+  buildProviderStatusBoard,
 };

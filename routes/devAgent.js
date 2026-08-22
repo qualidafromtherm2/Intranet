@@ -39,7 +39,7 @@ const {
   isApplyDraftRequest,
   findLastDraftContent,
 } = require('../utils/iaOrchestrator');
-const { listConfiguredProviders } = require('../utils/iaCloudProviders');
+const { listConfiguredProviders, buildProviderStatusBoard } = require('../utils/iaCloudProviders');
 const { executeLightTasks } = require('../utils/iaOrchestratorExec');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
@@ -504,6 +504,9 @@ async function runOrchestration({ conv, resolved, req, userText }) {
   let freeResults = [];
   let assistantMessage = '';
   let hasDraft = false;
+  let lightRouting = null;
+  let opsUsed = false;
+  let attempts = [];
 
   if (planNeedsOps(plan) || planNeedsFree(plan)) {
     const light = await executeLightTasks({
@@ -520,6 +523,9 @@ async function runOrchestration({ conv, resolved, req, userText }) {
     freeResults = light.results || [];
     assistantMessage = light.assistantMessage || '';
     hasDraft = Boolean(light.hasDraft);
+    lightRouting = light.routing || null;
+    opsUsed = Boolean(light.opsUsed);
+    attempts = light.attempts || [];
   }
 
   // Fase 3: "aplicar" → busca último rascunho da conversa para o Cursor
@@ -534,10 +540,37 @@ async function runOrchestration({ conv, resolved, req, userText }) {
   }
 
   const needsCursor = planNeedsCursor(plan);
+  const engine = engineFromPlan(plan, needsCursor);
+
+  const finalizeRouting = (cursorStatus) => {
+    const base = lightRouting || buildProviderStatusBoard({
+      configured: listConfiguredProviders(),
+      attempts,
+      opsUsed,
+      cursorStatus: 'idle',
+    });
+    const providers = (base.providers || []).map((p) => {
+      if (p.id !== 'cursor') return p;
+      return {
+        ...p,
+        status: cursorStatus,
+        detail:
+          cursorStatus === 'ok'
+            ? 'utilizado / ok'
+            : cursorStatus === 'running'
+              ? 'utilizado / rodando'
+              : cursorStatus === 'nok'
+                ? 'não utilizado / nok'
+                : 'não utilizado',
+      };
+    });
+    return { ...base, engine, providers, summary: plan.summary, source: plan.source };
+  };
 
   if (assistantMessage && !needsCursor) {
     const deletedConversationId =
       freeResults.find((r) => r.deletedConversationId)?.deletedConversationId || null;
+    const routing = finalizeRouting('idle');
     let asst = null;
     if (!deletedConversationId) {
       asst = await iaDb.addMessage({
@@ -547,21 +580,23 @@ async function runOrchestration({ conv, resolved, req, userText }) {
         cursorRunId: null,
         specialistId: resolved?.specialistId || null,
       });
-      await iaDb.touchConversation(conv.id, { status: 'FINISHED' });
+      await iaDb.touchConversation(conv.id, { status: 'FINISHED', routing_meta: routing });
     }
     return {
       handled: true,
       plan,
       freeResults,
+      routing,
       response: {
         ok: true,
         conversationId: deletedConversationId ? null : conv.id,
         agentId: deletedConversationId ? null : conv.cursor_agent_id || null,
         runId: null,
         run: null,
-        engine: engineFromPlan(plan, false),
+        engine,
         deletedConversationId,
         hasDraft,
+        routing,
         orchestrator: {
           summary: plan.summary,
           risk: plan.risk,
@@ -594,6 +629,13 @@ async function runOrchestration({ conv, resolved, req, userText }) {
     } catch (_) {}
   }
 
+  const routing = finalizeRouting(needsCursor ? 'running' : 'idle');
+  if (conv?.id) {
+    try {
+      await iaDb.touchConversation(conv.id, { routing_meta: routing });
+    } catch (_) {}
+  }
+
   return {
     handled: false,
     plan,
@@ -601,6 +643,7 @@ async function runOrchestration({ conv, resolved, req, userText }) {
     assistantMessage,
     cursorPromptText,
     hasDraft,
+    routing,
   };
 }
 
@@ -1177,6 +1220,7 @@ router.get('/conversations', requireAdminOrMobile, async (req, res) => {
         prNumber: c.pr_number,
         updatedAt: c.updated_at,
         createdAt: c.created_at,
+        routing: c.routing_meta || null,
       })),
     });
   } catch (err) {
@@ -1208,6 +1252,7 @@ router.get('/conversations/:id', requireAdminOrMobile, async (req, res) => {
       prNumber: conv.pr_number,
       agentUrl: conv.agent_url,
       specialistId: conv.specialist_id || null,
+      routing: conv.routing_meta || null,
       runStatus: conv.status,
       messages: messages.map((m) => ({
         id: m.id,
@@ -1356,6 +1401,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     }
 
     let orchPlan = null;
+    let orchRouting = null;
     let launchPrompt = prompt;
     if (!shouldSkipOrchestrator(req, resolved)) {
       const orch = await runOrchestration({
@@ -1372,6 +1418,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
         });
       }
       orchPlan = orch.plan;
+      orchRouting = orch.routing || null;
       if (orch.cursorPromptText) {
         launchPrompt = { ...prompt, text: orch.cursorPromptText };
       }
@@ -1393,6 +1440,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       chamadoIa: Boolean(resolved.chamadoIa),
       recoveredFromArchive: reused,
       engine: orchPlan ? engineFromPlan(orchPlan, true) : 'cursor',
+      routing: orchRouting,
       orchestrator: orchPlan
         ? {
             summary: orchPlan.summary,
@@ -1488,6 +1536,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     }
 
     let orchPlan = null;
+    let orchRouting = null;
     let launchPrompt = prompt;
     if (!shouldSkipOrchestrator(req, resolved)) {
       const orch = await runOrchestration({
@@ -1505,6 +1554,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         });
       }
       orchPlan = orch.plan;
+      orchRouting = orch.routing || null;
       if (orch.cursorPromptText) {
         launchPrompt = { ...prompt, text: orch.cursorPromptText };
       }
@@ -1565,6 +1615,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       chamadoIa,
       recoveredFromArchive,
       engine: orchPlan ? engineFromPlan(orchPlan, true) : 'cursor',
+      routing: orchRouting,
       orchestrator: orchPlan
         ? {
             summary: orchPlan.summary,

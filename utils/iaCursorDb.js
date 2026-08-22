@@ -72,6 +72,7 @@ async function ensureIaCursorSchema() {
     await pool.query(`ALTER TABLE ia_cursor.conversations ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
     await pool.query(`ALTER TABLE ia_cursor.messages ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
     await pool.query(`ALTER TABLE ia_cursor.messages ADD COLUMN IF NOT EXISTS favorited_at TIMESTAMPTZ`);
+    await pool.query(`ALTER TABLE ia_cursor.conversations ADD COLUMN IF NOT EXISTS routing_meta JSONB`);
     await pool.query(`
       CREATE INDEX IF NOT EXISTS ia_cursor_msg_fav_idx
         ON ia_cursor.messages (favorited_at DESC)
@@ -90,7 +91,7 @@ async function listConversations({ userId, limit = 40 } = {}) {
   // Sem resposta ainda: cai em updated_at (ex.: run em andamento).
   const { rows } = await pool.query(
     `SELECT c.id, c.title, c.cursor_agent_id, c.status, c.branch, c.pr_url, c.pr_number, c.agent_url,
-            c.specialist_id, c.created_at, c.updated_at,
+            c.specialist_id, c.routing_meta, c.created_at, c.updated_at,
             la.last_assistant_at
        FROM ia_cursor.conversations c
        LEFT JOIN LATERAL (
@@ -155,6 +156,7 @@ async function touchConversation(id, patch = {}) {
         pr_number = COALESCE($7, pr_number),
         agent_url = COALESCE($8, agent_url),
         specialist_id = COALESCE($9, specialist_id),
+        routing_meta = COALESCE($10::jsonb, routing_meta),
         updated_at = NOW()
       WHERE id = $1
       RETURNING *`,
@@ -168,6 +170,7 @@ async function touchConversation(id, patch = {}) {
       patch.pr_number ?? null,
       patch.agent_url ?? null,
       patch.specialist_id ?? null,
+      patch.routing_meta != null ? JSON.stringify(patch.routing_meta) : null,
     ]
   );
   return rows[0] || null;
