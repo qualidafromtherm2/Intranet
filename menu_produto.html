@@ -10364,6 +10364,7 @@
                 <button type="button" class="cursor-chat-btn primary" id="cursorChatNew">Nova conversa</button>
                 <button type="button" class="cursor-chat-btn danger" id="cursorChatDelete" title="Exclui conversa e fotos" style="display:none;">Excluir</button>
                 <span id="cursorChatPublishBar" class="cursor-chat-publish-bar" hidden>
+                  <button type="button" class="cursor-chat-btn warn" id="cursorChatTestPr" data-no-global-spinner="1" title="Sobe o preview no Render (GitHub + label render-preview)">Testar PR</button>
                   <button type="button" class="cursor-chat-btn success" id="cursorChatApprove" title="Merge na main → Render">Publicar no site</button>
                   <button type="button" class="cursor-chat-btn danger" id="cursorChatReject">Descartar PR</button>
                 </span>
@@ -10434,14 +10435,14 @@
             <button type="button" class="cursor-chat-btn" id="cursorChatCfgNew" data-no-global-spinner="1">Nova conversa (+)</button>
             <button type="button" class="cursor-chat-btn" id="cursorChatCfgClearSpec" data-no-global-spinner="1">Remover especialista ativo</button>
             <div class="cursor-chat-config-divider">Revisão desta conversa</div>
-            <button type="button" class="cursor-chat-btn warn" id="cursorChatCfgTest" data-no-global-spinner="1" title="Sobe uma cópia temporária no Render com o código deste PR">Ver no site (teste)</button>
+            <button type="button" class="cursor-chat-btn warn" id="cursorChatCfgTest" data-no-global-spinner="1" title="Sobe o preview no Render (mesmo do botão Testar PR no topo)">Testar PR</button>
             <button type="button" class="cursor-chat-btn success" id="cursorChatCfgApprove" data-no-global-spinner="1" title="Aprovar a proposta e publicar no site">Aprovar</button>
             <button type="button" class="cursor-chat-btn success" id="cursorChatCfgPublish" data-no-global-spinner="1" title="Merge na main → Render">Publicar</button>
             <button type="button" class="cursor-chat-btn danger" id="cursorChatCfgDiscard" data-no-global-spinner="1" title="Fecha o PR sem publicar">Descartar</button>
             <p id="cursorChatCfgPrHint" class="cursor-chat-config-hint">Ainda sem PR nesta conversa.</p>
             <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.4;">
-              “Ver no site (teste)” sobe uma cópia temporária no Render (mesmo banco do site ao vivo).
-              Publicar / descartar também ficam no topo desta página. O Assistente SGF não tem esses botões.
+              No topo: <strong>Testar PR#…</strong> dispara GitHub + Render; quando o link ficar pronto vira <strong>Abrir PR#…</strong>.
+              Publicar / descartar também ficam no topo. O Assistente SGF não tem esses botões.
               Mensagens seguem na mesma conversa até Nova conversa.
             </p>
           </div>

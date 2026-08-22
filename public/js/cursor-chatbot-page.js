@@ -36,6 +36,8 @@
     previewUrl: null,
     previewPollTimer: null,
     previewOpenedOnce: false,
+    /** idle | pending | live | failed */
+    previewStatus: 'idle',
   };
 
   function $(id) {
@@ -797,36 +799,70 @@
       approveBtn.hidden = showApprove === false;
       approveBtn.style.display = showApprove === false ? 'none' : '';
     }
-    updateConfigActions();
+    updateTestPrButtons();
+  }
+
+  function previewReady() {
+    return state.previewStatus === 'live' && Boolean(state.previewUrl);
+  }
+
+  function updateTestPrButtons() {
+    const hasPr = Boolean(state.prNumber);
+    const n = state.prNumber || '…';
+    const pending = state.previewStatus === 'pending';
+    const live = previewReady();
+    const label = !hasPr
+      ? 'Testar PR'
+      : live
+        ? `Abrir PR#${n}`
+        : pending
+          ? `Subindo PR#${n}…`
+          : `Testar PR#${n}`;
+    const title = !hasPr
+      ? 'Espere o agent abrir um PR'
+      : live
+        ? 'Abre o site de teste (preview Render) em nova aba'
+        : pending
+          ? 'Aguardando GitHub + Render liberar o link do preview'
+          : 'Dispara label render-preview no GitHub e sobe o preview no Render';
+    const disabled = !hasPr || state.busy || pending;
+    [ $('cursorChatTestPr'), $('cursorChatCfgTest') ].forEach((btn) => {
+      if (!btn) return;
+      btn.textContent = label;
+      btn.title = title;
+      btn.disabled = disabled;
+      btn.classList.toggle('is-on', live || pending);
+      btn.classList.toggle('success', live);
+      btn.classList.toggle('warn', !live);
+    });
   }
 
   function updateConfigActions() {
     const hasPr = Boolean(state.prNumber);
-    const testBtn = $('cursorChatCfgTest');
     const approveBtn = $('cursorChatCfgApprove');
     const publishBtn = $('cursorChatCfgPublish');
     const discardBtn = $('cursorChatCfgDiscard');
     const hint = $('cursorChatCfgPrHint');
-    if (testBtn) {
-      const on = isTestMode() && Boolean(state.previewUrl);
-      testBtn.textContent = on ? 'Abrir preview de novo' : 'Ver no site (teste)';
-      testBtn.classList.toggle('is-on', isTestMode());
-      testBtn.disabled = !hasPr || state.busy;
-      testBtn.title = hasPr
-        ? 'Sobe uma cópia temporária no Render com o código deste PR'
-        : 'Espere o agent abrir um PR';
-    }
+    updateTestPrButtons();
     [approveBtn, publishBtn, discardBtn].forEach((btn) => {
       if (btn) btn.disabled = !hasPr || state.busy;
     });
     if (hint) {
       if (hasPr) {
         const branch = state.branch ? ` · ${state.branch}` : '';
-        hint.textContent =
-          `PR #${state.prNumber}${branch} pronto. “Ver no site (teste)” sobe uma cópia temporária no Render (mesmo banco do site ao vivo). Depois Publicar ou Descartar.`;
+        if (previewReady()) {
+          hint.textContent =
+            `PR #${state.prNumber}${branch} — preview pronto. Use “Abrir PR#${state.prNumber}” para ver. Depois Publicar ou Descartar.`;
+        } else if (state.previewStatus === 'pending') {
+          hint.textContent =
+            `PR #${state.prNumber}${branch} — subindo preview no Render (label render-preview). Quando liberar, o botão vira Abrir.`;
+        } else {
+          hint.textContent =
+            `PR #${state.prNumber}${branch} pronto. Clique em “Testar PR#${state.prNumber}” para subir o preview (mesmo banco do site ao vivo).`;
+        }
       } else {
         hint.textContent =
-          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Ver no site / Aprovar / Publicar / Descartar ficam disponíveis aqui.';
+          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Testar / Publicar / Descartar ficam disponíveis no topo.';
       }
     }
   }
@@ -835,6 +871,7 @@
     stopPreviewPoll();
     document.body.classList.remove('cursor-chat-preview-mode');
     state.previewOpenedOnce = false;
+    if (state.previewStatus === 'pending') state.previewStatus = 'idle';
     updateConfigActions();
   }
 
@@ -845,27 +882,38 @@
     } catch (_) {}
   }
 
+  function onTestPrClick() {
+    if (!state.prNumber) {
+      appendBubble('error', 'Ainda sem PR nesta conversa. Espere o agent abrir um pull request.');
+      return;
+    }
+    if (previewReady()) {
+      openPreviewTab();
+      return;
+    }
+    if (state.previewStatus === 'pending') return;
+    void startPreviewMode();
+  }
+
   async function pollPreviewStatus(prNumber) {
     stopPreviewPoll();
     try {
       const data = await api(`/preview/${encodeURIComponent(prNumber)}`);
       if (data.previewUrl) state.previewUrl = data.previewUrl;
       if (data.status === 'live' && data.previewUrl) {
+        state.previewStatus = 'live';
         setPreviewBanner({
           text:
-            `Preview PR #${prNumber} pronto — abra o link para ver como fica. ` +
+            `Preview PR #${prNumber} pronto — use “Abrir PR#${prNumber}” no topo. ` +
             `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
           showOpen: true,
           showApprove: true,
         });
-        if (!state.previewOpenedOnce) {
-          state.previewOpenedOnce = true;
-          openPreviewTab();
-        }
-        setStatus('Preview pronto', 'ok');
+        setStatus(`Abrir PR#${prNumber}`, 'ok');
         return;
       }
       if (data.status === 'failed') {
+        state.previewStatus = 'failed';
         setPreviewBanner({
           text: `Falha no preview do PR #${prNumber}: ${data.error || 'erro desconhecido'}. Confira Previews Manual no Render.`,
           showOpen: false,
@@ -874,6 +922,7 @@
         setStatus('Preview falhou', 'err');
         return;
       }
+      state.previewStatus = 'pending';
       setPreviewBanner({
         text:
           `Subindo preview do PR #${prNumber}… ${data.detail || 'pode levar alguns minutos'}. ` +
@@ -886,6 +935,7 @@
         void pollPreviewStatus(prNumber);
       }, 5000);
     } catch (e) {
+      state.previewStatus = 'failed';
       setPreviewBanner({
         text: `Erro ao consultar preview: ${e.message || 'falha'}`,
         showOpen: false,
@@ -902,12 +952,13 @@
     }
     state.previewOpenedOnce = false;
     state.previewUrl = null;
+    state.previewStatus = 'pending';
     setPreviewBanner({
       text: `Pedindo preview do PR #${state.prNumber} no Render… (Manual: label render-preview)`,
       showOpen: false,
       showApprove: true,
     });
-    setStatus('Subindo preview…', 'warn');
+    setStatus(`Subindo PR#${state.prNumber}…`, 'warn');
     try {
       const data = await api('/preview', {
         method: 'POST',
@@ -918,19 +969,19 @@
       });
       if (data.previewUrl) state.previewUrl = data.previewUrl;
       if (data.status === 'live' && data.previewUrl) {
+        state.previewStatus = 'live';
         setPreviewBanner({
           text:
-            `Preview PR #${state.prNumber} pronto — abra o link para ver como fica. ` +
+            `Preview PR #${state.prNumber} pronto — use “Abrir PR#${state.prNumber}” no topo. ` +
             `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
           showOpen: true,
           showApprove: true,
         });
-        state.previewOpenedOnce = true;
-        openPreviewTab();
-        setStatus('Preview pronto', 'ok');
+        setStatus(`Abrir PR#${state.prNumber}`, 'ok');
         return;
       }
       if (data.status === 'failed') {
+        state.previewStatus = 'failed';
         setPreviewBanner({
           text: `Falha no preview: ${data.error || 'erro'}`,
           showOpen: false,
@@ -939,6 +990,7 @@
         setStatus('Preview falhou', 'err');
         return;
       }
+      state.previewStatus = 'pending';
       setPreviewBanner({
         text:
           `Subindo preview do PR #${state.prNumber}… ${data.message || 'aguarde'}. ` +
@@ -948,6 +1000,7 @@
       });
       void pollPreviewStatus(state.prNumber);
     } catch (e) {
+      state.previewStatus = 'failed';
       setPreviewBanner({
         text: `Não foi possível iniciar o preview: ${e.message || 'erro'}`,
         showOpen: false,
@@ -2018,6 +2071,7 @@
       stopWorkWatchers();
       exitTestMode();
       state.previewUrl = null;
+      state.previewStatus = 'idle';
       appendBubble('meta', `✅ ${data.message || 'Publicado — aguarde o deploy.'}`);
       state.prNumber = null;
       saveCloudSession();
@@ -2052,6 +2106,7 @@
       stopWorkWatchers();
       exitTestMode();
       state.previewUrl = null;
+      state.previewStatus = 'idle';
       appendBubble('meta', 'PR descartado.');
       state.prNumber = null;
       updatePublishBar();
@@ -2079,12 +2134,15 @@
 
   function newChat() {
     stopWorkWatchers();
+    exitTestMode();
     state.conversationId = null;
     state.agentId = null;
     state.runId = null;
     state.prNumber = null;
     state.prUrl = null;
     state.branch = null;
+    state.previewUrl = null;
+    state.previewStatus = 'idle';
     state.specialistId = null;
     state.specialistName = null;
     state.previousAssistantText = '';
@@ -2096,7 +2154,7 @@
     clearMessages();
     appendBubble(
       'assistant',
-      'Nova conversa (+).\n\nA partir daqui as mensagens ficam juntas nesta conversa. Use **Agentes** ou **⚙** para especialista. Publicar/Descartar só no topo desta página.'
+      'Nova conversa (+).\n\nA partir daqui as mensagens ficam juntas nesta conversa. Use **Agentes** ou **⚙** para especialista. Testar / Publicar / Descartar só no topo desta página.'
     );
     setStatus('Nova conversa', '');
     markHistoryActive();
@@ -2233,11 +2291,10 @@
     });
     $('cursorChatCfgTest')?.addEventListener('click', () => {
       closeConfigModal();
-      if (state.previewUrl && isTestMode()) {
-        openPreviewTab();
-        return;
-      }
-      void startPreviewMode();
+      onTestPrClick();
+    });
+    $('cursorChatTestPr')?.addEventListener('click', () => {
+      onTestPrClick();
     });
     $('cursorChatCfgApprove')?.addEventListener('click', () => {
       closeConfigModal();
