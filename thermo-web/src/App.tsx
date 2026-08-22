@@ -1357,6 +1357,16 @@ function App() {
               </div>
 
               <div className="flex items-center gap-2">
+                <a
+                  className="inline-flex h-9 items-center gap-2 rounded-lg border border-thermo-border bg-white px-3 text-sm font-semibold text-thermo-navy hover:bg-slate-50"
+                  href="/menu_produto.html"
+                  onClick={() => {
+                    try { localStorage.setItem('fromtherm.ui', 'legacy') } catch { /* armazenamento opcional */ }
+                  }}
+                >
+                  <ExternalLink className="size-4" />
+                  <span className="hidden md:inline">Sistema atual</span>
+                </a>
                 <span className="hidden text-sm font-semibold text-thermo-navy sm:inline">{user.username}</span>
                 <button className="inline-flex h-9 items-center gap-2 rounded-lg border border-thermo-border bg-white px-3 text-sm font-semibold text-thermo-navy hover:bg-slate-50" type="button" onClick={() => void doLogout()}>
                   <LogOut className="size-4" />

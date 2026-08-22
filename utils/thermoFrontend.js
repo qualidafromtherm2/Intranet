@@ -37,4 +37,21 @@ function mountThermoFrontend(app, options = {}) {
   return { enabled: true, mounted: true };
 }
 
-module.exports = { mountThermoFrontend };
+function injectLegacyThermoSwitch(html, enabled) {
+  if (!enabled || html.includes('id="thermo-ui-switch"')) return html;
+
+  const switchMarkup = `
+  <a id="thermo-ui-switch"
+     href="/thermo/"
+     onclick="try{localStorage.setItem('fromtherm.ui','thermo')}catch(e){}"
+     title="Experimentar a nova interface Thermo"
+     aria-label="Usar interface Thermo"
+     style="display:inline-flex;align-items:center;min-height:34px;padding:0 12px;border:1px solid rgba(255,255,255,.28);border-radius:9px;color:inherit;text-decoration:none;font-size:13px;font-weight:700;white-space:nowrap;">
+    Usar Thermo
+  </a>
+`;
+
+  return html.replace('  <!-- Ícones da direita -->', `${switchMarkup}\n  <!-- Ícones da direita -->`);
+}
+
+module.exports = { injectLegacyThermoSwitch, mountThermoFrontend };

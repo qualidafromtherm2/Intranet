@@ -53,6 +53,7 @@ describe('App stability', () => {
     })
 
     expect(screen.getByRole('heading', { name: 'Agenda e indicadores' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sistema atual' })).toHaveAttribute('href', '/menu_produto.html')
     expect(screen.queryByText(/migrad|pendente|legado|atalhos reais|home operacional/i)).not.toBeInTheDocument()
 
     expect(consoleError).not.toHaveBeenCalledWith(expect.stringContaining('Maximum update depth exceeded'))

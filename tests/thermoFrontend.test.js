@@ -5,7 +5,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const express = require('express');
-const { mountThermoFrontend } = require('../utils/thermoFrontend');
+const { injectLegacyThermoSwitch, mountThermoFrontend } = require('../utils/thermoFrontend');
 
 function request(server, pathname) {
   const { port } = server.address();
@@ -69,4 +69,15 @@ test('preserva o bloqueio de sessão injetado pelo legado', async (t) => {
 
   const response = await request(server, '/thermo/');
   assert.equal(response.status, 401);
+});
+
+test('injeta a alternância no legado somente quando habilitada', () => {
+  const html = '<header>Legado</header>\n  <!-- Ícones da direita -->';
+  assert.equal(injectLegacyThermoSwitch(html, false), html);
+
+  const enabled = injectLegacyThermoSwitch(html, true);
+  assert.match(enabled, /id="thermo-ui-switch"/);
+  assert.match(enabled, /href="\/thermo\/"/);
+  assert.equal((enabled.match(/id="thermo-ui-switch"/g) || []).length, 1);
+  assert.equal(injectLegacyThermoSwitch(enabled, true), enabled);
 });

@@ -29109,6 +29109,10 @@ function sendStorageHtml(res, filename) {
   res.setHeader('Expires', '0');
   const filePath = path.join(__dirname, filename);
   let html = injectStoragePublicUrls(fs.readFileSync(filePath, 'utf8'));
+  if (filename === 'menu_produto.html') {
+    const { injectLegacyThermoSwitch } = require('./utils/thermoFrontend');
+    html = injectLegacyThermoSwitch(html, thermoFrontend.enabled && thermoFrontend.mounted);
+  }
   // Etiquetas de saída SEP — script externo (evita conflito de edição em menu_produto.*)
   if (filename === 'menu_produto.html' && !html.includes('sep-etiquetas-saida.js')) {
     html = html.replace(
