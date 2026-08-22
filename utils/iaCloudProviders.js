@@ -371,6 +371,16 @@ function formatUsageDetail(usage) {
   return ` · ~${total} tok`;
 }
 
+/** Impede chave/token de ir para o chip da barra de IAs. */
+function redactProviderError(err) {
+  return String(err || '')
+    .replace(/api[_-]?key[:\s=']+[A-Za-z0-9_\-]{8,}/gi, 'api_key:[redacted]')
+    .replace(/Bearer\s+[A-Za-z0-9._\-]+/gi, 'Bearer [redacted]')
+    .replace(/AIza[0-9A-Za-z_\-]{20,}/g, '[redacted]')
+    .replace(/sk-[A-Za-z0-9_\-]{10,}/g, '[redacted]')
+    .slice(0, 80);
+}
+
 /**
  * Monta status visual de todas as IAs configuradas + Cursor.
  * status: ok | nok | idle
@@ -400,7 +410,7 @@ function buildProviderStatusBoard({
         id: p.id,
         label: p.id,
         status: 'nok',
-        detail: `não utilizado / nok${a.error ? `: ${String(a.error).slice(0, 80)}` : ''}`,
+        detail: `não utilizado / nok${a.error ? `: ${redactProviderError(a.error)}` : ''}`,
       };
     }
     return { id: p.id, label: p.id, status: 'idle', detail: 'não utilizado' };
@@ -482,6 +492,7 @@ function buildCursorLaunchRouting({
 
 module.exports = {
   PROVIDERS,
+  redactProviderError,
   listConfiguredProviders,
   hasAnyFreeProvider,
   isFreeProviderId,
