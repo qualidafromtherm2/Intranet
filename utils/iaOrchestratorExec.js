@@ -65,13 +65,14 @@ function formatSqlResult(result) {
     .join('\n');
 }
 
-async function freeChat({ action, prompt, context = '' }) {
+async function freeChat({ action, prompt, context = '', preferredProvider = null }) {
   const system = action === 'draft_html_css' ? DRAFT_SYSTEM : FREE_SYSTEM;
   const userContent = [context ? `Contexto:\n${context}\n` : '', `Pedido:\n${prompt || ''}`]
     .filter(Boolean)
     .join('\n');
   const isDraft = action === 'draft_html_css';
   const preferred =
+    preferredProvider ||
     process.env.IA_FREE_WORKER_PROVIDER ||
     process.env.IA_ORCHESTRATOR_PROVIDER ||
     (process.env.GROQ_API_KEY ? 'groq' : 'openrouter');
@@ -115,6 +116,7 @@ async function executeLightTasks({
   pool,
   cancelAgentRun,
   conversationHistory = '',
+  preferredProvider = null,
 }) {
   const tasks = (plan?.tasks || []).filter((t) => t.assignee === 'ops' || t.assignee === 'free');
   const results = [];
@@ -218,6 +220,7 @@ async function executeLightTasks({
         try {
           const drafted = await chatCompletion({
             preferred:
+              preferredProvider ||
               process.env.IA_FREE_WORKER_PROVIDER ||
               (process.env.GROQ_API_KEY ? 'groq' : 'openrouter'),
             temperature: 0,
@@ -271,6 +274,7 @@ async function executeLightTasks({
         action: task.action,
         prompt: task.prompt || userText,
         context: contextBits,
+        preferredProvider,
       });
       mergeAttempts(chat.attempts);
       const isDraft = task.action === 'draft_html_css';

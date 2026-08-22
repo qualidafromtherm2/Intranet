@@ -38,8 +38,17 @@ const {
   buildCursorPromptFromPlan,
   isApplyDraftRequest,
   findLastDraftContent,
+  applyUserProviderChoice,
 } = require('../utils/iaOrchestrator');
-const { listConfiguredProviders, buildProviderStatusBoard } = require('../utils/iaCloudProviders');
+const {
+  listConfiguredProviders,
+  buildProviderStatusBoard,
+  normalizePreferredProvider,
+  isFreeProviderId,
+  cursorStatusFromRun,
+  withCursorStatus,
+  buildCursorLaunchRouting,
+} = require('../utils/iaCloudProviders');
 const { executeLightTasks } = require('../utils/iaOrchestratorExec');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
@@ -520,12 +529,49 @@ function checkDevAgentRateLimit(req) {
 /**
  * Quando pular o orquestrador e ir direto ao Cursor (comportamento legado).
  */
+function preferredFromReq(req) {
+  return normalizePreferredProvider(req.body?.preferredProvider || req.body?.engine);
+}
+
 function shouldSkipOrchestrator(req, resolved) {
   if (req.body?.forceCursor === true || req.body?.forceCursor === '1') return true;
-  if (String(req.body?.engine || '').toLowerCase() === 'cursor') return true;
+  if (preferredFromReq(req) === 'cursor') return true;
   if (resolved?.activateSpecialist) return true;
   if (Array.isArray(resolved?.images) && resolved.images.length) return true;
   return false;
+}
+
+function skipOrchestratorRouting(req, resolved) {
+  const preferred = preferredFromReq(req);
+  if (resolved?.activateSpecialist) {
+    return buildCursorLaunchRouting({
+      source: 'specialist',
+      summary: 'Especialista → Cursor',
+    });
+  }
+  if (preferred === 'cursor') {
+    return buildCursorLaunchRouting({
+      source: 'user-select',
+      summary: 'Cursor (escolhido)',
+    });
+  }
+  if (Array.isArray(resolved?.images) && resolved.images.length) {
+    return buildCursorLaunchRouting({
+      source: 'cursor-direct',
+      summary: 'Imagem → Cursor',
+    });
+  }
+  return buildCursorLaunchRouting({
+    source: 'cursor-direct',
+    summary: 'Cursor direto',
+  });
+}
+
+async function persistRouting(conv, routing) {
+  if (!conv?.id || !routing) return;
+  try {
+    await iaDb.touchConversation(conv.id, { routing_meta: routing });
+  } catch (_) {}
 }
 
 function engineFromPlan(plan, launchedCursor) {
@@ -546,9 +592,13 @@ function engineFromPlan(plan, launchedCursor) {
  * ou { handled: false, plan, freeResults, cursorPromptText }.
  */
 async function runOrchestration({ conv, resolved, req, userText }) {
-  const plan = await buildPlan(userText, {
+  const preferred = preferredFromReq(req);
+  let plan = await buildPlan(userText, {
     context: resolved?.chamadoIa ? 'Modo Chamado IA: só consulta SQL + abrir chamado.' : '',
   });
+  if (preferred && preferred !== 'cursor') {
+    plan = applyUserProviderChoice(plan, preferred);
+  }
 
   let freeResults = [];
   let assistantMessage = '';
@@ -574,6 +624,7 @@ async function runOrchestration({ conv, resolved, req, userText }) {
       iaDb,
       pool,
       conversationHistory,
+      preferredProvider: isFreeProviderId(preferred) ? preferred : undefined,
       cancelAgentRun: async (agentId) => {
         await cancelActiveRunIfBusy(agentId);
       },
@@ -1004,6 +1055,10 @@ async function syncAssistantFromCursor(conversation, agentId) {
     await iaDb.touchConversation(conversation.id, patch);
 
     const st = String(summary.runStatus || '').toUpperCase();
+    const cursorChip = cursorStatusFromRun(st);
+    if (cursorChip) {
+      patch.routing_meta = withCursorStatus(conversation.routing_meta, cursorChip);
+    }
     if (st === 'FINISHED' && summary.result) {
       const msgs = await iaDb.listMessages(conversation.id);
       const already = msgs.some(
@@ -1471,7 +1526,10 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     let orchPlan = null;
     let orchRouting = null;
     let launchPrompt = prompt;
-    if (!shouldSkipOrchestrator(req, resolved)) {
+    if (shouldSkipOrchestrator(req, resolved)) {
+      orchRouting = skipOrchestratorRouting(req, resolved);
+      await persistRouting(conv, orchRouting);
+    } else {
       const orch = await runOrchestration({
         conv,
         resolved,
@@ -1607,7 +1665,10 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     let orchPlan = null;
     let orchRouting = null;
     let launchPrompt = prompt;
-    if (!shouldSkipOrchestrator(req, resolved)) {
+    if (shouldSkipOrchestrator(req, resolved)) {
+      orchRouting = skipOrchestratorRouting(req, resolved);
+      await persistRouting(conv, orchRouting);
+    } else {
       const orch = await runOrchestration({
         conv,
         resolved: { ...resolved, chamadoIa },
@@ -1751,12 +1812,14 @@ router.get('/agents/:id', requireAdminOrMobile, async (req, res) => {
     }
     const summary = summarizeAgent(agent, run);
     const conv = await iaDb.getConversationByAgentId(req.params.id);
+    let synced = conv;
     if (conv) {
-      await syncAssistantFromCursor(conv, req.params.id);
+      synced = await syncAssistantFromCursor(conv, req.params.id);
     }
     return res.json({
       ok: true,
       conversationId: conv?.id || null,
+      routing: synced?.routing_meta || conv?.routing_meta || null,
       ...summary,
       agent,
       run,
@@ -1840,6 +1903,7 @@ router.get('/agents/:id/conversation', requireAdminOrMobile, async (req, res) =>
         prUrl: synced.pr_url || conv.pr_url,
         prNumber: synced.pr_number || conv.pr_number,
         agentUrl: synced.agent_url || conv.agent_url,
+        routing: synced.routing_meta || conv.routing_meta || null,
         runId: synced.runId || null,
         runStatus: synced.runStatus || conv.status,
         result: synced.result || null,

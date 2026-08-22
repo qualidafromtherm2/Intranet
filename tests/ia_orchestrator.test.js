@@ -8,6 +8,7 @@ const {
   planNeedsCursor,
   planNeedsFree,
   planNeedsOps,
+  applyUserProviderChoice,
   summarizePlanForUi,
   buildCursorPromptFromPlan,
 } = require('../utils/iaOrchestrator');
@@ -106,6 +107,22 @@ test('fase 3: aplicar rascunho → Cursor', () => {
     { taskId: 'draft', content: '```css\n.btn{color:red}\n```' },
   ]);
   assert.match(applyPrompt, /APLICAR o rascunho/i);
+});
+
+test('escolha do usuário: Gemini força task Cursor a virar reply grátis', () => {
+  const plan = planWithHeuristics('publicar no site e fazer merge do PR', { hasFree: true });
+  assert.equal(planNeedsCursor(plan), true);
+  const forced = applyUserProviderChoice(plan, 'gemini');
+  assert.equal(forced.source, 'user-select');
+  assert.equal(forced.tasks[0].assignee, 'free');
+  assert.equal(forced.tasks[0].action, 'reply');
+  assert.equal(planNeedsCursor(forced), false);
+});
+
+test('escolha do usuário: cursor não altera o plano (modo direto)', () => {
+  const plan = planWithHeuristics('explica o modal de férias', { hasFree: true });
+  const same = applyUserProviderChoice(plan, 'cursor');
+  assert.equal(same, plan);
 });
 
 test('fase 2: reply após sql precisa de contexto', () => {
