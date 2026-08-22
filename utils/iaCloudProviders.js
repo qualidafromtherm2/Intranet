@@ -19,10 +19,11 @@ const PROVIDERS = [
     id: 'groq',
     envKey: 'GROQ_API_KEY',
     baseUrl: 'https://api.groq.com/openai/v1',
-    defaultModel: 'llama-3.3-70b-versatile',
+    // llama-3.3-70b / llama-3.1-8b saíram do ar em 16 ago 2026 (404)
+    defaultModel: 'openai/gpt-oss-120b',
     modelEnv: 'GROQ_MODEL',
     kind: 'openai',
-    lightModel: 'llama-3.1-8b-instant',
+    lightModel: 'openai/gpt-oss-20b',
   },
   {
     id: 'gemini',
@@ -79,14 +80,29 @@ function extractUsage(data, kind) {
   return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: total };
 }
 
+/** Llama 3.1/3.3 da Groq desligados em 16 ago 2026 — a API responde 404. */
+function isRetiredGroqModel(model) {
+  return /^(llama-3\.1-8b-instant|llama-3\.3-70b-versatile)$/i.test(String(model || '').trim());
+}
+
+function mapRetiredGroqModel(model, { light = false } = {}) {
+  const m = String(model || '').trim();
+  if (!isRetiredGroqModel(m)) return m;
+  if (light || /8b-instant/i.test(m)) return 'openai/gpt-oss-20b';
+  return 'openai/gpt-oss-120b';
+}
+
 function resolveModel(provider, { model = null, light = false } = {}) {
-  if (model) return String(model).trim();
-  if (light) {
+  let resolved;
+  if (model) resolved = String(model).trim();
+  else if (light) {
     const lightEnv = env(`${String(provider.modelEnv || '').replace(/_MODEL$/, '_LIGHT_MODEL')}`);
-    if (lightEnv) return lightEnv;
-    if (provider.lightModel) return provider.lightModel;
+    resolved = lightEnv || provider.lightModel || env(provider.modelEnv) || provider.defaultModel;
+  } else {
+    resolved = env(provider.modelEnv) || provider.defaultModel;
   }
-  return env(provider.modelEnv) || provider.defaultModel;
+  if (provider.id === 'groq') return mapRetiredGroqModel(resolved, { light });
+  return resolved;
 }
 
 /** Família 2.0 Flash desligada em 1 jun 2026 — a API responde 404. */
@@ -113,9 +129,12 @@ function isGeminiModelMissingError(status, data) {
 function listConfiguredProviders() {
   return PROVIDERS.filter((p) => Boolean(env(p.envKey))).map((p) => {
     const raw = env(p.modelEnv) || p.defaultModel;
+    let model = raw;
+    if (p.id === 'gemini') model = geminiModelCandidates(raw)[0];
+    else if (p.id === 'groq') model = mapRetiredGroqModel(raw);
     return {
       id: p.id,
-      model: p.id === 'gemini' ? geminiModelCandidates(raw)[0] : raw,
+      model,
       kind: p.kind,
     };
   });
@@ -473,5 +492,7 @@ module.exports = {
   chatCompletion,
   buildProviderStatusBoard,
   isRetiredGeminiModel,
+  isRetiredGroqModel,
+  mapRetiredGroqModel,
   geminiModelCandidates,
 };

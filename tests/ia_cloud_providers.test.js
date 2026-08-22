@@ -7,6 +7,8 @@ const {
   withCursorStatus,
   buildProviderStatusBoard,
   isRetiredGeminiModel,
+  isRetiredGroqModel,
+  mapRetiredGroqModel,
   geminiModelCandidates,
 } = require('../utils/iaCloudProviders');
 
@@ -40,6 +42,16 @@ test('gemini 2.0 flash aposentado vira 3.5', () => {
   assert.equal(isRetiredGeminiModel('gemini-3.5-flash'), false);
   assert.deepEqual(geminiModelCandidates('gemini-2.0-flash')[0], 'gemini-3.5-flash');
   assert.deepEqual(geminiModelCandidates('gemini-3.6-flash')[0], 'gemini-3.6-flash');
+});
+
+test('groq llama aposentado vira gpt-oss', () => {
+  assert.equal(isRetiredGroqModel('llama-3.1-8b-instant'), true);
+  assert.equal(isRetiredGroqModel('llama-3.3-70b-versatile'), true);
+  assert.equal(isRetiredGroqModel('openai/gpt-oss-20b'), false);
+  assert.equal(mapRetiredGroqModel('llama-3.1-8b-instant'), 'openai/gpt-oss-20b');
+  assert.equal(mapRetiredGroqModel('llama-3.3-70b-versatile'), 'openai/gpt-oss-120b');
+  assert.equal(mapRetiredGroqModel('llama-3.3-70b-versatile', { light: true }), 'openai/gpt-oss-20b');
+  assert.equal(mapRetiredGroqModel('openai/gpt-oss-120b'), 'openai/gpt-oss-120b');
 });
 
 test('withCursorStatus atualiza só o Cursor e cria board se faltar', () => {

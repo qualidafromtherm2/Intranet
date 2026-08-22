@@ -12122,9 +12122,23 @@ function requireSessionOrAgentForStatic(req, res, next) {
 }
 
 const { mountThermoFrontend } = require('./utils/thermoFrontend');
+const thermoEnabled =
+  String(process.env.THERMO_FRONTEND_ENABLED || '').toLowerCase() === 'true';
+const thermoDistRoot = path.join(__dirname, 'thermo-web', 'dist');
+if (thermoEnabled) {
+  try {
+    require('child_process').execFileSync(process.execPath, [path.join(__dirname, 'scripts', 'ensure-thermo-dist.js')], {
+      cwd: __dirname,
+      stdio: 'inherit',
+      env: process.env,
+    });
+  } catch (err) {
+    console.error('[thermo] ensure-dist no boot falhou:', err.message || err);
+  }
+}
 const thermoFrontend = mountThermoFrontend(app, {
-  enabled: String(process.env.THERMO_FRONTEND_ENABLED || '').toLowerCase() === 'true',
-  distRoot: path.join(__dirname, 'thermo-web', 'dist'),
+  enabled: thermoEnabled,
+  distRoot: thermoDistRoot,
   requireSession: requireSessionForStatic,
 });
 console.log('[thermo] frontend', thermoFrontend);

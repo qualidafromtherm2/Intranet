@@ -15,8 +15,16 @@ npm ci
 npm run build:thermo
 ```
 
+No Render, o ideal é o **Build Command**:
+
+```sh
+npm ci && npm run build:thermo
+```
+
 O comando gera `thermo-web/dist`, que não é versionado. Se a flag estiver ligada
-sem esse diretório, `/thermo/` retorna `503` sem afetar o legado.
+sem esse diretório, o boot tenta gerar o dist automaticamente
+(`scripts/ensure-thermo-dist.js` + `npm start` / boot do `server.js`).
+Se mesmo assim falhar, `/thermo/` retorna `503` sem afetar o legado.
 
 ## Liberação gradual
 
