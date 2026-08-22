@@ -781,6 +781,7 @@ router.get('/status', requireAdminOrMobile, (req, res) => {
     storage: 'ia_cursor + R2',
     // Preview real: Render Dashboard → serviço web → Previews → PR Previews = Manual
     previewConfigured: Boolean(githubCfg().token),
+    renderApiConfigured: Boolean(String(process.env.RENDER_API_KEY || '').trim()),
     previewHint:
       'Render: Previews → Pull Request Previews = Manual. Modo teste usa a label render-preview.',
   });
@@ -1759,6 +1760,163 @@ router.get('/pulls/:number/files', requireAdminOrMobile, async (req, res) => {
 
 const RENDER_PREVIEW_LABEL = 'render-preview';
 const RENDER_PREVIEW_TITLE_TAG = '[render preview]';
+const RENDER_API = 'https://api.render.com/v1';
+
+function renderApiKey() {
+  return String(process.env.RENDER_API_KEY || '').trim();
+}
+
+async function renderFetch(path, opts = {}) {
+  const token = renderApiKey();
+  if (!token) {
+    const err = new Error('RENDER_API_KEY não configurada no servidor.');
+    err.status = 503;
+    throw err;
+  }
+  const resp = await fetch(`${RENDER_API}${path}`, {
+    method: opts.method || 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json',
+      'Content-Type': 'application/json',
+      ...(opts.headers || {}),
+    },
+    body: opts.body != null ? JSON.stringify(opts.body) : undefined,
+  });
+  const text = await resp.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!resp.ok) {
+    const err = new Error(data?.message || data?.error || `Render API ${resp.status}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return data;
+}
+
+function unwrapRenderService(item) {
+  if (!item || typeof item !== 'object') return null;
+  return item.service && typeof item.service === 'object' ? item.service : item;
+}
+
+function renderServiceLooksLikeIntranet(svc) {
+  if (!svc) return false;
+  const blob = [
+    svc.name,
+    svc.slug,
+    svc.repo,
+    svc.serviceDetails?.url,
+    svc.serviceDetails?.env,
+  ].map((s) => String(s || '').toLowerCase()).join(' ');
+  return /intranet|30av/.test(blob);
+}
+
+function renderServiceIsPreviewForPr(svc, prNumber) {
+  if (!svc || !prNumber) return false;
+  const blob = [
+    svc.name,
+    svc.slug,
+    svc.serviceDetails?.url,
+    svc.serviceDetails?.env,
+  ].map((s) => String(s || '').toLowerCase()).join(' ');
+  const n = String(prNumber);
+  return (
+    blob.includes(`pr #${n}`) ||
+    blob.includes(`pr-${n}`) ||
+    blob.includes(`pr${n}`) ||
+    blob.includes(`pull-request-${n}`) ||
+    (blob.includes('preview') && blob.includes(n))
+  );
+}
+
+async function listRenderServices({ includePreviews = true } = {}) {
+  const items = [];
+  let cursor = '';
+  for (let i = 0; i < 8; i += 1) {
+    const q = new URLSearchParams({
+      limit: '50',
+      includePreviews: includePreviews ? 'true' : 'false',
+    });
+    if (cursor) q.set('cursor', cursor);
+    const page = await renderFetch(`/services?${q.toString()}`);
+    const rows = Array.isArray(page) ? page : page?.items || [];
+    rows.forEach((row) => {
+      const svc = unwrapRenderService(row);
+      if (svc) items.push(svc);
+    });
+    cursor = page?.cursor || rows[rows.length - 1]?.cursor || '';
+    if (!cursor || rows.length < 50) break;
+  }
+  return items;
+}
+
+async function lookupPreviewFromRenderApi(prNumber, branch) {
+  if (!renderApiKey()) return null;
+  try {
+    const services = await listRenderServices({ includePreviews: true });
+    const matches = services.filter((svc) => renderServiceIsPreviewForPr(svc, prNumber));
+    const byBranch = !matches.length && branch
+      ? services.filter((svc) => {
+        const svcBranch = String(svc.serviceDetails?.branch || svc.branch || '').toLowerCase();
+        return svcBranch && svcBranch === String(branch).toLowerCase() && renderServiceLooksLikeIntranet(svc);
+      })
+      : [];
+    const hit = matches[0] || byBranch[0];
+    if (!hit) return null;
+    const url = hit.serviceDetails?.url || hit.url || null;
+    const suspended = String(hit.suspended || '').toLowerCase();
+    if (url && (!suspended || suspended === 'not_suspended')) {
+      return {
+        status: 'live',
+        previewUrl: String(url),
+        detail: `Preview no Render (${hit.name || 'serviço'})`,
+        renderServiceId: hit.id || null,
+      };
+    }
+    return {
+      status: 'pending',
+      previewUrl: url ? String(url) : null,
+      detail: 'Render ainda está subindo o serviço de preview…',
+      renderServiceId: hit.id || null,
+    };
+  } catch (err) {
+    console.warn('[dev-agent] Render API preview:', err.message);
+    return null;
+  }
+}
+
+async function ensureRenderManualPreviews() {
+  if (!renderApiKey()) return { ok: false, reason: 'no_key' };
+  try {
+    const services = await listRenderServices({ includePreviews: false });
+    const web = services.find((svc) => {
+      const type = String(svc.type || '').toLowerCase();
+      return renderServiceLooksLikeIntranet(svc) && (type === 'web_service' || type === 'web');
+    });
+    if (!web) return { ok: false, reason: 'service_not_found' };
+    const details = web.serviceDetails || {};
+    const already =
+      String(details.pullRequestPreviewsEnabled || '').toLowerCase() === 'yes' ||
+      String(web.previews?.generation || details.previews?.generation || '').toLowerCase() === 'manual' ||
+      String(web.previews?.generation || details.previews?.generation || '').toLowerCase() === 'automatic';
+    if (already) return { ok: true, already: true, serviceId: web.id };
+    try {
+      await renderFetch(`/services/${encodeURIComponent(web.id)}`, {
+        method: 'PATCH',
+        body: { previews: { generation: 'manual' } },
+      });
+    } catch (_) {
+      await renderFetch(`/services/${encodeURIComponent(web.id)}`, {
+        method: 'PATCH',
+        body: { serviceDetails: { pullRequestPreviewsEnabled: 'yes' } },
+      });
+    }
+    return { ok: true, already: false, serviceId: web.id };
+  } catch (err) {
+    console.warn('[dev-agent] enable Render previews:', err.message);
+    return { ok: false, reason: err.message };
+  }
+}
 
 async function ensureRenderPreviewLabel(owner, repo) {
   try {
@@ -1782,12 +1940,22 @@ async function triggerRenderPreview(owner, repo, pr) {
   try {
     await ensureRenderPreviewLabel(owner, repo);
     const labels = (pr.labels || []).map((l) => String(l.name || '').toLowerCase());
-    if (!labels.includes(RENDER_PREVIEW_LABEL)) {
-      await githubFetch(`/repos/${owner}/${repo}/issues/${prNumber}/labels`, {
-        method: 'POST',
-        body: { labels: [RENDER_PREVIEW_LABEL] },
-      });
+    // Tira e recoloca a label: o Render só cria o preview se Previews=Manual
+    // e a label mudar (já estar lá não dispara de novo).
+    if (labels.includes(RENDER_PREVIEW_LABEL)) {
+      try {
+        await githubFetch(
+          `/repos/${owner}/${repo}/issues/${prNumber}/labels/${encodeURIComponent(RENDER_PREVIEW_LABEL)}`,
+          { method: 'DELETE' }
+        );
+      } catch (rmErr) {
+        console.warn('[dev-agent] remove render-preview:', rmErr.message);
+      }
     }
+    await githubFetch(`/repos/${owner}/${repo}/issues/${prNumber}/labels`, {
+      method: 'POST',
+      body: { labels: [RENDER_PREVIEW_LABEL] },
+    });
   } catch (labelErr) {
     console.warn('[dev-agent] label render-preview:', labelErr.message);
     method = 'title';
@@ -1899,16 +2067,28 @@ async function getPrPreviewStatus(prNumber) {
       sha: pr.head?.sha || null,
     };
   }
-  const look = await lookupPreviewFromDeployments(owner, repo, pr.head?.sha);
+  const lookGh = await lookupPreviewFromDeployments(owner, repo, pr.head?.sha);
+  const lookRender = lookGh.status === 'live'
+    ? null
+    : await lookupPreviewFromRenderApi(pr.number, pr.head?.ref);
+  const look = lookRender?.status === 'live' ? lookRender : (lookRender || lookGh);
+  const triggered =
+    (pr.labels || []).some((l) => String(l.name || '').toLowerCase() === RENDER_PREVIEW_LABEL) ||
+    /\[render preview\]/i.test(String(pr.title || ''));
+  if (look.status === 'pending' && !look.previewUrl && triggered && !lookRender) {
+    look.detail =
+      look.detail === 'Aguardando Render criar o deployment…'
+        ? 'Aguardando Render criar o deployment. Se isso não mudar, no serviço da intranet: Previews → Pull Request Previews = Manual.'
+        : look.detail;
+    look.needsDashboard = true;
+  }
   return {
     ok: true,
     prNumber,
     branch: pr.head?.ref || null,
     sha: pr.head?.sha || null,
     title: pr.title || null,
-    triggered:
-      (pr.labels || []).some((l) => String(l.name || '').toLowerCase() === RENDER_PREVIEW_LABEL) ||
-      /\[render preview\]/i.test(String(pr.title || '')),
+    triggered,
     ...look,
   };
 }
@@ -1931,16 +2111,20 @@ router.post('/preview', requireAdminOrMobile, express.json({ limit: '20kb' }), a
         error: `PR #${prNumber} precisa estar aberto para o modo teste.`,
       });
     }
+    const renderEnable = await ensureRenderManualPreviews();
     const triggerMethod = await triggerRenderPreview(owner, repo, pr);
     const status = await getPrPreviewStatus(prNumber);
     return res.json({
       ...status,
       ok: true,
       triggerMethod,
+      renderEnable,
       message:
         status.status === 'live'
           ? 'Preview pronto — abra o link para ver como fica.'
-          : 'Preview solicitado. O Render pode levar alguns minutos para subir.',
+          : renderEnable?.ok
+            ? 'Preview solicitado. O Render pode levar alguns minutos para subir.'
+            : 'Preview solicitado. Se o botão não virar Abrir, ligue Previews = Manual no serviço da intranet no Render.',
       sharedDatabaseWarning:
         'O preview usa o mesmo banco e variáveis do site ao vivo. Evite gravar dados de teste.',
     });
