@@ -307,6 +307,18 @@
     return `${m}m ${String(r).padStart(2, '0')}s`;
   }
 
+  /** Altura mínima → cresce com o texto → scrollbar no teto (~Cursor). */
+  function autoResizeChatInput() {
+    const ta = $('cursorChatInput');
+    if (!ta) return;
+    const min = 44;
+    const max = 200;
+    ta.style.height = 'auto';
+    const next = Math.min(Math.max(ta.scrollHeight, min), max);
+    ta.style.height = `${next}px`;
+    ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
+  }
+
   function refreshStatusLine() {
     const line = $('cursorChatStatus');
     const badge = $('cursorChatBadge');
@@ -1180,6 +1192,7 @@
     const images = state.pendingImages.slice();
     if ((!text && !images.length) || state.busy) return;
     input.value = '';
+    autoResizeChatInput();
     clearPendingImages();
     appendBubble('user', text || '(imagem anexada)', { images });
     setBusy(true);
@@ -1485,6 +1498,8 @@
         void sendMessage();
       }
     });
+    $('cursorChatInput')?.addEventListener('input', autoResizeChatInput);
+    autoResizeChatInput();
     $('cursorChatInput')?.addEventListener('paste', (e) => {
       const items = Array.from(e.clipboardData?.items || []);
       const files = items

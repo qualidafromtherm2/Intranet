@@ -2026,16 +2026,49 @@ img {
   transition: 0.5s;
 }
 
-/* ====== ZONA DE ATALHOS FLUTUANTE ====== */
+/* ====== ZONA DE ATALHOS (drop flutuante + barra no header) ====== */
+.header-shortcuts-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0 4px;
+  scrollbar-width: thin;
+}
+.header-shortcuts-items {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+.header-shortcuts-bar .shortcut-manage-btn {
+  flex-shrink: 0;
+}
+.header-shortcuts-bar .shortcut-btn {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  box-shadow: none;
+}
+
 .floating-shortcut-zone {
   position: fixed;
   bottom: 16px;
   right: 84px;
   z-index: 4;
-  display: flex;
+  display: none; /* só aparece durante drag via .is-drop-ready */
   align-items: center;
   gap: 8px;
   flex-direction: row-reverse;
+  pointer-events: none;
+}
+.floating-shortcut-zone.is-drop-ready {
+  display: flex;
+  pointer-events: auto;
 }
 
 /* Bot�o de atalho individual */
@@ -2503,7 +2536,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   transform: scale(1.06);
 }
 
-/* Bot�o de gerenciar atalhos (engrenagem) */
+/* Botão gerenciar atalhos (no header; --fixed mantido só por compat) */
 .shortcut-manage-btn {
   position: relative;
   width: 36px;
@@ -2519,6 +2552,7 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   font-size: 14px;
   transition: background .2s, color .2s, border-color .2s, transform .2s;
   outline: none;
+  flex-shrink: 0;
 }
 .shortcut-manage-btn:hover {
   background: #312e81;
@@ -2527,12 +2561,9 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
   transform: rotate(30deg);
 }
 
-/* Bot�o gerenciar atalhos standalone (posi��o fixa, canto inferior direito) */
 .shortcut-manage-btn--fixed {
-  position: fixed;
-  bottom: 16px;
-  right: 30px;
-  z-index: 3;
+  /* legado: atalhos agora ficam no header */
+  display: none !important;
 }
 
 /* Overlay do modal */
@@ -24042,17 +24073,14 @@ html.light-mode #minhasComprasWrapper {
   background: transparent;
 }
 
-/* Elementos fixos continuam acessíveis, mas sem encobrir o rodapé operacional. */
+/* Elementos fixos: atalhos migraram para o header. */
 .floating-shortcut-zone {
   right: 68px;
   bottom: 12px;
   gap: 6px;
 }
 .shortcut-manage-btn--fixed {
-  right: 16px;
-  bottom: 12px;
-  width: 44px;
-  height: 44px;
+  display: none !important;
 }
 #listaProdutos .lista-produtos-fab {
   right: 124px;

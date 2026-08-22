@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821k"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821l"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -83,19 +83,13 @@
 
 
 
-  <!-- Zona de atalhos do usuário (drag-and-drop a partir do menu lateral) -->
-  <div id="floatingShortcutZone" class="floating-shortcut-zone">
-    <div id="shortcutItemsContainer" class="shortcut-items-container"></div>
+  <!-- Zona de drop para criar atalho (visível só durante arraste) -->
+  <div id="floatingShortcutZone" class="floating-shortcut-zone" aria-hidden="true">
     <div id="shortcutDropTarget" class="shortcut-drop-target" title="Arraste um item do menu lateral aqui para criar um atalho">
       <i class="fa-solid fa-thumbtack"></i>
       <span>Solte aqui</span>
     </div>
   </div>
-
-  <!-- Botão gerenciar atalhos (fixo, substitui posição do toggle de tema) -->
-  <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn shortcut-manage-btn--fixed" title="Gerenciar atalhos">
-    <i class="fa-solid fa-sliders"></i>
-  </button>
 
   <!-- Modal de gerenciamento de atalhos -->
   <div id="modalGerenciarAtalhos" class="shortcut-modal-overlay" hidden>
@@ -105,7 +99,7 @@
         <button type="button" id="btnFecharModalAtalhos" class="shortcut-modal-close" aria-label="Fechar">×</button>
       </div>
       <p class="shortcut-modal-hint">
-        <strong>Atalho</strong> = bolinha flutuante ·
+        <strong>Atalho</strong> = ícone no topo da página ·
         <strong>Início</strong> = card na página Início (celular)
       </p>
       <div class="shortcut-modal-theme-row">
@@ -118,7 +112,7 @@
       </div>
       <div class="shortcut-modal-cols-header" aria-hidden="true">
         <span class="item-label">Botão</span>
-        <span class="col-check" title="Bolinha flutuante">Atalho</span>
+        <span class="col-check" title="Ícone no topo">Atalho</span>
         <span class="col-check" title="Card na página Início (celular)">Início</span>
       </div>
       <div id="shortcutModalList" class="shortcut-modal-list"></div>
@@ -186,6 +180,14 @@
   data-nav-selector="#menu-registros">Registros</a>
 </nav>
 
+  <!-- Atalhos no topo: gerenciar primeiro, depois os ativados -->
+  <div id="headerShortcutsBar" class="header-shortcuts-bar" aria-label="Atalhos">
+    <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn" title="Gerenciar atalhos" aria-label="Gerenciar atalhos">
+      <i class="fa-solid fa-sliders"></i>
+    </button>
+    <div id="shortcutItemsContainer" class="shortcut-items-container header-shortcuts-items"></div>
+  </div>
+
   <!-- Campo de busca -->
 <div class="user-badge">
   <span id="userNameDisplay" class="user-name">Usuário</span>
@@ -194,10 +196,9 @@
 
   <!-- Ícones da direita -->
   <div class="header-profile">
-    <button id="sgf-ai-btn" title="Assistente SGF" aria-label="Abrir assistente SGF">
+    <button id="sgf-ai-btn" type="button" title="Chatbot" aria-label="Abrir Chatbot" style="display:none;" data-nav-key="top-shortcut:chatbot-cursor" data-nav-pos="top" data-nav-label="Chatbot">
       <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
       <i class="fa-solid fa-robot" aria-hidden="true"></i>
-      <span class="sgf-ai-badge" id="sgf-ai-badge">!</span>
     </button>
     <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
     <div id="notification-wrapper" class="notification" style="display:none;">
@@ -10320,9 +10321,12 @@
         <div class="content-wrapper" style="padding:12px;">
           <div class="cursor-chat-page">
             <header class="cursor-chat-header">
-              <div>
-                <h3>Chatbot</h3>
-                <p>Mesmo modo do Cursor — conversa contínua. Só admin.</p>
+              <div class="cursor-chat-title-wrap">
+                <img class="cursor-chat-title-bot" src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="" width="40" height="40">
+                <div>
+                  <h3>Chatbot</h3>
+                  <p>Mesmo modo do Cursor — conversa contínua. Só admin.</p>
+                </div>
               </div>
               <div class="cursor-chat-header-actions">
                 <span id="cursorChatBadge" class="cursor-chat-badge">Chatbot</span>
@@ -10343,20 +10347,21 @@
                 <div class="cursor-chat-statusline" id="cursorChatStatus">Pronto</div>
                 <div class="cursor-chat-messages" id="cursorChatMessages" aria-live="polite"></div>
                 <div class="cursor-chat-composer">
-                  <div class="cursor-chat-attach-row">
-                    <button type="button" class="cursor-chat-btn" id="cursorChatAttach" title="Anexar imagem">📷 Foto</button>
-                    <input type="file" id="cursorChatFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
-                    <span class="cursor-chat-attach-hint">Ou Ctrl+V para colar print</span>
-                    <span id="cursorChatSpecialistChip" class="cursor-chat-specialist-chip" hidden></span>
-                  </div>
                   <div class="cursor-chat-previews" id="cursorChatPreviews"></div>
-                  <div class="cursor-chat-composer-row">
-                    <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (cole um print com Ctrl+V)"></textarea>
-                    <div class="send-wrap">
-                      <button type="button" class="cursor-chat-btn icon-only" id="cursorChatConfigBtn" data-no-global-spinner="1" title="Configuração" aria-label="Configuração" onclick="window.__cursorOpenConfig&&window.__cursorOpenConfig(event)">⚙</button>
-                      <button type="button" class="cursor-chat-btn icon-only" id="cursorChatAgentsBtn" data-no-global-spinner="1" title="Escolher especialista" aria-label="Agentes" onclick="window.__cursorOpenAgents&&window.__cursorOpenAgents(event)">✦</button>
-                      <button type="button" class="cursor-chat-btn primary icon-only" id="cursorChatSend" data-no-global-spinner="1" title="Enviar" aria-label="Enviar">➤</button>
+                  <div class="cursor-chat-input-shell">
+                    <textarea id="cursorChatInput" rows="1" placeholder="Descreva a mudança… (cole um print com Ctrl+V)"></textarea>
+                    <div class="cursor-chat-toolbar">
+                      <div class="cursor-chat-toolbar-left">
+                        <button type="button" class="cursor-chat-tool-btn" id="cursorChatAttach" data-no-global-spinner="1" title="Anexar imagem" aria-label="Anexar">+</button>
+                        <button type="button" class="cursor-chat-tool-btn" id="cursorChatConfigBtn" data-no-global-spinner="1" title="Configuração" aria-label="Configuração" onclick="window.__cursorOpenConfig&&window.__cursorOpenConfig(event)">⚙</button>
+                        <button type="button" class="cursor-chat-tool-btn" id="cursorChatAgentsBtn" data-no-global-spinner="1" title="Escolher especialista" aria-label="Agentes" onclick="window.__cursorOpenAgents&&window.__cursorOpenAgents(event)">✦</button>
+                        <span id="cursorChatSpecialistChip" class="cursor-chat-specialist-chip" hidden></span>
+                      </div>
+                      <div class="cursor-chat-toolbar-right">
+                        <button type="button" class="cursor-chat-send-btn" id="cursorChatSend" data-no-global-spinner="1" title="Enviar" aria-label="Enviar">↑</button>
+                      </div>
                     </div>
+                    <input type="file" id="cursorChatFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
                   </div>
                 </div>
               </section>
@@ -14409,7 +14414,7 @@
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821k"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821l"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 
@@ -21856,6 +21861,21 @@ body.dev-agent-preview-mode { padding-top: 44px; }
   const participantsSummaryEl = document.getElementById('sgf-ai-participant-summary');
   const participantsSubtitleEl = document.getElementById('sgf-ai-participant-subtitle');
 
+  function syncHeaderChatbotBtn() {
+    if (!btn) return;
+    const admin =
+      (typeof window.usuarioEhAdminSistema === 'function' && window.usuarioEhAdminSistema()) ||
+      (Array.isArray(window.userRoles) && window.userRoles.map(String).map((r) => r.toLowerCase()).includes('admin'));
+    btn.style.display = admin ? '' : 'none';
+    btn.title = 'Chatbot';
+    btn.setAttribute('aria-label', 'Abrir Chatbot');
+  }
+  window.syncHeaderChatbotBtn = syncHeaderChatbotBtn;
+  document.addEventListener('auth:loggedIn', syncHeaderChatbotBtn);
+  document.addEventListener('DOMContentLoaded', syncHeaderChatbotBtn);
+  setTimeout(syncHeaderChatbotBtn, 0);
+  setTimeout(syncHeaderChatbotBtn, 1500);
+
   let history = [];   // [{role, content}]
   let loading = false;
   let techModeQualidade = false;
@@ -23859,14 +23879,14 @@ body.dev-agent-preview-mode { padding-top: 44px; }
   // ── Abrir/fechar painel ──────────────────────────────────────────────────
   async function openPanel() {
     await detectarTechModeQualidade();
-    panel.classList.add('open');
-    badge.style.display = 'none';
-    if (messages.children.length === 0) addWelcome();
+    panel?.classList.add('open');
+    if (badge) badge.style.display = 'none';
+    if (messages && messages.children.length === 0) addWelcome();
     if (meetingFlow.active && meetingFlow.step === 'participants' && participantsPanel) {
       participantsPanel.classList.add('open');
       renderMeetingParticipantsPanel();
     }
-    setTimeout(() => input.focus(), 80);
+    setTimeout(() => input?.focus(), 80);
     void reportAiClientLog('info', 'Painel do assistente aberto', { techModeQualidade });
   }
   function closePanel() {
@@ -23904,13 +23924,22 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     void reportAiClientLog('info', 'Atendimento finalizado e contexto limpo');
   }
 
-  btn.addEventListener('click', () => panel.classList.contains('open') ? closePanel() : openPanel());
-  closeBtn.addEventListener('click', closePanel);
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    // Header robot = Chatbot Cloud Agent (admin). Não abre mais o Assistente SGF/Técnico.
+    if (typeof window.abrirPainelCursorChatbot === 'function') {
+      void window.abrirPainelCursorChatbot();
+      return;
+    }
+    if (typeof showMainTab === 'function') showMainTab('cursorChatbotPane');
+  });
+  closeBtn?.addEventListener('click', closePanel);
   document.addEventListener('mousedown', (event) => {
-    if (!panel.classList.contains('open')) return;
+    if (!panel?.classList.contains('open')) return;
     const target = event.target;
     if (panel.contains(target)) return;
-    if (btn.contains(target)) return;
+    if (btn?.contains(target)) return;
     if (participantsPanel?.contains(target)) return;
     closePanel();
   });
