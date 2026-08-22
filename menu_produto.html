@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821a"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821e"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -10322,12 +10322,17 @@
             <header class="cursor-chat-header">
               <div>
                 <h3>Chatbot</h3>
-                <p>Cloud Agent no GitHub — como no app do celular. Só admin.</p>
+                <p>Mesmo modo do Cursor — conversa contínua. Só admin.</p>
               </div>
               <div class="cursor-chat-header-actions">
                 <span id="cursorChatBadge" class="cursor-chat-badge">Chatbot</span>
-                <button type="button" class="cursor-chat-btn" id="cursorChatRefresh">Atualizar lista</button>
+                <button type="button" class="cursor-chat-btn" id="cursorChatRefresh">Atualizar</button>
                 <button type="button" class="cursor-chat-btn primary" id="cursorChatNew">Nova conversa</button>
+                <button type="button" class="cursor-chat-btn danger" id="cursorChatDelete" title="Exclui conversa e fotos" style="display:none;">Excluir</button>
+                <span id="cursorChatPublishBar" class="cursor-chat-publish-bar" hidden>
+                  <button type="button" class="cursor-chat-btn success" id="cursorChatApprove" title="Merge na main → Render">Publicar no site</button>
+                  <button type="button" class="cursor-chat-btn danger" id="cursorChatReject">Descartar PR</button>
+                </span>
               </div>
             </header>
             <div class="cursor-chat-body">
@@ -10337,24 +10342,39 @@
               <section class="cursor-chat-main">
                 <div class="cursor-chat-statusline" id="cursorChatStatus">Pronto</div>
                 <div class="cursor-chat-messages" id="cursorChatMessages" aria-live="polite"></div>
-                <div class="cursor-chat-review" id="cursorChatReview">
-                  <div id="cursorChatReviewText">Proposta pronta.</div>
-                  <div class="cursor-chat-files" id="cursorChatFiles"></div>
-                  <div class="cursor-chat-review-actions">
-                    <button type="button" class="cursor-chat-btn" id="cursorChatTest">Entrar no modo de teste</button>
-                    <button type="button" class="cursor-chat-btn success" id="cursorChatApprove">Aprovar e publicar</button>
-                    <button type="button" class="cursor-chat-btn danger" id="cursorChatReject">Descartar</button>
-                  </div>
-                </div>
                 <div class="cursor-chat-composer">
-                  <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (como no Cursor)"></textarea>
-                  <div class="send-wrap">
-                    <button type="button" class="cursor-chat-btn primary" id="cursorChatSend">Enviar</button>
+                  <div class="cursor-chat-attach-row">
+                    <button type="button" class="cursor-chat-btn" id="cursorChatAttach" title="Anexar imagem">📷 Foto</button>
+                    <input type="file" id="cursorChatFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+                    <span class="cursor-chat-attach-hint">Ou Ctrl+V para colar print</span>
+                    <span id="cursorChatSpecialistChip" class="cursor-chat-specialist-chip" hidden></span>
+                  </div>
+                  <div class="cursor-chat-previews" id="cursorChatPreviews"></div>
+                  <div class="cursor-chat-composer-row">
+                    <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (cole um print com Ctrl+V)"></textarea>
+                    <div class="send-wrap">
+                      <button type="button" class="cursor-chat-btn" id="cursorChatAgentsBtn" title="Escolher especialista">Agentes</button>
+                      <button type="button" class="cursor-chat-btn primary" id="cursorChatSend">Enviar</button>
+                    </div>
                   </div>
                 </div>
               </section>
             </div>
           </div>
+        </div>
+      </div>
+
+      <div id="cursorChatAgentsModal" class="cursor-chat-agents-modal" hidden>
+        <div class="cursor-chat-agents-dialog" role="dialog" aria-modal="true" aria-labelledby="cursorChatAgentsTitle">
+          <div class="cursor-chat-agents-head">
+            <div>
+              <strong id="cursorChatAgentsTitle">Especialistas</strong>
+              <div class="cursor-chat-agents-sub">Entra na conversa atual · na tela só aparece o nome · o prompt completo vai por baixo</div>
+            </div>
+            <button type="button" class="cursor-chat-btn" id="cursorChatAgentsClose">&times;</button>
+          </div>
+          <input type="search" id="cursorChatAgentsSearch" class="cursor-chat-agents-search" placeholder="Buscar módulo ou botão…" autocomplete="off">
+          <div id="cursorChatAgentsBody" class="cursor-chat-agents-body"></div>
         </div>
       </div>
 
@@ -14339,7 +14359,7 @@
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821a"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821e"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 

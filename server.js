@@ -15441,6 +15441,248 @@ async function stampEtqNecessarioEng(idEtq, necessarioEng) {
   );
 }
 
+/**
+ * Após reprocessar/concluir NF-e na Omie, cria em ETQ_recebimento só os itens
+ * que ainda não existem (não duplica os já gerados/impressos).
+ */
+async function reconciliarEtqRecebimentoPorNfe({
+  numeroNfe = null,
+  nIdReceb = null,
+  numeroPedido = null,
+  usuario = 'sistema-reconciliacao',
+} = {}) {
+  const nfeBusca = String(numeroNfe || '').trim();
+  const idReceb = Number(nIdReceb || 0);
+  if (!nfeBusca && !(Number.isFinite(idReceb) && idReceb > 0)) {
+    return { ok: false, error: 'Informe numero_nfe ou n_id_receb.' };
+  }
+
+  const { rows: cabRows } = await pool.query(
+    `SELECT n_id_receb, c_numero_nfe, c_recebido, c_etapa, c_cancelada,
+            d_emissao_nfe
+       FROM logistica.recebimentos_nfe_omie
+      WHERE ($1::bigint IS NOT NULL AND n_id_receb = $1)
+         OR ($2::text <> '' AND TRIM(COALESCE(c_numero_nfe, '')) = TRIM($2))
+      ORDER BY updated_at DESC NULLS LAST, n_id_receb DESC
+      LIMIT 1`,
+    [Number.isFinite(idReceb) && idReceb > 0 ? idReceb : null, nfeBusca]
+  );
+  const cab = cabRows[0];
+  if (!cab) {
+    return { ok: false, error: 'NF-e/recebimento não encontrado no Intranet.' };
+  }
+
+  const nfe = String(cab.c_numero_nfe || nfeBusca || '').trim();
+  const recebido = flagOmieSim(cab.c_recebido);
+  const cancelada = flagOmieSim(cab.c_cancelada);
+  const etapa = String(cab.c_etapa || '').trim();
+  if (cancelada) {
+    return { ok: true, skipped: true, reason: 'cancelada', numero_nfe: nfe, criados: [] };
+  }
+  if (!recebido && !['60', '80'].includes(etapa)) {
+    return {
+      ok: true,
+      skipped: true,
+      reason: 'ainda_nao_recebida',
+      numero_nfe: nfe,
+      c_recebido: cab.c_recebido || null,
+      c_etapa: etapa || null,
+      criados: [],
+    };
+  }
+
+  const { rows: itensNf } = await pool.query(
+    `SELECT TRIM(COALESCE(c_codigo_produto, '')) AS codigo_produto,
+            COALESCE(NULLIF(TRIM(c_descricao_produto), ''), TRIM(COALESCE(c_codigo_produto, ''))) AS descricao_produto,
+            n_qtde_nfe AS qtd,
+            TRIM(COALESCE(c_unidade_nfe, '')) AS unidade,
+            TRIM(COALESCE(n_num_ped_compra::text, '')) AS numero_pedido_item
+       FROM logistica.recebimentos_nfe_itens
+      WHERE n_id_receb = $1
+        AND TRIM(COALESCE(c_codigo_produto, '')) <> ''
+      ORDER BY n_sequencia NULLS LAST, id`,
+    [cab.n_id_receb]
+  );
+
+  if (!itensNf.length) {
+    return { ok: true, skipped: true, reason: 'sem_itens', numero_nfe: nfe, criados: [] };
+  }
+
+  const { rows: etqExistentes } = await pool.query(
+    `SELECT id, TRIM(COALESCE(codigo_produto, '')) AS codigo_produto,
+            TRIM(COALESCE(numero_pedido, '')) AS numero_pedido
+       FROM etiqueta."ETQ_recebimento"
+      WHERE TRIM(COALESCE(numero_nfe, '')) = TRIM($1)`,
+    [nfe]
+  );
+  const codigosJaTem = new Set(
+    etqExistentes.map((r) => String(r.codigo_produto || '').trim()).filter(Boolean)
+  );
+
+  let pedidoBase = String(numeroPedido || '').trim();
+  if (!pedidoBase) {
+    const contagem = new Map();
+    for (const row of etqExistentes) {
+      const p = String(row.numero_pedido || '').trim();
+      if (!p) continue;
+      contagem.set(p, (contagem.get(p) || 0) + 1);
+    }
+    pedidoBase = [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] || '';
+  }
+  if (!pedidoBase) {
+    pedidoBase = itensNf.map((i) => String(i.numero_pedido_item || '').trim()).find(Boolean) || '';
+  }
+  if (!pedidoBase) {
+    return {
+      ok: false,
+      error: `NF-e ${nfe}: não foi possível determinar o número do pedido para criar as etiquetas faltantes.`,
+      numero_nfe: nfe,
+      faltantes: itensNf.filter((i) => !codigosJaTem.has(i.codigo_produto)).map((i) => i.codigo_produto),
+    };
+  }
+
+  const faltantes = itensNf.filter((i) => !codigosJaTem.has(String(i.codigo_produto || '').trim()));
+  if (!faltantes.length) {
+    return {
+      ok: true,
+      numero_nfe: nfe,
+      numero_pedido: pedidoBase,
+      existentes: etqExistentes.length,
+      criados: [],
+      message: 'Nenhum item faltante em ETQ_recebimento.',
+    };
+  }
+
+  const layoutRecebimento = await _carregarLayoutEtiqueta('recebimento');
+  let dataExibir = '';
+  if (cab.d_emissao_nfe) {
+    const d = new Date(cab.d_emissao_nfe);
+    if (!Number.isNaN(d.getTime())) {
+      dataExibir = [
+        String(d.getUTCDate()).padStart(2, '0'),
+        String(d.getUTCMonth() + 1).padStart(2, '0'),
+        d.getUTCFullYear(),
+      ].join('/');
+    }
+  }
+  if (!dataExibir) {
+    const hoje = new Date();
+    dataExibir = [
+      String(hoje.getDate()).padStart(2, '0'),
+      String(hoje.getMonth() + 1).padStart(2, '0'),
+      hoje.getFullYear(),
+    ].join('/');
+  }
+
+  const sanitize = (v, max = 999) => String(v || '').slice(0, max).replace(/[\\^~]/g, ' ');
+  const lote = `${pedidoBase}-${nfe}`;
+  const loteTxt = sanitize(lote, 40);
+  const { resolverDestinoPirRecebimento } = require('./utils/etqRecebimentoPir');
+  const criados = [];
+
+  for (const item of faltantes) {
+    const codProdRaw = String(item.codigo_produto || '').trim();
+    if (!codProdRaw || codigosJaTem.has(codProdRaw)) continue;
+
+    const descProdRaw = String(item.descricao_produto || '').trim();
+    const qtdNum = item.qtd != null ? Number(item.qtd) : null;
+    const unidRaw = String(item.unidade || '').trim();
+    const pedidoItem = String(item.numero_pedido_item || '').trim() || pedidoBase;
+
+    let pirInicial = false;
+    let necessarioEng = false;
+    try {
+      const destinoPir = await resolverDestinoPirRecebimento(pool, codProdRaw);
+      pirInicial = destinoPir.pirInicial;
+      necessarioEng = destinoPir.necessarioEng === true;
+    } catch (_) { /* segue */ }
+
+    const ins = await pool.query(
+      `INSERT INTO etiqueta."ETQ_recebimento"
+         (numero_nfe, numero_pedido, lote, codigo_produto, descricao_produto,
+          qtd, unidade, data_emissao, conteudo_zpl, usuario_criacao, pir)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       RETURNING id`,
+      [
+        nfe,
+        pedidoItem,
+        `${pedidoItem}-${nfe}`,
+        codProdRaw,
+        descProdRaw,
+        Number.isFinite(qtdNum) ? qtdNum : null,
+        unidRaw,
+        dataExibir,
+        '',
+        usuario,
+        pirInicial,
+      ]
+    );
+    const idEtq = ins.rows[0]?.id;
+    if (!idEtq) continue;
+    await stampEtqNecessarioEng(idEtq, necessarioEng);
+
+    const zpl = _gerarZplRecebimentoBloco({
+      codProd: sanitize(codProdRaw, 30),
+      descProd: sanitize(descProdRaw, 70),
+      loteTxt: sanitize(`${pedidoItem}-${nfe}`, 40),
+      dataExibir,
+      idEtq,
+      layout: layoutRecebimento,
+    });
+    await pool.query(
+      `UPDATE etiqueta."ETQ_recebimento" SET conteudo_zpl=$1 WHERE id=$2`,
+      [zpl, idEtq]
+    );
+
+    codigosJaTem.add(codProdRaw);
+    criados.push({ id: idEtq, codigo_produto: codProdRaw, qtd: qtdNum, pir: pirInicial });
+  }
+
+  console.log(
+    `[etiquetas/recebimento/reconciliar] NF-e ${nfe}: +${criados.length} item(ns) ` +
+    `(existentes=${etqExistentes.length}, faltavam=${faltantes.length})`
+  );
+
+  return {
+    ok: true,
+    numero_nfe: nfe,
+    numero_pedido: pedidoBase,
+    n_id_receb: cab.n_id_receb,
+    existentes: etqExistentes.length,
+    faltantes_detectados: faltantes.length,
+    criados,
+  };
+}
+
+// POST /api/etiquetas/recebimento/reconciliar-nfe
+// Body: { nfe | numero_nfe, n_id_receb?, pedido? } — cria só itens faltantes em ETQ_recebimento
+app.post('/api/etiquetas/recebimento/reconciliar-nfe', express.json(), async (req, res) => {
+  try {
+    const body = req.body || {};
+    const numeroNfe = String(body.nfe || body.numero_nfe || '').trim();
+    const nIdReceb = Number(body.n_id_receb || body.nIdReceb || 0) || null;
+    const numeroPedido = String(body.pedido || body.numero_pedido || '').trim() || null;
+    const usuario = body.usuario
+      || req.session?.usuario
+      || req.session?.user?.login
+      || 'reconciliar-nfe';
+
+    const resultado = await reconciliarEtqRecebimentoPorNfe({
+      numeroNfe,
+      nIdReceb,
+      numeroPedido,
+      usuario,
+    });
+    if (!resultado?.ok) {
+      return res.status(400).json(resultado);
+    }
+    return res.json(resultado);
+  } catch (err) {
+    console.error('[etiquetas/recebimento/reconciliar-nfe]', err);
+    return res.status(500).json({ ok: false, error: err?.message || 'Falha ao reconciliar ETQ_recebimento.' });
+  }
+});
+
 // PATCH /api/etiquetas/recebimento/:id/necessario-eng — marca item para PIR_ENG (não trava o PIR)
 app.patch('/api/etiquetas/recebimento/:id/necessario-eng', express.json(), async (req, res) => {
   try {
@@ -32871,6 +33113,34 @@ async function upsertRecebimentoNFe(recebimento, eventoWebhook = '', messageId =
     await client.query('COMMIT');
     console.log(`[RecebimentosNFe] ✓ Recebimento ${nIdReceb} sincronizado`);
 
+    // Reconcilia ETQ_recebimento: cria só itens novos após reprocessar/concluir NF-e
+    try {
+      const numeroNfeSync = String(cabec?.cNumeroNFe || cabec?.c_numero_nfe || '').trim();
+      const recebidoSync = flagOmieSim(infoCadastro?.cRecebido || cabec?.cRecebido || cabec?.c_recebido);
+      const statusSync = String(statusFinal || '').trim();
+      const etapaSync = String(cabec?.cEtapa || cabec?.c_etapa || '').trim();
+      if (
+        recebidoSync
+        || ['Concluida', 'Recebida'].includes(statusSync)
+        || ['60', '80'].includes(etapaSync)
+      ) {
+        setImmediate(() => {
+          reconciliarEtqRecebimentoPorNfe({
+            numeroNfe: numeroNfeSync || null,
+            nIdReceb,
+            usuario: 'webhook-recebimento-nfe',
+          }).catch((errRec) => {
+            console.warn(
+              `[RecebimentosNFe] Reconciliação ETQ falhou (nIdReceb=${nIdReceb}):`,
+              errRec?.message || errRec
+            );
+          });
+        });
+      }
+    } catch (errHookRec) {
+      console.warn('[RecebimentosNFe] Hook reconciliação ETQ:', errHookRec?.message || errHookRec);
+    }
+
   } catch (error) {
     await client.query('ROLLBACK');
     console.error(`[RecebimentosNFe] Erro ao fazer upsert do recebimento:`, error);
@@ -41789,6 +42059,11 @@ async function listarSugestoesComplementaresAssociacaoNfePedido({
   return candidatos;
 }
 
+function flagOmieSim(valor) {
+  const v = String(valor ?? '').trim().toUpperCase();
+  return v === 'S' || v === 'SIM' || v === '1' || v === 'TRUE';
+}
+
 async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe = null, nCodPedInformado = null) {
   const nCodPedNumerico = Number(nCodPedInformado);
   const usarIdDireto = Number.isFinite(nCodPedNumerico) && nCodPedNumerico > 0;
@@ -42014,6 +42289,10 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
         nf_valor_unitario: itensCabec?.nPrecoUnit ?? null,
         nf_valor_total: itensCabec?.vTotalItem ?? null,
         nf_cfop: cfopNf || null,
+        nf_nao_gerar_financeiro: flagOmieSim(
+          itensInfoAdic?.cNaoGerarFinanceiro
+          || item?.itensAjustes?.cNaoGerarFinanceiro
+        ),
         item_servico: servicoCfop.servico,
         servico_cfop_entrada: servicoCfop.cfopEntrada,
         pedido_item_encontrado: !!itemPedidoVinculo || servicoCfop.servico,
@@ -42082,6 +42361,7 @@ async function montarPlanoAssociacaoNfePedido(numeroNfe, numeroPedido, chaveNfe 
     itens_match_total: previewItens.filter(item => item.pedido_item_encontrado).length,
     itens_revisao_total: previewItens.filter(item => item.requer_revisao).length,
     itens_sem_match_total: previewItens.filter(item => !item.pedido_item_encontrado).length,
+    itens_nao_gerar_financeiro_total: previewItens.filter(item => !!item.nf_nao_gerar_financeiro).length,
     recebimento_omie: recebimento,
     itens_preview: previewItens,
     itens_pedido_informativos: itensPedidoInformativos,
@@ -43066,7 +43346,11 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
           );
 
           const ajustes = {};
-          if (!isServico) ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
+          if (!isServico) {
+            ajustes.codigo_local_estoque = ESTOQUE_LOCAL_ESPECIAL;
+            // Evita NF-e com itens "não gerar financeiro" (financeiro ≠ valor da nota).
+            ajustes.cNaoGerarFinanceiro = 'N';
+          }
           if (cUnidadeFinal) ajustes.cUnidade = cUnidadeFinal;
           // Campo correto na Omie: nQtdeRecebida (não nQtde) — grava a qtd convertida
           if (precisaConversaoQtdUnid && nQtdeRecebidaFinal != null) {
@@ -43461,9 +43745,30 @@ app.post('/api/compras/pedidos-omie/nfe-associar-pedido', express.json(), async 
       throw new Error(alertaItemAssociacao);
     }
 
+    // Garante identificação dos itens (cria só os que faltam em ETQ_recebimento)
+    let reconciliacaoEtq = null;
+    try {
+      const nfeAssociada = String(
+        recebimentoAposAlteracao?.cabec?.cNumeroNFe
+        || plano?.numero_nfe
+        || numeroNfe
+        || ''
+      ).trim();
+      const pedidoAssociado = String(plano?.c_numero_pedido || numeroPedido || '').trim() || null;
+      reconciliacaoEtq = await reconciliarEtqRecebimentoPorNfe({
+        numeroNfe: nfeAssociada,
+        nIdReceb: Number(recebimentoAposAlteracao?.cabec?.nIdReceb || plano?.n_id_receb || 0) || null,
+        numeroPedido: pedidoAssociado,
+        usuario: req.session?.usuario || req.session?.user?.login || 'nfe-associar-pedido',
+      });
+    } catch (errRecAssoc) {
+      console.warn('[Compras/NFeAssociarPedido] Reconciliação ETQ:', errRecAssoc?.message || errRecAssoc);
+    }
+
     return res.json({
       ok: true,
       pedidos_preco_atualizado: pedidosComPrecoAtualizado,
+      reconciliacao_etq: reconciliacaoEtq,
       message: alertaItemAssociacao
         ? `Pedido ${plano.c_numero_pedido || plano.n_cod_ped} vinculado à NF-e ${recebimentoAposAlteracao?.cabec?.cNumeroNFe || numeroNfe} na Omie, com alerta de item: ${alertaItemAssociacao}`
         : (vinculoConfirmado
