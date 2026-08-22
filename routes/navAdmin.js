@@ -9,7 +9,7 @@ router.use(express.json());
 
 let schemaOk = false;
 
-const NAV_KEYS_OBSOLETOS = ['side:rh:constr18', 'side:produtos:constr3'];
+const NAV_KEYS_OBSOLETOS = ['side:rh:constr18', 'side:produtos:constr3', 'side:conf-sistema:chatbot'];
 
 async function desativarBotoesObsoletos() {
   await pool.query(
