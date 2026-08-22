@@ -91,7 +91,7 @@ const CURATED = [
     id: 'sql-schema-intranet',
     name: 'Banco / SQL',
     group: 'Transversal',
-    blurb: 'Schema, migrations, colunas',
+    blurb: 'Acesso total via API SQL (criar schema/tabela, consultar)',
     skill: 'sql-schema-intranet',
   },
   {
@@ -215,6 +215,7 @@ function buildActivationPrompt(specialist) {
     '4. Não faça commit/push sem pedido explícito do usuário.',
     '5. Português simples; diga onde ver na tela (menu, botão, modal).',
     '6. Fluxo: ENTENDER → EXPLORAR → IMPLEMENTAR → VALIDAR.',
+    '7. SQL: use a API /api/dev-agent/sql com $INTRANET_PUBLIC_URL e $DEV_AGENT_MOBILE_TOKEN (não invente DATABASE_URL).',
     '',
     'O usuário acabou de te colocar nesta conversa. Confirme em UMA frase curta que está no papel "' +
       specialist.name +

@@ -8,6 +8,7 @@
 const express = require('express');
 const router = express.Router();
 const iaDb = require('../utils/iaCursorDb');
+const { pool } = require('../src/db');
 const {
   listSpecialists,
   getSpecialist,
@@ -17,6 +18,8 @@ const {
 
 const CURSOR_API = 'https://api.cursor.com/v1';
 const GH_API = 'https://api.github.com';
+const SQL_MAX_ROWS = Math.min(Number(process.env.DEV_AGENT_SQL_MAX_ROWS || 500), 2000);
+const SQL_TIMEOUT_MS = Math.min(Number(process.env.DEV_AGENT_SQL_TIMEOUT_MS || 60000), 120000);
 
 function listRoles(req) {
   const raw = req?.session?.user?.roles ?? [];
@@ -206,6 +209,68 @@ function titleFromPrompt(text) {
   return t.length > 60 ? `${t.slice(0, 57)}…` : t;
 }
 
+function intranetPublicUrl() {
+  return String(
+    process.env.INTRANET_PUBLIC_URL ||
+      process.env.RENDER_EXTERNAL_URL ||
+      process.env.PUBLIC_BASE_URL ||
+      ''
+  )
+    .trim()
+    .replace(/\/$/, '');
+}
+
+/** Env injetado na VM do Cloud Agent (acesso SQL via API da intranet). */
+function cloudAgentEnvVars() {
+  const out = {};
+  const base = intranetPublicUrl();
+  const token = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
+  if (base) out.INTRANET_PUBLIC_URL = base;
+  if (token) out.DEV_AGENT_MOBILE_TOKEN = token;
+  return Object.keys(out).length ? out : null;
+}
+
+function sqlAccessPreamble() {
+  const base = intranetPublicUrl() || 'https://SEU-SITE.onrender.com';
+  return [
+    '## Acesso ao Postgres (intranet)',
+    'Você pode criar schemas/tabelas, alterar colunas e consultar o banco via API (o agent NÃO usa DATABASE_URL direto no Render interno).',
+    '',
+    'Executar SQL:',
+    '```bash',
+    `curl -sS -X POST "${base}/api/dev-agent/sql" \\`,
+    '  -H "Content-Type: application/json" \\',
+    '  -H "X-Dev-Agent-Token: $DEV_AGENT_MOBILE_TOKEN" \\',
+    '  -d \'{"sql":"SELECT current_database(), current_user;"}\'',
+    '```',
+    '',
+    'Catálogo:',
+    '```bash',
+    `curl -sS "${base}/api/dev-agent/sql/catalog" -H "X-Dev-Agent-Token: $DEV_AGENT_MOBILE_TOKEN"`,
+    '```',
+    '',
+    'Não imprima tokens/senhas. DROP/TRUNCATE só com pedido explícito do usuário.',
+    '',
+  ].join('\n');
+}
+
+function wrapPromptForCursor(prompt) {
+  const text = String(prompt?.text || '');
+  const wrapped = {
+    ...prompt,
+    text: `${sqlAccessPreamble()}\n---\n\n${text}`,
+  };
+  return wrapped;
+}
+
+function actorLabel(req) {
+  return (
+    req.session?.user?.username ||
+    req.session?.user?.login ||
+    (req.devAgentMobile ? 'cloud-agent' : 'admin')
+  );
+}
+
 /**
  * Salva mensagem do usuário + sobe imagens no R2.
  * displayText = o que aparece no chat; cursorText = o que vai para o Cloud Agent.
@@ -341,14 +406,111 @@ async function syncAssistantFromCursor(conversation, agentId) {
 }
 
 router.get('/status', requireAdminOrMobile, (req, res) => {
+  const envVars = cloudAgentEnvVars();
   res.json({
     ok: true,
     cursorConfigured: Boolean(cursorKey()),
     githubConfigured: Boolean(githubCfg().token),
+    sqlApiConfigured: Boolean(pool),
+    sqlViaAgentConfigured: Boolean(envVars?.INTRANET_PUBLIC_URL && envVars?.DEV_AGENT_MOBILE_TOKEN),
+    intranetPublicUrl: intranetPublicUrl() || null,
     repo: repoHttpsUrl(),
     branch: githubCfg().branch,
     storage: 'ia_cursor + R2',
   });
+});
+
+/** Catálogo de schemas/tabelas (descoberta). */
+router.get('/sql/catalog', requireAdminOrMobile, async (req, res) => {
+  try {
+    if (!pool) return res.status(503).json({ ok: false, error: 'DATABASE_URL não configurada.' });
+    const schemaFilter = String(req.query.schema || '').trim();
+    const { rows: schemas } = await pool.query(
+      `SELECT schema_name
+         FROM information_schema.schemata
+        WHERE schema_name NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+          AND schema_name NOT LIKE 'pg_temp%'
+          AND schema_name NOT LIKE 'pg_toast_temp%'
+        ORDER BY schema_name`
+    );
+    const params = [];
+    let where = `table_schema NOT IN ('pg_catalog', 'information_schema', 'pg_toast')`;
+    if (schemaFilter) {
+      params.push(schemaFilter);
+      where += ` AND table_schema = $1`;
+    }
+    const { rows: tables } = await pool.query(
+      `SELECT table_schema, table_name, table_type
+         FROM information_schema.tables
+        WHERE ${where}
+        ORDER BY table_schema, table_name
+        LIMIT 2000`,
+      params
+    );
+    let columns = [];
+    if (schemaFilter) {
+      const { rows } = await pool.query(
+        `SELECT table_name, column_name, data_type, is_nullable, column_default
+           FROM information_schema.columns
+          WHERE table_schema = $1
+          ORDER BY table_name, ordinal_position
+          LIMIT 5000`,
+        [schemaFilter]
+      );
+      columns = rows;
+    }
+    const dbRes = await pool.query('SELECT current_database() AS db');
+    return res.json({
+      ok: true,
+      database: dbRes.rows[0]?.db || null,
+      schemas: schemas.map((s) => s.schema_name),
+      tables,
+      columns,
+    });
+  } catch (err) {
+    console.error('[dev-agent] sql catalog', err.message);
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+/**
+ * Executa SQL no Postgres da intranet (DDL/DML/SELECT).
+ * Cloud Agent chama com X-Dev-Agent-Token — sem DATABASE_URL na VM.
+ */
+router.post('/sql', requireAdminOrMobile, express.json({ limit: '2mb' }), async (req, res) => {
+  const sql = String(req.body?.sql || req.body?.query || '').trim();
+  if (!sql) return res.status(400).json({ ok: false, error: 'Campo sql obrigatório.' });
+  if (!pool) return res.status(503).json({ ok: false, error: 'DATABASE_URL não configurada.' });
+
+  const params = Array.isArray(req.body?.params) ? req.body.params : [];
+  const who = actorLabel(req);
+  console.log(`[dev-agent] SQL by ${who}:`, sql.slice(0, 400).replace(/\s+/g, ' '));
+
+  const client = await pool.connect();
+  try {
+    await client.query(`SET statement_timeout = ${Number(SQL_TIMEOUT_MS)}`);
+    const result = await client.query(sql, params);
+    const rows = Array.isArray(result.rows) ? result.rows.slice(0, SQL_MAX_ROWS) : [];
+    return res.json({
+      ok: true,
+      command: result.command || null,
+      rowCount: result.rowCount ?? rows.length,
+      truncated: Array.isArray(result.rows) && result.rows.length > rows.length,
+      fields: (result.fields || []).map((f) => f.name),
+      rows,
+    });
+  } catch (err) {
+    console.error('[dev-agent] SQL error:', err.message);
+    return res.status(400).json({
+      ok: false,
+      error: err.message,
+      code: err.code || null,
+      detail: err.detail || null,
+      hint: err.hint || null,
+    });
+  } finally {
+    client.release();
+  }
 });
 
 /** Catálogo de especialistas (módulos + botões). */
@@ -489,14 +651,16 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     }
 
     const { branch } = githubCfg();
+    const envVars = cloudAgentEnvVars();
     const body = {
-      prompt,
+      prompt: wrapPromptForCursor(prompt),
       name:
         String(req.body?.name || '').trim() ||
         (resolved.specialist ? `Esp: ${resolved.specialist.name}` : titleFromPrompt(resolved.displayText)),
       repos: [{ url: repoHttpsUrl(), startingRef: branch }],
       autoCreatePR: req.body?.autoCreatePR !== false,
       mode: req.body?.mode === 'plan' ? 'plan' : 'agent',
+      ...(envVars ? { envVars } : {}),
     };
 
     const data = await cursorFetch('/agents', { method: 'POST', body });
@@ -561,7 +725,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
 
     const data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
       method: 'POST',
-      body: { prompt },
+      body: { prompt: wrapPromptForCursor(prompt) },
     });
     const run = data?.run || data;
     await iaDb.touchConversation(conv.id, {
