@@ -19,10 +19,10 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260822-etq-copias"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821m"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -14247,6 +14247,10 @@
       <button id="etqReimpressaoFormatoFechar" type="button" aria-label="Cancelar reimpressão">&times;</button>
     </div>
     <p>O sistema vai gerar um ZPL novo com o layout atual e preservar o mesmo número da ETQ.</p>
+    <label class="etq-reprint-copias" for="etqReimpressaoCopias">
+      <span>Quantas etiquetas imprimir?</span>
+      <input id="etqReimpressaoCopias" type="number" min="1" max="100" step="1" value="1" inputmode="numeric" autocomplete="off" />
+    </label>
     <div class="etq-reprint-format-options">
       <button type="button" data-etq-formato="pequena">
         <i class="fa-solid fa-tag"></i>
@@ -14412,10 +14416,10 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
+  <script type="module" src="menu_produto.js?v=20260822-etq-copias"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821m"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260822a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 

@@ -601,6 +601,25 @@ router.get('/conversations/:id', requireAdminOrMobile, async (req, res) => {
   }
 });
 
+/** Nota de sistema na conversa (ex.: erro de UI que some no re-render). */
+router.post('/conversations/:id/system-note', requireAdminOrMobile, express.json({ limit: '20kb' }), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const content = String(req.body?.content || '').trim().slice(0, 2000);
+    if (!content) return res.status(400).json({ ok: false, error: 'content obrigatório' });
+    const conv = await iaDb.getConversation(id);
+    if (!conv) return res.status(404).json({ ok: false, error: 'Conversa não encontrada.' });
+    const msg = await iaDb.addMessage({
+      conversationId: id,
+      role: 'system',
+      content,
+    });
+    return res.json({ ok: true, id: msg?.id || null });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /** Exclui conversa + fotos no R2. */
 router.delete('/conversations/:id', requireAdminOrMobile, async (req, res) => {
   try {

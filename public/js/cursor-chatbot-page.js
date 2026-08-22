@@ -23,6 +23,7 @@
     lastEventAt: null,
     lastActivity: '',
     statusPinned: '',
+    lastUiError: '',
     liveBubble: null,
     pendingImages: [],
     specialistId: null,
@@ -652,23 +653,43 @@
     clearMessages();
     if (!messages?.length) {
       appendBubble('meta', 'Nenhuma mensagem ainda. Escolha um especialista (Agentes) ou envie um comando.');
-      return;
+    } else {
+      messages.forEach((m) => {
+        const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant';
+        const images = (m.attachments || []).map((a) => ({ url: a.url, mimeType: a.mimeType }));
+        if (role === 'user') {
+          appendBubble('user', m.content || '', {
+            id: `m-${m.id}`,
+            images,
+            specialist: Boolean(m.specialistId),
+          });
+        } else if (m.role === 'run') {
+          if (m.result) appendBubble('assistant', m.result, { id: `a-${m.id}` });
+        } else {
+          appendBubble(role === 'system' ? 'meta' : 'assistant', m.content || '', { id: `m-${m.id}` });
+        }
+      });
     }
-    messages.forEach((m) => {
-      const role = m.role === 'user' ? 'user' : m.role === 'system' ? 'system' : 'assistant';
-      const images = (m.attachments || []).map((a) => ({ url: a.url, mimeType: a.mimeType }));
-      if (role === 'user') {
-        appendBubble('user', m.content || '', {
-          id: `m-${m.id}`,
-          images,
-          specialist: Boolean(m.specialistId),
-        });
-      } else if (m.role === 'run') {
-        if (m.result) appendBubble('assistant', m.result, { id: `a-${m.id}` });
-      } else {
-        appendBubble(role === 'system' ? 'meta' : 'assistant', m.content || '', { id: `m-${m.id}` });
-      }
-    });
+    if (state.lastUiError) {
+      appendBubble('error', state.lastUiError);
+    }
+  }
+
+  function showStickyError(message) {
+    const msg = String(message || 'Erro').trim();
+    state.lastUiError = msg;
+    appendBubble('error', msg);
+    setStatus(msg.slice(0, 80), 'err');
+    if (state.conversationId) {
+      void api('/conversations/' + encodeURIComponent(state.conversationId) + '/system-note', {
+        method: 'POST',
+        body: JSON.stringify({ content: `⚠️ ${msg}` }),
+      }).catch(() => {});
+    }
+  }
+
+  function clearStickyError() {
+    state.lastUiError = '';
   }
 
   function updateSpecialistChip() {
@@ -1170,6 +1191,7 @@
   async function openConversation(conversationId) {
     stopWorkWatchers();
     state.conversationId = conversationId;
+    clearStickyError();
     hideBannerExtras();
     setStatus('Carregando histórico…', 'warn');
     try {
@@ -1215,8 +1237,7 @@
       await refreshAgentList();
     } catch (e) {
       clearMessages();
-      appendBubble('error', e.message);
-      setStatus('Erro', 'err');
+      showStickyError(e.message || 'Falha ao abrir conversa');
     }
   }
 
@@ -1269,6 +1290,7 @@
         state.branch = data.branch || state.branch;
         stopWorkWatchers();
         setBusy(false);
+        clearStickyError();
         renderSqlMessages(data.messages || []);
         updatePublishBar();
         setStatus(data.prNumber ? 'Resposta pronta · dá para publicar no site' : 'Resposta pronta', 'ok');
@@ -1285,6 +1307,8 @@
       if (st === 'FINISHED' || st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') {
         stopWorkWatchers();
         setBusy(false);
+        if (st === 'FINISHED') clearStickyError();
+        else if (st === 'ERROR') showStickyError('O agent terminou com erro. Veja o histórico ou tente Nova conversa.');
         renderSqlMessages(data.messages || []);
         updatePublishBar();
         setStatus(st === 'FINISHED' ? 'Resposta pronta' : st, st === 'FINISHED' ? 'ok' : 'err');
@@ -1330,7 +1354,14 @@
     const input = $('cursorChatInput');
     const text = String(input?.value || '').trim();
     const images = state.pendingImages.slice();
-    if ((!text && !images.length) || state.busy) return;
+    if (!text && !images.length) return;
+    if (state.busy || state.eventSource) {
+      showStickyError(
+        'O agent ainda está trabalhando nesta conversa. Aguarde terminar (status RUNNING) ou abra Nova conversa.'
+      );
+      return;
+    }
+    clearStickyError();
     input.value = '';
     autoResizeChatInput();
     clearPendingImages();
@@ -1393,8 +1424,11 @@
     } catch (e) {
       stopWorkWatchers();
       setBusy(false);
-      appendBubble('error', e.message || 'Falha ao enviar');
-      setStatus('Erro', 'err');
+      if (input && text) {
+        input.value = text;
+        autoResizeChatInput();
+      }
+      showStickyError(e.message || 'Falha ao enviar');
     }
   }
 
@@ -1479,6 +1513,7 @@
     state.branch = null;
     state.specialistId = null;
     state.specialistName = null;
+    clearStickyError();
     clearCloudSession();
     updateSpecialistChip();
     updatePublishBar();
