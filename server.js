@@ -16968,6 +16968,7 @@ app.get('/api/etiquetas/rec-impresso/:id', async (req, res) => {
 // :id aceita PK (1850) ou rótulo de volume (1850.1)
 app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req, res) => {
   const _sep = '─'.repeat(60);
+  const client = await pool.connect();
   try {
     const resolved = await _etqResolverImpressoPorIdOuRotulo(pool, req.params.id);
     const id = resolved?.id || 0;
@@ -16985,7 +16986,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       return res.status(400).json({ error: 'Selecione um armazem de destino diferente do Recebimento de Produtos.' });
     }
 
-    const { rows: localDestinoRows } = await pool.query(
+    const { rows: localDestinoRows } = await client.query(
       `SELECT local_codigo, COALESCE(NULLIF(TRIM(nome), ''), local_codigo) AS nome
          FROM omie.omie_locais_estoque
         WHERE local_codigo = $1
@@ -17000,37 +17001,53 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     if (!localDestino) {
       return res.status(400).json({ error: 'O armazem de destino selecionado nao existe ou esta inativo.' });
     }
-    // 1. Lê o impresso (sem gravar endereço ainda — Omie precisa ter sucesso primeiro)
-    const { rows: impressoRows } = await pool.query(
+
+    await client.query('BEGIN');
+
+    // 1. Trava a etiqueta (FOR UPDATE) para evitar TRF duplicada se o usuário confirmar de novo enquanto a Omie demora
+    const { rows: impressoRows } = await client.query(
       `SELECT i.id, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto,
-              NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo
+              NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo,
+              NULLIF(TRIM(i.endereco), '') AS endereco
          FROM etiqueta."ETQ_rec_impresso" i
         WHERE i.id = $1
-        LIMIT 1`,
+        FOR UPDATE`,
       [id]
     );
-    if (!impressoRows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    if (!impressoRows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Registro não encontrado.' });
+    }
     const impresso = impressoRows[0];
+    if (impresso.endereco) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        already: true,
+        endereco: impresso.endereco,
+        error: `Esta etiqueta já está guardada em ${impresso.endereco}. Não foi enviada nova transferência.`,
+      });
+    }
     const { origem_id, qtd } = impresso;
 
     // 2. Busca dados do produto no recebimento para o TRF Omie
-    const { rows: recRows } = await pool.query(
+    const { rows: recRows } = await client.query(
       `SELECT codigo_produto, numero_nfe, lote FROM etiqueta."ETQ_recebimento" WHERE id = $1`,
       [origem_id]
     );
 
-    // 3. TRF Omie: RECEBIMENTO (10408201806) → PORTA PALLET ALMOXARIFADO (10717096386)
-    //    Obrigatório ter sucesso antes de marcar o material como guardado.
+    // 3. TRF Omie: RECEBIMENTO → PORTA PALLET (obrigatório ter sucesso antes de marcar como guardado)
     if (recRows.length) {
       const { codigo_produto, numero_nfe, lote } = recRows[0];
       const COD_ORIGEM  = ETQ_ARMAZENAR_LOCAL_ORIGEM;
       const COD_DESTINO = String(localDestino.local_codigo);
       if (!OMIE_APP_KEY || !OMIE_APP_SECRET) {
+        await client.query('ROLLBACK');
         return res.status(500).json({
           error: 'Credenciais da Omie ausentes. Endereço não foi salvo.',
         });
       }
-      const { rows: prodRows } = await pool.query(
+      const { rows: prodRows } = await client.query(
         `SELECT p.codigo_produto AS id_prod,
                 COALESCE(
                   NULLIF(e.cmc, 0),
@@ -17047,6 +17064,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       );
 
       if (!prodRows.length) {
+        await client.query('ROLLBACK');
         return res.status(400).json({
           error: `Produto ${codigo_produto} não encontrado em produtos_omie. Transferência Omie não realizada; endereço não foi salvo.`,
         });
@@ -17084,16 +17102,19 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       } catch (omieErr) {
         const fault = omieErr?.faultstring || omieErr?.message || String(omieErr);
         console.warn(`\n┌${_sep}\n│ [ARMAZENAR] ⚠ Omie IncluirAjusteEstoque falhou: ${fault}\n└${_sep}`);
+        await client.query('ROLLBACK');
         return res.status(502).json({
           error: `Omie recusou a transferência (Recebimento → ${localDestino.nome}): ${fault}. Endereço não foi salvo.`,
         });
       }
       if (omieResp?.faultstring) {
+        await client.query('ROLLBACK');
         return res.status(502).json({
           error: `Omie recusou a transferência: ${omieResp.faultstring}. Endereço não foi salvo.`,
         });
       }
       if (omieResp?.codigo_status != null && String(omieResp.codigo_status) !== '0') {
+        await client.query('ROLLBACK');
         return res.status(502).json({
           error: `${omieResp.descricao_status || 'Omie rejeitou a transferência'}. Endereço não foi salvo.`,
         });
@@ -17102,7 +17123,7 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
     }
 
     // 4. Só após TRF Ok (ou sem vínculo de recebimento): salva endereço
-    const result = await pool.query(
+    const result = await client.query(
       `UPDATE etiqueta."ETQ_rec_impresso" i
           SET endereco = $1,
               complemento = $2,
@@ -17121,12 +17142,21 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
                 (SELECT r.descricao_produto FROM etiqueta."ETQ_recebimento" r WHERE r.id = i.origem_id LIMIT 1)
               )
         WHERE i.id = $3
+          AND NULLIF(TRIM(i.endereco), '') IS NULL
         RETURNING i.id, i.endereco, i.complemento, i.origem_id, i.qtd, i.codigo_produto, i.descricao_produto,
                   NULLIF(TRIM(i.id_rotulo), '') AS id_rotulo`,
       [endereco, complemento || null, id, String(localDestino.local_codigo), localDestino.nome]
     );
-    if (!result.rows.length) return res.status(404).json({ error: 'Registro não encontrado.' });
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        ok: false,
+        already: true,
+        error: 'Esta etiqueta já foi guardada por outra operação. Não foi enviada nova transferência.',
+      });
+    }
 
+    await client.query('COMMIT');
     res.json({
       ok: true,
       id: result.rows[0].id,
@@ -17136,10 +17166,14 @@ app.patch('/api/etiquetas/rec-impresso/:id/endereco', express.json(), async (req
       local_destino_nome: localDestino.nome
     });
   } catch (err) {
+    try { await client.query('ROLLBACK'); } catch (_) { /* ignore */ }
     console.error('[etiquetas/rec-impresso/endereco]', err);
     res.status(500).json({ error: err?.message || 'Falha ao registrar endereço' });
+  } finally {
+    client.release();
   }
 });
+
 
 // POST /api/etiquetas/rec-impresso/registrar-movimentacao
 // Body: { codigo, descricao?, qtd?, endereco_origem?, endereco_destino?, enderecos?, complemento?, usuario?, tipo_movimentacao? }
