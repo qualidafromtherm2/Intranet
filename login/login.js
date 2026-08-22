@@ -413,7 +413,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       
       // Se recebeu um objeto user completo, usa o username/id dele
       const username = typeof userOrId === 'object' ? (userOrId.username || userOrId.id) : userOrId;
-      nomeUsuarioSpan.textContent = username || '';
+      nomeUsuarioSpan.textContent = String(username || '').trim();
 
       // consulta status e foto de perfil
       const stResp = await fetch(`${BASE}/api/auth/status`, { credentials: 'include' });
@@ -424,8 +424,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Carrega foto de perfil se disponível
       if (js.loggedIn && js.user) {
         const u = js.user;
-        const _nome = String(u.nome || '').trim();
-        const _uname = String(u.username || '').trim();
+        const _nome = String(u.nome_completo || u.nome || '').trim();
+        const _uname = String(u.username || u.login || '').trim();
         if (uiNomeCompleto) uiNomeCompleto.textContent = _nome || _uname || '';
         if (uiUsername) {
           // Evita duplicar: só mostra @username quando difere do nome exibido.
@@ -664,7 +664,7 @@ if (st.loggedIn && st.user) {
     moverDadosParaDireita();
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
-    nomeUsuarioSpan.textContent = st.user.nome || st.user.username || st.user.id || '';
+    nomeUsuarioSpan.textContent = st.user.username || st.user.login || st.user.id || '';
   } else {
     divNotLogged.style.display = 'block';
     divLogged.style.display    = 'none';
@@ -1031,7 +1031,7 @@ formSignIn?.addEventListener('submit', async (e) => {
     divNotLogged.style.display = 'none';
     divLogged.style.display    = 'block';
     if (nomeUsuarioSpan) {
-      nomeUsuarioSpan.textContent = data.user.nome || data.user.username || data.user.id || username;
+      nomeUsuarioSpan.textContent = data.user.username || data.user.login || data.user.id || username;
     }
     if (typeof moverDadosParaDireita === 'function') moverDadosParaDireita();
     if (formSignIn) formSignIn.style.display = 'none';
@@ -1118,7 +1118,7 @@ formCriar?.addEventListener('submit', async (e) => {
       divNotLogged.style.display = 'none';
       divLogged.style.display    = 'block';
     }
-    if (nomeUsuario) nomeUsuario.textContent = data.user?.nome || data.user?.username || username;
+    if (nomeUsuario) nomeUsuario.textContent = data.user?.username || data.user?.login || username;
 
     overlay.querySelector('#formSignIn')?.reset();
     window.__pendingResetUsername = null;
