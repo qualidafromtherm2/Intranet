@@ -3007,10 +3007,11 @@ body.light-mode {
 }
 .user-name {
   display: inline-block;
-  max-width: 160px;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-transform: none;
   font-size: 13px;
   font-weight: 600;
   line-height: 1.2;

@@ -877,11 +877,24 @@
   function atualizarNomeHeaderSessao(user) {
     const el = document.getElementById('userNameDisplay');
     if (!el) return;
-    if (!user) {
-      el.textContent = '';
+    if (typeof window.aplicarNomeHeaderSessao === 'function') {
+      window.aplicarNomeHeaderSessao(el, user);
       return;
     }
-    el.textContent = user.nome || user.username || user.login || '';
+    if (!user) {
+      el.textContent = '';
+      el.removeAttribute('title');
+      return;
+    }
+    el.textContent = String(user.username || user.login || '').trim();
+    const nomeCompleto = String(user.nome_completo || user.nome || '').trim();
+    if (nomeCompleto && nomeCompleto.toLowerCase() !== el.textContent.toLowerCase()) {
+      el.title = nomeCompleto;
+    } else if (el.textContent) {
+      el.title = el.textContent;
+    } else {
+      el.removeAttribute('title');
+    }
   }
 
   function montarUserVisaoCliente(d) {

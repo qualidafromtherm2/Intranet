@@ -36,6 +36,8 @@
     previewUrl: null,
     previewPollTimer: null,
     previewOpenedOnce: false,
+    previewStartedAt: null,
+    previewSyncedFor: null,
     /** idle | pending | live | failed */
     previewStatus: 'idle',
   };
@@ -70,6 +72,8 @@
       branch: state.branch ?? prev.branch ?? null,
       specialistId: state.specialistId ?? prev.specialistId ?? null,
       specialistName: state.specialistName ?? prev.specialistName ?? null,
+      previewUrl: state.previewUrl ?? prev.previewUrl ?? null,
+      previewStatus: state.previewStatus ?? prev.previewStatus ?? 'idle',
       ...patch,
       updatedAt: Date.now(),
     };
@@ -89,6 +93,8 @@
     if (sess.branch) state.branch = sess.branch;
     if (sess.specialistId) state.specialistId = sess.specialistId;
     if (sess.specialistName) state.specialistName = sess.specialistName;
+    if (sess.previewUrl) state.previewUrl = sess.previewUrl;
+    if (sess.previewStatus) state.previewStatus = sess.previewStatus;
   }
 
   function collapseWs(s) {
@@ -806,6 +812,65 @@
     return state.previewStatus === 'live' && Boolean(state.previewUrl);
   }
 
+  function applyPreviewPayload(data, prNumber) {
+    const n = prNumber || data?.prNumber || state.prNumber;
+    if (data?.previewUrl) state.previewUrl = data.previewUrl;
+    if (data?.status === 'live' && data.previewUrl) {
+      state.previewStatus = 'live';
+      setPreviewBanner({
+        text:
+          `Preview PR #${n} pronto — use “Abrir PR#${n}” no topo. ` +
+          `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
+        showOpen: true,
+        showApprove: true,
+      });
+      setStatus(`Abrir PR#${n}`, 'ok');
+      saveCloudSession({ previewUrl: state.previewUrl, previewStatus: 'live' });
+      return 'live';
+    }
+    if (data?.status === 'failed') {
+      state.previewStatus = 'failed';
+      setPreviewBanner({
+        text: `Falha no preview do PR #${n}: ${data.error || 'erro desconhecido'}. Confira Previews Manual no Render.`,
+        showOpen: false,
+        showApprove: true,
+      });
+      setStatus('Preview falhou', 'err');
+      saveCloudSession({ previewStatus: 'failed' });
+      return 'failed';
+    }
+    if (data?.triggered || data?.status === 'pending') {
+      state.previewStatus = 'pending';
+      setPreviewBanner({
+        text:
+          `Subindo preview do PR #${n}… ${data.detail || data.message || 'pode levar alguns minutos'}. ` +
+          `Aviso: o preview usa o mesmo banco do site ao vivo.`,
+        showOpen: Boolean(data?.previewUrl),
+        showApprove: true,
+      });
+      saveCloudSession({ previewUrl: state.previewUrl, previewStatus: 'pending' });
+      return 'pending';
+    }
+    updateTestPrButtons();
+    return data?.status || 'idle';
+  }
+
+  async function syncPreviewFromServer() {
+    if (!state.prNumber) {
+      updateTestPrButtons();
+      return;
+    }
+    try {
+      const data = await api(`/preview/${encodeURIComponent(state.prNumber)}`);
+      const st = applyPreviewPayload(data, state.prNumber);
+      if (st === 'pending' && !state.previewPollTimer) {
+        void pollPreviewStatus(state.prNumber);
+      }
+    } catch (_) {
+      updateTestPrButtons();
+    }
+  }
+
   function updateTestPrButtons() {
     const hasPr = Boolean(state.prNumber);
     const n = state.prNumber || '…';
@@ -899,37 +964,22 @@
     stopPreviewPoll();
     try {
       const data = await api(`/preview/${encodeURIComponent(prNumber)}`);
-      if (data.previewUrl) state.previewUrl = data.previewUrl;
-      if (data.status === 'live' && data.previewUrl) {
-        state.previewStatus = 'live';
-        setPreviewBanner({
-          text:
-            `Preview PR #${prNumber} pronto — use “Abrir PR#${prNumber}” no topo. ` +
-            `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
-          showOpen: true,
-          showApprove: true,
-        });
-        setStatus(`Abrir PR#${prNumber}`, 'ok');
-        return;
-      }
-      if (data.status === 'failed') {
+      const st = applyPreviewPayload(data, prNumber);
+      if (st === 'live' || st === 'failed') return;
+      const started = Number(state.previewStartedAt || 0);
+      if (started && Date.now() - started > 8 * 60 * 1000 && !data.previewUrl) {
         state.previewStatus = 'failed';
         setPreviewBanner({
-          text: `Falha no preview do PR #${prNumber}: ${data.error || 'erro desconhecido'}. Confira Previews Manual no Render.`,
+          text:
+            `O Render não criou o site de teste do PR #${prNumber}. ` +
+            `No Dashboard: serviço da intranet → Previews → Pull Request Previews = Manual. Depois clique de novo em Testar.`,
           showOpen: false,
           showApprove: true,
         });
-        setStatus('Preview falhou', 'err');
+        setStatus('Preview não subiu', 'err');
+        saveCloudSession({ previewStatus: 'failed' });
         return;
       }
-      state.previewStatus = 'pending';
-      setPreviewBanner({
-        text:
-          `Subindo preview do PR #${prNumber}… ${data.detail || 'pode levar alguns minutos'}. ` +
-          `Aviso: o preview usa o mesmo banco do site ao vivo.`,
-        showOpen: Boolean(data.previewUrl),
-        showApprove: true,
-      });
       state.previewPollTimer = setTimeout(() => {
         state.previewPollTimer = null;
         void pollPreviewStatus(prNumber);
@@ -953,12 +1003,14 @@
     state.previewOpenedOnce = false;
     state.previewUrl = null;
     state.previewStatus = 'pending';
+    state.previewStartedAt = Date.now();
     setPreviewBanner({
       text: `Pedindo preview do PR #${state.prNumber} no Render… (Manual: label render-preview)`,
       showOpen: false,
       showApprove: true,
     });
     setStatus(`Subindo PR#${state.prNumber}…`, 'warn');
+    saveCloudSession({ previewStatus: 'pending', previewUrl: null });
     try {
       const data = await api('/preview', {
         method: 'POST',
@@ -967,37 +1019,8 @@
           conversationId: state.conversationId,
         }),
       });
-      if (data.previewUrl) state.previewUrl = data.previewUrl;
-      if (data.status === 'live' && data.previewUrl) {
-        state.previewStatus = 'live';
-        setPreviewBanner({
-          text:
-            `Preview PR #${state.prNumber} pronto — use “Abrir PR#${state.prNumber}” no topo. ` +
-            `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
-          showOpen: true,
-          showApprove: true,
-        });
-        setStatus(`Abrir PR#${state.prNumber}`, 'ok');
-        return;
-      }
-      if (data.status === 'failed') {
-        state.previewStatus = 'failed';
-        setPreviewBanner({
-          text: `Falha no preview: ${data.error || 'erro'}`,
-          showOpen: false,
-          showApprove: true,
-        });
-        setStatus('Preview falhou', 'err');
-        return;
-      }
-      state.previewStatus = 'pending';
-      setPreviewBanner({
-        text:
-          `Subindo preview do PR #${state.prNumber}… ${data.message || 'aguarde'}. ` +
-          `Aviso: mesmo banco do site ao vivo.`,
-        showOpen: Boolean(data.previewUrl),
-        showApprove: true,
-      });
+      const st = applyPreviewPayload(data, state.prNumber);
+      if (st === 'live' || st === 'failed') return;
       void pollPreviewStatus(state.prNumber);
     } catch (e) {
       state.previewStatus = 'failed';
@@ -1021,6 +1044,10 @@
       bar.hidden = !state.prNumber;
     }
     updateConfigActions();
+    if (state.prNumber && state.previewSyncedFor !== state.prNumber && state.previewStatus === 'idle') {
+      state.previewSyncedFor = state.prNumber;
+      void syncPreviewFromServer();
+    }
   }
 
   async function api(path, opts) {
@@ -1715,6 +1742,7 @@
       updatePublishBar();
       saveCloudSession();
       markHistoryActive();
+      if (state.prNumber) void syncPreviewFromServer();
 
       const st = String(data.runStatus || data.status || '').toUpperCase();
       if (st === 'RUNNING' || st === 'CREATING') {
@@ -2213,6 +2241,7 @@
       await openConversation(sess.conversationId);
       return;
     }
+    if (state.prNumber) void syncPreviewFromServer();
 
     const box = $('cursorChatMessages');
     if (box && !box.children.length) {
