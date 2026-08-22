@@ -513,7 +513,11 @@
 
   function closeAgentsModal() {
     const modal = $('cursorChatAgentsModal');
-    if (modal) modal.hidden = true;
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.removeProperty('display');
   }
 
   function ensureAgentsModalOnBody() {
@@ -522,6 +526,20 @@
       document.body.appendChild(modal);
     }
     return modal;
+  }
+
+  function showAgentsModalEl(modal) {
+    if (!modal) return;
+    if (modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    modal.hidden = false;
+    modal.removeAttribute('hidden');
+    modal.setAttribute('aria-hidden', 'false');
+    modal.classList.add('is-open');
+    // belt-and-suspenders: inline style beats leftover CSS from overlays
+    modal.style.setProperty('display', 'flex', 'important');
+    modal.style.setProperty('z-index', '2147483000', 'important');
   }
 
   function renderAgentsModal(filter) {
@@ -581,7 +599,9 @@
       appendBubble('error', 'Modal de agentes não encontrado. Dê F5 e tente de novo.');
       return;
     }
-    modal.hidden = false;
+    // abre no próximo tick p/ o click do botão não “passar” pelo backdrop
+    await new Promise((r) => setTimeout(r, 0));
+    showAgentsModalEl(modal);
     const search = $('cursorChatAgentsSearch');
     if (search) search.value = '';
     const body = $('cursorChatAgentsBody');
@@ -600,6 +620,17 @@
       }
     }
   }
+
+  // API global: onclick inline + outros scripts
+  window.__cursorOpenAgents = function __cursorOpenAgents(ev) {
+    if (ev) {
+      try {
+        ev.preventDefault();
+        ev.stopPropagation();
+      } catch (_) {}
+    }
+    void openAgentsModal();
+  };
 
   async function activateSpecialist(spec) {
     if (!spec?.id || state.busy) return;
@@ -1213,16 +1244,26 @@
   function openConfigModal() {
     const modal = $('cursorChatConfigModal');
     if (!modal) return;
-    if (modal.parentElement !== document.body) document.body.appendChild(modal);
-    modal.hidden = false;
+    showAgentsModalEl(modal);
   }
 
   function closeConfigModal() {
     const modal = $('cursorChatConfigModal');
-    if (modal) modal.hidden = true;
+    if (!modal) return;
+    modal.classList.remove('is-open');
+    modal.hidden = true;
+    modal.setAttribute('aria-hidden', 'true');
+    modal.style.removeProperty('display');
   }
 
   function bind() {
+    // sobe modais pro body já no boot (fora de tab-pane / overflow)
+    ensureAgentsModalOnBody();
+    const cfgModal = $('cursorChatConfigModal');
+    if (cfgModal && cfgModal.parentElement !== document.body) {
+      document.body.appendChild(cfgModal);
+    }
+
     $('menu-chatbot-cursor')?.addEventListener('click', (e) => {
       e.preventDefault();
       void window.abrirPainelCursorChatbot();
@@ -1230,17 +1271,29 @@
     $('cursorChatSend')?.addEventListener('click', () => {
       void sendMessage();
     });
-    $('cursorChatAgentsBtn')?.addEventListener('click', () => {
-      void openAgentsModal();
-    });
+    // delegação em captura: funciona mesmo se o botão for recriado
+    document.addEventListener(
+      'click',
+      (e) => {
+        const t = e.target;
+        if (!(t instanceof Element)) return;
+        if (t.closest('#cursorChatAgentsBtn')) {
+          e.preventDefault();
+          void openAgentsModal();
+          return;
+        }
+        if (t.closest('#cursorChatCfgAgents')) {
+          e.preventDefault();
+          closeConfigModal();
+          void openAgentsModal();
+        }
+      },
+      true
+    );
     $('cursorChatConfigBtn')?.addEventListener('click', openConfigModal);
     $('cursorChatConfigClose')?.addEventListener('click', closeConfigModal);
     $('cursorChatConfigModal')?.addEventListener('click', (e) => {
       if (e.target === $('cursorChatConfigModal')) closeConfigModal();
-    });
-    $('cursorChatCfgAgents')?.addEventListener('click', () => {
-      closeConfigModal();
-      void openAgentsModal();
     });
     $('cursorChatCfgNew')?.addEventListener('click', () => {
       closeConfigModal();
