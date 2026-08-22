@@ -28,10 +28,11 @@ const PROVIDERS = [
     id: 'gemini',
     envKey: 'GEMINI_API_KEY',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    defaultModel: 'gemini-2.0-flash',
+    // gemini-2.0-flash saiu do ar em 1 jun 2026 (404 NOT_FOUND)
+    defaultModel: 'gemini-3.5-flash',
     modelEnv: 'GEMINI_MODEL',
     kind: 'gemini',
-    lightModel: 'gemini-2.0-flash',
+    lightModel: 'gemini-3.5-flash',
   },
   {
     id: 'deepseek',
@@ -88,12 +89,36 @@ function resolveModel(provider, { model = null, light = false } = {}) {
   return env(provider.modelEnv) || provider.defaultModel;
 }
 
+/** Família 2.0 Flash desligada em 1 jun 2026 — a API responde 404. */
+function isRetiredGeminiModel(model) {
+  return /^gemini-2\.0-flash(?:-lite)?(?:-001)?$/i.test(String(model || '').trim());
+}
+
+function geminiModelCandidates(requested) {
+  const first = String(requested || '').trim();
+  const out = [];
+  if (first && !isRetiredGeminiModel(first)) out.push(first);
+  for (const m of ['gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.1-flash-lite']) {
+    if (!out.includes(m)) out.push(m);
+  }
+  return out;
+}
+
+function isGeminiModelMissingError(status, data) {
+  if (Number(status) === 404) return true;
+  const msg = String(data?.error?.message || data?.message || '').toLowerCase();
+  return /not found|no longer available|is not found/.test(msg);
+}
+
 function listConfiguredProviders() {
-  return PROVIDERS.filter((p) => Boolean(env(p.envKey))).map((p) => ({
-    id: p.id,
-    model: env(p.modelEnv) || p.defaultModel,
-    kind: p.kind,
-  }));
+  return PROVIDERS.filter((p) => Boolean(env(p.envKey))).map((p) => {
+    const raw = env(p.modelEnv) || p.defaultModel;
+    return {
+      id: p.id,
+      model: p.id === 'gemini' ? geminiModelCandidates(raw)[0] : raw,
+      kind: p.kind,
+    };
+  });
 }
 
 function isFreeProviderId(id) {
@@ -211,14 +236,10 @@ function toGeminiContents(messages) {
 
 async function chatGemini(provider, { messages, temperature = 0.2, maxTokens = 2048, model = null, light = false }) {
   const apiKey = env(provider.envKey);
-  const resolvedModel = resolveModel(provider, { model, light });
   const { systemParts, contents } = toGeminiContents(messages);
   if (!contents.length) {
     throw new Error('Mensagens vazias para Gemini');
   }
-  const url =
-    `${provider.baseUrl.replace(/\/$/, '')}/models/${encodeURIComponent(resolvedModel)}:generateContent` +
-    `?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents,
     generationConfig: {
@@ -229,35 +250,46 @@ async function chatGemini(provider, { messages, temperature = 0.2, maxTokens = 2
   if (systemParts.length) {
     body.systemInstruction = { parts: [{ text: systemParts.join('\n\n') }] };
   }
-  const resp = await fetch(url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const text = await resp.text();
-  let data;
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch {
-    data = { raw: text };
+  const candidates = geminiModelCandidates(resolveModel(provider, { model, light }));
+  let lastErr = null;
+  for (const resolvedModel of candidates) {
+    const url =
+      `${provider.baseUrl.replace(/\/$/, '')}/models/${encodeURIComponent(resolvedModel)}:generateContent` +
+      `?key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const text = await resp.text();
+    let data;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { raw: text };
+    }
+    if (!resp.ok) {
+      lastErr = new Error(
+        data?.error?.message || data?.message || `HTTP ${resp.status} (gemini)`
+      );
+      lastErr.status = resp.status;
+      lastErr.provider = provider.id;
+      if (isGeminiModelMissingError(resp.status, data) && candidates.length > 1) {
+        continue;
+      }
+      throw lastErr;
+    }
+    const parts = data?.candidates?.[0]?.content?.parts || [];
+    const content = parts.map((p) => p?.text || '').join('').trim();
+    return {
+      content,
+      provider: provider.id,
+      model: resolvedModel,
+      usage: extractUsage(data, 'gemini'),
+      raw: data,
+    };
   }
-  if (!resp.ok) {
-    const err = new Error(
-      data?.error?.message || data?.message || `HTTP ${resp.status} (gemini)`
-    );
-    err.status = resp.status;
-    err.provider = provider.id;
-    throw err;
-  }
-  const parts = data?.candidates?.[0]?.content?.parts || [];
-  const content = parts.map((p) => p?.text || '').join('').trim();
-  return {
-    content,
-    provider: provider.id,
-    model: resolvedModel,
-    usage: extractUsage(data, 'gemini'),
-    raw: data,
-  };
+  throw lastErr || new Error('HTTP 404 (gemini)');
 }
 
 /**
@@ -440,4 +472,6 @@ module.exports = {
   buildCursorLaunchRouting,
   chatCompletion,
   buildProviderStatusBoard,
+  isRetiredGeminiModel,
+  geminiModelCandidates,
 };
