@@ -632,6 +632,16 @@
     void openAgentsModal();
   };
 
+  window.__cursorOpenConfig = function __cursorOpenConfig(ev) {
+    if (ev) {
+      try {
+        ev.preventDefault();
+        ev.stopPropagation();
+      } catch (_) {}
+    }
+    openConfigModal();
+  };
+
   async function activateSpecialist(spec) {
     if (!spec?.id || state.busy) return;
     closeAgentsModal();
@@ -825,53 +835,107 @@
     list.innerHTML = '<div class="cursor-chat-bubble meta">Carregando conversas…</div>';
     try {
       const data = await api('/conversations');
-      const items = data.items || [];
+      let items = data.items || [];
+      let fromCursor = false;
       if (!items.length) {
-        // fallback lista Cursor
         const legacy = await api('/agents').catch(() => ({ items: [] }));
-        if (!(legacy.items || []).length) {
-          list.innerHTML = '<div class="cursor-chat-bubble meta">Nenhuma conversa ainda.</div>';
-          return;
+        fromCursor = true;
+        items = (legacy.items || []).map((a) => ({
+          conversationId: a.conversationId || null,
+          agentId: a.agentId || a.id,
+          title: a.name || a.title || a.id,
+          status: a.status || '—',
+          updatedAt: a.updatedAt || '',
+          source: 'cursor',
+        }));
+      }
+
+      // Remove históricos órfãos pedidos (ACTIVE sem SQL / sem × antigo)
+      if (fromCursor && items.length) {
+        const stuck = [
+          'seleção de agentes conversa',
+          'selecao de agentes conversa',
+          'primiero teste de apk cursor',
+          'primeiro teste de apk cursor',
+        ];
+        const norm = (s) =>
+          String(s || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .trim();
+        const keep = [];
+        for (const c of items) {
+          const title = norm(c.title || c.name);
+          if (stuck.some((t) => title.includes(t) || t.includes(title)) && c.agentId) {
+            try {
+              await api(`/agents/${encodeURIComponent(c.agentId)}/archive`, {
+                method: 'POST',
+                body: JSON.stringify({}),
+              });
+            } catch (_) {
+              keep.push(c);
+            }
+          } else {
+            keep.push(c);
+          }
         }
-        list.innerHTML = '';
-        legacy.items.forEach((a) => {
-          const btn = el(
-            'button',
-            'cursor-chat-agent-item' + (a.agentId === state.agentId || a.id === state.agentId ? ' active' : '')
-          );
-          btn.type = 'button';
-          btn.innerHTML = '<strong></strong><span></span>';
-          btn.querySelector('strong').textContent = a.name || a.id;
-          btn.querySelector('span').textContent = String(a.status || '—');
-          btn.addEventListener('click', () => openAgent(a.agentId || a.id, a.conversationId));
-          list.appendChild(btn);
-        });
+        items = keep;
+      }
+
+      if (!items.length) {
+        list.innerHTML = '<div class="cursor-chat-bubble meta">Nenhuma conversa ainda.</div>';
         return;
       }
       list.innerHTML = '';
       items.forEach((c) => {
+        const cid = c.conversationId || c.id || null;
+        const agentId = c.agentId || null;
         const active =
-          Number(c.conversationId || c.id) === Number(state.conversationId) ||
-          (c.agentId && c.agentId === state.agentId);
+          (cid && Number(cid) === Number(state.conversationId)) ||
+          (agentId && agentId === state.agentId);
         const btn = el('button', 'cursor-chat-agent-item' + (active ? ' active' : ''));
         btn.type = 'button';
-        btn.innerHTML = '<strong></strong><span></span><button type="button" class="cursor-chat-side-del" title="Excluir">×</button>';
-        btn.querySelector('strong').textContent = c.title || c.name || `Conversa #${c.id}`;
+        btn.innerHTML =
+          '<strong></strong><span></span><button type="button" class="cursor-chat-side-del" title="Excluir" aria-label="Excluir">×</button>';
+        btn.querySelector('strong').textContent = c.title || c.name || (cid ? `Conversa #${cid}` : agentId);
         const when = (c.updatedAt || '').toString().slice(0, 16).replace('T', ' ');
-        btn.querySelector('span').textContent = `${c.status || '—'} · ${when}`;
+        btn.querySelector('span').textContent = when
+          ? `${c.status || '—'} · ${when}`
+          : String(c.status || '—');
         btn.addEventListener('click', (e) => {
           if (e.target?.closest?.('.cursor-chat-side-del')) return;
-          void openConversation(c.conversationId || c.id);
+          if (cid) void openConversation(cid);
+          else if (agentId) void openAgent(agentId, null);
         });
         btn.querySelector('.cursor-chat-side-del').addEventListener('click', (e) => {
           e.stopPropagation();
-          void deleteConversation(c.conversationId || c.id);
+          void removeHistoryItem({ conversationId: cid, agentId });
         });
         list.appendChild(btn);
       });
     } catch (e) {
       list.innerHTML = '';
       list.appendChild(el('div', 'cursor-chat-bubble error', e.message || 'Falha ao listar'));
+    }
+  }
+
+  async function removeHistoryItem({ conversationId, agentId }) {
+    if (!window.confirm('Excluir este histórico da lista?')) return;
+    try {
+      if (conversationId) {
+        await api(`/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' });
+        if (Number(state.conversationId) === Number(conversationId)) newChat();
+      } else if (agentId) {
+        await api(`/agents/${encodeURIComponent(agentId)}/archive`, {
+          method: 'POST',
+          body: JSON.stringify({}),
+        });
+        if (state.agentId === agentId) newChat();
+      }
+      await refreshAgentList();
+    } catch (e) {
+      appendBubble('error', e.message || 'Falha ao excluir');
     }
   }
 
@@ -1282,6 +1346,11 @@
           void openAgentsModal();
           return;
         }
+        if (t.closest('#cursorChatConfigBtn')) {
+          e.preventDefault();
+          openConfigModal();
+          return;
+        }
         if (t.closest('#cursorChatCfgAgents')) {
           e.preventDefault();
           closeConfigModal();
@@ -1290,7 +1359,6 @@
       },
       true
     );
-    $('cursorChatConfigBtn')?.addEventListener('click', openConfigModal);
     $('cursorChatConfigClose')?.addEventListener('click', closeConfigModal);
     $('cursorChatConfigModal')?.addEventListener('click', (e) => {
       if (e.target === $('cursorChatConfigModal')) closeConfigModal();

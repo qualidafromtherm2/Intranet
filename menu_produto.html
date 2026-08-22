@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821i"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821j"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -10353,9 +10353,9 @@
                   <div class="cursor-chat-composer-row">
                     <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (cole um print com Ctrl+V)"></textarea>
                     <div class="send-wrap">
-                      <button type="button" class="cursor-chat-btn" id="cursorChatConfigBtn" data-no-global-spinner="1" title="Configuração">⚙</button>
-                      <button type="button" class="cursor-chat-btn" id="cursorChatAgentsBtn" data-no-global-spinner="1" title="Escolher especialista" onclick="window.__cursorOpenAgents&&window.__cursorOpenAgents(event)">Agentes</button>
-                      <button type="button" class="cursor-chat-btn primary" id="cursorChatSend" data-no-global-spinner="1">Enviar</button>
+                      <button type="button" class="cursor-chat-btn icon-only" id="cursorChatConfigBtn" data-no-global-spinner="1" title="Configuração" aria-label="Configuração" onclick="window.__cursorOpenConfig&&window.__cursorOpenConfig(event)">⚙</button>
+                      <button type="button" class="cursor-chat-btn icon-only" id="cursorChatAgentsBtn" data-no-global-spinner="1" title="Escolher especialista" aria-label="Agentes" onclick="window.__cursorOpenAgents&&window.__cursorOpenAgents(event)">✦</button>
+                      <button type="button" class="cursor-chat-btn primary icon-only" id="cursorChatSend" data-no-global-spinner="1" title="Enviar" aria-label="Enviar">➤</button>
                     </div>
                   </div>
                 </div>
@@ -10401,10 +10401,9 @@
       </div>
 
       <script>
-        /* stub imediato: Agentes abre mesmo antes do JS defer carregar */
-        window.__cursorOpenAgents = window.__cursorOpenAgents || function (ev) {
-          if (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} }
-          var m = document.getElementById('cursorChatAgentsModal');
+        /* stubs: Abrir Agentes/Config mesmo antes do JS defer */
+        function __cursorShowModal(id) {
+          var m = document.getElementById(id);
           if (!m) return;
           document.body.appendChild(m);
           m.hidden = false;
@@ -10412,6 +10411,14 @@
           m.classList.add('is-open');
           m.style.setProperty('display', 'flex', 'important');
           m.style.setProperty('z-index', '2147483000', 'important');
+        }
+        window.__cursorOpenAgents = window.__cursorOpenAgents || function (ev) {
+          if (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} }
+          __cursorShowModal('cursorChatAgentsModal');
+        };
+        window.__cursorOpenConfig = window.__cursorOpenConfig || function (ev) {
+          if (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} }
+          __cursorShowModal('cursorChatConfigModal');
         };
       </script>
 
@@ -14396,7 +14403,7 @@
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821i"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821j"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 

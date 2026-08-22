@@ -578,6 +578,30 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
 });
 
 /** Detalhe + último run (poll). */
+/** Arquiva Cloud Agent na Cursor (remove da lista ACTIVE). */
+router.post('/agents/:id/archive', requireAdminOrMobile, async (req, res) => {
+  try {
+    const agentId = String(req.params.id || '').trim();
+    if (!agentId) return res.status(400).json({ ok: false, error: 'agentId obrigatório.' });
+    await cursorFetch(`/agents/${encodeURIComponent(agentId)}/archive`, {
+      method: 'POST',
+      body: {},
+    });
+    const conv = await iaDb.getConversationByAgentId(agentId);
+    if (conv) {
+      try {
+        await iaDb.deleteConversation(conv.id);
+      } catch (e) {
+        console.warn('[dev-agent] sql delete after archive:', e.message);
+      }
+    }
+    return res.json({ ok: true, agentId });
+  } catch (err) {
+    console.error('[dev-agent] archive', err.message);
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/agents/:id', requireAdminOrMobile, async (req, res) => {
   try {
     const agent = await cursorFetch(`/agents/${encodeURIComponent(req.params.id)}`);
