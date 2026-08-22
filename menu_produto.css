@@ -2077,7 +2077,8 @@ img {
   width: max-content;
   max-width: 100%;
   min-width: 0;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
   padding: 0 4px;
   scrollbar-width: none;
 }
@@ -2792,6 +2793,14 @@ body.dragging-menu-item .shortcut-drop-target { display: flex; }
 }
 .shortcut-modal-item.shortcut-modal-item--system {
   cursor: pointer;
+}
+.shortcut-modal-item.shortcut-modal-item--system.is-forced {
+  cursor: default;
+  opacity: 0.95;
+}
+.shortcut-modal-item.shortcut-modal-item--system.is-forced .item-toggle-atalho:disabled {
+  cursor: not-allowed;
+  opacity: 0.9;
 }
 .shortcut-modal--relatorios {
   max-width: 420px;
