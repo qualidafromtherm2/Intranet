@@ -12,6 +12,8 @@
     conversationId: null,
     agentId: null,
     runId: null,
+    streamRunId: null,
+    finishWaitCount: 0,
     prNumber: null,
     prUrl: null,
     branch: null,
@@ -532,6 +534,7 @@
   function stopPoll() {
     if (state.pollTimer) {
       clearInterval(state.pollTimer);
+      clearTimeout(state.pollTimer);
       state.pollTimer = null;
     }
   }
@@ -543,20 +546,23 @@
       } catch (_) {}
       state.eventSource = null;
     }
+    state.streamRunId = null;
   }
 
-  function stopWorkWatchers() {
+  function stopWorkWatchers({ keepLive = false } = {}) {
     stopPoll();
     stopStream();
     stopTick();
     state.workStartedAt = null;
     state.lastEventAt = null;
-    if (state.liveBubble) {
+    if (state.liveBubble && !keepLive) {
       state.liveBubble.classList.remove('streaming');
       const body = state.liveBubble.querySelector('.md-body');
       if (body && body.textContent) {
         body.innerHTML = renderMarkdown(body.textContent);
       }
+      const st = state.liveBubble.querySelector('.cursor-chat-work-status');
+      if (st) st.hidden = true;
       state.liveBubble = null;
     }
   }
@@ -567,6 +573,45 @@
     if (send) send.disabled = false; // allow follow-up while busy (backend cancela)
     updatePublishBar();
     updateConfigActions();
+  }
+
+  function isTerminalStatus(st) {
+    const s = String(st || '').toUpperCase();
+    return s === 'FINISHED' || s === 'ERROR' || s === 'CANCELLED' || s === 'EXPIRED';
+  }
+
+  function isActiveStatus(st) {
+    const s = String(st || '').toUpperCase();
+    return s === 'RUNNING' || s === 'CREATING';
+  }
+
+  /** Atualiza bolha ao vivo a partir do SQL sem apagar a UI no meio do run. */
+  async function softSyncWhileBusy() {
+    if (!state.conversationId || !state.busy) return;
+    try {
+      const data = await api(`/conversations/${encodeURIComponent(state.conversationId)}`);
+      state.prNumber = data.prNumber || state.prNumber;
+      state.prUrl = data.prUrl || state.prUrl;
+      state.branch = data.branch || state.branch;
+      updatePublishBar();
+      const msgs = data.messages || [];
+      const lastAsst = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content);
+      if (lastAsst?.content) {
+        const b = ensureLiveBubble();
+        setBubbleMarkdown(b, lastAsst.content);
+        b.classList.add('streaming');
+      }
+    } catch (_) {}
+  }
+
+  function ensureWorkingUi() {
+    setBusy(true);
+    state.workStartedAt = state.workStartedAt || Date.now();
+    state.lastEventAt = Date.now();
+    startTick();
+    ensureLiveBubble();
+    refreshStatusLine();
+    updatePublishBar();
   }
 
   function markActivity(label) {
@@ -989,10 +1034,12 @@
     state.lastEventAt = Date.now();
     startTick();
     setStatus('Conectado ao vivo…', 'warn');
+    ensureLiveBubble();
 
     const url = `/api/dev-agent/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/stream`;
     const es = new EventSource(url, { withCredentials: true });
     state.eventSource = es;
+    state.streamRunId = runId;
 
     es.addEventListener('assistant', (ev) => {
       markActivity('escrevendo resposta');
@@ -1034,7 +1081,6 @@
         const data = JSON.parse(ev.data || '{}');
         const text = data.text || '';
         const b = ensureLiveBubble();
-        b.classList.remove('streaming');
         if (text) setBubbleMarkdown(b, text);
         else {
           const body = b.querySelector('.md-body');
@@ -1044,22 +1090,33 @@
     });
 
     es.addEventListener('done', () => {
-      stopStream();
-      void finishFromPoll();
+      // NÃO finaliza a UI aqui: o stream pode cair enquanto o run ainda está RUNNING.
+      try {
+        es.close();
+      } catch (_) {}
+      if (state.eventSource === es) state.eventSource = null;
+      markActivity('stream encerrado — confirmando status…');
+      void poll();
     });
 
     es.addEventListener('error', (ev) => {
+      // Erro SSE do Cursor (com data) — não mostra vermelho efêmero; só status
       if (ev?.data) {
         try {
           const data = JSON.parse(ev.data);
-          if (data.message) appendBubble('error', data.message);
-        } catch (_) {}
+          if (data.message) markActivity(`stream: ${String(data.message).slice(0, 80)}`);
+        } catch (_) {
+          markActivity('stream com aviso');
+        }
+      } else {
+        markActivity('reconectando stream…');
       }
-      markActivity('reconectando stream…');
     });
 
     es.onerror = () => {
+      // EventSource nativo dispara isto em queda/reconexão — nunca bolha vermelha
       markActivity('stream instável — checando por status…');
+      void softSyncWhileBusy();
     };
   }
 
@@ -1283,31 +1340,77 @@
     updatePublishBar();
   }
 
-  async function finishFromPoll() {
+  async function finishFromPoll({ force = false } = {}) {
     if (!state.agentId && !state.conversationId) return;
     try {
+      // Sempre confirma no Cursor se o run realmente terminou (stream cai no meio do caminho)
+      let st = '';
+      if (state.agentId) {
+        const ag = await api(`/agents/${encodeURIComponent(state.agentId)}`);
+        state.conversationId = ag.conversationId || state.conversationId;
+        state.runId = ag.runId || state.runId;
+        state.prNumber = ag.prNumber || state.prNumber;
+        state.prUrl = ag.prUrl || state.prUrl;
+        state.branch = ag.branch || state.branch;
+        st = String(ag.runStatus || '').toUpperCase();
+        updatePublishBar();
+
+        if (!force && isActiveStatus(st)) {
+          ensureWorkingUi();
+          markActivity(`ainda ${st.toLowerCase()} — retomando…`);
+          if (!state.eventSource && state.runId) startStream(state.agentId, state.runId);
+          await softSyncWhileBusy();
+          return;
+        }
+      }
+
+      if (!force && st && !isTerminalStatus(st) && !isActiveStatus(st)) {
+        // status desconhecido — mantém poll
+        markActivity(`status ${st || '…'}`);
+        return;
+      }
+
       if (state.conversationId) {
         const data = await api(`/conversations/${encodeURIComponent(state.conversationId)}`);
         state.prNumber = data.prNumber || state.prNumber;
         state.prUrl = data.prUrl || state.prUrl;
         state.branch = data.branch || state.branch;
+        // Se o SQL ainda não tem a resposta e o Cursor diz FINISHED, espera soft sync
+        const msgs = data.messages || [];
+        const hasAssistant = msgs.some((m) => m.role === 'assistant' && String(m.content || '').trim());
+        if (!force && st === 'FINISHED' && !hasAssistant && state.busy) {
+          state.finishWaitCount = (state.finishWaitCount || 0) + 1;
+          markActivity('aguardando gravar resposta…');
+          await softSyncWhileBusy();
+          if (state.finishWaitCount < 4) return;
+          // após algumas tentativas, mostra o que tiver
+        }
+        state.finishWaitCount = 0;
         stopWorkWatchers();
         setBusy(false);
         clearStickyError();
-        renderSqlMessages(data.messages || []);
+        renderSqlMessages(msgs);
         updatePublishBar();
-        setStatus(data.prNumber ? 'Resposta pronta · dá para publicar no site' : 'Resposta pronta', 'ok');
+        if (st === 'ERROR') {
+          showStickyError('O agent terminou com erro. Veja o histórico ou tente Nova conversa.');
+          setStatus('ERROR', 'err');
+        } else if (st === 'CANCELLED') {
+          setStatus('Cancelado', 'warn');
+        } else {
+          setStatus(data.prNumber ? 'Resposta pronta · dá para publicar no site' : 'Resposta pronta', 'ok');
+        }
         await refreshAgentList();
         return;
       }
+
       const data = await api(`/agents/${encodeURIComponent(state.agentId)}/conversation`);
       state.conversationId = data.conversationId || state.conversationId;
       state.runId = data.runId || state.runId;
       state.prNumber = data.prNumber || state.prNumber;
       state.prUrl = data.prUrl || state.prUrl;
       state.branch = data.branch || state.branch;
-      const st = String(data.runStatus || '').toUpperCase();
-      if (st === 'FINISHED' || st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') {
+      st = String(data.runStatus || st || '').toUpperCase();
+      if (isTerminalStatus(st) || force) {
         stopWorkWatchers();
         setBusy(false);
         if (st === 'FINISHED') clearStickyError();
@@ -1325,7 +1428,12 @@
     try {
       const data = await api(`/agents/${encodeURIComponent(state.agentId)}`);
       state.conversationId = data.conversationId || state.conversationId;
-      state.runId = data.runId || state.runId;
+      const nextRunId = data.runId || state.runId;
+      // Se o run mudou (follow-up), reconecta o stream
+      if (nextRunId && state.streamRunId && nextRunId !== state.streamRunId && isActiveStatus(data.runStatus)) {
+        stopStream();
+      }
+      state.runId = nextRunId;
       state.prNumber = data.prNumber || state.prNumber;
       state.prUrl = data.prUrl || state.prUrl;
       state.branch = data.branch || state.branch;
@@ -1333,11 +1441,17 @@
       const st = String(data.runStatus || '').toUpperCase();
       markActivity(state.lastActivity || `status ${st || '…'}`);
 
-      if (!state.eventSource && (st === 'RUNNING' || st === 'CREATING') && state.runId) {
-        startStream(state.agentId, state.runId);
+      if (isActiveStatus(st)) {
+        ensureWorkingUi();
+        if (!state.eventSource && state.runId) {
+          startStream(state.agentId, state.runId);
+        }
+        // Fallback: se o stream sumiu, puxa texto do SQL
+        if (!state.eventSource) await softSyncWhileBusy();
+        return;
       }
 
-      if (st === 'FINISHED' || st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') {
+      if (isTerminalStatus(st)) {
         await finishFromPoll();
       }
     } catch (_) {
@@ -1347,10 +1461,15 @@
 
   function startPoll() {
     stopPoll();
-    void poll();
-    state.pollTimer = setInterval(() => {
-      void poll();
-    }, 6000);
+    const tick = async () => {
+      await poll();
+      if (!(state.busy || state.eventSource) || !state.agentId) return;
+      state.pollTimer = setTimeout(() => {
+        state.pollTimer = null;
+        void tick();
+      }, 2500);
+    };
+    void tick();
   }
 
   async function sendMessage() {

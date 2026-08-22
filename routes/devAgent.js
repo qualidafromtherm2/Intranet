@@ -1089,26 +1089,42 @@ router.get('/agents/:id/runs/:runId/stream', requireAdminOrMobile, async (req, r
     `${CURSOR_API}/agents/${encodeURIComponent(req.params.id)}` +
     `/runs/${encodeURIComponent(req.params.runId)}/stream`;
 
-  let upstream;
-  try {
-    upstream = await fetch(url, {
-      headers: {
-        Authorization: `Basic ${auth}`,
-        Accept: 'text/event-stream',
-      },
-    });
-  } catch (err) {
-    res.write(`event: error\ndata: ${JSON.stringify({ message: err.message })}\n\n`);
-    return res.end();
+  let upstream = null;
+  let lastErrText = '';
+  // Run recém-criado pode estar CREATING — tenta algumas vezes antes de desistir
+  for (let attempt = 0; attempt < 8; attempt++) {
+    try {
+      upstream = await fetch(url, {
+        headers: {
+          Authorization: `Basic ${auth}`,
+          Accept: 'text/event-stream',
+        },
+      });
+    } catch (err) {
+      lastErrText = err.message || String(err);
+      await sleep(700);
+      continue;
+    }
+    if (upstream.ok && upstream.body) break;
+    lastErrText = await upstream.text().catch(() => '') || `Upstream HTTP ${upstream.status}`;
+    // 404/409/425 enquanto cria — espera e tenta de novo
+    if ([404, 409, 425, 429, 502, 503].includes(upstream.status)) {
+      try {
+        res.write(`event: heartbeat\ndata: {}\n\n`);
+      } catch (_) {}
+      await sleep(800);
+      continue;
+    }
+    break;
   }
 
-  if (!upstream.ok || !upstream.body) {
-    const text = await upstream.text().catch(() => '');
+  if (!upstream || !upstream.ok || !upstream.body) {
     res.write(
       `event: error\ndata: ${JSON.stringify({
-        message: text || `Upstream HTTP ${upstream.status}`,
+        message: lastErrText || 'Falha ao abrir stream do agent',
       })}\n\n`
     );
+    // Não manda "done" aqui: o front confirma status via poll e reabre o stream se ainda RUNNING
     return res.end();
   }
 
