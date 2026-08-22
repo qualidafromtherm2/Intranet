@@ -66,18 +66,50 @@
   </div>
   <script>
     // Failsafe independente do menu_produto.js (arquivo grande):
-    // se o módulo demorar/falhar, libera a UI para o Início/calendário não ficar preto.
+    // se o módulo demorar/falhar, libera a UI e pinta o mês para o Início não ficar vazio.
     (function () {
+      function pintarCalendarioBoot() {
+        var grid = document.getElementById('agendaCalendarioGrid');
+        if (!grid || grid.childElementCount) return;
+        var agora = new Date();
+        var meses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+        var titulo = document.getElementById('agendaMesTituloMobile');
+        if (titulo && titulo.textContent === '-') {
+          titulo.textContent = meses[agora.getMonth()] + ' ' + agora.getFullYear();
+        }
+        var tituloDesk = document.getElementById('agendaMesTitulo');
+        if (tituloDesk && (!tituloDesk.textContent || tituloDesk.textContent === '-')) {
+          tituloDesk.textContent = meses[agora.getMonth()] + ' ' + agora.getFullYear();
+        }
+        var first = new Date(agora.getFullYear(), agora.getMonth(), 1);
+        var startPad = first.getDay();
+        var daysInMonth = new Date(agora.getFullYear(), agora.getMonth() + 1, 0).getDate();
+        var heads = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+        var html = heads.map(function (h) { return '<div class="agenda-cal-head">' + h + '</div>'; }).join('');
+        var slots = Math.ceil((startPad + daysInMonth) / 7) * 7;
+        for (var i = 0; i < slots; i++) {
+          var dia = i - startPad + 1;
+          var fora = dia < 1 || dia > daysInMonth;
+          html += '<div class="agenda-cal-day' + (fora ? ' is-out' : '') + '"><div class="agenda-cal-num">' + (fora ? '' : dia) + '</div></div>';
+        }
+        grid.innerHTML = html;
+      }
       function liberarBoot() {
         try {
           document.body.classList.add('app-ready');
           var ov = document.getElementById('app-boot-overlay');
           if (ov) ov.remove();
+          pintarCalendarioBoot();
         } catch (_) {}
       }
-      setTimeout(liberarBoot, 6000);
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', pintarCalendarioBoot);
+      } else {
+        pintarCalendarioBoot();
+      }
+      setTimeout(liberarBoot, 2500);
       window.addEventListener('load', function () {
-        setTimeout(liberarBoot, 1500);
+        setTimeout(liberarBoot, 400);
       });
     })();
   </script>
@@ -136,7 +168,7 @@
     <!-- Cabeçalho principal -->
 <!-- ===== CABEÇALHO PRINCIPAL ===== -->
 <div class="header" id="appHeader">
-  <img class="menu-logo" src="../img/logo.png" alt="Logo da empresa" title="Início" />
+  <img class="menu-logo" src="/img/logo.png" alt="Logo da empresa" title="Início" />
 
   <!-- Links que podem “sobrar” -->
 <nav id="mainMenu" class="header-menu">
@@ -14460,7 +14492,7 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
-  <script type="module" src="menu_produto.js?v=20260822-arm-lock"></script>
+  <script type="module" src="menu_produto.js?v=20260822-cal-boot"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
   <script defer src="/public/js/cursor-chatbot-page.js?v=20260822h"></script>
