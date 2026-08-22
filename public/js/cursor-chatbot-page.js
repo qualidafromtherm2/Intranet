@@ -415,14 +415,52 @@
 
   async function loadSpecialists() {
     if (state.specialistsCache?.length) return state.specialistsCache;
-    const data = await api('/specialists');
-    state.specialistsCache = data.items || [];
+
+    // 1) JSON estático (rápido, sem auth) — funciona mesmo se a API falhar
+    try {
+      const resp = await fetch('/public/js/cursor-specialists.json?v=20260821f', {
+        credentials: 'same-origin',
+        cache: 'no-cache',
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data.items) && data.items.length) {
+          state.specialistsCache = data.items;
+          return state.specialistsCache;
+        }
+      }
+    } catch (_) {}
+
+    // 2) API admin
+    try {
+      const data = await api('/specialists');
+      state.specialistsCache = data.items || [];
+      if (state.specialistsCache.length) return state.specialistsCache;
+    } catch (_) {}
+
+    // 3) Fallback mínimo (módulos)
+    state.specialistsCache = [
+      { id: 'logistica-lista-produtos', name: 'Lista de produtos', group: 'Módulos', blurb: 'Grid, filtros, sync Omie' },
+      { id: 'modulo-sac-at', name: 'SAC / AT', group: 'Módulos', blurb: 'OS, VIPP, envios' },
+      { id: 'modulo-compras', name: 'Compras', group: 'Módulos', blurb: 'Kanban, cotação, NF-e' },
+      { id: 'modulo-produto', name: 'Produto', group: 'Módulos', blurb: 'Dados, fotos, estrutura' },
+      { id: 'sql-schema-intranet', name: 'Banco / SQL', group: 'Transversal', blurb: 'Schema e migrations' },
+      { id: 'deploy-github', name: 'Deploy / GitHub', group: 'Transversal', blurb: 'Commit e push' },
+    ];
     return state.specialistsCache;
   }
 
   function closeAgentsModal() {
     const modal = $('cursorChatAgentsModal');
     if (modal) modal.hidden = true;
+  }
+
+  function ensureAgentsModalOnBody() {
+    const modal = $('cursorChatAgentsModal');
+    if (modal && modal.parentElement !== document.body) {
+      document.body.appendChild(modal);
+    }
+    return modal;
   }
 
   function renderAgentsModal(filter) {
@@ -462,6 +500,7 @@
       groups[g].forEach((s) => {
         const btn = el('button', 'cursor-chat-agent-pick');
         btn.type = 'button';
+        btn.dataset.noGlobalSpinner = '1';
         btn.innerHTML = '<strong></strong><span></span>';
         btn.querySelector('strong').textContent = s.name;
         btn.querySelector('span').textContent = s.blurb || s.id;
@@ -476,17 +515,24 @@
   }
 
   async function openAgentsModal() {
-    const modal = $('cursorChatAgentsModal');
-    if (!modal) return;
+    const modal = ensureAgentsModalOnBody();
+    if (!modal) {
+      appendBubble('error', 'Modal de agentes não encontrado. Dê F5 e tente de novo.');
+      return;
+    }
     modal.hidden = false;
     const search = $('cursorChatAgentsSearch');
     if (search) search.value = '';
+    const body = $('cursorChatAgentsBody');
+    if (body) {
+      body.innerHTML = '';
+      body.appendChild(el('div', 'cursor-chat-bubble meta', 'Carregando especialistas…'));
+    }
     try {
       await loadSpecialists();
       renderAgentsModal('');
       search?.focus();
     } catch (e) {
-      const body = $('cursorChatAgentsBody');
       if (body) {
         body.innerHTML = '';
         body.appendChild(el('div', 'cursor-chat-bubble error', e.message || 'Falha ao carregar'));

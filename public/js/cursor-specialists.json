@@ -1,0 +1,587 @@
+{
+  "ok": true,
+  "items": [
+    {
+      "id": "pagina-inicio",
+      "name": "Início",
+      "group": "Módulos",
+      "blurb": "Calendário, reservas, visão semanal",
+      "skill": "pagina-inicio"
+    },
+    {
+      "id": "logistica-lista-produtos",
+      "name": "Lista de produtos",
+      "group": "Módulos",
+      "blurb": "Grid, filtros, sync Omie",
+      "skill": "logistica-lista-produtos"
+    },
+    {
+      "id": "logistica-tela-separacao",
+      "name": "Tela de separação",
+      "group": "Módulos",
+      "blurb": "Kanban separação, modal separar",
+      "skill": "logistica-tela-separacao"
+    },
+    {
+      "id": "logistica-kanban-solicitacoes",
+      "name": "Kanban solicitações",
+      "group": "Módulos",
+      "blurb": "Criar/editar solicitação de produto",
+      "skill": "logistica-kanban-solicitacoes"
+    },
+    {
+      "id": "modulo-produto",
+      "name": "Produto",
+      "group": "Módulos",
+      "blurb": "Dados, fotos, estrutura, RI, PIR",
+      "skill": "modulo-produto"
+    },
+    {
+      "id": "modulo-rh",
+      "name": "RH",
+      "group": "Módulos",
+      "blurb": "Colaboradores, cargos, férias",
+      "skill": "modulo-rh"
+    },
+    {
+      "id": "modulo-compras",
+      "name": "Compras",
+      "group": "Módulos",
+      "blurb": "Kanban, cotação, NF-e",
+      "skill": "modulo-compras"
+    },
+    {
+      "id": "modulo-sac-at",
+      "name": "SAC / AT",
+      "group": "Módulos",
+      "blurb": "OS, VIPP, envios",
+      "skill": "modulo-sac-at"
+    },
+    {
+      "id": "modulo-armazens",
+      "name": "Armazéns",
+      "group": "Módulos",
+      "blurb": "Estoque, transferência, ajuste",
+      "skill": "modulo-armazens"
+    },
+    {
+      "id": "modulo-producao",
+      "name": "Produção",
+      "group": "Módulos",
+      "blurb": "OP's, 1ª peça, kanban PCP",
+      "skill": "modulo-producao"
+    },
+    {
+      "id": "modulo-engenharia",
+      "name": "Engenharia",
+      "group": "Módulos",
+      "blurb": "Lista, códigos de erro",
+      "skill": "modulo-engenharia"
+    },
+    {
+      "id": "sql-schema-intranet",
+      "name": "Banco / SQL",
+      "group": "Transversal",
+      "blurb": "Schema, migrations, colunas",
+      "skill": "sql-schema-intranet"
+    },
+    {
+      "id": "api-rotas-intranet",
+      "name": "API / rotas",
+      "group": "Transversal",
+      "blurb": "Express, auth, middleware",
+      "skill": "api-rotas-intranet"
+    },
+    {
+      "id": "deploy-github",
+      "name": "Deploy / GitHub",
+      "group": "Transversal",
+      "blurb": "Commit, push, Render",
+      "skill": "deploy-github"
+    },
+    {
+      "id": "cursor-token-economia",
+      "name": "Economia de tokens",
+      "group": "Transversal",
+      "blurb": "Grep antes de ler, contexto mínimo",
+      "skill": "cursor-token-economia"
+    },
+    {
+      "id": "btn-auditar",
+      "name": "Auditar",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Auditar\" do Intranet (Sincronização).\nUse quando a tarefa envolve auditoria, cronologia de movime",
+      "skill": "btn-auditar"
+    },
+    {
+      "id": "btn-chatbot-config",
+      "name": "Configuração do Chatbot",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Configuração do Chatbot\" do Intranet (Chatbot).\nUse quando a tarefa envolve \"Configuração do Chat",
+      "skill": "btn-chatbot-config"
+    },
+    {
+      "id": "btn-chatbot-monitor",
+      "name": "Monitoramento do Chatbot",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Monitoramento do Chatbot\" do Intranet (Chatbot).\nUse quando a tarefa envolve \"Monitoramento do Ch",
+      "skill": "btn-chatbot-monitor"
+    },
+    {
+      "id": "btn-compras-configuracoes",
+      "name": "Configurações",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Configurações\" do Intranet (Compras).\nUse quando a tarefa envolve \"Configurações\", \"Compras\" ou q",
+      "skill": "btn-compras-configuracoes"
+    },
+    {
+      "id": "btn-compras-contas-utilizadas",
+      "name": "Contas utilizadas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Contas utilizadas\" do Intranet (Compras).\nUse quando a tarefa envolve \"Contas utilizadas\", \"Compr",
+      "skill": "btn-compras-contas-utilizadas"
+    },
+    {
+      "id": "btn-compras-produto-recebido",
+      "name": "Produtos recebidos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Produtos recebidos\" do Intranet (Compras).\nUse quando a tarefa envolve \"Produtos recebidos\", \"Com",
+      "skill": "btn-compras-produto-recebido"
+    },
+    {
+      "id": "btn-conf-sistema-configurar-agente",
+      "name": "Configurar agente",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Configurar agente\" (Conf. sistema).\nUse quando a tarefa envolve agente de impressão, config de im",
+      "skill": "btn-conf-sistema-configurar-agente"
+    },
+    {
+      "id": "btn-detector",
+      "name": "Detector de Botões Novos",
+      "group": "Botões",
+      "blurb": "Detecta novos botões no menu do Intranet (tabela nav_node) e cria\nautomaticamente um skill especialista para cada um. Us",
+      "skill": "btn-detector"
+    },
+    {
+      "id": "btn-engenharia",
+      "name": "Engenharia",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Engenharia\" do Intranet (top).\nUse quando a tarefa envolve \"Engenharia\", \"top\" ou qualquer\naltera",
+      "skill": "btn-engenharia"
+    },
+    {
+      "id": "btn-engenharia-codigos-erro",
+      "name": "Códigos de Erro",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Códigos de Erro\" do Intranet (Engenharia).\nUse quando a tarefa envolve \"Códigos de Erro\", \"Engenh",
+      "skill": "btn-engenharia-codigos-erro"
+    },
+    {
+      "id": "btn-engenharia-fichas-tecnicas",
+      "name": "Fichas Técnicas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Fichas Técnicas\" do Intranet (Engenharia).\nUse quando a tarefa envolve \"Fichas Técnicas\", \"Engenh",
+      "skill": "btn-engenharia-fichas-tecnicas"
+    },
+    {
+      "id": "btn-engenharia-fromthest",
+      "name": "Baixar Fromthest",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Baixar Fromthest\" do Intranet (Engenharia).\nUse quando a tarefa envolve \"Baixar Fromthest\", \"Enge",
+      "skill": "btn-engenharia-fromthest"
+    },
+    {
+      "id": "btn-inicio",
+      "name": "Início",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Início\" do Intranet (top).\nUse quando a tarefa envolve \"Início\", \"top\" ou qualquer\nalteração nest",
+      "skill": "btn-inicio"
+    },
+    {
+      "id": "btn-lista-produtos",
+      "name": "Lista de produtos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Lista de produtos\" do Intranet (top).\nUse quando a tarefa envolve \"Lista de produtos\", \"top\" ou q",
+      "skill": "btn-lista-produtos"
+    },
+    {
+      "id": "btn-log-armazens",
+      "name": "Armazéns",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Armazéns\" do Intranet (Logística).\nUse quando a tarefa envolve \"Armazéns\", \"Logística\" ou qualque",
+      "skill": "btn-log-armazens"
+    },
+    {
+      "id": "btn-log-envio-mercadoria",
+      "name": "Envio de mercadoria",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Envio de mercadoria\" do Intranet (Logística).\nUse quando a tarefa envolve \"Envio de mercadoria\", ",
+      "skill": "btn-log-envio-mercadoria"
+    },
+    {
+      "id": "btn-log-estoque-minimo",
+      "name": "Estoque mínimo",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Estoque mínimo\" do Intranet (Logística).\nUse quando a tarefa envolve \"Estoque mínimo\", \"Logística",
+      "skill": "btn-log-estoque-minimo"
+    },
+    {
+      "id": "btn-log-guardar-materiais",
+      "name": "Guardar materiais",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Guardar materiais\" do Intranet (Logística).\nUse quando a tarefa envolve \"Guardar materiais\", \"Log",
+      "skill": "btn-log-guardar-materiais"
+    },
+    {
+      "id": "btn-log-identificacao-produto",
+      "name": "Identificação do produto",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Identificação do produto\" do Intranet (Logística).\nUse quando a tarefa envolve \"Identificação do ",
+      "skill": "btn-log-identificacao-produto"
+    },
+    {
+      "id": "btn-log-pedidos",
+      "name": "Controle de OP's",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Controle de OP's\" do Intranet (Logística).\nUse quando a tarefa envolve \"Controle de OP's\", \"Logís",
+      "skill": "btn-log-pedidos"
+    },
+    {
+      "id": "btn-log-produto-recebido",
+      "name": "Produtos recebidos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Produtos recebidos\" do Intranet (Logística).\nUse quando a tarefa envolve \"Produtos recebidos\", \"L",
+      "skill": "btn-log-produto-recebido"
+    },
+    {
+      "id": "btn-log-recebimento",
+      "name": "Recebimento",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Recebimento\" do Intranet (Logística).\nUse quando a tarefa envolve \"Recebimento\", \"Logística\" ou q",
+      "skill": "btn-log-recebimento"
+    },
+    {
+      "id": "btn-log-solicitacao-ajuste",
+      "name": "Solicitação de ajuste",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Solicitação de ajuste\" do Intranet (Logística).\nUse quando a tarefa envolve \"Solicitação de ajust",
+      "skill": "btn-log-solicitacao-ajuste"
+    },
+    {
+      "id": "btn-log-solicitacao-transferencia",
+      "name": "Solicitação de transferência",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Solicitação de transferência\" do Intranet (Logística).\nUse quando a tarefa envolve \"Solicitação d",
+      "skill": "btn-log-solicitacao-transferencia"
+    },
+    {
+      "id": "btn-producao-gemba",
+      "name": "Gemba",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Gemba\" do Intranet (Produção).\nUse quando a tarefa envolve Gemba, ocorrências da fábrica, foto/ví",
+      "skill": "btn-producao-gemba"
+    },
+    {
+      "id": "btn-producao-montagem",
+      "name": "Produção montagem",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Produção montagem\" do Intranet (Produção).\nUse quando a tarefa envolve \"Produção montagem\", \"Prod",
+      "skill": "btn-producao-montagem"
+    },
+    {
+      "id": "btn-producao-ocorrencias",
+      "name": "Ocorrencias registradas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Ocorrencias registradas\" do Intranet (Produção).\nUse quando a tarefa envolve a lista de falhas de",
+      "skill": "btn-producao-ocorrencias"
+    },
+    {
+      "id": "btn-producao-primeira-peca-ok",
+      "name": "1° pç ok",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"1° pç ok\" do Intranet (Produção).\nUse quando a tarefa envolve \"1° pç ok\", \"Produção\" ou qualquer\n",
+      "skill": "btn-producao-primeira-peca-ok"
+    },
+    {
+      "id": "btn-producao-registrar",
+      "name": "Registrar produção",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Registrar produção\" do Intranet (Produção).\nUse quando a tarefa envolve \"Registrar produção\", \"Pr",
+      "skill": "btn-producao-registrar"
+    },
+    {
+      "id": "btn-producao-testes",
+      "name": "testes",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"testes\" do Intranet (Produção).\nUse quando a tarefa envolve \"testes\", relatório de testes de bomb",
+      "skill": "btn-producao-testes"
+    },
+    {
+      "id": "btn-produto-dados-cadastro",
+      "name": "Dados de cadastro",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Dados de cadastro\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Dados de cadastro",
+      "skill": "btn-produto-dados-cadastro"
+    },
+    {
+      "id": "btn-produto-dados-compras",
+      "name": "Compras",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Compras\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Compras\", \"Dados do produto",
+      "skill": "btn-produto-dados-compras"
+    },
+    {
+      "id": "btn-produto-dados-detalhes",
+      "name": "Detalhes do produto",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Detalhes do produto\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Detalhes do pro",
+      "skill": "btn-produto-dados-detalhes"
+    },
+    {
+      "id": "btn-produto-dados-financeiro",
+      "name": "Financeiro",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Financeiro\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Financeiro\", \"Dados do p",
+      "skill": "btn-produto-dados-financeiro"
+    },
+    {
+      "id": "btn-produto-dados-logistica",
+      "name": "Logística",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Logística\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Logística\", \"Dados do pro",
+      "skill": "btn-produto-dados-logistica"
+    },
+    {
+      "id": "btn-produto-dados-pdv",
+      "name": "PDV",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"PDV\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"PDV\", \"Dados do produto\" ou qua",
+      "skill": "btn-produto-dados-pdv"
+    },
+    {
+      "id": "btn-produto-dados-ultimascompras",
+      "name": "Últimas compras",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Últimas compras\" do Intranet (Dados do produto).\nUse quando a tarefa envolve \"Últimas compras\", \"",
+      "skill": "btn-produto-dados-ultimascompras"
+    },
+    {
+      "id": "btn-produto-estrutura-anexos",
+      "name": "Anexos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Anexos\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"Anexos\", \"Estrutura do p",
+      "skill": "btn-produto-estrutura-anexos"
+    },
+    {
+      "id": "btn-produto-estrutura-check-compras",
+      "name": "Check-Compras",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Check-Compras\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"Check-Compras\", \"",
+      "skill": "btn-produto-estrutura-check-compras"
+    },
+    {
+      "id": "btn-produto-estrutura-check-proj",
+      "name": "Check-Proj",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Check-Proj\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"Check-Proj\", \"Estrut",
+      "skill": "btn-produto-estrutura-check-proj"
+    },
+    {
+      "id": "btn-produto-estrutura-fotos",
+      "name": "Fotos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Fotos\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"Fotos\", \"Estrutura do pro",
+      "skill": "btn-produto-estrutura-fotos"
+    },
+    {
+      "id": "btn-produto-estrutura-lista-pecas",
+      "name": "Lista de peças",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Lista de peças\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"Lista de peças\",",
+      "skill": "btn-produto-estrutura-lista-pecas"
+    },
+    {
+      "id": "btn-produto-estrutura-pir",
+      "name": "PIR",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"PIR\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"PIR\", \"Estrutura do produto",
+      "skill": "btn-produto-estrutura-pir"
+    },
+    {
+      "id": "btn-produto-estrutura-ri",
+      "name": "RI",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"RI\" do Intranet (Estrutura do produto).\nUse quando a tarefa envolve \"RI\", \"Estrutura do produto\" ",
+      "skill": "btn-produto-estrutura-ri"
+    },
+    {
+      "id": "btn-produto-pri-pc-ok",
+      "name": "1° pç ok",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"1° pç ok\" do Intranet (Produto).\nUse quando a tarefa envolve \"1° pç ok\", \"Produto\" ou qualquer\nal",
+      "skill": "btn-produto-pri-pc-ok"
+    },
+    {
+      "id": "btn-produtos-constr3",
+      "name": "em construção 3",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"em construção 3\" do Intranet (Produtos).\nUse quando a tarefa envolve \"em construção 3\", \"Produtos",
+      "skill": "btn-produtos-constr3"
+    },
+    {
+      "id": "btn-produtos-definicoes",
+      "name": "Definições",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Definições\" do Intranet (Produtos).\nUse quando a tarefa envolve \"Definições\", \"Produtos\" ou qualq",
+      "skill": "btn-produtos-definicoes"
+    },
+    {
+      "id": "btn-produtos-lista",
+      "name": "Lista de produtos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Lista de produtos\" do Intranet (Produtos).\nUse quando a tarefa envolve \"Lista de produtos\", \"Prod",
+      "skill": "btn-produtos-lista"
+    },
+    {
+      "id": "btn-qualidade-fabrica",
+      "name": "PIR",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"PIR\" do Intranet (Qualidade).\nUse quando a tarefa envolve \"PIR\", \"Qualidade\" ou qualquer\nalteraçã",
+      "skill": "btn-qualidade-fabrica"
+    },
+    {
+      "id": "btn-qualidade-manuais",
+      "name": "Manuais",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Manuais\" do Intranet (Qualidade).\nUse quando a tarefa envolve \"Manuais\", \"Qualidade\" ou qualquer\n",
+      "skill": "btn-qualidade-manuais"
+    },
+    {
+      "id": "btn-registros",
+      "name": "Registros",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Registros\" do Intranet (top).\nUse quando a tarefa envolve \"Registros\", \"top\" ou qualquer\nalteraçã",
+      "skill": "btn-registros"
+    },
+    {
+      "id": "btn-rh-aniversariantes",
+      "name": "Aniversariantes",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Aniversariantes\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"Aniversariantes\", \"",
+      "skill": "btn-rh-aniversariantes"
+    },
+    {
+      "id": "btn-rh-cad-colab",
+      "name": "Cadastro de colaboradores",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Cadastro de colaboradores\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"Cadastro ",
+      "skill": "btn-rh-cad-colab"
+    },
+    {
+      "id": "btn-rh-cad-rh-colab",
+      "name": "Colaboradores RH",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Colaboradores RH\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"Colaboradores RH\",",
+      "skill": "btn-rh-cad-rh-colab"
+    },
+    {
+      "id": "btn-rh-config-cargos",
+      "name": "Configuração de cargos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Configuração de cargos\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"Configuração",
+      "skill": "btn-rh-config-cargos"
+    },
+    {
+      "id": "btn-rh-constr18",
+      "name": "… em construção 18 …",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"… em construção 18 …\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"… em construçã",
+      "skill": "btn-rh-constr18"
+    },
+    {
+      "id": "btn-rh-controle-ferias",
+      "name": "Controle de férias",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Controle de férias\" do Intranet (Recursos humanos).\nUse quando a tarefa envolve \"Controle de féri",
+      "skill": "btn-rh-controle-ferias"
+    },
+    {
+      "id": "btn-sac-at",
+      "name": "AT",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"AT\" do Intranet (SAC).\nUse quando a tarefa envolve \"AT\", \"SAC\" ou qualquer\nalteração nesta seção ",
+      "skill": "btn-sac-at"
+    },
+    {
+      "id": "btn-sac-at-graficos",
+      "name": "Gráfico AT",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Gráfico AT\" do Intranet (SAC).\nUse quando a tarefa envolve \"Gráfico AT\", \"SAC\" ou qualquer\naltera",
+      "skill": "btn-sac-at-graficos"
+    },
+    {
+      "id": "btn-sac-at-mapa",
+      "name": "Mapa de Técnicos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Mapa de Técnicos\" do Intranet (SAC).\nUse quando a tarefa envolve \"Mapa de Técnicos\", \"SAC\" ou qua",
+      "skill": "btn-sac-at-mapa"
+    },
+    {
+      "id": "btn-sac-at-relatorio",
+      "name": "Relatório AT",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Relatório AT\" do Intranet (SAC).\nUse quando a tarefa envolve \"Relatório AT\", \"Relatório Gerencial",
+      "skill": "btn-sac-at-relatorio"
+    },
+    {
+      "id": "btn-sac-solicitacao-envio",
+      "name": "Solicitação de envio",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Solicitação de envio\" do Intranet (SAC).\nUse quando a tarefa envolve \"Solicitação de envio\", \"SAC",
+      "skill": "btn-sac-solicitacao-envio"
+    },
+    {
+      "id": "btn-sincronizacao-produtos",
+      "name": "Sincronizar Produtos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Sincronizar Produtos\" do Intranet (Sincronização).\nUse quando a tarefa envolve \"Sincronizar Produ",
+      "skill": "btn-sincronizacao-produtos"
+    },
+    {
+      "id": "btn-top-shortcut-links-rapidos",
+      "name": "×Links rápidos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"×Links rápidos\" do Intranet (side).\nUse quando a tarefa envolve \"×Links rápidos\", \"side\" ou qualq",
+      "skill": "btn-top-shortcut-links-rapidos"
+    },
+    {
+      "id": "btn-vendas-controle",
+      "name": "Controle de Pedidos",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Controle de Pedidos\" do Intranet (Vendas).\nUse quando a tarefa envolve \"Controle de Pedidos\", \"Ve",
+      "skill": "btn-vendas-controle"
+    },
+    {
+      "id": "btn-vendas-graficos",
+      "name": "Gráficos de Vendas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Gráficos de Vendas\" do Intranet (Vendas).\nUse quando a tarefa envolve \"Gráficos de Vendas\", \"Vend",
+      "skill": "btn-vendas-graficos"
+    },
+    {
+      "id": "btn-vendas-kanban",
+      "name": "Kanban Vendas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Kanban Vendas\" do Intranet (Vendas).\nUse quando a tarefa envolve \"Kanban Vendas\", \"Vendas\" ou qua",
+      "skill": "btn-vendas-kanban"
+    },
+    {
+      "id": "btn-vendas-mapa",
+      "name": "Mapa de Vendas",
+      "group": "Botões",
+      "blurb": "Especialista no botão \"Mapa de Vendas\" do Intranet (Vendas).\nUse quando a tarefa envolve \"Mapa de Vendas\", \"Vendas\" ou q",
+      "skill": "btn-vendas-mapa"
+    }
+  ],
+  "generatedAt": "2026-08-22T00:18:55.345Z"
+}
