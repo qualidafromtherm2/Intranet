@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260822-header-atalhos-noscroll"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822f"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822h"/>
   <link rel="stylesheet" href="/public/css/chamado-ia-chat.css?v=20260822a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
@@ -10434,12 +10434,13 @@
             <button type="button" class="cursor-chat-btn" id="cursorChatCfgNew" data-no-global-spinner="1">Nova conversa (+)</button>
             <button type="button" class="cursor-chat-btn" id="cursorChatCfgClearSpec" data-no-global-spinner="1">Remover especialista ativo</button>
             <div class="cursor-chat-config-divider">Revisão desta conversa</div>
-            <button type="button" class="cursor-chat-btn warn" id="cursorChatCfgTest" data-no-global-spinner="1">Modo teste</button>
+            <button type="button" class="cursor-chat-btn warn" id="cursorChatCfgTest" data-no-global-spinner="1" title="Sobe uma cópia temporária no Render com o código deste PR">Ver no site (teste)</button>
             <button type="button" class="cursor-chat-btn success" id="cursorChatCfgApprove" data-no-global-spinner="1" title="Aprovar a proposta e publicar no site">Aprovar</button>
             <button type="button" class="cursor-chat-btn success" id="cursorChatCfgPublish" data-no-global-spinner="1" title="Merge na main → Render">Publicar</button>
             <button type="button" class="cursor-chat-btn danger" id="cursorChatCfgDiscard" data-no-global-spinner="1" title="Fecha o PR sem publicar">Descartar</button>
             <p id="cursorChatCfgPrHint" class="cursor-chat-config-hint">Ainda sem PR nesta conversa.</p>
             <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.4;">
+              “Ver no site (teste)” sobe uma cópia temporária no Render (mesmo banco do site ao vivo).
               Publicar / descartar também ficam no topo desta página. O Assistente SGF não tem esses botões.
               Mensagens seguem na mesma conversa até Nova conversa.
             </p>
@@ -14454,7 +14455,7 @@
   <script type="module" src="menu_produto.js?v=20260822-arm-lock"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260822g"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260822h"></script>
   <script defer src="/public/js/chamado-ia-chat.js?v=20260822a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260822a"></script>
@@ -21851,10 +21852,12 @@ body.dev-agent-preview-mode { padding-top: 44px; }
 </div>
 
 <div id="cursor-chat-preview-banner" role="status">
-  <span id="cursorChatPreviewText">Modo de teste do Chatbot — mudanças ainda NÃO publicadas no GitHub.</span>
+  <span id="cursorChatPreviewText">Preview do Chatbot — cópia temporária no Render (ainda NÃO na main).</span>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
-    <button type="button" class="cursor-chat-btn success" id="cursorChatBannerApprove">Aprovar e publicar</button>
-    <button type="button" class="cursor-chat-btn" id="cursorChatBannerExit">Sair do modo teste</button>
+    <button type="button" class="cursor-chat-btn warn" id="cursorChatBannerOpen" style="display:none;">Abrir preview</button>
+    <button type="button" class="cursor-chat-btn success" id="cursorChatBannerApprove">Publicar</button>
+    <button type="button" class="cursor-chat-btn danger" id="cursorChatBannerDiscard">Descartar</button>
+    <button type="button" class="cursor-chat-btn" id="cursorChatBannerExit">Fechar aviso</button>
   </div>
 </div>
 

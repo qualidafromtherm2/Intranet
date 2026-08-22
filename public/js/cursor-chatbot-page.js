@@ -33,6 +33,9 @@
     specialistsCache: null,
     previousAssistantText: '',
     histTab: 'atual',
+    previewUrl: null,
+    previewPollTimer: null,
+    previewOpenedOnce: false,
   };
 
   function $(id) {
@@ -167,11 +170,28 @@
   /** Markdown leve → HTML seguro (negrito, código, tabelas, listas, links). */
   function normalizeAssistantText(src) {
     let s = String(src || '').replace(/\r\n/g, '\n');
-    // Frases grudadas do stream: "modal.O modal" → quebra de parágrafo
-    s = s.replace(/([.!?…])([A-ZÀ-Ü])/g, '$1\n\n$2');
-    // Espaço faltando após pontuação antes de minúscula rara já coberta; limpa espaços duplos em linha
+    // Frases grudadas do stream: "modal.O modal" → nova linha
+    s = s.replace(/([.!?…])([A-ZÀ-Ü])/g, '$1\n$2');
+    // Após pontuação final + espaços → próxima frase na linha de baixo
+    s = s.replace(/([.!?…])[ \t]+(?=[A-ZÀ-Ü"“'(\[])/g, '$1\n');
+    // Minúscula/número colado em maiúscula: "códigoVou" / "UINo"
+    s = s.replace(/([a-zà-ü0-9`])([A-ZÀ-Ü])/g, '$1 $2');
     s = s.replace(/[ \t]+\n/g, '\n');
+    s = s.replace(/\n{3,}/g, '\n\n');
     return s;
+  }
+
+  function markBubbleDone(bubble) {
+    if (!bubble || !bubble.classList.contains('assistant')) return;
+    if (bubble.classList.contains('streaming')) return;
+    bubble.classList.add('is-done');
+    if (bubble.querySelector('.cursor-chat-done-icon')) return;
+    const icon = document.createElement('span');
+    icon.className = 'cursor-chat-done-icon';
+    icon.title = 'Resposta concluída';
+    icon.setAttribute('aria-label', 'Resposta concluída');
+    icon.textContent = '✓';
+    bubble.appendChild(icon);
   }
 
   function renderMarkdown(src) {
@@ -284,6 +304,7 @@
     }
 
     box.appendChild(b);
+    if (role === 'assistant' && !opts?.streaming) markBubbleDone(b);
     box.scrollTop = box.scrollHeight;
     return b;
   }
@@ -677,13 +698,15 @@
     state.workStartedAt = null;
     state.lastEventAt = null;
     if (state.liveBubble && !keepLive) {
-      state.liveBubble.classList.remove('streaming');
-      const body = state.liveBubble.querySelector('.md-body');
+      const doneBubble = state.liveBubble;
+      doneBubble.classList.remove('streaming');
+      const body = doneBubble.querySelector('.md-body');
       if (body && body.textContent) {
         body.innerHTML = renderMarkdown(body.textContent);
       }
-      const st = state.liveBubble.querySelector('.cursor-chat-work-status');
+      const st = doneBubble.querySelector('.cursor-chat-work-status');
       if (st) st.hidden = true;
+      markBubbleDone(doneBubble);
       state.liveBubble = null;
     }
   }
@@ -753,6 +776,30 @@
     return document.body.classList.contains('cursor-chat-preview-mode');
   }
 
+  function stopPreviewPoll() {
+    if (state.previewPollTimer) {
+      clearTimeout(state.previewPollTimer);
+      state.previewPollTimer = null;
+    }
+  }
+
+  function setPreviewBanner({ text, showOpen, showApprove }) {
+    document.body.classList.add('cursor-chat-preview-mode');
+    const el = $('cursorChatPreviewText');
+    if (el) el.textContent = text || '';
+    const openBtn = $('cursorChatBannerOpen');
+    if (openBtn) {
+      openBtn.hidden = !showOpen || !state.previewUrl;
+      openBtn.style.display = showOpen && state.previewUrl ? '' : 'none';
+    }
+    const approveBtn = $('cursorChatBannerApprove');
+    if (approveBtn) {
+      approveBtn.hidden = showApprove === false;
+      approveBtn.style.display = showApprove === false ? 'none' : '';
+    }
+    updateConfigActions();
+  }
+
   function updateConfigActions() {
     const hasPr = Boolean(state.prNumber);
     const testBtn = $('cursorChatCfgTest');
@@ -761,10 +808,13 @@
     const discardBtn = $('cursorChatCfgDiscard');
     const hint = $('cursorChatCfgPrHint');
     if (testBtn) {
-      const on = isTestMode();
-      testBtn.textContent = on ? 'Sair do modo teste' : 'Modo teste';
-      testBtn.classList.toggle('is-on', on);
-      testBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      const on = isTestMode() && Boolean(state.previewUrl);
+      testBtn.textContent = on ? 'Abrir preview de novo' : 'Ver no site (teste)';
+      testBtn.classList.toggle('is-on', isTestMode());
+      testBtn.disabled = !hasPr || state.busy;
+      testBtn.title = hasPr
+        ? 'Sobe uma cópia temporária no Render com o código deste PR'
+        : 'Espere o agent abrir um PR';
     }
     [approveBtn, publishBtn, discardBtn].forEach((btn) => {
       if (btn) btn.disabled = !hasPr || state.busy;
@@ -772,33 +822,140 @@
     if (hint) {
       if (hasPr) {
         const branch = state.branch ? ` · ${state.branch}` : '';
-        hint.textContent = `PR #${state.prNumber}${branch} pronto. Use Modo teste, Aprovar, Publicar ou Descartar.`;
+        hint.textContent =
+          `PR #${state.prNumber}${branch} pronto. “Ver no site (teste)” sobe uma cópia temporária no Render (mesmo banco do site ao vivo). Depois Publicar ou Descartar.`;
       } else {
         hint.textContent =
-          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Aprovar / Publicar / Descartar ficam disponíveis aqui.';
+          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Ver no site / Aprovar / Publicar / Descartar ficam disponíveis aqui.';
       }
     }
   }
 
-  function enterTestMode() {
-    document.body.classList.add('cursor-chat-preview-mode');
-    const el = $('cursorChatPreviewText');
-    if (el) {
-      el.textContent = state.prNumber
-        ? `Modo de teste — PR #${state.prNumber}${state.branch ? ` · ${state.branch}` : ''}. Ainda NÃO está no site ao vivo.`
-        : 'Modo de teste ativo. Ainda não há PR — as mudanças ainda NÃO estão no site.';
-    }
-    updateConfigActions();
-  }
-
   function exitTestMode() {
+    stopPreviewPoll();
     document.body.classList.remove('cursor-chat-preview-mode');
+    state.previewOpenedOnce = false;
     updateConfigActions();
   }
 
-  function toggleTestMode() {
-    if (isTestMode()) exitTestMode();
-    else enterTestMode();
+  function openPreviewTab() {
+    if (!state.previewUrl) return;
+    try {
+      window.open(state.previewUrl, '_blank', 'noopener,noreferrer');
+    } catch (_) {}
+  }
+
+  async function pollPreviewStatus(prNumber) {
+    stopPreviewPoll();
+    try {
+      const data = await api(`/preview/${encodeURIComponent(prNumber)}`);
+      if (data.previewUrl) state.previewUrl = data.previewUrl;
+      if (data.status === 'live' && data.previewUrl) {
+        setPreviewBanner({
+          text:
+            `Preview PR #${prNumber} pronto — abra o link para ver como fica. ` +
+            `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
+          showOpen: true,
+          showApprove: true,
+        });
+        if (!state.previewOpenedOnce) {
+          state.previewOpenedOnce = true;
+          openPreviewTab();
+        }
+        setStatus('Preview pronto', 'ok');
+        return;
+      }
+      if (data.status === 'failed') {
+        setPreviewBanner({
+          text: `Falha no preview do PR #${prNumber}: ${data.error || 'erro desconhecido'}. Confira Previews Manual no Render.`,
+          showOpen: false,
+          showApprove: true,
+        });
+        setStatus('Preview falhou', 'err');
+        return;
+      }
+      setPreviewBanner({
+        text:
+          `Subindo preview do PR #${prNumber}… ${data.detail || 'pode levar alguns minutos'}. ` +
+          `Aviso: o preview usa o mesmo banco do site ao vivo.`,
+        showOpen: Boolean(data.previewUrl),
+        showApprove: true,
+      });
+      state.previewPollTimer = setTimeout(() => {
+        state.previewPollTimer = null;
+        void pollPreviewStatus(prNumber);
+      }, 5000);
+    } catch (e) {
+      setPreviewBanner({
+        text: `Erro ao consultar preview: ${e.message || 'falha'}`,
+        showOpen: false,
+        showApprove: true,
+      });
+      setStatus(e.message || 'Erro no preview', 'err');
+    }
+  }
+
+  async function startPreviewMode() {
+    if (!state.prNumber) {
+      appendBubble('error', 'Ainda sem PR nesta conversa. Espere o agent abrir um pull request.');
+      return;
+    }
+    state.previewOpenedOnce = false;
+    state.previewUrl = null;
+    setPreviewBanner({
+      text: `Pedindo preview do PR #${state.prNumber} no Render… (Manual: label render-preview)`,
+      showOpen: false,
+      showApprove: true,
+    });
+    setStatus('Subindo preview…', 'warn');
+    try {
+      const data = await api('/preview', {
+        method: 'POST',
+        body: JSON.stringify({
+          prNumber: state.prNumber,
+          conversationId: state.conversationId,
+        }),
+      });
+      if (data.previewUrl) state.previewUrl = data.previewUrl;
+      if (data.status === 'live' && data.previewUrl) {
+        setPreviewBanner({
+          text:
+            `Preview PR #${state.prNumber} pronto — abra o link para ver como fica. ` +
+            `Usa o mesmo banco do site ao vivo. Ainda NÃO está publicado na main.`,
+          showOpen: true,
+          showApprove: true,
+        });
+        state.previewOpenedOnce = true;
+        openPreviewTab();
+        setStatus('Preview pronto', 'ok');
+        return;
+      }
+      if (data.status === 'failed') {
+        setPreviewBanner({
+          text: `Falha no preview: ${data.error || 'erro'}`,
+          showOpen: false,
+          showApprove: true,
+        });
+        setStatus('Preview falhou', 'err');
+        return;
+      }
+      setPreviewBanner({
+        text:
+          `Subindo preview do PR #${state.prNumber}… ${data.message || 'aguarde'}. ` +
+          `Aviso: mesmo banco do site ao vivo.`,
+        showOpen: Boolean(data.previewUrl),
+        showApprove: true,
+      });
+      void pollPreviewStatus(state.prNumber);
+    } catch (e) {
+      setPreviewBanner({
+        text: `Não foi possível iniciar o preview: ${e.message || 'erro'}`,
+        showOpen: false,
+        showApprove: true,
+      });
+      appendBubble('error', e.message || 'Falha ao iniciar preview');
+      setStatus(e.message || 'Erro no preview', 'err');
+    }
   }
 
   function updatePublishBar() {
@@ -1743,11 +1900,15 @@
     clearStickyError();
     rememberPreviousAssistant(lastCompletedAssistantText());
     if (state.liveBubble) {
-      state.liveBubble.classList.remove('streaming');
-      const stale = state.liveBubble.querySelector('.md-body');
+      const prevBubble = state.liveBubble;
+      prevBubble.classList.remove('streaming');
+      const stale = prevBubble.querySelector('.md-body');
       const staleText = String(stale?.textContent || '').trim();
       if (!staleText || staleText === 'Agent trabalhando… (recebendo ao vivo)') {
-        state.liveBubble.remove();
+        prevBubble.remove();
+      } else {
+        if (stale) stale.innerHTML = renderMarkdown(staleText);
+        markBubbleDone(prevBubble);
       }
       state.liveBubble = null;
     }
@@ -1855,6 +2016,8 @@
         }),
       });
       stopWorkWatchers();
+      exitTestMode();
+      state.previewUrl = null;
       appendBubble('meta', `✅ ${data.message || 'Publicado — aguarde o deploy.'}`);
       state.prNumber = null;
       saveCloudSession();
@@ -1887,6 +2050,8 @@
         }),
       });
       stopWorkWatchers();
+      exitTestMode();
+      state.previewUrl = null;
       appendBubble('meta', 'PR descartado.');
       state.prNumber = null;
       updatePublishBar();
@@ -2067,8 +2232,12 @@
       closeConfigModal();
     });
     $('cursorChatCfgTest')?.addEventListener('click', () => {
-      toggleTestMode();
       closeConfigModal();
+      if (state.previewUrl && isTestMode()) {
+        openPreviewTab();
+        return;
+      }
+      void startPreviewMode();
     });
     $('cursorChatCfgApprove')?.addEventListener('click', () => {
       closeConfigModal();
@@ -2150,6 +2319,12 @@
     });
     $('cursorChatBannerApprove')?.addEventListener('click', () => {
       void approve();
+    });
+    $('cursorChatBannerOpen')?.addEventListener('click', () => {
+      openPreviewTab();
+    });
+    $('cursorChatBannerDiscard')?.addEventListener('click', () => {
+      void reject();
     });
     $('cursorChatBannerExit')?.addEventListener('click', () => {
       exitTestMode();

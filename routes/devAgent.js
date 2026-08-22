@@ -779,6 +779,10 @@ router.get('/status', requireAdminOrMobile, (req, res) => {
     repo: repoHttpsUrl(),
     branch: githubCfg().branch,
     storage: 'ia_cursor + R2',
+    // Preview real: Render Dashboard → serviço web → Previews → PR Previews = Manual
+    previewConfigured: Boolean(githubCfg().token),
+    previewHint:
+      'Render: Previews → Pull Request Previews = Manual. Modo teste usa a label render-preview.',
   });
 });
 
@@ -1749,6 +1753,218 @@ router.get('/pulls/:number/files', requireAdminOrMobile, async (req, res) => {
     }));
     return res.json({ ok: true, items });
   } catch (err) {
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
+const RENDER_PREVIEW_LABEL = 'render-preview';
+const RENDER_PREVIEW_TITLE_TAG = '[render preview]';
+
+async function ensureRenderPreviewLabel(owner, repo) {
+  try {
+    await githubFetch(`/repos/${owner}/${repo}/labels/${encodeURIComponent(RENDER_PREVIEW_LABEL)}`);
+  } catch (err) {
+    if (err.status !== 404) throw err;
+    await githubFetch(`/repos/${owner}/${repo}/labels`, {
+      method: 'POST',
+      body: {
+        name: RENDER_PREVIEW_LABEL,
+        color: 'b45309',
+        description: 'Dispara Service Preview manual no Render (Modo teste do Chatbot)',
+      },
+    });
+  }
+}
+
+async function triggerRenderPreview(owner, repo, pr) {
+  const prNumber = pr.number;
+  let method = 'label';
+  try {
+    await ensureRenderPreviewLabel(owner, repo);
+    const labels = (pr.labels || []).map((l) => String(l.name || '').toLowerCase());
+    if (!labels.includes(RENDER_PREVIEW_LABEL)) {
+      await githubFetch(`/repos/${owner}/${repo}/issues/${prNumber}/labels`, {
+        method: 'POST',
+        body: { labels: [RENDER_PREVIEW_LABEL] },
+      });
+    }
+  } catch (labelErr) {
+    console.warn('[dev-agent] label render-preview:', labelErr.message);
+    method = 'title';
+    const title = String(pr.title || '');
+    if (!/\[render preview\]/i.test(title)) {
+      await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`, {
+        method: 'PATCH',
+        body: { title: `${RENDER_PREVIEW_TITLE_TAG} ${title}`.trim() },
+      });
+    }
+  }
+  return method;
+}
+
+async function lookupPreviewFromDeployments(owner, repo, sha) {
+  if (!sha) {
+    return { status: 'pending', previewUrl: null, detail: 'Sem commit SHA no PR.' };
+  }
+  const deployments = await githubFetch(
+    `/repos/${owner}/${repo}/deployments?sha=${encodeURIComponent(sha)}&per_page=20`
+  );
+  const list = Array.isArray(deployments) ? deployments : [];
+  if (!list.length) {
+    return { status: 'pending', previewUrl: null, detail: 'Aguardando Render criar o deployment…' };
+  }
+
+  // Prefer deployments that look like Render / preview
+  const ranked = [...list].sort((a, b) => {
+    const score = (d) => {
+      const env = String(d.environment || '').toLowerCase();
+      const desc = String(d.description || '').toLowerCase();
+      let s = 0;
+      if (/preview|render/i.test(env)) s += 3;
+      if (/preview|render/i.test(desc)) s += 2;
+      if (/onrender\.com/i.test(String(d.payload?.web_url || ''))) s += 4;
+      return s;
+    };
+    return score(b) - score(a) || (b.id || 0) - (a.id || 0);
+  });
+
+  let sawPending = false;
+  let lastFail = null;
+  for (const dep of ranked) {
+    const statuses = await githubFetch(
+      `/repos/${owner}/${repo}/deployments/${dep.id}/statuses?per_page=10`
+    );
+    const stList = Array.isArray(statuses) ? statuses : [];
+    const latest = stList[0];
+    if (!latest) {
+      sawPending = true;
+      continue;
+    }
+    const state = String(latest.state || '').toLowerCase();
+    const url =
+      latest.environment_url ||
+      latest.target_url ||
+      dep.payload?.web_url ||
+      null;
+    if ((state === 'success' || state === 'inactive') && url) {
+      return {
+        status: 'live',
+        previewUrl: String(url),
+        detail: `Preview pronto (${dep.environment || 'render'})`,
+        deploymentId: dep.id,
+      };
+    }
+    if (state === 'error' || state === 'failure') {
+      lastFail = latest.description || latest.log_url || `Deployment ${dep.id} falhou`;
+      continue;
+    }
+    if (state === 'pending' || state === 'queued' || state === 'in_progress') {
+      sawPending = true;
+      if (url) {
+        return {
+          status: 'pending',
+          previewUrl: String(url),
+          detail: 'Preview ainda subindo…',
+          deploymentId: dep.id,
+        };
+      }
+    }
+  }
+
+  if (sawPending) {
+    return { status: 'pending', previewUrl: null, detail: 'Render ainda está fazendo deploy do preview…' };
+  }
+  if (lastFail) {
+    return { status: 'failed', previewUrl: null, error: lastFail };
+  }
+  return { status: 'pending', previewUrl: null, detail: 'Aguardando status do deployment…' };
+}
+
+async function getPrPreviewStatus(prNumber) {
+  const { owner, repo } = githubCfg();
+  const pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+  if (!pr || pr.message === 'Not Found') {
+    const err = new Error(`PR #${prNumber} não encontrado.`);
+    err.status = 404;
+    throw err;
+  }
+  if (pr.state !== 'open') {
+    return {
+      ok: true,
+      status: 'failed',
+      prNumber,
+      previewUrl: null,
+      error: `PR #${prNumber} está ${pr.state} — abra/reabra o PR ou peça outro.`,
+      branch: pr.head?.ref || null,
+      sha: pr.head?.sha || null,
+    };
+  }
+  const look = await lookupPreviewFromDeployments(owner, repo, pr.head?.sha);
+  return {
+    ok: true,
+    prNumber,
+    branch: pr.head?.ref || null,
+    sha: pr.head?.sha || null,
+    title: pr.title || null,
+    triggered:
+      (pr.labels || []).some((l) => String(l.name || '').toLowerCase() === RENDER_PREVIEW_LABEL) ||
+      /\[render preview\]/i.test(String(pr.title || '')),
+    ...look,
+  };
+}
+
+/**
+ * Dispara Service Preview manual do Render (label render-preview) e consulta status.
+ * Pré-requisito: no Dashboard Render, Previews → Pull Request Previews = Manual.
+ */
+router.post('/preview', requireAdminOrMobile, express.json({ limit: '20kb' }), async (req, res) => {
+  try {
+    const prNumber = Number(req.body?.prNumber || 0);
+    if (!prNumber) {
+      return res.status(400).json({ ok: false, error: 'prNumber obrigatório.' });
+    }
+    const { owner, repo } = githubCfg();
+    const pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+    if (!pr || pr.state !== 'open') {
+      return res.status(400).json({
+        ok: false,
+        error: `PR #${prNumber} precisa estar aberto para o modo teste.`,
+      });
+    }
+    const triggerMethod = await triggerRenderPreview(owner, repo, pr);
+    const status = await getPrPreviewStatus(prNumber);
+    return res.json({
+      ...status,
+      ok: true,
+      triggerMethod,
+      message:
+        status.status === 'live'
+          ? 'Preview pronto — abra o link para ver como fica.'
+          : 'Preview solicitado. O Render pode levar alguns minutos para subir.',
+      sharedDatabaseWarning:
+        'O preview usa o mesmo banco e variáveis do site ao vivo. Evite gravar dados de teste.',
+    });
+  } catch (err) {
+    console.error('[dev-agent] preview POST', err.message);
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/preview/:prNumber', requireAdminOrMobile, async (req, res) => {
+  try {
+    const prNumber = Number(req.params.prNumber || 0);
+    if (!prNumber) {
+      return res.status(400).json({ ok: false, error: 'prNumber obrigatório.' });
+    }
+    const status = await getPrPreviewStatus(prNumber);
+    return res.json({
+      ...status,
+      ok: true,
+      sharedDatabaseWarning:
+        'O preview usa o mesmo banco e variáveis do site ao vivo. Evite gravar dados de teste.',
+    });
+  } catch (err) {
+    console.error('[dev-agent] preview GET', err.message);
     return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
 });

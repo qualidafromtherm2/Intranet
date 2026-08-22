@@ -233,6 +233,7 @@
 }
 
 .cursor-chat-bubble {
+  position: relative;
   max-width: min(720px, 92%);
   padding: 10px 32px 10px 14px;
   border-radius: 16px;
@@ -274,8 +275,35 @@
   right: 6px;
 }
 
+.cursor-chat-bubble.assistant.is-done {
+  padding-bottom: 22px;
+}
+
+.cursor-chat-bubble .cursor-chat-done-icon {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  background: rgba(34, 197, 94, 0.22);
+  color: #86efac;
+  border: 1px solid rgba(134, 239, 172, 0.45);
+  pointer-events: none;
+}
+
 .cursor-chat-bubble .md-body {
   white-space: normal;
+}
+
+.cursor-chat-bubble.streaming .md-body {
+  white-space: pre-wrap;
 }
 
 .cursor-chat-bubble.user .md-body {
