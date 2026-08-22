@@ -424,6 +424,8 @@ const API_PUBLIC_PREFIXES = [
   '/api/etiquetas/agentes-disponiveis',   // frontend busca agentes online
   '/api/etiquetas/fila/pendentes',        // agente busca fila para imprimir
   '/api/etiquetas/fila/confirmar',        // agente confirma impressão
+  // ── Cloud Agent / chatbot (auth própria via X-Dev-Agent-Token ou ticket HMAC) ──
+  '/api/dev-agent',                       // SQL/catalog/agents — requireAdminOrMobile na rota
 ];
 function isApiPublic(pathname) {
   if (!pathname.startsWith('/api/')) return true;
