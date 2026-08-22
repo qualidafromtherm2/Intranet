@@ -50,7 +50,14 @@ function injectLegacyThermoSwitch(html, enabled) {
   </a>
 `;
 
-  return html.replace('  <!-- Ícones da direita -->', `${switchMarkup}\n  <!-- Ícones da direita -->`);
+  if (html.includes('  <!-- Ícones da direita -->')) {
+    return html.replace('  <!-- Ícones da direita -->', `${switchMarkup}\n  <!-- Ícones da direita -->`);
+  }
+  // Fallback se o comentário sumir no HTML
+  if (html.includes('<div class="header-profile">')) {
+    return html.replace('<div class="header-profile">', `${switchMarkup}\n  <div class="header-profile">`);
+  }
+  return html;
 }
 
 module.exports = { injectLegacyThermoSwitch, mountThermoFrontend };

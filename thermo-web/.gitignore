@@ -8,7 +8,8 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
+# dist versionado para o Render servir /thermo/ sem depender do Build Command
+# dist
 dist-ssr
 *.local
 .env
