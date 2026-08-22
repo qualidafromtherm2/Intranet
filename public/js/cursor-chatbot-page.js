@@ -1658,6 +1658,13 @@
     });
   }
 
+  async function ensureHistoryList() {
+    const list = $('cursorChatAgentList');
+    const hasItems = Boolean(list?.querySelector('.cursor-chat-agent-item'));
+    if (!hasItems) await refreshAgentList();
+    else markHistoryActive();
+  }
+
   async function refreshAgentList() {
     const list = $('cursorChatAgentList');
     if (!list) return;
@@ -1879,9 +1886,11 @@
         setBusy(false);
         setStatus(data.title || 'Conversa', data.prNumber ? 'ok' : '');
       }
+      await ensureHistoryList();
     } catch (e) {
       clearMessages();
       showStickyError(e.message || 'Falha ao abrir conversa');
+      await ensureHistoryList();
     }
   }
 
@@ -2406,18 +2415,19 @@
       applySession(sess);
       updateSpecialistChip();
       await openConversation(sess.conversationId);
-      return;
+    } else {
+      if (state.prNumber) void syncPreviewFromServer();
+      const box = $('cursorChatMessages');
+      if (box && !box.children.length) {
+        appendBubble(
+          'assistant',
+          'Olá — Chatbot de desenvolvimento.\n\n**Agentes** / **⚙** ao lado de Enviar. Mensagens ficam na mesma conversa até **Nova conversa**. Publicar só no topo desta página (não no Assistente SGF).'
+        );
+      }
     }
-    if (state.prNumber) void syncPreviewFromServer();
-
-    const box = $('cursorChatMessages');
-    if (box && !box.children.length) {
-      appendBubble(
-        'assistant',
-        'Olá — Chatbot de desenvolvimento.\n\n**Agentes** / **⚙** ao lado de Enviar. Mensagens ficam na mesma conversa até **Nova conversa**. Publicar só no topo desta página (não no Assistente SGF).'
-      );
-    }
-    await refreshAgentList();
+    // Sempre preenche a coluna Atual/Favorito — restaurar a conversa
+    // do localStorage não pode pular o GET /conversations.
+    await ensureHistoryList();
   };
 
   function openConfigModal() {
@@ -2559,7 +2569,7 @@
     $('cursorChatRefresh')?.addEventListener('click', () => {
       if (state.conversationId) void openConversation(state.conversationId);
       else if (state.agentId) void openAgent(state.agentId);
-      else void refreshAgentList();
+      void refreshAgentList();
     });
     $('cursorChatDelete')?.addEventListener('click', () => {
       void deleteConversation();
