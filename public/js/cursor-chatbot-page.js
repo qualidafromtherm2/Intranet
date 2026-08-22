@@ -319,6 +319,146 @@
     ta.style.overflowY = ta.scrollHeight > max ? 'auto' : 'hidden';
   }
 
+  const voice = {
+    recognition: null,
+    active: false,
+    sendOnEnd: false,
+    baseText: '',
+    finalParts: [],
+  };
+
+  function setMicUi(on) {
+    const mic = $('cursorChatMic');
+    if (!mic) return;
+    mic.classList.toggle('is-recording', !!on);
+    mic.setAttribute('aria-pressed', on ? 'true' : 'false');
+    mic.title = on ? 'Parar e enviar' : 'Falar (grava → texto → envia)';
+  }
+
+  function applyVoiceDraft(interim) {
+    const input = $('cursorChatInput');
+    if (!input) return;
+    const spoken = [...voice.finalParts, interim || ''].join(' ').replace(/\s+/g, ' ').trim();
+    const base = voice.baseText;
+    input.value = [base, spoken].filter(Boolean).join(base && spoken ? ' ' : '');
+    autoResizeChatInput();
+  }
+
+  function stopVoiceInput(shouldSend) {
+    voice.sendOnEnd = !!shouldSend;
+    voice.active = false;
+    setMicUi(false);
+    try {
+      voice.recognition?.stop();
+    } catch (_) {}
+  }
+
+  function finishVoiceAndMaybeSend() {
+    const input = $('cursorChatInput');
+    const spoken = voice.finalParts.join(' ').replace(/\s+/g, ' ').trim();
+    const base = String(voice.baseText || '').trim();
+    const full = [base, spoken].filter(Boolean).join(base && spoken ? ' ' : '');
+    if (input) {
+      input.value = full;
+      autoResizeChatInput();
+    }
+    const doSend = voice.sendOnEnd;
+    voice.sendOnEnd = false;
+    voice.finalParts = [];
+    voice.baseText = '';
+    if (doSend && full && !state.busy) {
+      void sendMessage();
+    } else if (doSend && !full) {
+      setStatus('Nada captado no áudio — tente de novo', 'warn');
+    }
+  }
+
+  function startVoiceInput() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      appendBubble(
+        'error',
+        'Ditado por voz não disponível neste navegador. Use Chrome ou Edge (HTTPS) e permita o microfone.'
+      );
+      return;
+    }
+    if (state.busy) return;
+
+    const input = $('cursorChatInput');
+    voice.baseText = String(input?.value || '').trim();
+    voice.finalParts = [];
+    voice.sendOnEnd = false;
+    voice.active = true;
+    setMicUi(true);
+    setStatus('Ouvindo… clique de novo no microfone para enviar', 'warn');
+
+    const recognition = new SR();
+    voice.recognition = recognition;
+    recognition.lang = 'pt-BR';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+    recognition.maxAlternatives = 1;
+
+    recognition.onresult = (event) => {
+      let interim = '';
+      const finals = [];
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const piece = event.results[i]?.[0]?.transcript || '';
+        if (event.results[i].isFinal) finals.push(piece.trim());
+        else interim += piece;
+      }
+      if (finals.length) {
+        finals.forEach((p) => {
+          if (p) voice.finalParts.push(p);
+        });
+      }
+      applyVoiceDraft(interim.trim());
+    };
+
+    recognition.onerror = (event) => {
+      const code = String(event?.error || '');
+      voice.active = false;
+      setMicUi(false);
+      if (code === 'not-allowed' || code === 'service-not-allowed') {
+        appendBubble('error', 'Permissão de microfone negada. Libere o microfone neste site e tente de novo.');
+      } else if (code !== 'aborted' && code !== 'no-speech') {
+        appendBubble('error', `Falha no ditado (${code || 'erro'}).`);
+      }
+      if (code === 'no-speech') {
+        setStatus('Sem fala detectada', 'warn');
+      }
+    };
+
+    recognition.onend = () => {
+      const wasActive = voice.active;
+      voice.active = false;
+      setMicUi(false);
+      // Alguns browsers encerram sozinhos; se ainda queríamos gravar, reinicia
+      if (wasActive && !voice.sendOnEnd) {
+        try {
+          recognition.start();
+          voice.active = true;
+          setMicUi(true);
+          return;
+        } catch (_) {}
+      }
+      finishVoiceAndMaybeSend();
+    };
+
+    try {
+      recognition.start();
+    } catch (e) {
+      voice.active = false;
+      setMicUi(false);
+      appendBubble('error', e.message || 'Não foi possível iniciar o microfone.');
+    }
+  }
+
+  function toggleVoiceInput() {
+    if (voice.active) stopVoiceInput(true);
+    else startVoiceInput();
+  }
+
   function refreshStatusLine() {
     const line = $('cursorChatStatus');
     const badge = $('cursorChatBadge');
@@ -1488,6 +1628,7 @@
     });
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        if (voice.active) stopVoiceInput(false);
         closeAgentsModal();
         closeConfigModal();
       }
@@ -1511,6 +1652,9 @@
       void addImageFiles(files);
     });
     $('cursorChatAttach')?.addEventListener('click', () => $('cursorChatFile')?.click());
+    $('cursorChatMic')?.addEventListener('click', () => {
+      toggleVoiceInput();
+    });
     $('cursorChatFile')?.addEventListener('change', (e) => {
       void addImageFiles(e.target?.files);
       e.target.value = '';
