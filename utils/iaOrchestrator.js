@@ -4,7 +4,11 @@
  */
 'use strict';
 
-const { chatCompletion, hasAnyFreeProvider } = require('./iaCloudProviders');
+const {
+  chatCompletion,
+  hasAnyFreeProvider,
+  normalizePreferredProvider,
+} = require('./iaCloudProviders');
 
 const ASSIGNEES = new Set(['ops', 'free', 'cursor']);
 const ACTIONS = new Set([
@@ -406,6 +410,40 @@ async function buildPlan(userText, opts = {}) {
   }
 }
 
+/**
+ * Usuário tocou numa IA na barra: força essa engine.
+ * Cursor continua no skip do orquestrador (modo direto).
+ */
+function applyUserProviderChoice(plan, preferredRaw) {
+  const preferred = normalizePreferredProvider(preferredRaw);
+  if (!preferred || preferred === 'cursor' || !plan) return plan;
+  if (preferred === 'ops') {
+    return {
+      ...plan,
+      source: 'user-select',
+      summary: `Ops (escolhido) — ${plan.summary || ''}`.trim().slice(0, 240),
+      tasks: (plan.tasks || []).map((t) =>
+        t.assignee === 'ops'
+          ? t
+          : { ...t, assignee: 'ops', action: t.action === 'cancel_run' ? 'cancel_run' : 'list_conversations' }
+      ),
+    };
+  }
+  return {
+    ...plan,
+    source: 'user-select',
+    summary: `${plan.summary || 'Resposta'} · ${preferred}`.trim().slice(0, 240),
+    tasks: (plan.tasks || []).map((t) => {
+      if (t.assignee === 'ops' || t.assignee === 'free') return t;
+      return {
+        ...t,
+        assignee: 'free',
+        action: t.action === 'cursor_implement' ? 'reply' : t.action || 'reply',
+      };
+    }),
+  };
+}
+
 function planNeedsCursor(plan) {
   return (plan?.tasks || []).some((t) => t.assignee === 'cursor');
 }
@@ -465,6 +503,7 @@ module.exports = {
   planNeedsCursor,
   planNeedsFree,
   planNeedsOps,
+  applyUserProviderChoice,
   summarizePlanForUi,
   buildCursorPromptFromPlan,
 };

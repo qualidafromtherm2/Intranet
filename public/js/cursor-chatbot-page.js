@@ -34,6 +34,8 @@
     previousAssistantText: '',
     histTab: 'atual',
     routing: null,
+    preferredProvider: null,
+    freeProviders: [],
     previewUrl: null,
     previewPollTimer: null,
     previewOpenedOnce: false,
@@ -73,6 +75,7 @@
       branch: state.branch ?? prev.branch ?? null,
       specialistId: state.specialistId ?? prev.specialistId ?? null,
       specialistName: state.specialistName ?? prev.specialistName ?? null,
+      preferredProvider: state.preferredProvider ?? prev.preferredProvider ?? null,
       previewUrl: state.previewUrl ?? prev.previewUrl ?? null,
       previewStatus: state.previewStatus ?? prev.previewStatus ?? 'idle',
       ...patch,
@@ -94,6 +97,9 @@
     if (sess.branch) state.branch = sess.branch;
     if (sess.specialistId) state.specialistId = sess.specialistId;
     if (sess.specialistName) state.specialistName = sess.specialistName;
+    if (Object.prototype.hasOwnProperty.call(sess, 'preferredProvider')) {
+      state.preferredProvider = sess.preferredProvider || null;
+    }
     if (sess.previewUrl) state.previewUrl = sess.previewUrl;
     if (sess.previewStatus) state.previewStatus = sess.previewStatus;
   }
@@ -1623,22 +1629,71 @@
     return 'não utilizado';
   }
 
-  function renderProviders(routing) {
+  function idleRoutingFromConfigured() {
+    const configured = Array.isArray(state.freeProviders) ? state.freeProviders : [];
+    const ids = configured.length
+      ? [...configured.map((p) => p.id), 'ops', 'cursor']
+      : ['openrouter', 'groq', 'gemini', 'deepseek', 'mistral', 'ops', 'cursor'];
+    return {
+      providers: ids.map((id) => ({ id, status: 'idle', detail: 'não utilizado' })),
+    };
+  }
+
+  function applyCursorTerminalToRouting(routing, runStatus) {
+    const st = String(runStatus || '').toUpperCase();
+    let cursorStatus = null;
+    if (st === 'FINISHED') cursorStatus = 'ok';
+    else if (st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') cursorStatus = 'nok';
+    else if (st === 'RUNNING' || st === 'CREATING') cursorStatus = 'running';
+    if (!cursorStatus) return routing;
+    const base =
+      routing && Array.isArray(routing.providers) ? routing : idleRoutingFromConfigured();
+    return {
+      ...base,
+      providers: base.providers.map((p) =>
+        p.id === 'cursor'
+          ? { ...p, status: cursorStatus, detail: statusCaption(cursorStatus) }
+          : p
+      ),
+    };
+  }
+
+  function renderProviders(routing, { reset = false } = {}) {
     const box = $('cursorChatProviders');
     if (!box) return;
-    state.routing = routing || null;
+    if (reset) state.routing = routing || null;
+    else if (routing) state.routing = routing;
     box.innerHTML = '';
-    const providers = Array.isArray(routing?.providers) ? routing.providers : [];
+    const board = state.routing && Array.isArray(state.routing.providers)
+      ? state.routing
+      : idleRoutingFromConfigured();
+    const providers = Array.isArray(board.providers) ? board.providers : [];
     if (!providers.length) return;
+    const anyUsed = providers.some(
+      (p) => p.status === 'ok' || p.status === 'nok' || p.status === 'running'
+    );
+    const hint = el('div', 'cursor-chat-prov-hint');
+    hint.textContent = state.preferredProvider
+      ? `Usar: ${providerShortLabel(state.preferredProvider)} · toque de novo = Auto`
+      : 'Auto · toque numa IA para usar ela';
+    box.appendChild(hint);
     providers.forEach((p) => {
       const st = p.status || 'idle';
-      const chip = el(
-        'span',
-        `cursor-chat-prov is-${st}` + (st === 'running' ? ' is-running' : ''),
-        null
-      );
+      const selectable = p.id !== 'ops';
+      const selected = selectable && state.preferredProvider === p.id;
+      const chip = document.createElement(selectable ? 'button' : 'span');
+      if (selectable) chip.type = 'button';
+      chip.className =
+        `cursor-chat-prov is-${st}` +
+        (st === 'running' ? ' is-running' : '') +
+        (selected ? ' is-selected' : '') +
+        (anyUsed && st === 'idle' && !selected ? ' is-dim' : '');
       chip.dataset.id = p.id || '';
-      chip.title = `${providerShortLabel(p.id)} — ${p.detail || statusCaption(st)}`;
+      chip.title = selectable
+        ? `${providerShortLabel(p.id)} — ${p.detail || statusCaption(st)}. Toque para ${
+            selected ? 'voltar ao Auto' : 'usar esta IA'
+          }.`
+        : `${providerShortLabel(p.id)} — ${p.detail || statusCaption(st)}`;
       const ico = document.createElement('span');
       ico.className = 'cursor-chat-prov-ico';
       ico.textContent = providerIconLetter(p.id);
@@ -1654,6 +1709,13 @@
               : providerShortLabel(p.id);
       chip.appendChild(ico);
       chip.appendChild(lab);
+      if (selectable) {
+        chip.addEventListener('click', () => {
+          state.preferredProvider = state.preferredProvider === p.id ? null : p.id;
+          saveCloudSession({ preferredProvider: state.preferredProvider });
+          renderProviders(state.routing);
+        });
+      }
       box.appendChild(chip);
     });
   }
@@ -1845,7 +1907,7 @@
       }
       updateSpecialistChip();
       renderSqlMessages(data.messages || []);
-      renderProviders(data.routing || null);
+      renderProviders(data.routing || null, { reset: true });
       updatePublishBar();
       saveCloudSession();
       markHistoryActive();
@@ -1901,6 +1963,7 @@
       state.prUrl = data.prUrl;
       state.branch = data.branch;
       renderSqlMessages(data.messages || []);
+      renderProviders(data.routing || null, { reset: true });
       updatePublishBar();
 
       const st = String(data.runStatus || '').toUpperCase();
@@ -1977,6 +2040,9 @@
         setBusy(false);
         clearStickyError();
         renderSqlMessages(msgs);
+        renderProviders(applyCursorTerminalToRouting(data.routing || state.routing, st), {
+          reset: true,
+        });
         updatePublishBar();
         if (st === 'ERROR') {
           showStickyError('O agent terminou com erro. Veja o histórico ou tente Nova conversa.');
@@ -2003,6 +2069,9 @@
         if (st === 'FINISHED') clearStickyError();
         else if (st === 'ERROR') showStickyError('O agent terminou com erro. Veja o histórico ou tente Nova conversa.');
         renderSqlMessages(data.messages || []);
+        renderProviders(applyCursorTerminalToRouting(data.routing || state.routing, st), {
+          reset: true,
+        });
         updatePublishBar();
         setStatus(st === 'FINISHED' ? 'Resposta pronta' : st, st === 'FINISHED' ? 'ok' : 'err');
         await refreshAgentList();
@@ -2034,6 +2103,9 @@
       state.branch = data.branch || state.branch;
       updatePublishBar();
       const st = String(data.runStatus || '').toUpperCase();
+      if (data.routing) {
+        renderProviders(applyCursorTerminalToRouting(data.routing, st));
+      }
       markActivity(state.lastActivity || `status ${st || '…'}`);
 
       if (isActiveStatus(st)) {
@@ -2123,12 +2195,14 @@
         images: payloadImages,
         autoCreatePR: true,
         conversationId: state.conversationId,
+        preferredProvider: state.preferredProvider || undefined,
         ...specialistPayload,
       };
       const followBody = {
         prompt: text,
         images: payloadImages,
         conversationId: state.conversationId,
+        preferredProvider: state.preferredProvider || undefined,
         ...specialistPayload,
       };
       let data;
@@ -2341,12 +2415,15 @@
     state.specialistId = null;
     state.specialistName = null;
     state.previousAssistantText = '';
+    state.routing = null;
+    state.preferredProvider = null;
     clearStickyError();
     clearCloudSession();
     updateSpecialistChip();
     updatePublishBar();
     setBusy(false);
     clearMessages();
+    renderProviders(null, { reset: true });
     appendBubble(
       'assistant',
       'Nova conversa (+).\n\nA partir daqui as mensagens ficam juntas nesta conversa. Use **Agentes** ou **⚙** para especialista. Testar / Publicar / Descartar só no topo desta página.'
@@ -2390,6 +2467,10 @@
         const sqlOk = s.sqlViaAgentConfigured ? 'SQL ok' : 'SQL via ticket';
         setStatus(`Repo: ${s.repo || 'Intranet'} · ${sqlOk}`, 'ok');
       }
+      state.freeProviders = Array.isArray(s.orchestrator?.freeProviders)
+        ? s.orchestrator.freeProviders
+        : [];
+      renderProviders(state.routing);
     } catch (e) {
       setStatus(e.message || 'Sem permissão (admin)', 'err');
       appendBubble('error', e.message || 'Acesso restrito a administradores.');

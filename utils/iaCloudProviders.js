@@ -96,6 +96,36 @@ function listConfiguredProviders() {
   }));
 }
 
+function isFreeProviderId(id) {
+  return PROVIDERS.some((p) => p.id === id);
+}
+
+/** Normaliza escolha do usuário na barra de IAs. auto/vazio → null. */
+function normalizePreferredProvider(raw) {
+  const id = String(raw || '')
+    .toLowerCase()
+    .trim();
+  if (!id || id === 'auto') return null;
+  if (id === 'cursor' || id === 'ops') return id;
+  if (isFreeProviderId(id)) return id;
+  return null;
+}
+
+function cursorStatusFromRun(runStatus) {
+  const st = String(runStatus || '').toUpperCase();
+  if (st === 'FINISHED') return 'ok';
+  if (st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') return 'nok';
+  if (st === 'RUNNING' || st === 'CREATING') return 'running';
+  return null;
+}
+
+function cursorDetail(cursorStatus) {
+  if (cursorStatus === 'ok') return 'utilizado / ok';
+  if (cursorStatus === 'running') return 'utilizado / rodando';
+  if (cursorStatus === 'nok') return 'não utilizado / nok';
+  return 'não utilizado';
+}
+
 function hasAnyFreeProvider() {
   return listConfiguredProviders().length > 0;
 }
@@ -362,10 +392,52 @@ function buildProviderStatusBoard({
   };
 }
 
+/** Atualiza só o chip do Cursor (ex.: running → ok quando o run termina). */
+function withCursorStatus(board, cursorStatus) {
+  if (!cursorStatus) return board || null;
+  const base =
+    board && Array.isArray(board.providers)
+      ? board
+      : buildProviderStatusBoard({ cursorStatus: 'idle' });
+  return {
+    ...base,
+    updatedAt: new Date().toISOString(),
+    providers: (base.providers || []).map((p) => {
+      if (p.id !== 'cursor') return p;
+      return {
+        ...p,
+        status: cursorStatus,
+        detail: cursorDetail(cursorStatus),
+      };
+    }),
+  };
+}
+
+function buildCursorLaunchRouting({
+  source = 'cursor-direct',
+  summary = 'Cursor',
+} = {}) {
+  return {
+    ...buildProviderStatusBoard({
+      configured: listConfiguredProviders(),
+      attempts: [],
+      engine: 'cursor',
+      cursorStatus: 'running',
+    }),
+    source,
+    summary,
+  };
+}
+
 module.exports = {
   PROVIDERS,
   listConfiguredProviders,
   hasAnyFreeProvider,
+  isFreeProviderId,
+  normalizePreferredProvider,
+  cursorStatusFromRun,
+  withCursorStatus,
+  buildCursorLaunchRouting,
   chatCompletion,
   buildProviderStatusBoard,
 };
