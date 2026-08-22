@@ -2057,11 +2057,21 @@ img {
 }
 
 /* ====== ZONA DE ATALHOS (drop flutuante + barra no header) ====== */
+.header-user-cluster {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-left: auto;
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .header-shortcuts-bar {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 8px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   max-width: 100%;
   overflow-x: auto;
@@ -24145,7 +24155,8 @@ html.light-mode #minhasComprasWrapper {
   :root { --shell-gutter: 10px; }
   .header-menu { display: none; }
   .header { justify-content: space-between; }
-  .header-profile { margin-left: auto; padding-left: 0; }
+  .header-user-cluster { margin-left: auto; }
+  .header-profile { margin-left: 8px; padding-left: 0; }
   .user-badge { display: none; }
   #listaProdutos > .content-wrapper { padding: 8px var(--shell-gutter) 12px; }
   #listaProdutos .lp-tabs-nav { overflow-x: auto; scrollbar-width: none; }
@@ -24265,7 +24276,8 @@ html.light-mode #minhasComprasWrapper {
 
 /* Terceiro passe: uma navegaÃ§Ã£o global e uma Ãºnica barra local no piloto. */
 .header > #mainMenu { display: none; }
-.header .user-badge { margin-left: auto; }
+.header .header-user-cluster { margin-left: auto; }
+.header .user-badge { margin-left: 0; flex-shrink: 0; }
 .header .header-profile { margin-left: 8px; }
 #cart-icon {
   position: absolute !important;
