@@ -1360,9 +1360,6 @@ function App() {
                 <a
                   className="inline-flex h-9 items-center gap-2 rounded-lg border border-thermo-border bg-white px-3 text-sm font-semibold text-thermo-navy hover:bg-slate-50"
                   href="/menu_produto.html"
-                  onClick={() => {
-                    try { localStorage.setItem('fromtherm.ui', 'legacy') } catch { /* armazenamento opcional */ }
-                  }}
                 >
                   <ExternalLink className="size-4" />
                   <span className="hidden md:inline">Sistema atual</span>
