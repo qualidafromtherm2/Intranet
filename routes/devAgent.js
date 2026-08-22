@@ -17,6 +17,16 @@ const {
   buildUserPromptWithSpecialist,
   isChamadoIaSpecialist,
 } = require('../utils/iaCursorSpecialists');
+const {
+  stripPreviousAssistantPrefix,
+  mergeAssistantStream,
+  previousAssistantContents,
+} = require('../utils/iaCursorChatText');
+const {
+  isMergeConflictError,
+  resolvePrConflictsSafely,
+  CONFLICT_FOLLOWUP_PROMPT,
+} = require('../utils/iaCursorSafeMerge');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
 const GH_API = 'https://api.github.com';
@@ -421,13 +431,27 @@ function sqlAccessPreamble({ readOnly = false } = {}) {
   return lines.join('\n');
 }
 
-function wrapPromptForCursor(prompt, { readOnlySql = false } = {}) {
+function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } = {}) {
   const text = String(prompt?.text || '');
+  const followUpHint = followUp
+    ? [
+        '',
+        '[Follow-up] Responda SÓ o pedido novo abaixo.',
+        'Não repita, não cole e não reescreva a resposta anterior.',
+        'Se precisar de contexto, use uma frase curta — o histórico já está na conversa.',
+        '',
+      ].join('\n')
+    : '\n';
   const wrapped = {
     ...prompt,
-    text: `${sqlAccessPreamble({ readOnly: readOnlySql })}\n---\n\n${text}`,
+    text: `${sqlAccessPreamble({ readOnly: readOnlySql })}\n---\n${followUpHint}${text}`,
   };
   return wrapped;
+}
+
+function cleanAssistantContent(raw, messages, runId) {
+  const previous = previousAssistantContents(messages, { excludeRunId: runId });
+  return stripPreviousAssistantPrefix(String(raw || '').trim(), previous);
 }
 
 function sleep(ms) {
@@ -641,11 +665,12 @@ async function syncAssistantFromCursor(conversation, agentId) {
       const already = msgs.some(
         (m) => m.role === 'assistant' && m.cursor_run_id === summary.runId
       );
-      if (!already) {
+      const content = cleanAssistantContent(summary.result, msgs, summary.runId);
+      if (!already && content) {
         await iaDb.addMessage({
           conversationId: conversation.id,
           role: 'assistant',
-          content: summary.result,
+          content,
           cursorRunId: summary.runId,
         });
       }
@@ -1171,7 +1196,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     try {
       data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
         method: 'POST',
-        body: { prompt: wrapPromptForCursor(prompt, { readOnlySql: chamadoIa }) },
+        body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
       });
     } catch (runErr) {
       // Corrida: ainda busy → tenta cancelar de novo e recria 1x
@@ -1179,7 +1204,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         await cancelActiveRunIfBusy(agentId);
         data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
           method: 'POST',
-          body: { prompt: wrapPromptForCursor(prompt, { readOnlySql: chamadoIa }) },
+          body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
         });
       } else {
         throw runErr;
@@ -1458,7 +1483,9 @@ router.get('/agents/:id/runs/:runId/stream', requireAdminOrMobile, async (req, r
         if (!dataLine) continue;
         try {
           const data = JSON.parse(dataLine);
-          if (event === 'assistant' && data.text) lastAssistant += data.text;
+          if (event === 'assistant' && data.text) {
+            lastAssistant = mergeAssistantStream(lastAssistant, data.text);
+          }
           if (event === 'result' && data.text) lastAssistant = data.text;
         } catch (_) {}
       }
@@ -1473,11 +1500,12 @@ router.get('/agents/:id/runs/:runId/stream', requireAdminOrMobile, async (req, r
           const already = msgs.some(
             (m) => m.role === 'assistant' && m.cursor_run_id === req.params.runId
           );
-          if (!already) {
+          const content = cleanAssistantContent(lastAssistant, msgs, req.params.runId);
+          if (!already && content) {
             await iaDb.addMessage({
               conversationId: conv.id,
               role: 'assistant',
-              content: lastAssistant.trim(),
+              content,
               cursorRunId: req.params.runId,
             });
           }
@@ -1573,6 +1601,46 @@ router.get('/pulls/:number/files', requireAdminOrMobile, async (req, res) => {
   }
 });
 
+async function squashMergePr(owner, repo, prNumber, actor) {
+  return githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
+    method: 'PUT',
+    body: {
+      commit_title: `Intranet: aprovar alteração do Agente Dev (#${prNumber})`,
+      commit_message: `Aprovado por ${actor} via chatbot.`,
+      merge_method: 'squash',
+    },
+  });
+}
+
+async function maybeAskAgentToResolveConflicts({ agentId, conversationId, prNumber }) {
+  if (!agentId) return { asked: false };
+  try {
+    await cancelActiveRunIfBusy(agentId);
+    await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
+      method: 'POST',
+      body: {
+        prompt: wrapPromptForCursor(
+          { text: `${CONFLICT_FOLLOWUP_PROMPT}\n\nPR #${prNumber}` },
+          { followUp: true }
+        ),
+      },
+    });
+    if (conversationId) {
+      await iaDb.addMessage({
+        conversationId,
+        role: 'system',
+        content:
+          `Conflito no PR #${prNumber}: pedi ao agente de merge seguro para unir com a main. ` +
+          'Quando a resposta aparecer, clique de novo em Publicar no site.',
+      });
+    }
+    return { asked: true };
+  } catch (e) {
+    console.warn('[dev-agent] follow-up conflito:', e.message);
+    return { asked: false, error: e.message };
+  }
+}
+
 router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), async (req, res) => {
   try {
     const prNumber = Number(req.body?.prNumber || 0);
@@ -1582,7 +1650,8 @@ router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), a
       return res.status(400).json({ ok: false, error: 'prNumber obrigatório.' });
     }
     const { owner, repo } = githubCfg();
-    const pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+    const actor = req.session.user?.username || req.session.user?.id || 'admin';
+    let pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
     if (pr?.draft) {
       // Cloud Agents abrem PR em draft; GitHub recusa merge até marcar Ready.
       await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/ready_for_review`, {
@@ -1590,14 +1659,56 @@ router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), a
         body: {},
       });
     }
-    const merged = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
-      method: 'PUT',
-      body: {
-        commit_title: `Intranet: aprovar alteração do Agente Dev (#${prNumber})`,
-        commit_message: `Aprovado por ${req.session.user?.username || req.session.user?.id || 'admin'} via chatbot.`,
-        merge_method: 'squash',
-      },
-    });
+
+    let conflictFix = null;
+    const looksDirty =
+      pr?.mergeable === false ||
+      /dirty|unstable/i.test(String(pr?.mergeable_state || ''));
+    if (looksDirty) {
+      conflictFix = await resolvePrConflictsSafely({ githubFetch, owner, repo, prNumber });
+      if (!conflictFix.ok) {
+        const asked = await maybeAskAgentToResolveConflicts({ agentId, conversationId, prNumber });
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          resolving: Boolean(asked.asked),
+          error: asked.asked
+            ? `${conflictFix.message} O agente de merge seguro já foi acionado — publique de novo quando ele terminar.`
+            : conflictFix.message,
+        });
+      }
+      if (conversationId) {
+        try {
+          await iaDb.addMessage({
+            conversationId,
+            role: 'system',
+            content: `${conflictFix.message} Seguindo com o publish.`,
+          });
+        } catch (_) {}
+      }
+      await sleep(900);
+    }
+
+    let merged;
+    try {
+      merged = await squashMergePr(owner, repo, prNumber, actor);
+    } catch (mergeErr) {
+      if (!isMergeConflictError(mergeErr)) throw mergeErr;
+      conflictFix = await resolvePrConflictsSafely({ githubFetch, owner, repo, prNumber });
+      if (!conflictFix.ok) {
+        const asked = await maybeAskAgentToResolveConflicts({ agentId, conversationId, prNumber });
+        return res.status(409).json({
+          ok: false,
+          conflict: true,
+          resolving: Boolean(asked.asked),
+          error: asked.asked
+            ? `${conflictFix.message} O agente de merge seguro já foi acionado — publique de novo quando ele terminar.`
+            : conflictFix.message || mergeErr.message,
+        });
+      }
+      if (conflictFix?.ok) await sleep(900);
+      merged = await squashMergePr(owner, repo, prNumber, actor);
+    }
 
     if (agentId) {
       try {
@@ -1622,8 +1733,11 @@ router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), a
       ok: true,
       merged: Boolean(merged?.merged),
       sha: merged?.sha || null,
-      message: merged?.message || 'PR mesclado. O Render deve publicar em breve.',
+      message:
+        (conflictFix?.ok ? `${conflictFix.message} ` : '') +
+        (merged?.message || 'PR mesclado. O Render deve publicar em breve.'),
       prNumber,
+      conflictResolved: Boolean(conflictFix?.ok),
     });
   } catch (err) {
     console.error('[dev-agent] approve', err.message);
