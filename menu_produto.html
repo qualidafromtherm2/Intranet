@@ -22,6 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
+  <link rel="stylesheet" href="/public/css/cursor-chat.css?v=20260822a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -197,6 +198,9 @@
       <img src="{{STORAGE_PUBLIC_BASE_URL}}/produtos/assets/Gif_chatbot2.gif" alt="Chatbot Fromtherm">
       <i class="fa-solid fa-robot" aria-hidden="true"></i>
       <span class="sgf-ai-badge" id="sgf-ai-badge">!</span>
+    </button>
+    <button id="cursor-chat-open-btn" type="button" title="Agente Cursor" aria-label="Abrir chat do Cloud Agent do Cursor">
+      <i class="fa-solid fa-cloud" aria-hidden="true"></i>
     </button>
     <i id="home-icon" class="fa-solid fa-house" title="Início" style="display:none;"></i>
     <div id="notification-wrapper" class="notification" style="display:none;">
@@ -14281,6 +14285,7 @@
   <script src="/public/js/producao-ocorrencias-registradas.js?v=20260812a" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js" defer></script>
   <script src="/public/js/bipagem-contagem.js?v=20260814h" defer></script>
+  <script src="/public/js/cursor-chat.js?v=20260822a" defer></script>
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
@@ -21563,6 +21568,52 @@ function attachDropZone(ul) {
     <button id="sgf-ai-send" title="Enviar" aria-label="Enviar mensagem">
       <i class="fa-solid fa-paper-plane"></i>
     </button>
+  </div>
+</div>
+
+<div id="cursor-chat-panel" role="dialog" aria-label="Agente Cursor">
+  <div id="cursor-chat-header">
+    <div>
+      <strong>Agente Cursor</strong>
+      <span>Cloud Agent — não é o Assistente SGF</span>
+    </div>
+    <div class="cursor-chat-header-actions">
+      <button id="cursor-chat-new" type="button" title="Nova conversa" aria-label="Nova conversa">
+        <i class="fa-solid fa-plus"></i>
+      </button>
+      <button id="cursor-chat-close" type="button" title="Fechar" aria-label="Fechar chat do Cursor">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+  </div>
+  <div id="cursor-chat-messages">
+    <div class="cursor-chat-msg system">Este chat usa a API do Cursor. O Assistente SGF (ChatGPT) continua no ícone do robô.</div>
+  </div>
+  <div id="cursor-chat-footer">
+    <div class="cursor-chat-composer">
+      <textarea id="cursor-chat-input" rows="1" placeholder="Peça uma alteração no repositório..." aria-label="Mensagem para o agente Cursor"></textarea>
+      <button id="cursor-chat-send" type="button" title="Enviar" aria-label="Enviar mensagem">
+        <i class="fa-solid fa-paper-plane"></i>
+      </button>
+    </div>
+    <div class="cursor-chat-toolbar">
+      <button type="button" class="cursor-chat-btn" aria-haspopup="listbox" aria-expanded="false" title="Escolher agente do Cursor">
+        <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+        <span id="cursor-chat-agent-label">Agentes · Auto</span>
+        <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
+      </button>
+      <div id="cursor-chat-menu" hidden role="listbox">
+        <button type="button" class="cursor-chat-option is-active" role="option" aria-selected="true" data-agent-id="auto">
+          <span><strong>Auto</strong><span>Cursor escolhe o modelo padrão da conta</span></span>
+        </button>
+        <button type="button" class="cursor-chat-option" role="option" aria-selected="false" data-agent-id="gpt">
+          <span><strong>GPT</strong><span>Usa um modelo GPT disponível no Cloud Agent</span></span>
+        </button>
+        <button type="button" class="cursor-chat-option" role="option" aria-selected="false" data-agent-id="cloud">
+          <span><strong>Cloud</strong><span>Agente na nuvem com o modelo mais capaz da lista</span></span>
+        </button>
+      </div>
+    </div>
   </div>
 </div>
 
