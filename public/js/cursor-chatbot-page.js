@@ -1981,7 +1981,6 @@
   window.abrirPainelCursorChatbot = async function abrirPainelCursorChatbot() {
     if (typeof showMainTab === 'function') showMainTab('cursorChatbotPane');
     document.querySelectorAll('.left-side .side-menu a').forEach((a) => a.classList.remove('is-active'));
-    $('menu-chatbot-cursor')?.classList.add('is-active');
     await checkConfig();
 
     const sess = loadCloudSession();
@@ -2025,10 +2024,6 @@
       document.body.appendChild(cfgModal);
     }
 
-    $('menu-chatbot-cursor')?.addEventListener('click', (e) => {
-      e.preventDefault();
-      void window.abrirPainelCursorChatbot();
-    });
     $('cursorChatSend')?.addEventListener('click', () => {
       void sendMessage();
     });
