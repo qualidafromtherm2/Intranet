@@ -5,6 +5,9 @@
 (function () {
   'use strict';
 
+  const PROMPTS_KEY = 'cursorChatPromptsV1';
+  const CLOUD_CHAT_KEY = 'cursorCloudChatActiveV1';
+
   const state = {
     conversationId: null,
     agentId: null,
@@ -35,6 +38,46 @@
     if (cls) node.className = cls;
     if (text != null) node.textContent = text;
     return node;
+  }
+
+  function loadCloudSession() {
+    try {
+      return JSON.parse(localStorage.getItem(CLOUD_CHAT_KEY) || 'null') || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveCloudSession(patch = {}) {
+    const prev = loadCloudSession() || {};
+    const next = {
+      ...prev,
+      conversationId: state.conversationId ?? prev.conversationId ?? null,
+      agentId: state.agentId ?? prev.agentId ?? null,
+      prNumber: state.prNumber ?? prev.prNumber ?? null,
+      prUrl: state.prUrl ?? prev.prUrl ?? null,
+      branch: state.branch ?? prev.branch ?? null,
+      specialistId: state.specialistId ?? prev.specialistId ?? null,
+      specialistName: state.specialistName ?? prev.specialistName ?? null,
+      ...patch,
+      updatedAt: Date.now(),
+    };
+    localStorage.setItem(CLOUD_CHAT_KEY, JSON.stringify(next));
+  }
+
+  function clearCloudSession() {
+    localStorage.removeItem(CLOUD_CHAT_KEY);
+  }
+
+  function applySession(sess) {
+    if (!sess) return;
+    if (sess.conversationId) state.conversationId = sess.conversationId;
+    if (sess.agentId) state.agentId = sess.agentId;
+    if (sess.prNumber != null) state.prNumber = sess.prNumber;
+    if (sess.prUrl) state.prUrl = sess.prUrl;
+    if (sess.branch) state.branch = sess.branch;
+    if (sess.specialistId) state.specialistId = sess.specialistId;
+    if (sess.specialistName) state.specialistName = sess.specialistName;
   }
 
   /** Markdown leve → HTML seguro (negrito, código, tabelas, listas, links). */
@@ -259,20 +302,38 @@
     const badge = $('cursorChatBadge');
     if (!line) return;
 
+    let workText = '';
     if (state.busy || state.eventSource) {
       const elapsed = state.workStartedAt ? formatElapsed(Date.now() - state.workStartedAt) : '…';
       const ago = state.lastEventAt
         ? ` · sinal há ${formatElapsed(Date.now() - state.lastEventAt)}`
         : '';
       const act = state.lastActivity ? ` · ${state.lastActivity}` : '';
-      line.textContent = `Trabalhando há ${elapsed}${act}${ago}`;
+      workText = `Trabalhando há ${elapsed}${act}${ago}`;
+      line.textContent = workText;
       if (badge) {
         badge.className = 'cursor-chat-badge warn';
         badge.textContent = 'Trabalhando';
       }
-      return;
+    } else {
+      line.textContent = state.lastActivity || 'Pronto';
     }
-    line.textContent = state.lastActivity || 'Pronto';
+
+    // status colado debaixo da bolha que está respondendo
+    if (state.liveBubble) {
+      let st = state.liveBubble.querySelector('.cursor-chat-work-status');
+      if (!st) {
+        st = document.createElement('div');
+        st.className = 'cursor-chat-work-status';
+        state.liveBubble.appendChild(st);
+      }
+      if (workText) {
+        st.textContent = workText;
+        st.hidden = false;
+      } else {
+        st.hidden = true;
+      }
+    }
   }
 
   function setStatus(text, kind) {
@@ -543,9 +604,11 @@
   async function activateSpecialist(spec) {
     if (!spec?.id || state.busy) return;
     closeAgentsModal();
+    if (!state.agentId) applySession(loadCloudSession());
     state.specialistId = spec.id;
     state.specialistName = spec.name;
     updateSpecialistChip();
+    saveCloudSession();
     appendBubble('user', spec.name, { specialist: true });
     setBusy(true);
     state.workStartedAt = Date.now();
@@ -567,6 +630,7 @@
         state.conversationId = data.conversationId || null;
         runId = data.runId;
         state.runId = runId;
+        saveCloudSession();
       } else {
         const data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
           method: 'POST',
@@ -579,10 +643,15 @@
         state.conversationId = data.conversationId || state.conversationId;
         runId = data.run?.id || data.runId || null;
         state.runId = runId;
+        saveCloudSession();
       }
       state.liveBubble = appendBubble('assistant', 'Especialista entrando na conversa…', {
         streaming: true,
       });
+      const stEl = document.createElement('div');
+      stEl.className = 'cursor-chat-work-status';
+      stEl.textContent = 'Trabalhando…';
+      state.liveBubble.appendChild(stEl);
       if (state.runId) startStream(state.agentId, state.runId);
       startPoll();
       await refreshAgentList();
@@ -597,6 +666,10 @@
   function ensureLiveBubble() {
     if (state.liveBubble && document.body.contains(state.liveBubble)) return state.liveBubble;
     state.liveBubble = appendBubble('assistant', '', { streaming: true });
+    const st = document.createElement('div');
+    st.className = 'cursor-chat-work-status';
+    st.textContent = 'Trabalhando…';
+    state.liveBubble.appendChild(st);
     return state.liveBubble;
   }
 
@@ -797,6 +870,7 @@
       updateSpecialistChip();
       renderSqlMessages(data.messages || []);
       updatePublishBar();
+      saveCloudSession();
 
       const st = String(data.runStatus || data.status || '').toUpperCase();
       if (st === 'RUNNING' || st === 'CREATING') {
@@ -945,6 +1019,11 @@
     updatePublishBar();
     const payloadImages = images.map((img) => ({ data: img.data, mimeType: img.mimeType }));
     const specialistPayload = state.specialistId ? { specialistId: state.specialistId } : {};
+    // retoma conversa ativa (página ou Assistente SGF) — não cria outra sem "Nova conversa"
+    if (!state.agentId) {
+      const sess = loadCloudSession();
+      if (sess?.agentId) applySession(sess);
+    }
     try {
       let runId = null;
       if (!state.agentId) {
@@ -961,6 +1040,7 @@
         state.conversationId = data.conversationId || null;
         runId = data.runId;
         state.runId = runId;
+        saveCloudSession();
       } else {
         const data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
           method: 'POST',
@@ -974,10 +1054,15 @@
         state.conversationId = data.conversationId || state.conversationId;
         runId = data.run?.id || data.runId || null;
         state.runId = runId;
+        saveCloudSession();
       }
       state.liveBubble = appendBubble('assistant', 'Agent trabalhando… (recebendo ao vivo)', {
         streaming: true,
       });
+      const st = document.createElement('div');
+      st.className = 'cursor-chat-work-status';
+      st.textContent = 'Trabalhando…';
+      state.liveBubble.appendChild(st);
       if (state.runId) startStream(state.agentId, state.runId);
       startPoll();
       await refreshAgentList();
@@ -1008,10 +1093,13 @@
       stopWorkWatchers();
       appendBubble('meta', `✅ ${data.message || 'Publicado — aguarde o deploy.'}`);
       state.prNumber = null;
+      clearCloudSession();
+      state.agentId = null;
+      state.conversationId = null;
       updatePublishBar();
       setStatus('Publicado', 'ok');
-      if (state.conversationId) await openConversation(state.conversationId);
-      else await refreshAgentList();
+      await refreshAgentList();
+      newChat();
     } catch (e) {
       appendBubble('error', e.message);
       setStatus('Erro', 'err');
@@ -1067,13 +1155,14 @@
     state.branch = null;
     state.specialistId = null;
     state.specialistName = null;
+    clearCloudSession();
     updateSpecialistChip();
     updatePublishBar();
     setBusy(false);
     clearMessages();
     appendBubble(
       'assistant',
-      'Nova conversa.\n\nUse **Agentes** (ao lado de Enviar) para chamar um especialista (módulo ou botão). Na tela só aparece o nome; o prompt completo vai por baixo. Depois descreva a tarefa.'
+      'Nova conversa (+).\n\nA partir daqui as mensagens ficam juntas nesta conversa. Use **Agentes** ou **⚙** para especialista. Publicar/Descartar só no topo desta página.'
     );
     setStatus('Nova conversa', '');
     $('cursorChatInput')?.focus();
@@ -1101,16 +1190,37 @@
     if (typeof showMainTab === 'function') showMainTab('cursorChatbotPane');
     document.querySelectorAll('.left-side .side-menu a').forEach((a) => a.classList.remove('is-active'));
     $('menu-chatbot-cursor')?.classList.add('is-active');
+    await checkConfig();
+
+    const sess = loadCloudSession();
+    if (sess?.conversationId && !state.conversationId) {
+      applySession(sess);
+      updateSpecialistChip();
+      await openConversation(sess.conversationId);
+      return;
+    }
+
     const box = $('cursorChatMessages');
     if (box && !box.children.length) {
       appendBubble(
         'assistant',
-        'Olá — Chatbot de desenvolvimento.\n\nClique em **Agentes** (ao lado de Enviar) para escolher um especialista. Ele entra nesta conversa; na tela só o nome, e por baixo vai o prompt da skill (economia de token + menos conflito).\n\n**Publicar no site** só no topo quando houver PR.'
+        'Olá — Chatbot de desenvolvimento.\n\n**Agentes** / **⚙** ao lado de Enviar. Mensagens ficam na mesma conversa até **Nova conversa**. Publicar só no topo desta página (não no Assistente SGF).'
       );
     }
-    await checkConfig();
     await refreshAgentList();
   };
+
+  function openConfigModal() {
+    const modal = $('cursorChatConfigModal');
+    if (!modal) return;
+    if (modal.parentElement !== document.body) document.body.appendChild(modal);
+    modal.hidden = false;
+  }
+
+  function closeConfigModal() {
+    const modal = $('cursorChatConfigModal');
+    if (modal) modal.hidden = true;
+  }
 
   function bind() {
     $('menu-chatbot-cursor')?.addEventListener('click', (e) => {
@@ -1123,6 +1233,26 @@
     $('cursorChatAgentsBtn')?.addEventListener('click', () => {
       void openAgentsModal();
     });
+    $('cursorChatConfigBtn')?.addEventListener('click', openConfigModal);
+    $('cursorChatConfigClose')?.addEventListener('click', closeConfigModal);
+    $('cursorChatConfigModal')?.addEventListener('click', (e) => {
+      if (e.target === $('cursorChatConfigModal')) closeConfigModal();
+    });
+    $('cursorChatCfgAgents')?.addEventListener('click', () => {
+      closeConfigModal();
+      void openAgentsModal();
+    });
+    $('cursorChatCfgNew')?.addEventListener('click', () => {
+      closeConfigModal();
+      newChat();
+    });
+    $('cursorChatCfgClearSpec')?.addEventListener('click', () => {
+      state.specialistId = null;
+      state.specialistName = null;
+      saveCloudSession({ specialistId: null, specialistName: null });
+      updateSpecialistChip();
+      closeConfigModal();
+    });
     $('cursorChatAgentsClose')?.addEventListener('click', closeAgentsModal);
     $('cursorChatAgentsModal')?.addEventListener('click', (e) => {
       if (e.target === $('cursorChatAgentsModal')) closeAgentsModal();
@@ -1131,7 +1261,10 @@
       renderAgentsModal(e.target.value);
     });
     document.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') closeAgentsModal();
+      if (e.key === 'Escape') {
+        closeAgentsModal();
+        closeConfigModal();
+      }
     });
     $('cursorChatInput')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' && !e.shiftKey) {

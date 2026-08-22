@@ -22,7 +22,7 @@
   <link rel="stylesheet" href="menu_produto.css?v=20260817-menu-grupos"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
-  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821f"/>
+  <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260821h"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -10353,6 +10353,7 @@
                   <div class="cursor-chat-composer-row">
                     <textarea id="cursorChatInput" rows="2" placeholder="Descreva a mudança… (cole um print com Ctrl+V)"></textarea>
                     <div class="send-wrap">
+                      <button type="button" class="cursor-chat-btn" id="cursorChatConfigBtn" data-no-global-spinner="1" title="Configuração">⚙</button>
                       <button type="button" class="cursor-chat-btn" id="cursorChatAgentsBtn" data-no-global-spinner="1" title="Escolher especialista">Agentes</button>
                       <button type="button" class="cursor-chat-btn primary" id="cursorChatSend" data-no-global-spinner="1">Enviar</button>
                     </div>
@@ -10375,6 +10376,27 @@
           </div>
           <input type="search" id="cursorChatAgentsSearch" class="cursor-chat-agents-search" placeholder="Buscar módulo ou botão…" autocomplete="off">
           <div id="cursorChatAgentsBody" class="cursor-chat-agents-body"></div>
+        </div>
+      </div>
+
+      <div id="cursorChatConfigModal" class="cursor-chat-agents-modal" hidden>
+        <div class="cursor-chat-agents-dialog" role="dialog" aria-modal="true" style="width:min(420px,96vw);max-height:70vh;">
+          <div class="cursor-chat-agents-head">
+            <div>
+              <strong>Configuração do chat</strong>
+              <div class="cursor-chat-agents-sub">Opções desta conversa Cloud Agent</div>
+            </div>
+            <button type="button" class="cursor-chat-btn" id="cursorChatConfigClose">&times;</button>
+          </div>
+          <div class="cursor-chat-config-body" style="padding:14px 16px 18px;display:grid;gap:10px;">
+            <button type="button" class="cursor-chat-btn primary" id="cursorChatCfgAgents" data-no-global-spinner="1">Escolher especialista (Agentes)</button>
+            <button type="button" class="cursor-chat-btn" id="cursorChatCfgNew" data-no-global-spinner="1">Nova conversa (+)</button>
+            <button type="button" class="cursor-chat-btn" id="cursorChatCfgClearSpec" data-no-global-spinner="1">Remover especialista ativo</button>
+            <p style="margin:0;font-size:12px;color:#94a3b8;line-height:1.4;">
+              Publicar / descartar PR fica só nesta página (topo), nunca no Assistente SGF.
+              Mensagens seguem na mesma conversa até você clicar em Nova conversa.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -14359,7 +14381,7 @@
   <script type="module" src="menu_produto.js?v=20260818-guias-assunto"></script>
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
-  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821f"></script>
+  <script defer src="/public/js/cursor-chatbot-page.js?v=20260821g"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
   <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
 
@@ -21722,16 +21744,6 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     <button type="button" data-mode="dev" role="tab" aria-selected="false">Agente Dev</button>
   </div>
 
-  <div id="sgf-ai-dev-review" aria-live="polite">
-    <div id="sgf-ai-dev-review-text">Proposta pronta para revisão.</div>
-    <div id="sgf-ai-dev-files"></div>
-    <div class="dev-review-actions">
-      <button type="button" class="btn-test" id="sgf-ai-dev-test">Entrar no modo de teste</button>
-      <button type="button" class="btn-approve" id="sgf-ai-dev-approve">Aprovar e publicar</button>
-      <button type="button" class="btn-reject" id="sgf-ai-dev-reject">Descartar</button>
-    </div>
-  </div>
-
   <!-- Mensagens -->
   <div id="sgf-ai-messages"></div>
 
@@ -21760,12 +21772,8 @@ body.dev-agent-preview-mode { padding-top: 44px; }
   </div>
 </div>
 
-<div id="dev-agent-preview-banner" role="status">
-  <span id="dev-agent-preview-banner-text">Modo de teste do Agente Dev — as mudanças ainda NÃO estão no GitHub/produção.</span>
-  <div class="dev-banner-actions">
-    <button type="button" class="btn-approve" id="dev-agent-banner-approve">Aprovar e publicar</button>
-    <button type="button" class="btn-exit" id="dev-agent-banner-exit">Sair do modo teste</button>
-  </div>
+<div id="dev-agent-preview-banner" role="status" hidden>
+  <span id="dev-agent-preview-banner-text">Use Conf. sistema → Chatbot para publicar PRs.</span>
 </div>
 
 <div id="cursor-chat-preview-banner" role="status">
@@ -24456,9 +24464,11 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     input.style.height = Math.min(input.scrollHeight, 100) + 'px';
   });
 
-  // ── Agente Dev (Cloud Agent + aprovação GitHub) ───────────────────────────
+  // ── Agente Dev (Cloud Agent — chat; publicar só em Conf. sistema → Chatbot) ─
+  const CLOUD_CHAT_KEY = 'cursorCloudChatActiveV1';
   const devAgent = {
     mode: 'ajuda',
+    conversationId: null,
     agentId: null,
     runId: null,
     prNumber: null,
@@ -24468,15 +24478,23 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     busy: false,
   };
   const modeTabs = document.getElementById('sgf-ai-mode-tabs');
-  const reviewBox = document.getElementById('sgf-ai-dev-review');
-  const reviewText = document.getElementById('sgf-ai-dev-review-text');
-  const reviewFiles = document.getElementById('sgf-ai-dev-files');
-  const btnDevTest = document.getElementById('sgf-ai-dev-test');
-  const btnDevApprove = document.getElementById('sgf-ai-dev-approve');
-  const btnDevReject = document.getElementById('sgf-ai-dev-reject');
-  const bannerApprove = document.getElementById('dev-agent-banner-approve');
-  const bannerExit = document.getElementById('dev-agent-banner-exit');
   const suggBox = document.getElementById('sgf-ai-suggestions');
+
+  function loadCloudChatSession() {
+    try {
+      return JSON.parse(localStorage.getItem(CLOUD_CHAT_KEY) || 'null') || null;
+    } catch {
+      return null;
+    }
+  }
+
+  function saveCloudChatSession(patch) {
+    const prev = loadCloudChatSession() || {};
+    const next = { ...prev, ...patch, updatedAt: Date.now() };
+    localStorage.setItem(CLOUD_CHAT_KEY, JSON.stringify(next));
+    if (next.agentId) devAgent.agentId = next.agentId;
+    if (next.conversationId != null) devAgent.conversationId = next.conversationId;
+  }
 
   function stopDevPoll() {
     if (devAgent.pollTimer) {
@@ -24501,15 +24519,23 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     input.placeholder = next === 'dev'
       ? 'Ex.: mudar o texto do botão X na tela de Y…'
       : 'Pergunte algo sobre o sistema...';
-    if (next === 'dev' && messages.children.length === 0) {
-      appendMsg(
-        'assistant',
-        'Modo Agente Dev (admin).\n\nDescreva a mudança. Eu trabalho numa branch/PR no GitHub.\nQuando ficar pronto, use “Entrar no modo de teste”, confira o site e só então “Aprovar e publicar” (merge na main → Render).'
-      );
-    }
-    if (next !== 'dev') {
-      reviewBox?.classList.remove('is-visible');
+    if (next === 'dev') {
+      const sess = loadCloudChatSession();
+      if (sess?.agentId) {
+        devAgent.agentId = sess.agentId;
+        devAgent.conversationId = sess.conversationId || null;
+        devAgent.prNumber = sess.prNumber || null;
+        devAgent.branch = sess.branch || null;
+      }
+      if (messages.children.length === 0) {
+        appendMsg(
+          'assistant',
+          'Modo Agente Dev (admin).\n\nDescreva a mudança — continuo na mesma conversa (como no Cursor).\nPara publicar/descartar PR use Conf. sistema → Chatbot (não aparece aqui).'
+        );
+      }
+    } else {
       stopDevPoll();
+      document.body.classList.remove('dev-agent-preview-mode');
     }
   }
 
@@ -24518,35 +24544,6 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     if (!b) return;
     setAssistantMode(b.dataset.mode);
   });
-
-  function showReviewCard(summary) {
-    if (!reviewBox || !reviewText) return;
-    const parts = [
-      'Proposta pronta para revisão.',
-      summary.branch ? `Branch: ${summary.branch}` : null,
-      summary.prUrl ? `PR: ${summary.prUrl}` : null,
-      summary.result ? `\n${summary.result}` : null,
-    ].filter(Boolean);
-    reviewText.textContent = parts.join('\n');
-    reviewBox.classList.add('is-visible');
-  }
-
-  async function loadPrFiles(prNumber) {
-    if (!reviewFiles || !prNumber) return;
-    reviewFiles.textContent = 'Carregando arquivos…';
-    try {
-      const resp = await fetch(`/api/dev-agent/pulls/${prNumber}/files`, { credentials: 'include' });
-      const data = await resp.json();
-      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao listar arquivos');
-      const lines = (data.items || []).slice(0, 40).map((f) => {
-        const sign = f.status === 'removed' ? '-' : (f.status === 'added' ? '+' : '~');
-        return `${sign} ${f.filename} (+${f.additions}/-${f.deletions})`;
-      });
-      reviewFiles.textContent = lines.length ? lines.join('\n') : 'Sem arquivos listados.';
-    } catch (e) {
-      reviewFiles.textContent = e.message || 'Não foi possível listar o PR.';
-    }
-  }
 
   async function pollDevAgent() {
     if (!devAgent.agentId) return;
@@ -24560,15 +24557,27 @@ body.dev-agent-preview-mode { padding-top: 44px; }
       devAgent.prNumber = data.prNumber || devAgent.prNumber;
       devAgent.prUrl = data.prUrl || devAgent.prUrl;
       devAgent.branch = data.branch || devAgent.branch;
+      if (data.conversationId) devAgent.conversationId = data.conversationId;
+      saveCloudChatSession({
+        agentId: devAgent.agentId,
+        conversationId: data.conversationId || devAgent.conversationId,
+        prNumber: devAgent.prNumber,
+        prUrl: devAgent.prUrl,
+        branch: devAgent.branch,
+      });
       const st = String(data.runStatus || '').toUpperCase();
       if (st === 'FINISHED') {
         stopDevPoll();
         loading = false;
         sendBtn.disabled = false;
         if (data.result) appendMsg('assistant', data.result);
-        else appendMsg('assistant', 'Agent concluiu. Revise a proposta abaixo.');
-        showReviewCard(data);
-        if (data.prNumber) await loadPrFiles(data.prNumber);
+        else appendMsg('assistant', 'Agent concluiu.');
+        if (data.prNumber) {
+          appendMsg(
+            'assistant',
+            'Há um PR pronto. Para Entrar no modo de teste / Publicar / Descartar, abra Conf. sistema → Chatbot (mesma conversa).'
+          );
+        }
       } else if (st === 'ERROR' || st === 'CANCELLED' || st === 'EXPIRED') {
         stopDevPoll();
         loading = false;
@@ -24593,6 +24602,11 @@ body.dev-agent-preview-mode { padding-top: 44px; }
     loading = true;
     sendBtn.disabled = true;
     const typingEl = appendMsg('typing', '...');
+    const sess = loadCloudChatSession();
+    if (!devAgent.agentId && sess?.agentId) {
+      devAgent.agentId = sess.agentId;
+      devAgent.conversationId = sess.conversationId || null;
+    }
     try {
       let data;
       if (!devAgent.agentId) {
@@ -24605,19 +24619,32 @@ body.dev-agent-preview-mode { padding-top: 44px; }
         data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
         devAgent.agentId = data.agentId;
+        devAgent.conversationId = data.conversationId || null;
         devAgent.runId = data.runId;
-        appendMsg('assistant', 'Agent iniciado no GitHub. Aguarde — vou avisar quando a proposta estiver pronta.');
+        saveCloudChatSession({
+          agentId: devAgent.agentId,
+          conversationId: devAgent.conversationId,
+        });
+        appendMsg('assistant', 'Agent iniciado. Continuo nesta conversa — acompanho até ficar pronto.');
       } else {
         const resp = await fetch(`/api/dev-agent/agents/${encodeURIComponent(devAgent.agentId)}/runs`, {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: text }),
+          body: JSON.stringify({
+            prompt: text,
+            conversationId: devAgent.conversationId || sess?.conversationId || undefined,
+          }),
         });
         data = await resp.json();
         if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+        if (data.conversationId) devAgent.conversationId = data.conversationId;
         devAgent.runId = data.run?.id || data.runId || null;
-        appendMsg('assistant', 'Follow-up enviado. Trabalhando…');
+        saveCloudChatSession({
+          agentId: devAgent.agentId,
+          conversationId: devAgent.conversationId,
+        });
+        appendMsg('assistant', 'Follow-up na mesma conversa. Trabalhando…');
       }
       typingEl.remove();
       startDevPoll();
@@ -24628,88 +24655,6 @@ body.dev-agent-preview-mode { padding-top: 44px; }
       appendMsg('error', `⚠ ${err.message || 'Falha no Agente Dev'}`);
     }
   }
-
-  function enterTestMode() {
-    document.body.classList.add('dev-agent-preview-mode');
-    const el = document.getElementById('dev-agent-preview-banner-text');
-    if (el) {
-      el.textContent = `Modo de teste — branch ${devAgent.branch || 'pendente'}. As mudanças ainda NÃO foram publicadas. Confira o que dá para validar na tela; depois aprove para subir no GitHub.`;
-    }
-    appendMsg(
-      'assistant',
-      'Modo de teste ativo.\n\nImportante: o código da PR ainda não está no site ao vivo (só depois do “Aprovar e publicar”). Use o card/banner para publicar quando estiver bom, ou descarte.'
-    );
-  }
-
-  function exitTestMode() {
-    document.body.classList.remove('dev-agent-preview-mode');
-  }
-
-  async function approveDevProposal() {
-    if (!devAgent.prNumber) {
-      appendMsg('error', 'Não há PR para aprovar ainda.');
-      return;
-    }
-    if (!window.confirm('Publicar de verdade no GitHub (merge na main)? O Render vai atualizar o site.')) return;
-    loading = true;
-    try {
-      const resp = await fetch('/api/dev-agent/approve', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prNumber: devAgent.prNumber,
-          agentId: devAgent.agentId,
-        }),
-      });
-      const data = await resp.json();
-      if (!resp.ok || !data.ok) throw new Error(data.error || 'Falha ao mesclar PR');
-      exitTestMode();
-      reviewBox?.classList.remove('is-visible');
-      appendMsg('assistant', `✅ Publicado.\n${data.message || 'Merge ok — aguarde o deploy do Render.'}`);
-      devAgent.agentId = null;
-      devAgent.runId = null;
-      devAgent.prNumber = null;
-      devAgent.prUrl = null;
-      devAgent.branch = null;
-      stopDevPoll();
-    } catch (e) {
-      appendMsg('error', `⚠ ${e.message}`);
-    } finally {
-      loading = false;
-      sendBtn.disabled = false;
-    }
-  }
-
-  async function rejectDevProposal() {
-    if (!window.confirm('Descartar a proposta (fecha o PR sem publicar)?')) return;
-    try {
-      await fetch('/api/dev-agent/reject', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prNumber: devAgent.prNumber,
-          agentId: devAgent.agentId,
-        }),
-      });
-      exitTestMode();
-      reviewBox?.classList.remove('is-visible');
-      appendMsg('assistant', 'Proposta descartada.');
-      devAgent.agentId = null;
-      devAgent.runId = null;
-      devAgent.prNumber = null;
-      stopDevPoll();
-    } catch (e) {
-      appendMsg('error', `⚠ ${e.message}`);
-    }
-  }
-
-  btnDevTest?.addEventListener('click', enterTestMode);
-  btnDevApprove?.addEventListener('click', () => { void approveDevProposal(); });
-  btnDevReject?.addEventListener('click', () => { void rejectDevProposal(); });
-  bannerApprove?.addEventListener('click', () => { void approveDevProposal(); });
-  bannerExit?.addEventListener('click', exitTestMode);
 
 })();
 </script>
