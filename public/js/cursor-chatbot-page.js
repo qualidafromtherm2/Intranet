@@ -564,7 +564,8 @@
   function setBusy(v) {
     state.busy = v;
     const send = $('cursorChatSend');
-    if (send) send.disabled = v;
+    if (send) send.disabled = false; // allow follow-up while busy (backend cancela)
+    updatePublishBar();
     updateConfigActions();
   }
 
@@ -629,7 +630,9 @@
   function updatePublishBar() {
     const bar = $('cursorChatPublishBar');
     const del = $('cursorChatDelete');
+    const stop = $('cursorChatStop');
     if (del) del.style.display = state.conversationId || state.agentId ? '' : 'none';
+    if (stop) stop.style.display = state.agentId && (state.busy || state.eventSource) ? '' : 'none';
     if (bar) {
       bar.hidden = !state.prNumber;
     }
@@ -1355,17 +1358,15 @@
     const text = String(input?.value || '').trim();
     const images = state.pendingImages.slice();
     if (!text && !images.length) return;
+    // Se há run preso, o backend cancela e envia o follow-up (não bloqueia mais)
     if (state.busy || state.eventSource) {
-      showStickyError(
-        'O agent ainda está trabalhando nesta conversa. Aguarde terminar (status RUNNING) ou abra Nova conversa.'
-      );
-      return;
+      setStatus('Parando o run atual e enviando follow-up…', 'warn');
+      stopStream();
     }
     clearStickyError();
     input.value = '';
     autoResizeChatInput();
     clearPendingImages();
-    appendBubble('user', text || '(imagem anexada)', { images });
     setBusy(true);
     state.workStartedAt = Date.now();
     state.lastEventAt = Date.now();
@@ -1411,6 +1412,7 @@
         state.runId = runId;
         saveCloudSession();
       }
+      appendBubble('user', text || '(imagem anexada)', { images });
       state.liveBubble = appendBubble('assistant', 'Agent trabalhando… (recebendo ao vivo)', {
         streaming: true,
       });
@@ -1424,9 +1426,14 @@
     } catch (e) {
       stopWorkWatchers();
       setBusy(false);
+      updatePublishBar();
       if (input && text) {
         input.value = text;
         autoResizeChatInput();
+      }
+      if (images.length) {
+        state.pendingImages = images.slice();
+        renderPendingPreviews();
       }
       showStickyError(e.message || 'Falha ao enviar');
     }
@@ -1527,17 +1534,39 @@
     $('cursorChatInput')?.focus();
   }
 
+  async function stopCurrentRun() {
+    if (!state.agentId) return;
+    setStatus('Cancelando run…', 'warn');
+    try {
+      await api(`/agents/${encodeURIComponent(state.agentId)}/cancel`, { method: 'POST', body: '{}' });
+      stopWorkWatchers();
+      setBusy(false);
+      clearStickyError();
+      setStatus('Run cancelado — pode enviar de novo', 'ok');
+      updatePublishBar();
+      if (state.conversationId) await openConversation(state.conversationId);
+      else await refreshAgentList();
+    } catch (e) {
+      showStickyError(e.message || 'Falha ao cancelar');
+      updatePublishBar();
+    }
+  }
+
   async function checkConfig() {
     try {
       const s = await api('/status');
       const bits = [];
       if (!s.cursorConfigured) bits.push('falta CURSOR_API_KEY');
       if (!s.githubConfigured) bits.push('falta GITHUB_TOKEN');
+      if (!s.sqlViaAgentConfigured && !s.sqlTicketAuth) {
+        bits.push('SQL do agent sem autenticação (DEV_AGENT_MOBILE_TOKEN / CURSOR_API_KEY)');
+      }
       if (bits.length) {
         setStatus(bits.join(' · '), 'err');
         appendBubble('error', `Configuração incompleta no servidor: ${bits.join(', ')}.`);
       } else {
-        setStatus(`Repo: ${s.repo || 'Intranet'}`, 'ok');
+        const sqlOk = s.sqlViaAgentConfigured ? 'SQL ok' : 'SQL via ticket';
+        setStatus(`Repo: ${s.repo || 'Intranet'} · ${sqlOk}`, 'ok');
       }
     } catch (e) {
       setStatus(e.message || 'Sem permissão (admin)', 'err');
@@ -1701,6 +1730,9 @@
       if (e.dataTransfer?.files?.length) void addImageFiles(e.dataTransfer.files);
     });
     $('cursorChatNew')?.addEventListener('click', newChat);
+    $('cursorChatStop')?.addEventListener('click', () => {
+      void stopCurrentRun();
+    });
     $('cursorChatRefresh')?.addEventListener('click', () => {
       if (state.conversationId) void openConversation(state.conversationId);
       else if (state.agentId) void openAgent(state.agentId);

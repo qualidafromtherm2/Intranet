@@ -5,6 +5,7 @@
  */
 'use strict';
 
+const crypto = require('crypto');
 const express = require('express');
 const router = express.Router();
 const iaDb = require('../utils/iaCursorDb');
@@ -30,17 +31,65 @@ function listRoles(req) {
     .filter(Boolean);
 }
 
+/** Segredo para token fixo ou ticket SQL assinado (Cloud Agent). */
+function agentAuthSecret() {
+  return String(
+    process.env.DEV_AGENT_MOBILE_TOKEN ||
+      process.env.CURSOR_API_KEY ||
+      process.env.SESSION_SECRET ||
+      ''
+  ).trim();
+}
+
+function mintSqlTicket(ttlSec = 7 * 24 * 3600) {
+  const secret = agentAuthSecret();
+  if (!secret) return null;
+  const exp = Math.floor(Date.now() / 1000) + ttlSec;
+  const sig = crypto.createHmac('sha256', secret).update(`devsql.${exp}`).digest('hex');
+  return `${exp}.${sig}`;
+}
+
+function verifySqlTicket(ticket) {
+  const secret = agentAuthSecret();
+  const raw = String(ticket || '').trim();
+  if (!secret || !raw) return false;
+  const parts = raw.split('.');
+  if (parts.length !== 2) return false;
+  const exp = Number(parts[0]);
+  const sig = parts[1];
+  if (!Number.isFinite(exp) || exp < Math.floor(Date.now() / 1000)) return false;
+  const expect = crypto.createHmac('sha256', secret).update(`devsql.${exp}`).digest('hex');
+  try {
+    const a = Buffer.from(String(sig), 'utf8');
+    const b = Buffer.from(expect, 'utf8');
+    if (a.length !== b.length) return false;
+    return crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function markDevAgentAuth(req, username = 'cloud-agent') {
+  req.devAgentMobile = true;
+  req.session = req.session || {};
+  req.session.user = req.session.user || {
+    id: null,
+    username: String(username).slice(0, 80),
+    roles: ['admin'],
+  };
+}
+
 function requireAdminOrMobile(req, res, next) {
   const mobileToken = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
   const hdr = String(req.headers['x-dev-agent-token'] || req.headers['x-cursor-chat-token'] || '').trim();
+  const ticketHdr = String(req.headers['x-dev-agent-ticket'] || '').trim();
   if (mobileToken && hdr && hdr === mobileToken) {
-    req.devAgentMobile = true;
-    req.session = req.session || {};
-    req.session.user = req.session.user || {
-      id: null,
-      username: String(req.headers['x-dev-agent-user'] || 'mobile').slice(0, 80),
-      roles: ['admin'],
-    };
+    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'mobile');
+    return next();
+  }
+  // Ticket assinado (ou o próprio valor injetado em $DEV_AGENT_MOBILE_TOKEN na VM)
+  if (verifySqlTicket(hdr) || verifySqlTicket(ticketHdr)) {
+    markDevAgentAuth(req, req.headers['x-dev-agent-user'] || 'cloud-agent');
     return next();
   }
   if (!req.session?.user?.id) {
@@ -224,17 +273,30 @@ function intranetPublicUrl() {
 function cloudAgentEnvVars() {
   const out = {};
   const base = intranetPublicUrl();
-  const token = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
+  const fixed = String(process.env.DEV_AGENT_MOBILE_TOKEN || '').trim();
+  const ticket = mintSqlTicket();
   if (base) out.INTRANET_PUBLIC_URL = base;
-  if (token) out.DEV_AGENT_MOBILE_TOKEN = token;
+  // Prefer token fixo do Render; senão ticket assinado (válido ~7 dias)
+  if (fixed) out.DEV_AGENT_MOBILE_TOKEN = fixed;
+  else if (ticket) out.DEV_AGENT_MOBILE_TOKEN = ticket;
   return Object.keys(out).length ? out : null;
 }
 
 function sqlAccessPreamble() {
   const base = intranetPublicUrl() || 'https://SEU-SITE.onrender.com';
-  return [
+  const ticket = mintSqlTicket();
+  const lines = [
     '## Acesso ao Postgres (intranet)',
     'Você pode criar schemas/tabelas, alterar colunas e consultar o banco via API (o agent NÃO usa DATABASE_URL direto no Render interno).',
+    '',
+    'Autenticação: use o header X-Dev-Agent-Token com $DEV_AGENT_MOBILE_TOKEN (já injetado no ambiente quando disponível).',
+  ];
+  if (ticket) {
+    lines.push(
+      `Se $DEV_AGENT_MOBILE_TOKEN estiver vazio nesta sessão, use exatamente este valor no header: ${ticket}`
+    );
+  }
+  lines.push(
     '',
     'Executar SQL:',
     '```bash',
@@ -250,8 +312,9 @@ function sqlAccessPreamble() {
     '```',
     '',
     'Não imprima tokens/senhas. DROP/TRUNCATE só com pedido explícito do usuário.',
-    '',
-  ].join('\n');
+    ''
+  );
+  return lines.join('\n');
 }
 
 function wrapPromptForCursor(prompt) {
@@ -261,6 +324,53 @@ function wrapPromptForCursor(prompt) {
     text: `${sqlAccessPreamble()}\n---\n\n${text}`,
   };
   return wrapped;
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Cursor só aceita 1 run ativo. Se estiver CREATING/RUNNING, cancela e espera liberar.
+ */
+async function cancelActiveRunIfBusy(agentId) {
+  const agent = await cursorFetch(`/agents/${encodeURIComponent(agentId)}`);
+  const runId = agent?.latestRunId;
+  if (!runId) return { agent, cancelled: false, runId: null, run: null };
+
+  let run = await cursorFetch(
+    `/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}`
+  );
+  const st = String(run?.status || '').toUpperCase();
+  if (st !== 'RUNNING' && st !== 'CREATING') {
+    return { agent, cancelled: false, runId, run };
+  }
+
+  try {
+    await cursorFetch(
+      `/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}/cancel`,
+      { method: 'POST', body: {} }
+    );
+  } catch (e) {
+    if (e.status !== 409) throw e;
+  }
+
+  for (let i = 0; i < 10; i++) {
+    await sleep(600);
+    run = await cursorFetch(
+      `/agents/${encodeURIComponent(agentId)}/runs/${encodeURIComponent(runId)}`
+    );
+    const st2 = String(run?.status || '').toUpperCase();
+    if (st2 !== 'RUNNING' && st2 !== 'CREATING') {
+      return { agent, cancelled: true, runId, run };
+    }
+  }
+
+  const err = new Error(
+    'O agent anterior ainda está RUNNING e não liberou. Clique em Parar ou Nova conversa.'
+  );
+  err.status = 409;
+  throw err;
 }
 
 function actorLabel(req) {
@@ -413,6 +523,7 @@ router.get('/status', requireAdminOrMobile, (req, res) => {
     githubConfigured: Boolean(githubCfg().token),
     sqlApiConfigured: Boolean(pool),
     sqlViaAgentConfigured: Boolean(envVars?.INTRANET_PUBLIC_URL && envVars?.DEV_AGENT_MOBILE_TOKEN),
+    sqlTicketAuth: Boolean(agentAuthSecret()),
     intranetPublicUrl: intranetPublicUrl() || null,
     repo: repoHttpsUrl(),
     branch: githubCfg().branch,
@@ -715,6 +826,19 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     const agentId = req.params.id;
     const resolved = resolvePromptFromBody(req);
 
+    // Libera run preso ANTES de gravar a mensagem (evita user órfão sem resposta)
+    let cancelledBusy = false;
+    try {
+      const idle = await cancelActiveRunIfBusy(agentId);
+      cancelledBusy = Boolean(idle.cancelled);
+    } catch (busyErr) {
+      return res.status(busyErr.status || 409).json({
+        ok: false,
+        error: busyErr.message,
+        busy: true,
+      });
+    }
+
     let conv =
       (req.body?.conversationId
         ? await iaDb.getConversation(Number(req.body.conversationId))
@@ -730,6 +854,16 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       await iaDb.touchConversation(conv.id, { cursor_agent_id: agentId });
     }
 
+    if (cancelledBusy) {
+      try {
+        await iaDb.addMessage({
+          conversationId: conv.id,
+          role: 'system',
+          content: 'Run anterior cancelado automaticamente para liberar o follow-up.',
+        });
+      } catch (_) {}
+    }
+
     const { prompt, attachments } = await persistUserTurn({
       conversationId: conv.id,
       displayText: resolved.displayText,
@@ -742,10 +876,24 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       await iaDb.touchConversation(conv.id, { specialist_id: resolved.specialistId });
     }
 
-    const data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
-      method: 'POST',
-      body: { prompt: wrapPromptForCursor(prompt) },
-    });
+    let data;
+    try {
+      data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
+        method: 'POST',
+        body: { prompt: wrapPromptForCursor(prompt) },
+      });
+    } catch (runErr) {
+      // Corrida: ainda busy → tenta cancelar de novo e recria 1x
+      if (runErr.status === 409) {
+        await cancelActiveRunIfBusy(agentId);
+        data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
+          method: 'POST',
+          body: { prompt: wrapPromptForCursor(prompt) },
+        });
+      } else {
+        throw runErr;
+      }
+    }
     const run = data?.run || data;
     await iaDb.touchConversation(conv.id, {
       status: run?.status || 'RUNNING',
@@ -758,11 +906,12 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       specialistName: resolved.specialist?.name || null,
       run,
       runId: run?.id || null,
+      cancelledBusy,
       attachments,
     });
   } catch (err) {
     console.error('[dev-agent] follow-up', err.message);
-    return res.status(err.status || 500).json({ ok: false, error: err.message });
+    return res.status(err.status || 500).json({ ok: false, error: err.message, busy: err.status === 409 });
   }
 });
 
@@ -1050,7 +1199,48 @@ router.post('/agents/:id/runs/:runId/cancel', requireAdminOrMobile, async (req, 
       `/agents/${encodeURIComponent(req.params.id)}/runs/${encodeURIComponent(req.params.runId)}/cancel`,
       { method: 'POST', body: {} }
     );
+    const conv = await iaDb.getConversationByAgentId(req.params.id);
+    if (conv) {
+      await iaDb.touchConversation(conv.id, { status: 'CANCELLED' });
+      try {
+        await iaDb.addMessage({
+          conversationId: conv.id,
+          role: 'system',
+          content: 'Run cancelado pelo usuário.',
+        });
+      } catch (_) {}
+    }
     return res.json({ ok: true });
+  } catch (err) {
+    return res.status(err.status || 500).json({ ok: false, error: err.message });
+  }
+});
+
+/** Cancela o latest run do agent (atalho para UI). */
+router.post('/agents/:id/cancel', requireAdminOrMobile, async (req, res) => {
+  try {
+    const idle = await cancelActiveRunIfBusy(req.params.id);
+    const conv = await iaDb.getConversationByAgentId(req.params.id);
+    if (conv) {
+      await iaDb.touchConversation(conv.id, {
+        status: idle.cancelled ? 'CANCELLED' : String(idle.run?.status || conv.status || ''),
+      });
+      if (idle.cancelled) {
+        try {
+          await iaDb.addMessage({
+            conversationId: conv.id,
+            role: 'system',
+            content: 'Run cancelado pelo usuário (Parar).',
+          });
+        } catch (_) {}
+      }
+    }
+    return res.json({
+      ok: true,
+      cancelled: Boolean(idle.cancelled),
+      runId: idle.runId || null,
+      status: idle.run?.status || null,
+    });
   } catch (err) {
     return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
