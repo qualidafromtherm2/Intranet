@@ -6,6 +6,8 @@ const {
   cursorStatusFromRun,
   withCursorStatus,
   buildProviderStatusBoard,
+  isRetiredGeminiModel,
+  geminiModelCandidates,
 } = require('../utils/iaCloudProviders');
 
 test('normalizePreferredProvider', () => {
@@ -30,6 +32,14 @@ test('cursorStatusFromRun', () => {
   assert.equal(cursorStatusFromRun('RUNNING'), 'running');
   assert.equal(cursorStatusFromRun('CREATING'), 'running');
   assert.equal(cursorStatusFromRun(''), null);
+});
+
+test('gemini 2.0 flash aposentado vira 3.5', () => {
+  assert.equal(isRetiredGeminiModel('gemini-2.0-flash'), true);
+  assert.equal(isRetiredGeminiModel('gemini-2.0-flash-lite'), true);
+  assert.equal(isRetiredGeminiModel('gemini-3.5-flash'), false);
+  assert.deepEqual(geminiModelCandidates('gemini-2.0-flash')[0], 'gemini-3.5-flash');
+  assert.deepEqual(geminiModelCandidates('gemini-3.6-flash')[0], 'gemini-3.6-flash');
 });
 
 test('withCursorStatus atualiza só o Cursor e cria board se faltar', () => {
