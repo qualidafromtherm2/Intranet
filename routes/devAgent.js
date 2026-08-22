@@ -1290,6 +1290,14 @@ router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), a
       return res.status(400).json({ ok: false, error: 'prNumber obrigatório.' });
     }
     const { owner, repo } = githubCfg();
+    const pr = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}`);
+    if (pr?.draft) {
+      // Cloud Agents abrem PR em draft; GitHub recusa merge até marcar Ready.
+      await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/ready_for_review`, {
+        method: 'POST',
+        body: {},
+      });
+    }
     const merged = await githubFetch(`/repos/${owner}/${repo}/pulls/${prNumber}/merge`, {
       method: 'PUT',
       body: {
