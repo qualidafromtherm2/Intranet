@@ -857,7 +857,7 @@
 
     // 1) JSON estático (rápido, sem auth) — funciona mesmo se a API falhar
     try {
-      const resp = await fetch('/public/js/cursor-specialists.json?v=20260821f', {
+      const resp = await fetch('/public/js/cursor-specialists.json?v=20260822e', {
         credentials: 'same-origin',
         cache: 'no-cache',
       });
@@ -1675,6 +1675,7 @@
     }
     if (!window.confirm('Publicar no site de verdade? (merge na main → Render)')) return;
     setBusy(true);
+    setStatus('Publicando… se houver conflito, resolvo com segurança.', 'warn');
     try {
       const data = await api('/approve', {
         method: 'POST',
@@ -1695,8 +1696,14 @@
       await refreshAgentList();
       newChat();
     } catch (e) {
-      appendBubble('error', e.message);
-      setStatus('Erro', 'err');
+      const msg = e.message || 'Falha ao publicar';
+      if (/conflito|conflict|merge seguro/i.test(msg)) {
+        appendBubble('meta', msg);
+        setStatus('Conflito — agente de merge seguro', 'warn');
+      } else {
+        appendBubble('error', msg);
+        setStatus('Erro', 'err');
+      }
     } finally {
       setBusy(false);
     }

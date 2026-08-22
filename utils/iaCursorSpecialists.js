@@ -109,6 +109,13 @@ const CURATED = [
     skill: 'deploy-github',
   },
   {
+    id: 'merge-conflicts',
+    name: 'Merge conflicts',
+    group: 'Transversal',
+    blurb: 'Resolve conflito com a main sem descartar nenhum lado',
+    skill: 'merge-conflicts',
+  },
+  {
     id: 'cursor-token-economia',
     name: 'Economia de tokens',
     group: 'Transversal',
