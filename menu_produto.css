@@ -10461,12 +10461,68 @@ table.tabela td.num {
   color: #fde68a;
 }
 
+.links-rapidos-privado-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 0 12px 0;
+  font-size: 13px;
+  color: var(--content-title-color);
+  cursor: pointer;
+  user-select: none;
+}
+
+.links-rapidos-privado-check input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 2px 0 0 0;
+  flex-shrink: 0;
+  accent-color: #2563eb;
+  cursor: pointer;
+}
+
+.links-rapidos-privado-check small {
+  display: block;
+  margin-top: 2px;
+  font-size: 11px;
+  color: var(--inactive-color);
+}
+
 .links-rapidos-item {
   border: 1px solid var(--border-color);
   border-radius: 8px;
   padding: 8px 10px;
   background: var(--theme-bg-color);
   margin-bottom: 8px;
+}
+
+.links-rapidos-item.is-privado {
+  border-color: rgba(37, 99, 235, .45);
+}
+
+.links-rapidos-item-topo {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.links-rapidos-badge-privado {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: .02em;
+  color: #93c5fd;
+  background: rgba(37, 99, 235, .18);
+  border: 1px solid rgba(37, 99, 235, .4);
+  border-radius: 999px;
+  padding: 2px 7px;
+  line-height: 1.3;
+}
+
+.light-mode .links-rapidos-badge-privado {
+  color: #1d4ed8;
+  background: rgba(37, 99, 235, .1);
 }
 
 .links-rapidos-anchor {

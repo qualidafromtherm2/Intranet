@@ -1279,13 +1279,28 @@ async function ensureRhReservasSchema() {
         nome_link TEXT NOT NULL,
         url_link TEXT NOT NULL,
         criado_por TEXT NOT NULL,
-        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        criado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        somente_usuario BOOLEAN NOT NULL DEFAULT FALSE
       )
     `);
 
     await pool.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS links_rapidos_url_unq
+      ALTER TABLE rh.links_rapidos
+        ADD COLUMN IF NOT EXISTS somente_usuario BOOLEAN NOT NULL DEFAULT FALSE
+    `);
+
+    await pool.query(`DROP INDEX IF EXISTS rh.links_rapidos_url_unq`);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS links_rapidos_url_publico_unq
       ON rh.links_rapidos (url_link)
+      WHERE NOT somente_usuario
+    `);
+
+    await pool.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS links_rapidos_url_privado_user_unq
+      ON rh.links_rapidos (url_link, criado_por)
+      WHERE somente_usuario
     `);
 
     // Remove constraint de tipo para suportar novos tipos (Reunião online, Visita, Evento)
@@ -6305,12 +6320,16 @@ app.delete('/api/rh/lembretes/:id', async (req, res) => {
   }
 });
 
-app.get('/api/rh/links', async (_req, res) => {
+app.get('/api/rh/links', async (req, res) => {
+  const userLogado = resolverUsuarioAuditoria(req);
   try {
     const { rows } = await pool.query(
-      `SELECT id, nome_link, url_link, criado_por, criado_em
+      `SELECT id, nome_link, url_link, criado_por, criado_em, somente_usuario
          FROM rh.links_rapidos
-        ORDER BY criado_em DESC, id DESC`
+        WHERE somente_usuario = FALSE
+           OR ($1::text IS NOT NULL AND LOWER(criado_por) = LOWER($1))
+        ORDER BY criado_em DESC, id DESC`,
+      [userLogado]
     );
 
     const links = rows.map((r) => ({
@@ -6318,7 +6337,8 @@ app.get('/api/rh/links', async (_req, res) => {
       nome: r.nome_link,
       url: r.url_link,
       criadoPor: r.criado_por,
-      criadoEm: r.criado_em
+      criadoEm: r.criado_em,
+      somenteUsuario: !!r.somente_usuario
     }));
 
     return res.json({ ok: true, links });
@@ -6329,25 +6349,41 @@ app.get('/api/rh/links', async (_req, res) => {
 });
 
 app.post('/api/rh/links', async (req, res) => {
-  const userLogado = resolverUsuarioAuditoria(req) || 'anon';
+  const userLogado = resolverUsuarioAuditoria(req);
   const body = req.body || {};
 
   const nome = String(body.nome || '').trim();
   const url = String(body.url || '').trim();
+  const somenteUsuario = body.somenteUsuario === true || body.somenteUsuario === 'true' || body.somenteUsuario === 1;
 
   if (!nome || !url) {
     return res.status(400).json({ error: 'Campos obrigatórios: nome e url' });
   }
 
+  if (somenteUsuario && !userLogado) {
+    return res.status(401).json({ error: 'Faça login para registrar um link somente seu' });
+  }
+
+  const criadoPor = userLogado || 'anon';
+
   try {
-    const ins = await pool.query(
-      `INSERT INTO rh.links_rapidos (nome_link, url_link, criado_por)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (url_link) DO UPDATE
-         SET nome_link = EXCLUDED.nome_link
-       RETURNING id`,
-      [nome, url, userLogado]
-    );
+    const ins = somenteUsuario
+      ? await pool.query(
+          `INSERT INTO rh.links_rapidos (nome_link, url_link, criado_por, somente_usuario)
+           VALUES ($1, $2, $3, TRUE)
+           ON CONFLICT (url_link, criado_por) WHERE somente_usuario
+           DO UPDATE SET nome_link = EXCLUDED.nome_link
+           RETURNING id`,
+          [nome, url, criadoPor]
+        )
+      : await pool.query(
+          `INSERT INTO rh.links_rapidos (nome_link, url_link, criado_por, somente_usuario)
+           VALUES ($1, $2, $3, FALSE)
+           ON CONFLICT (url_link) WHERE NOT somente_usuario
+           DO UPDATE SET nome_link = EXCLUDED.nome_link
+           RETURNING id`,
+          [nome, url, criadoPor]
+        );
     return res.json({ ok: true, id: ins.rows[0].id });
   } catch (err) {
     console.error('[API] /api/rh/links POST erro:', err);
