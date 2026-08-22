@@ -342,6 +342,36 @@
   line-height: 1.45;
 }
 
+.etq-reprint-copias {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.etq-reprint-copias span {
+  font-size: 13px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.etq-reprint-copias input {
+  width: 88px;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 800;
+  color: #0f172a;
+  text-align: center;
+}
+
 .etq-reprint-format-options {
   display: grid;
   grid-template-columns: 1fr 1fr;

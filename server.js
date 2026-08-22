@@ -18898,13 +18898,15 @@ app.post('/api/etiquetas/impressao-rapida', express.json(), async (req, res) => 
 });
 
 // POST /api/etiquetas/rec-impresso/imprimir-ids
-// Body: { ids: [idImpresso,...], formato: 'pequena'|'grande', destino_agente?, impressora?, usuario? }
+// Body: { ids: [idImpresso,...], formato: 'pequena'|'grande', copias?: 1-100, destino_agente?, impressora?, usuario? }
 // Regenera o ZPL no perfil atual e preserva o ID já atribuído à etiqueta.
 app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req, res) => {
   try {
     await _ensureEtqDevolucaoColumns(pool);
     const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(n => n > 0) : [];
     if (!ids.length) return res.status(400).json({ error: 'Nenhum id informado.' });
+    const copiasRaw = parseInt(req.body?.copias, 10);
+    const copias = Number.isFinite(copiasRaw) ? Math.min(100, Math.max(1, copiasRaw)) : 1;
 
     const result = await pool.query(
       `SELECT i.id,
@@ -18949,7 +18951,7 @@ app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req,
         `UPDATE etiqueta."ETQ_rec_impresso" SET conteudo_zpl = $1 WHERE id = $2`,
         [zpl, row.id]
       );
-      zplBlocks.push(zpl);
+      for (let c = 0; c < copias; c++) zplBlocks.push(zpl);
     }
 
     const printerName = String(req.body?.printer || process.env.PRINTER || 'zebra').trim();
@@ -18960,7 +18962,7 @@ app.post('/api/etiquetas/rec-impresso/imprimir-ids', express.json(), async (req,
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
         [[], 0, usuario, zplBlocks.join('\n'), zplBlocks.length, destiAg, impres]
       );
-      return res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length, via: 'fila' });
+      return res.json({ ok: true, fila_id: filaIns.rows[0].id, quantidade: zplBlocks.length, copias, via: 'fila' });
     }
 
     const dirPrint = path.join(__dirname, 'etiquetas', 'Recebimento', 'Printed');
