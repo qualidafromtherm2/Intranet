@@ -545,8 +545,8 @@
   height: 32px;
   border-radius: 999px;
   border: 0;
-  background: #f8fafc;
-  color: #0f172a;
+  background: #16a34a;
+  color: #fff;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -559,7 +559,7 @@
 }
 
 .cursor-chat-send-btn:hover {
-  background: #e2e8f0;
+  background: #15803d;
 }
 
 .cursor-chat-send-btn:disabled {
