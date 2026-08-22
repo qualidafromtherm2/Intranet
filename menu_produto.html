@@ -21324,12 +21324,14 @@ function attachDropZone(ul) {
 }
 .sgf-ai-agent-picker {
   position: relative;
+  z-index: 2;
 }
 #sgf-ai-agent-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  min-height: 32px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid rgba(99,102,241,.35);
   background: rgba(99,102,241,.12);
@@ -21346,16 +21348,15 @@ function attachDropZone(ul) {
 #sgf-ai-agent-btn i:first-child { font-size: 11px; }
 #sgf-ai-agent-btn .fa-chevron-down { font-size: 9px; opacity: .75; }
 .sgf-ai-agent-menu {
-  position: absolute;
-  left: 0;
-  bottom: calc(100% + 6px);
+  position: fixed;
   min-width: 248px;
+  max-width: min(320px, calc(100vw - 16px));
   background: #111827;
   border: 1px solid rgba(99,102,241,.35);
   border-radius: 12px;
   box-shadow: 0 12px 32px rgba(0,0,0,.45);
   padding: 6px;
-  z-index: 8;
+  z-index: 10080;
 }
 .sgf-ai-agent-option {
   display: flex;
@@ -21646,12 +21647,25 @@ function attachDropZone(ul) {
     </div>
     <div class="sgf-ai-toolbar">
       <div class="sgf-ai-agent-picker" id="sgf-ai-agent-picker">
-        <button type="button" id="sgf-ai-agent-btn" aria-haspopup="listbox" aria-expanded="false" title="Escolher agente">
+        <button type="button" id="sgf-ai-agent-btn" aria-haspopup="listbox" aria-expanded="false" title="Escolher agente da conversa">
           <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-          <span id="sgf-ai-agent-label">Auto</span>
+          <span id="sgf-ai-agent-label">Agentes · Auto</span>
           <i class="fa-solid fa-chevron-down" aria-hidden="true"></i>
         </button>
-        <div id="sgf-ai-agent-menu" class="sgf-ai-agent-menu" role="listbox" hidden></div>
+        <div id="sgf-ai-agent-menu" class="sgf-ai-agent-menu" role="listbox" hidden>
+          <button type="button" class="sgf-ai-agent-option is-active" role="option" aria-selected="true" data-agent-id="auto">
+            <i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
+            <span><strong>Auto</strong><span>Escolhe o melhor caminho: FAQ, manuais, consultas e GPT rápido</span></span>
+          </button>
+          <button type="button" class="sgf-ai-agent-option" role="option" aria-selected="false" data-agent-id="gpt">
+            <i class="fa-solid fa-comments" aria-hidden="true"></i>
+            <span><strong>GPT</strong><span>GPT-4o — respostas mais completas na conversa</span></span>
+          </button>
+          <button type="button" class="sgf-ai-agent-option" role="option" aria-selected="false" data-agent-id="cloud">
+            <i class="fa-solid fa-cloud" aria-hidden="true"></i>
+            <span><strong>Cloud</strong><span>Agente mais capaz, com GPT-4o e ferramentas do sistema</span></span>
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -23818,6 +23832,23 @@ function attachDropZone(ul) {
     }
   }
 
+  function positionAgentMenu() {
+    if (!agentMenu || !agentBtn) return;
+    const rect = agentBtn.getBoundingClientRect();
+    const menuWidth = Math.max(248, Math.min(320, window.innerWidth - 16));
+    let left = rect.left;
+    if (left + menuWidth > window.innerWidth - 8) {
+      left = Math.max(8, window.innerWidth - menuWidth - 8);
+    }
+    if (left < 8) left = 8;
+    const height = agentMenu.offsetHeight || 180;
+    let top = rect.top - height - 6;
+    if (top < 8) top = Math.min(window.innerHeight - height - 8, rect.bottom + 6);
+    agentMenu.style.left = `${Math.round(left)}px`;
+    agentMenu.style.top = `${Math.round(top)}px`;
+    agentMenu.style.bottom = 'auto';
+  }
+
   function closeAgentMenu() {
     if (!agentMenu || !agentBtn) return;
     agentMenu.hidden = true;
@@ -23826,18 +23857,25 @@ function attachDropZone(ul) {
 
   function openAgentMenu() {
     if (!agentMenu || !agentBtn) return;
+    if (!agentMenu.querySelector('[data-agent-id]')) renderAgentPicker();
+    if (agentMenu.parentElement !== document.body) {
+      document.body.appendChild(agentMenu);
+    }
     agentMenu.hidden = false;
     agentBtn.setAttribute('aria-expanded', 'true');
+    positionAgentMenu();
+    requestAnimationFrame(positionAgentMenu);
   }
 
   function renderAgentPicker() {
     const atual = getSelectedAgent();
     selectedAgentId = atual.id;
-    if (agentLabelEl) agentLabelEl.textContent = atual.label;
+    if (agentLabelEl) agentLabelEl.textContent = `Agentes · ${atual.label}`;
     if (agentBtn) {
       const iconEl = agentBtn.querySelector('i:first-child');
       if (iconEl) iconEl.className = `fa-solid ${atual.icon || 'fa-wand-magic-sparkles'}`;
-      agentBtn.title = atual.description || 'Escolher agente';
+      agentBtn.title = atual.description || 'Escolher agente da conversa';
+      agentBtn.setAttribute('aria-label', `Agentes, selecionado ${atual.label}`);
     }
     if (!agentMenu) return;
     agentMenu.innerHTML = aiAgents.map((item) => `
@@ -23865,21 +23903,30 @@ function attachDropZone(ul) {
 
   function bindAgentPicker() {
     if (!agentBtn || !agentMenu) return;
+    if (agentBtn.dataset.bound === '1') return;
+    agentBtn.dataset.bound = '1';
+    renderAgentPicker();
     agentBtn.addEventListener('click', (event) => {
+      event.preventDefault();
       event.stopPropagation();
       if (agentMenu.hidden) openAgentMenu();
       else closeAgentMenu();
     });
     agentMenu.addEventListener('click', (event) => {
+      event.stopPropagation();
       const option = event.target.closest('[data-agent-id]');
       if (!option) return;
       setSelectedAgent(option.getAttribute('data-agent-id'), { announce: true });
     });
     document.addEventListener('click', (event) => {
-      if (!event.target.closest('#sgf-ai-agent-picker')) closeAgentMenu();
+      if (event.target.closest('#sgf-ai-agent-picker') || event.target.closest('#sgf-ai-agent-menu')) return;
+      closeAgentMenu();
     });
     document.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') closeAgentMenu();
+    });
+    window.addEventListener('resize', () => {
+      if (!agentMenu.hidden) positionAgentMenu();
     });
   }
 
