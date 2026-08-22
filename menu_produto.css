@@ -2929,7 +2929,7 @@ body.light-mode {
 .header-menu {
   display: flex;
   align-items: center;
-  flex: 1;
+  flex: 0 1 auto;
   gap: 6px;
   min-width: 0;
   justify-content: flex-start;
