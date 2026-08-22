@@ -19,7 +19,7 @@
   referrerpolicy="no-referrer"
 />
   <!-- Seu CSS principal -->
-  <link rel="stylesheet" href="menu_produto.css?v=20260822-header-atalhos-noscroll"/>
+  <link rel="stylesheet" href="menu_produto.css?v=20260822-header-user-under-photo"/>
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
   <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822h"/>
@@ -207,12 +207,14 @@
     <i id="chamado-icon" class="fa-solid fa-headset" title="Chamado de suporte" data-nav-key="top-shortcut:chamado" data-nav-pos="top" data-nav-label="Chamado de suporte"><span id="chamado-badge" class="chamado-badge" hidden>0</span></i>
     <i id="links-icon" class="fa-solid fa-link" title="Links rápidos" data-nav-key="top-shortcut:links-rapidos" data-nav-pos="top" data-nav-label="Links rápidos"></i>
     <i id="config-icon" class="fa-solid fa-rotate-right" title="Atualização disponível - clique para limpar cache e atualizar" style="cursor:pointer;display:none;"></i>
-    <div class="user-badge">
-      <span id="userNameDisplay" class="user-name">Usuário</span>
+    <div class="header-user-identity" title="Perfil">
+      <img id="profile-icon" class="profile-img"
+           src="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png"
+           alt="Perfil">
+      <div class="user-badge">
+        <span id="userNameDisplay" class="user-name">Usuário</span>
+      </div>
     </div>
-    <img id="profile-icon" class="profile-img"
-         src="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png"
-         alt="Perfil">
   </div>
 
   <!-- Dropdown criado dinamicamente -->
