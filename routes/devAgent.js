@@ -127,7 +127,13 @@ async function githubFetch(path, { method = 'GET', body } = {}) {
     data = { raw: text };
   }
   if (!resp.ok) {
-    const msg = data?.message || text || `GitHub HTTP ${resp.status}`;
+    let msg = data?.message || text || `GitHub HTTP ${resp.status}`;
+    if (/Resource not accessible by personal access token/i.test(msg)) {
+      msg =
+        'GITHUB_TOKEN do Render sem permissão de merge. No GitHub, use um token classic com scope "repo", ' +
+        'ou fine-grained com Contents + Pull requests (Read and write) no repo Intranet. ' +
+        'Atualize GITHUB_TOKEN no Render e redeploy.';
+    }
     const err = new Error(msg);
     err.status = resp.status;
     err.data = data;

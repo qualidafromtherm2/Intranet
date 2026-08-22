@@ -22,6 +22,7 @@
     workStartedAt: null,
     lastEventAt: null,
     lastActivity: '',
+    statusPinned: '',
     liveBubble: null,
     pendingImages: [],
     specialistId: null,
@@ -81,8 +82,17 @@
   }
 
   /** Markdown leve → HTML seguro (negrito, código, tabelas, listas, links). */
+  function normalizeAssistantText(src) {
+    let s = String(src || '').replace(/\r\n/g, '\n');
+    // Frases grudadas do stream: "modal.O modal" → quebra de parágrafo
+    s = s.replace(/([.!?…])([A-ZÀ-Ü])/g, '$1\n\n$2');
+    // Espaço faltando após pontuação antes de minúscula rara já coberta; limpa espaços duplos em linha
+    s = s.replace(/[ \t]+\n/g, '\n');
+    return s;
+  }
+
   function renderMarkdown(src) {
-    let s = String(src || '');
+    let s = normalizeAssistantText(src);
     s = s
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
@@ -310,13 +320,14 @@
         : '';
       const act = state.lastActivity ? ` · ${state.lastActivity}` : '';
       workText = `Trabalhando há ${elapsed}${act}${ago}`;
-      line.textContent = workText;
+      // topo: só badge / título fixo — o ticker fica só debaixo da bolha
+      line.textContent = state.statusPinned || 'Em execução';
       if (badge) {
         badge.className = 'cursor-chat-badge warn';
         badge.textContent = 'Trabalhando';
       }
     } else {
-      line.textContent = state.lastActivity || 'Pronto';
+      line.textContent = state.statusPinned || state.lastActivity || 'Pronto';
     }
 
     // status colado debaixo da bolha que está respondendo
@@ -337,7 +348,13 @@
   }
 
   function setStatus(text, kind) {
-    state.lastActivity = text || '';
+    const t = text || '';
+    const ephemeral =
+      /trabalhando|conectando|enviando|escrevendo|pensando|usando |concluiu |sinal|stream|ativando|ainda trabalhando|reconectando|instável|checando|finalizando|atualizando status/i.test(
+        t
+      );
+    if (!ephemeral) state.statusPinned = t;
+    state.lastActivity = t;
     const badge = $('cursorChatBadge');
     if (badge) {
       badge.className = 'cursor-chat-badge' + (kind ? ` ${kind}` : '');
@@ -395,6 +412,7 @@
     state.busy = v;
     const send = $('cursorChatSend');
     if (send) send.disabled = v;
+    updateConfigActions();
   }
 
   function markActivity(label) {
@@ -403,16 +421,66 @@
     refreshStatusLine();
   }
 
+  function isTestMode() {
+    return document.body.classList.contains('cursor-chat-preview-mode');
+  }
+
+  function updateConfigActions() {
+    const hasPr = Boolean(state.prNumber);
+    const testBtn = $('cursorChatCfgTest');
+    const approveBtn = $('cursorChatCfgApprove');
+    const publishBtn = $('cursorChatCfgPublish');
+    const discardBtn = $('cursorChatCfgDiscard');
+    const hint = $('cursorChatCfgPrHint');
+    if (testBtn) {
+      const on = isTestMode();
+      testBtn.textContent = on ? 'Sair do modo teste' : 'Modo teste';
+      testBtn.classList.toggle('is-on', on);
+      testBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    }
+    [approveBtn, publishBtn, discardBtn].forEach((btn) => {
+      if (btn) btn.disabled = !hasPr || state.busy;
+    });
+    if (hint) {
+      if (hasPr) {
+        const branch = state.branch ? ` · ${state.branch}` : '';
+        hint.textContent = `PR #${state.prNumber}${branch} pronto. Use Modo teste, Aprovar, Publicar ou Descartar.`;
+      } else {
+        hint.textContent =
+          'Ainda sem PR nesta conversa. Quando o agent abrir um pull request, Aprovar / Publicar / Descartar ficam disponíveis aqui.';
+      }
+    }
+  }
+
+  function enterTestMode() {
+    document.body.classList.add('cursor-chat-preview-mode');
+    const el = $('cursorChatPreviewText');
+    if (el) {
+      el.textContent = state.prNumber
+        ? `Modo de teste — PR #${state.prNumber}${state.branch ? ` · ${state.branch}` : ''}. Ainda NÃO está no site ao vivo.`
+        : 'Modo de teste ativo. Ainda não há PR — as mudanças ainda NÃO estão no site.';
+    }
+    updateConfigActions();
+  }
+
+  function exitTestMode() {
+    document.body.classList.remove('cursor-chat-preview-mode');
+    updateConfigActions();
+  }
+
+  function toggleTestMode() {
+    if (isTestMode()) exitTestMode();
+    else enterTestMode();
+  }
+
   function updatePublishBar() {
     const bar = $('cursorChatPublishBar');
     const del = $('cursorChatDelete');
     if (del) del.style.display = state.conversationId || state.agentId ? '' : 'none';
-    if (!bar) return;
-    if (state.prNumber) {
-      bar.hidden = false;
-    } else {
-      bar.hidden = true;
+    if (bar) {
+      bar.hidden = !state.prNumber;
     }
+    updateConfigActions();
   }
 
   async function api(path, opts) {
@@ -724,7 +792,15 @@
       b.appendChild(body);
     }
     if (body.textContent === 'Agent trabalhando… (recebendo ao vivo)') body.textContent = '';
-    body.textContent += chunk;
+    const prev = body.textContent || '';
+    let next = String(chunk);
+    // Se o chunk novo começa frase maiúscula grudada no ponto anterior, quebra parágrafo
+    if (prev && /[.!?…]$/.test(prev) && /^[A-ZÀ-Ü]/.test(next) && !/^\s/.test(next)) {
+      next = `\n\n${next}`;
+    } else if (prev && /[.!?…]$/.test(prev) && /^\s*[A-ZÀ-Ü]/.test(next) && !/\n\s*$/.test(prev)) {
+      next = next.replace(/^\s+/, '\n\n');
+    }
+    body.textContent = normalizeAssistantText(prev + next);
     const box = $('cursorChatMessages');
     if (box) box.scrollTop = box.scrollHeight;
   }
@@ -1374,6 +1450,22 @@
       updateSpecialistChip();
       closeConfigModal();
     });
+    $('cursorChatCfgTest')?.addEventListener('click', () => {
+      toggleTestMode();
+      closeConfigModal();
+    });
+    $('cursorChatCfgApprove')?.addEventListener('click', () => {
+      closeConfigModal();
+      void approve();
+    });
+    $('cursorChatCfgPublish')?.addEventListener('click', () => {
+      closeConfigModal();
+      void approve();
+    });
+    $('cursorChatCfgDiscard')?.addEventListener('click', () => {
+      closeConfigModal();
+      void reject();
+    });
     $('cursorChatAgentsClose')?.addEventListener('click', closeAgentsModal);
     $('cursorChatAgentsModal')?.addEventListener('click', (e) => {
       if (e.target === $('cursorChatAgentsModal')) closeAgentsModal();
@@ -1433,7 +1525,7 @@
       void approve();
     });
     $('cursorChatBannerExit')?.addEventListener('click', () => {
-      document.body.classList.remove('cursor-chat-preview-mode');
+      exitTestMode();
     });
   }
 
