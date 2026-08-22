@@ -10400,6 +10400,21 @@
         </div>
       </div>
 
+      <script>
+        /* stub imediato: Agentes abre mesmo antes do JS defer carregar */
+        window.__cursorOpenAgents = window.__cursorOpenAgents || function (ev) {
+          if (ev) { try { ev.preventDefault(); ev.stopPropagation(); } catch (_) {} }
+          var m = document.getElementById('cursorChatAgentsModal');
+          if (!m) return;
+          document.body.appendChild(m);
+          m.hidden = false;
+          m.removeAttribute('hidden');
+          m.classList.add('is-open');
+          m.style.setProperty('display', 'flex', 'important');
+          m.style.setProperty('z-index', '2147483000', 'important');
+        };
+      </script>
+
       <div id="confPerfilNovoModal" style="display:none;position:fixed;inset:0;z-index:10061;background:rgba(0,0,0,.72);align-items:center;justify-content:center;padding:16px;">
         <div style="width:min(470px,96vw);background:#0f172a;border:1px solid #334155;border-radius:14px;color:#e2e8f0;box-shadow:0 24px 70px rgba(0,0,0,.45);">
           <div style="padding:16px 18px;border-bottom:1px solid #334155;display:flex;align-items:center;justify-content:space-between;">
