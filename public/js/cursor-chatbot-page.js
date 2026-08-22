@@ -32,6 +32,7 @@
     specialistName: null,
     specialistsCache: null,
     previousAssistantText: '',
+    histTab: 'atual',
   };
 
   function $(id) {
@@ -248,6 +249,7 @@
     if (!box) return null;
     const b = el('div', `cursor-chat-bubble ${role}`, null);
     if (opts?.id) b.dataset.msgId = opts.id;
+    if (opts?.messageId) b.dataset.messageId = String(opts.messageId);
     if (opts?.streaming) b.classList.add('streaming');
     if (opts?.specialist) b.classList.add('specialist');
 
@@ -277,9 +279,49 @@
       b.textContent = '';
     }
 
+    if (opts?.messageId && role !== 'meta' && role !== 'error' && !opts?.streaming) {
+      attachStarButton(b, opts.messageId, Boolean(opts.favorited));
+    }
+
     box.appendChild(b);
     box.scrollTop = box.scrollHeight;
     return b;
+  }
+
+  function attachStarButton(bubble, messageId, favorited) {
+    if (!bubble || !messageId) return;
+    if (bubble.classList.contains('streaming') || bubble.classList.contains('meta') || bubble.classList.contains('error')) {
+      return;
+    }
+    let star = bubble.querySelector(':scope > .cursor-chat-star');
+    if (!star) {
+      star = document.createElement('button');
+      star.type = 'button';
+      star.className = 'cursor-chat-star';
+      star.addEventListener('click', (e) => {
+        e.stopPropagation();
+        void toggleFavorite(messageId, star);
+      });
+      bubble.appendChild(star);
+    }
+    const on = Boolean(favorited);
+    star.classList.toggle('is-on', on);
+    star.textContent = on ? '★' : '☆';
+    star.title = on ? 'Remover dos favoritos' : 'Favoritar mensagem';
+  }
+
+  async function toggleFavorite(messageId, starEl) {
+    const turningOn = !starEl?.classList.contains('is-on');
+    try {
+      const data = await api(`/messages/${encodeURIComponent(messageId)}/favorite`, {
+        method: 'POST',
+        body: JSON.stringify({ favorite: turningOn }),
+      });
+      attachStarButton(starEl?.closest('.cursor-chat-bubble'), messageId, data.favorited);
+      if (state.histTab === 'favorito') await refreshFavoriteList();
+    } catch (e) {
+      showStickyError(e.message || 'Falha ao favoritar');
+    }
   }
 
   function setBubbleMarkdown(bubble, text) {
@@ -779,9 +821,23 @@
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data.ok === false) {
-      throw new Error(data.error || `HTTP ${resp.status}`);
+      const err = new Error(
+        data.agentArchived || data.code === 'agent_archived'
+          ? 'O agent anterior foi encerrado. A conversa continua.'
+          : data.error || `HTTP ${resp.status}`
+      );
+      err.agentArchived = Boolean(data.agentArchived || data.code === 'agent_archived');
+      err.code = data.code || null;
+      err.conversationId = data.conversationId || null;
+      throw err;
     }
     return data;
+  }
+
+  function isAgentArchivedError(err) {
+    if (err?.agentArchived || err?.code === 'agent_archived') return true;
+    const msg = String(err?.message || '').toLowerCase();
+    return /agent_archived|agent is archived|agent has been archived/.test(msg);
   }
 
   function renderSqlMessages(messages) {
@@ -797,13 +853,25 @@
         if (role === 'user') {
           appendBubble('user', m.content || '', {
             id: `m-${m.id}`,
+            messageId: m.id,
+            favorited: Boolean(m.favorited),
             images,
             specialist: Boolean(m.specialistId),
           });
         } else if (m.role === 'run') {
-          if (m.result) appendBubble('assistant', m.result, { id: `a-${m.id}` });
+          if (m.result) {
+            appendBubble('assistant', m.result, {
+              id: `a-${m.id}`,
+              messageId: m.id,
+              favorited: Boolean(m.favorited),
+            });
+          }
         } else {
-          appendBubble(role === 'system' ? 'meta' : 'assistant', m.content || '', { id: `m-${m.id}` });
+          appendBubble(role === 'system' ? 'meta' : 'assistant', m.content || '', {
+            id: `m-${m.id}`,
+            messageId: role === 'system' ? null : m.id,
+            favorited: Boolean(m.favorited),
+          });
         }
       });
     }
@@ -1043,6 +1111,7 @@
             specialistId: spec.id,
             activateSpecialist: true,
             autoCreatePR: true,
+            conversationId: state.conversationId,
           }),
         });
         state.agentId = data.agentId;
@@ -1051,14 +1120,31 @@
         state.runId = runId;
         saveCloudSession();
       } else {
-        const data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
-          method: 'POST',
-          body: JSON.stringify({
-            specialistId: spec.id,
-            activateSpecialist: true,
-            conversationId: state.conversationId,
-          }),
-        });
+        let data;
+        try {
+          data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
+            method: 'POST',
+            body: JSON.stringify({
+              specialistId: spec.id,
+              activateSpecialist: true,
+              conversationId: state.conversationId,
+            }),
+          });
+        } catch (followErr) {
+          if (!isAgentArchivedError(followErr)) throw followErr;
+          state.agentId = null;
+          saveCloudSession({ agentId: null });
+          data = await api('/agents', {
+            method: 'POST',
+            body: JSON.stringify({
+              specialistId: spec.id,
+              activateSpecialist: true,
+              autoCreatePR: true,
+              conversationId: state.conversationId,
+            }),
+          });
+        }
+        if (data.agentId) state.agentId = data.agentId;
         state.conversationId = data.conversationId || state.conversationId;
         runId = data.run?.id || data.runId || null;
         state.runId = runId;
@@ -1236,10 +1322,8 @@
     try {
       const data = await api('/conversations');
       let items = data.items || [];
-      let fromCursor = false;
       if (!items.length) {
         const legacy = await api('/agents').catch(() => ({ items: [] }));
-        fromCursor = true;
         items = (legacy.items || []).map((a) => ({
           conversationId: a.conversationId || null,
           agentId: a.agentId || a.id,
@@ -1248,39 +1332,6 @@
           updatedAt: a.updatedAt || '',
           source: 'cursor',
         }));
-      }
-
-      // Remove históricos órfãos pedidos (ACTIVE sem SQL / sem × antigo)
-      if (fromCursor && items.length) {
-        const stuck = [
-          'seleção de agentes conversa',
-          'selecao de agentes conversa',
-          'primiero teste de apk cursor',
-          'primeiro teste de apk cursor',
-        ];
-        const norm = (s) =>
-          String(s || '')
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase()
-            .trim();
-        const keep = [];
-        for (const c of items) {
-          const title = norm(c.title || c.name);
-          if (stuck.some((t) => title.includes(t) || t.includes(title)) && c.agentId) {
-            try {
-              await api(`/agents/${encodeURIComponent(c.agentId)}/archive`, {
-                method: 'POST',
-                body: JSON.stringify({}),
-              });
-            } catch (_) {
-              keep.push(c);
-            }
-          } else {
-            keep.push(c);
-          }
-        }
-        items = keep;
       }
 
       if (!items.length) {
@@ -1302,6 +1353,8 @@
           (agentId && agentId === state.agentId);
         const btn = el('button', 'cursor-chat-agent-item' + (active ? ' active' : ''));
         btn.type = 'button';
+        if (cid) btn.dataset.conversationId = String(cid);
+        if (agentId) btn.dataset.agentId = String(agentId);
         btn.innerHTML =
           '<strong></strong><span></span><button type="button" class="cursor-chat-side-del" title="Excluir" aria-label="Excluir">×</button>';
         btn.querySelector('strong').textContent = c.title || c.name || (cid ? `Conversa #${cid}` : agentId);
@@ -1323,6 +1376,83 @@
     } catch (e) {
       list.innerHTML = '';
       list.appendChild(el('div', 'cursor-chat-bubble error', e.message || 'Falha ao listar'));
+    }
+  }
+
+  function markHistoryActive() {
+    document.querySelectorAll('#cursorChatAgentList .cursor-chat-agent-item').forEach((btn) => {
+      const cid = btn.dataset.conversationId;
+      const aid = btn.dataset.agentId;
+      const active =
+        (cid && Number(cid) === Number(state.conversationId)) ||
+        (aid && state.agentId && aid === state.agentId);
+      btn.classList.toggle('active', Boolean(active));
+    });
+  }
+
+  function setHistTab(tab) {
+    state.histTab = tab === 'favorito' ? 'favorito' : 'atual';
+    const atualBtn = $('cursorChatTabAtual');
+    const favBtn = $('cursorChatTabFavorito');
+    const list = $('cursorChatAgentList');
+    const favList = $('cursorChatFavoriteList');
+    atualBtn?.classList.toggle('active', state.histTab === 'atual');
+    favBtn?.classList.toggle('active', state.histTab === 'favorito');
+    if (atualBtn) atualBtn.setAttribute('aria-selected', state.histTab === 'atual' ? 'true' : 'false');
+    if (favBtn) favBtn.setAttribute('aria-selected', state.histTab === 'favorito' ? 'true' : 'false');
+    if (list) list.hidden = state.histTab !== 'atual';
+    if (favList) favList.hidden = state.histTab !== 'favorito';
+    if (state.histTab === 'favorito') void refreshFavoriteList();
+  }
+
+  async function refreshFavoriteList() {
+    const list = $('cursorChatFavoriteList');
+    if (!list) return;
+    list.innerHTML = '<div class="cursor-chat-bubble meta">Carregando favoritos…</div>';
+    try {
+      const data = await api('/favorites');
+      const items = data.items || [];
+      if (!items.length) {
+        list.innerHTML =
+          '<div class="cursor-chat-bubble meta">Nenhuma mensagem favorita. Toque na estrela de uma mensagem.</div>';
+        return;
+      }
+      list.innerHTML = '';
+      items.forEach((m) => {
+        const btn = el('button', 'cursor-chat-fav-item');
+        btn.type = 'button';
+        const preview = String(m.content || '')
+          .replace(/\s+/g, ' ')
+          .trim()
+          .slice(0, 90);
+        btn.innerHTML =
+          '<strong></strong><span></span><button type="button" class="cursor-chat-star is-on" title="Remover dos favoritos">★</button>';
+        btn.querySelector('strong').textContent = m.title || `Conversa #${m.conversationId}`;
+        btn.querySelector('span').textContent = preview || '(sem texto)';
+        btn.addEventListener('click', (e) => {
+          if (e.target?.closest?.('.cursor-chat-star')) return;
+          setHistTab('atual');
+          if (m.conversationId) void openConversation(m.conversationId);
+        });
+        btn.querySelector('.cursor-chat-star').addEventListener('click', (e) => {
+          e.stopPropagation();
+          void (async () => {
+            try {
+              await api(`/messages/${encodeURIComponent(m.id)}/favorite`, {
+                method: 'POST',
+                body: JSON.stringify({ favorite: false }),
+              });
+              await refreshFavoriteList();
+            } catch (err) {
+              showStickyError(err.message || 'Falha ao remover favorito');
+            }
+          })();
+        });
+        list.appendChild(btn);
+      });
+    } catch (e) {
+      list.innerHTML = '';
+      list.appendChild(el('div', 'cursor-chat-bubble error', e.message || 'Falha ao listar favoritos'));
     }
   }
 
@@ -1348,6 +1478,7 @@
   async function openConversation(conversationId) {
     stopWorkWatchers();
     state.conversationId = conversationId;
+    markHistoryActive();
     clearStickyError();
     hideBannerExtras();
     setStatus('Carregando histórico…', 'warn');
@@ -1373,6 +1504,7 @@
       renderSqlMessages(data.messages || []);
       updatePublishBar();
       saveCloudSession();
+      markHistoryActive();
 
       const st = String(data.runStatus || data.status || '').toUpperCase();
       if (st === 'RUNNING' || st === 'CREATING') {
@@ -1382,16 +1514,26 @@
         setStatus('Agent trabalhando…', 'warn');
         // precisa do runId — busca no agent
         if (state.agentId) {
-          const ag = await api(`/agents/${encodeURIComponent(state.agentId)}`);
-          state.runId = ag.runId;
-          if (state.runId) startStream(state.agentId, state.runId);
-          startPoll();
+          try {
+            const ag = await api(`/agents/${encodeURIComponent(state.agentId)}`);
+            state.runId = ag.runId;
+            if (state.runId) startStream(state.agentId, state.runId);
+            startPoll();
+          } catch (agErr) {
+            if (isAgentArchivedError(agErr)) {
+              state.agentId = null;
+              saveCloudSession({ agentId: null });
+              setBusy(false);
+              setStatus('Agent anterior encerrado — a conversa continua. Pode enviar.', 'warn');
+            } else {
+              throw agErr;
+            }
+          }
         }
       } else {
         setBusy(false);
         setStatus(data.title || 'Conversa', data.prNumber ? 'ok' : '');
       }
-      await refreshAgentList();
     } catch (e) {
       clearMessages();
       showStickyError(e.message || 'Falha ao abrir conversa');
@@ -1427,7 +1569,7 @@
         setBusy(false);
         setStatus(data.name || 'Conversa', '');
       }
-      await refreshAgentList();
+      markHistoryActive();
     } catch (e) {
       appendBubble('error', e.message);
     }
@@ -1520,7 +1662,15 @@
         setStatus(st === 'FINISHED' ? 'Resposta pronta' : st, st === 'FINISHED' ? 'ok' : 'err');
         await refreshAgentList();
       }
-    } catch (_) {}
+    } catch (e) {
+      if (isAgentArchivedError(e)) {
+        state.agentId = null;
+        saveCloudSession({ agentId: null });
+        stopWorkWatchers();
+        setBusy(false);
+        setStatus('Agent anterior encerrado — a conversa continua. Pode enviar de novo.', 'warn');
+      }
+    }
   }
 
   async function poll() {
@@ -1554,7 +1704,15 @@
       if (isTerminalStatus(st)) {
         await finishFromPoll();
       }
-    } catch (_) {
+    } catch (e) {
+      if (isAgentArchivedError(e)) {
+        state.agentId = null;
+        saveCloudSession({ agentId: null });
+        stopWorkWatchers();
+        setBusy(false);
+        setStatus('Agent anterior encerrado — a conversa continua. Pode enviar de novo.', 'warn');
+        return;
+      }
       markActivity('falha ao consultar status — tentando de novo');
     }
   }
@@ -1611,36 +1769,47 @@
     }
     try {
       let runId = null;
-      if (!state.agentId) {
-        const data = await api('/agents', {
-          method: 'POST',
-          body: JSON.stringify({
-            prompt: text,
-            images: payloadImages,
-            autoCreatePR: true,
-            ...specialistPayload,
-          }),
-        });
-        state.agentId = data.agentId;
-        state.conversationId = data.conversationId || null;
-        runId = data.runId;
-        state.runId = runId;
-        saveCloudSession();
+      const createBody = {
+        prompt: text,
+        images: payloadImages,
+        autoCreatePR: true,
+        conversationId: state.conversationId,
+        ...specialistPayload,
+      };
+      const followBody = {
+        prompt: text,
+        images: payloadImages,
+        conversationId: state.conversationId,
+        ...specialistPayload,
+      };
+      let data;
+      if (state.agentId) {
+        try {
+          data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
+            method: 'POST',
+            body: JSON.stringify(followBody),
+          });
+        } catch (followErr) {
+          if (!isAgentArchivedError(followErr)) throw followErr;
+          state.agentId = null;
+          saveCloudSession({ agentId: null });
+          setStatus('Agent anterior encerrado — reenviando na mesma conversa…', 'warn');
+          data = await api('/agents', {
+            method: 'POST',
+            body: JSON.stringify(createBody),
+          });
+        }
       } else {
-        const data = await api(`/agents/${encodeURIComponent(state.agentId)}/runs`, {
+        data = await api('/agents', {
           method: 'POST',
-          body: JSON.stringify({
-            prompt: text,
-            images: payloadImages,
-            conversationId: state.conversationId,
-            ...specialistPayload,
-          }),
+          body: JSON.stringify(createBody),
         });
-        state.conversationId = data.conversationId || state.conversationId;
-        runId = data.run?.id || data.runId || null;
-        state.runId = runId;
-        saveCloudSession();
       }
+      if (data.agentId) state.agentId = data.agentId;
+      state.conversationId = data.conversationId || state.conversationId;
+      runId = data.run?.id || data.runId || null;
+      state.runId = runId;
+      saveCloudSession();
       appendBubble('user', text || '(imagem anexada)', { images });
       state.liveBubble = appendBubble('assistant', 'Agent trabalhando… (recebendo ao vivo)', {
         streaming: true,
@@ -1688,13 +1857,10 @@
       stopWorkWatchers();
       appendBubble('meta', `✅ ${data.message || 'Publicado — aguarde o deploy.'}`);
       state.prNumber = null;
-      clearCloudSession();
-      state.agentId = null;
-      state.conversationId = null;
+      saveCloudSession();
       updatePublishBar();
       setStatus('Publicado', 'ok');
       await refreshAgentList();
-      newChat();
     } catch (e) {
       const msg = e.message || 'Falha ao publicar';
       if (/conflito|conflict|merge seguro/i.test(msg)) {
@@ -1768,6 +1934,7 @@
       'Nova conversa (+).\n\nA partir daqui as mensagens ficam juntas nesta conversa. Use **Agentes** ou **⚙** para especialista. Publicar/Descartar só no topo desta página.'
     );
     setStatus('Nova conversa', '');
+    markHistoryActive();
     $('cursorChatInput')?.focus();
   }
 
@@ -1966,6 +2133,8 @@
       e.preventDefault();
       if (e.dataTransfer?.files?.length) void addImageFiles(e.dataTransfer.files);
     });
+    $('cursorChatTabAtual')?.addEventListener('click', () => setHistTab('atual'));
+    $('cursorChatTabFavorito')?.addEventListener('click', () => setHistTab('favorito'));
     $('cursorChatNew')?.addEventListener('click', newChat);
     $('cursorChatStop')?.addEventListener('click', () => {
       void stopCurrentRun();
