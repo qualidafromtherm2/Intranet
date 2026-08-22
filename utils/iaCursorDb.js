@@ -71,6 +71,12 @@ async function ensureIaCursorSchema() {
     // colunas novas em bases já criadas
     await pool.query(`ALTER TABLE ia_cursor.conversations ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
     await pool.query(`ALTER TABLE ia_cursor.messages ADD COLUMN IF NOT EXISTS specialist_id TEXT`);
+    await pool.query(`ALTER TABLE ia_cursor.messages ADD COLUMN IF NOT EXISTS favorited_at TIMESTAMPTZ`);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS ia_cursor_msg_fav_idx
+        ON ia_cursor.messages (favorited_at DESC)
+        WHERE favorited_at IS NOT NULL
+    `);
   })().catch((err) => {
     ensurePromise = null;
     throw err;
@@ -185,7 +191,7 @@ async function addMessage({ conversationId, role, content, cursorRunId = null, s
 async function listMessages(conversationId) {
   await ensureIaCursorSchema();
   const { rows: messages } = await pool.query(
-    `SELECT id, role, content, specialist_id, cursor_run_id, created_at
+    `SELECT id, role, content, specialist_id, cursor_run_id, created_at, favorited_at
        FROM ia_cursor.messages
       WHERE conversation_id = $1
       ORDER BY id ASC`,
@@ -212,7 +218,45 @@ async function listMessages(conversationId) {
   }
   return messages.map((m) => ({
     ...m,
+    favorited: Boolean(m.favorited_at),
     attachments: byMsg.get(m.id) || [],
+  }));
+}
+
+async function setMessageFavorite(messageId, favorite) {
+  await ensureIaCursorSchema();
+  const { rows } = await pool.query(
+    `UPDATE ia_cursor.messages
+        SET favorited_at = CASE
+          WHEN $2 THEN COALESCE(favorited_at, NOW())
+          ELSE NULL
+        END
+      WHERE id = $1
+      RETURNING id, conversation_id, role, content, created_at, favorited_at`,
+    [Number(messageId), Boolean(favorite)]
+  );
+  const row = rows[0] || null;
+  if (!row) return null;
+  return { ...row, favorited: Boolean(row.favorited_at) };
+}
+
+async function listFavoriteMessages({ userId, limit = 50 } = {}) {
+  await ensureIaCursorSchema();
+  const { rows } = await pool.query(
+    `SELECT m.id, m.conversation_id, m.role, m.content, m.created_at, m.favorited_at,
+            c.title AS conversation_title
+       FROM ia_cursor.messages m
+       JOIN ia_cursor.conversations c ON c.id = m.conversation_id
+      WHERE m.favorited_at IS NOT NULL
+        AND c.deleted_at IS NULL
+        AND ($1::int IS NULL OR c.user_id = $1)
+      ORDER BY m.favorited_at DESC
+      LIMIT $2`,
+    [userId || null, Math.min(Number(limit) || 50, 100)]
+  );
+  return rows.map((r) => ({
+    ...r,
+    favorited: true,
   }));
 }
 
@@ -289,6 +333,8 @@ module.exports = {
   touchConversation,
   addMessage,
   listMessages,
+  listFavoriteMessages,
+  setMessageFavorite,
   saveAttachmentsForMessage,
   deleteConversation,
   buildPublicUrl,

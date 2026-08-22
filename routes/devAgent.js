@@ -27,6 +27,7 @@ const {
   resolvePrConflictsSafely,
   CONFLICT_FOLLOWUP_PROMPT,
 } = require('../utils/iaCursorSafeMerge');
+const { isAgentArchivedError } = require('../utils/iaCursorAgentErrors');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
 const GH_API = 'https://api.github.com';
@@ -429,6 +430,89 @@ function sqlAccessPreamble({ readOnly = false } = {}) {
     ''
   );
   return lines.join('\n');
+}
+
+function historyContextForRelaunch(messages) {
+  const prior = Array.isArray(messages) ? messages.slice(0, -1).slice(-12) : [];
+  if (!prior.length) {
+    return [
+      '[Continuação da mesma conversa da intranet — o agent anterior foi encerrado (agent_archived).]',
+      'Não peça Nova conversa. O histórico já está no banco desta conversa.',
+      '',
+    ].join('\n');
+  }
+  const lines = prior.map((m) => {
+    const role = m.role === 'user' ? 'Usuário' : m.role === 'assistant' ? 'Assistente' : 'Sistema';
+    const text = String(m.content || '').replace(/\s+/g, ' ').trim().slice(0, 700);
+    return `${role}: ${text}`;
+  });
+  return [
+    '[Continuação da mesma conversa da intranet — o agent anterior foi encerrado (agent_archived).]',
+    'Não peça Nova conversa. Histórico recente já gravado:',
+    ...lines,
+    'Atenda somente o último pedido do usuário.',
+    '',
+  ].join('\n');
+}
+
+async function launchCursorAgent({ conv, resolved, req, prompt, recoveredFromArchive = false }) {
+  let launchPrompt = prompt;
+  if (recoveredFromArchive && conv?.id) {
+    try {
+      const msgs = await iaDb.listMessages(conv.id);
+      const ctx = historyContextForRelaunch(msgs);
+      launchPrompt = {
+        ...prompt,
+        text: `${ctx}\n${prompt?.text || ''}`.trim(),
+      };
+    } catch (_) {}
+  }
+
+  const { branch } = githubCfg();
+  const envVars = cloudAgentEnvVars({ readOnlySql: Boolean(resolved.chamadoIa) });
+  const body = {
+    prompt: wrapPromptForCursor(launchPrompt, { readOnlySql: Boolean(resolved.chamadoIa) }),
+    name:
+      String(req.body?.name || '').trim() ||
+      (resolved.chamadoIa
+        ? 'Chamado IA'
+        : resolved.specialist
+          ? `Esp: ${resolved.specialist.name}`
+          : titleFromPrompt(resolved.displayText)),
+    repos: [{ url: repoHttpsUrl(), startingRef: branch }],
+    autoCreatePR: resolved.chamadoIa ? false : req.body?.autoCreatePR !== false,
+    mode: resolved.chamadoIa
+      ? req.body?.mode === 'plan'
+        ? 'plan'
+        : 'ask'
+      : req.body?.mode === 'plan'
+        ? 'plan'
+        : 'agent',
+    ...(envVars ? { envVars } : {}),
+  };
+
+  let data;
+  try {
+    data = await cursorFetch('/agents', { method: 'POST', body });
+  } catch (err) {
+    if (resolved.chamadoIa && body.mode === 'ask') {
+      body.mode = 'plan';
+      data = await cursorFetch('/agents', { method: 'POST', body });
+    } else {
+      throw err;
+    }
+  }
+  const summary = summarizeAgent(data?.agent, data?.run);
+  await iaDb.touchConversation(conv.id, {
+    cursor_agent_id: summary.agentId,
+    status: summary.runStatus || 'CREATING',
+    agent_url: summary.agentUrl,
+    branch: summary.branch,
+    pr_url: summary.prUrl,
+    pr_number: summary.prNumber,
+    specialist_id: resolved.specialistId,
+  });
+  return { data, summary };
 }
 
 function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } = {}) {
@@ -971,6 +1055,7 @@ router.get('/conversations/:id', requireAdminOrMobile, async (req, res) => {
         specialistId: m.specialist_id || null,
         runId: m.cursor_run_id,
         createdAt: m.created_at,
+        favorited: Boolean(m.favorited),
         attachments: m.attachments || [],
       })),
     });
@@ -999,6 +1084,47 @@ router.post('/conversations/:id/system-note', requireAdminOrMobile, express.json
   }
 });
 
+/** Mensagens favoritas (guia Favorito do histórico). */
+router.get('/favorites', requireAdminOrMobile, async (req, res) => {
+  try {
+    await iaDb.ensureIaCursorSchema();
+    const userId = req.devAgentMobile ? null : req.session?.user?.id;
+    const items = await iaDb.listFavoriteMessages({ userId, limit: 80 });
+    return res.json({
+      ok: true,
+      items: items.map((m) => ({
+        id: m.id,
+        conversationId: m.conversation_id,
+        role: m.role,
+        content: m.content,
+        createdAt: m.created_at,
+        favoritedAt: m.favorited_at,
+        title: m.conversation_title,
+        favorited: true,
+      })),
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/messages/:id/favorite', requireAdminOrMobile, express.json({ limit: '8kb' }), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const favorite = req.body?.favorite !== false && req.body?.favorite !== 'false';
+    const row = await iaDb.setMessageFavorite(id, favorite);
+    if (!row) return res.status(404).json({ ok: false, error: 'Mensagem não encontrada.' });
+    return res.json({
+      ok: true,
+      id: row.id,
+      conversationId: row.conversation_id,
+      favorited: row.favorited,
+    });
+  } catch (err) {
+    return res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 /** Exclui conversa + fotos no R2. */
 router.delete('/conversations/:id', requireAdminOrMobile, async (req, res) => {
   try {
@@ -1022,7 +1148,7 @@ router.delete('/conversations/:id', requireAdminOrMobile, async (req, res) => {
   }
 });
 
-/** Cria Cloud Agent + grava conversa no SQL. */
+/** Cria Cloud Agent + grava conversa no SQL. Reusa conversationId se a conversa já existir. */
 router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), async (req, res) => {
   try {
     const resolved = resolvePromptFromBody(req);
@@ -1030,14 +1156,19 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
     const titleSeed = resolved.activateSpecialist
       ? `Especialista: ${resolved.specialist.name}`
       : resolved.displayText;
-    const conv = await iaDb.createConversation({
-      userId: user.id || null,
-      username: user.username || null,
-      title:
-        resolved.chamadoIa
-          ? `Chamado IA: ${titleFromPrompt(titleSeed)}`
-          : titleFromPrompt(titleSeed) || String(req.body?.name || '').trim() || 'Nova conversa',
-    });
+    const reuseId = Number(req.body?.conversationId) || 0;
+    let conv = reuseId ? await iaDb.getConversation(reuseId) : null;
+    const reused = Boolean(conv);
+    if (!conv) {
+      conv = await iaDb.createConversation({
+        userId: user.id || null,
+        username: user.username || null,
+        title:
+          resolved.chamadoIa
+            ? `Chamado IA: ${titleFromPrompt(titleSeed)}`
+            : titleFromPrompt(titleSeed) || String(req.body?.name || '').trim() || 'Nova conversa',
+      });
+    }
 
     // Reaplica contexto com conversationId real (abrir chamado)
     let cursorText = resolved.cursorText;
@@ -1063,50 +1194,12 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       await iaDb.touchConversation(conv.id, { specialist_id: resolved.specialistId });
     }
 
-    const { branch } = githubCfg();
-    const envVars = cloudAgentEnvVars({ readOnlySql: Boolean(resolved.chamadoIa) });
-    const body = {
-      prompt: wrapPromptForCursor(prompt, { readOnlySql: Boolean(resolved.chamadoIa) }),
-      name:
-        String(req.body?.name || '').trim() ||
-        (resolved.chamadoIa
-          ? `Chamado IA`
-          : resolved.specialist
-            ? `Esp: ${resolved.specialist.name}`
-            : titleFromPrompt(resolved.displayText)),
-      repos: [{ url: repoHttpsUrl(), startingRef: branch }],
-      autoCreatePR: resolved.chamadoIa ? false : req.body?.autoCreatePR !== false,
-      // ask = sem editar código; fallback plan se a API rejeitar ask
-      mode: resolved.chamadoIa
-        ? req.body?.mode === 'plan'
-          ? 'plan'
-          : 'ask'
-        : req.body?.mode === 'plan'
-          ? 'plan'
-          : 'agent',
-      ...(envVars ? { envVars } : {}),
-    };
-
-    let data;
-    try {
-      data = await cursorFetch('/agents', { method: 'POST', body });
-    } catch (err) {
-      if (resolved.chamadoIa && body.mode === 'ask') {
-        body.mode = 'plan';
-        data = await cursorFetch('/agents', { method: 'POST', body });
-      } else {
-        throw err;
-      }
-    }
-    const summary = summarizeAgent(data?.agent, data?.run);
-    await iaDb.touchConversation(conv.id, {
-      cursor_agent_id: summary.agentId,
-      status: summary.runStatus || 'CREATING',
-      agent_url: summary.agentUrl,
-      branch: summary.branch,
-      pr_url: summary.prUrl,
-      pr_number: summary.prNumber,
-      specialist_id: resolved.specialistId,
+    const { data, summary } = await launchCursorAgent({
+      conv,
+      resolved,
+      req,
+      prompt,
+      recoveredFromArchive: reused,
     });
 
     return res.json({
@@ -1115,6 +1208,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       specialistId: resolved.specialistId,
       specialistName: resolved.specialist?.name || null,
       chamadoIa: Boolean(resolved.chamadoIa),
+      recoveredFromArchive: reused,
       ...summary,
       attachments,
       raw: data,
@@ -1125,29 +1219,34 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
   }
 });
 
-/** Follow-up em agent existente (+ SQL). */
+/** Follow-up em agent existente (+ SQL). Se o agent estiver archived, recria na mesma conversa. */
 router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25mb' }), async (req, res) => {
   try {
     const agentId = req.params.id;
     const resolved = resolvePromptFromBody(req);
 
-    // Libera run preso ANTES de gravar a mensagem (evita user órfão sem resposta)
-    let cancelledBusy = false;
-    try {
-      const idle = await cancelActiveRunIfBusy(agentId);
-      cancelledBusy = Boolean(idle.cancelled);
-    } catch (busyErr) {
-      return res.status(busyErr.status || 409).json({
-        ok: false,
-        error: busyErr.message,
-        busy: true,
-      });
-    }
-
     let conv =
       (req.body?.conversationId
         ? await iaDb.getConversation(Number(req.body.conversationId))
         : null) || (await iaDb.getConversationByAgentId(agentId));
+
+    // Libera run preso ANTES de gravar a mensagem (evita user órfão sem resposta)
+    let cancelledBusy = false;
+    let recoveredFromArchive = false;
+    try {
+      const idle = await cancelActiveRunIfBusy(agentId);
+      cancelledBusy = Boolean(idle.cancelled);
+    } catch (busyErr) {
+      if (isAgentArchivedError(busyErr)) {
+        recoveredFromArchive = true;
+      } else {
+        return res.status(busyErr.status || 409).json({
+          ok: false,
+          error: busyErr.message,
+          busy: true,
+        });
+      }
+    }
 
     if (!conv) {
       const user = req.session?.user || {};
@@ -1156,7 +1255,9 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         username: user.username || null,
         title: titleFromPrompt(resolved.displayText),
       });
-      await iaDb.touchConversation(conv.id, { cursor_agent_id: agentId });
+      if (!recoveredFromArchive) {
+        await iaDb.touchConversation(conv.id, { cursor_agent_id: agentId });
+      }
     }
 
     const chamadoIa =
@@ -1193,40 +1294,70 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     }
 
     let data;
-    try {
-      data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
-        method: 'POST',
-        body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
-      });
-    } catch (runErr) {
-      // Corrida: ainda busy → tenta cancelar de novo e recria 1x
-      if (runErr.status === 409) {
-        await cancelActiveRunIfBusy(agentId);
+    let summary = null;
+    if (!recoveredFromArchive) {
+      try {
         data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
           method: 'POST',
           body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
         });
-      } else {
-        throw runErr;
+      } catch (runErr) {
+        if (isAgentArchivedError(runErr)) {
+          recoveredFromArchive = true;
+        } else if (runErr.status === 409) {
+          await cancelActiveRunIfBusy(agentId);
+          data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
+            method: 'POST',
+            body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
+          });
+        } else {
+          throw runErr;
+        }
       }
     }
+
+    if (recoveredFromArchive) {
+      const launched = await launchCursorAgent({
+        conv,
+        resolved,
+        req,
+        prompt,
+        recoveredFromArchive: true,
+      });
+      data = launched.data;
+      summary = launched.summary;
+    }
+
     const run = data?.run || data;
+    const nextAgentId = summary?.agentId || agentId;
     await iaDb.touchConversation(conv.id, {
-      status: run?.status || 'RUNNING',
+      status: run?.status || summary?.runStatus || 'RUNNING',
+      cursor_agent_id: nextAgentId,
     });
 
     return res.json({
       ok: true,
       conversationId: conv.id,
+      agentId: nextAgentId,
       specialistId: resolved.specialistId || (chamadoIa ? 'chamado-ia' : null),
       specialistName: resolved.specialist?.name || (chamadoIa ? 'Chamado IA' : null),
       chamadoIa,
+      recoveredFromArchive,
       run,
-      runId: run?.id || null,
+      runId: run?.id || summary?.runId || null,
       cancelledBusy,
       attachments,
     });
   } catch (err) {
+    if (isAgentArchivedError(err)) {
+      console.warn('[dev-agent] follow-up agent_archived sem recuperação:', err.message);
+      return res.status(409).json({
+        ok: false,
+        error: 'O agent anterior foi encerrado. A conversa continua — envie de novo.',
+        agentArchived: true,
+        code: 'agent_archived',
+      });
+    }
     console.error('[dev-agent] follow-up', err.message);
     return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
@@ -1279,6 +1410,16 @@ router.get('/agents/:id', requireAdminOrMobile, async (req, res) => {
       run,
     });
   } catch (err) {
+    if (isAgentArchivedError(err)) {
+      const conv = await iaDb.getConversationByAgentId(req.params.id).catch(() => null);
+      return res.status(409).json({
+        ok: false,
+        error: 'O agent anterior foi encerrado. A conversa continua.',
+        agentArchived: true,
+        code: 'agent_archived',
+        conversationId: conv?.id || null,
+      });
+    }
     console.error('[dev-agent] get', err.message);
     return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
@@ -1356,6 +1497,7 @@ router.get('/agents/:id/conversation', requireAdminOrMobile, async (req, res) =>
           content: m.content,
           runId: m.cursor_run_id,
           createdAt: m.created_at,
+          favorited: Boolean(m.favorited),
           attachments: m.attachments || [],
           status: m.role === 'assistant' ? 'FINISHED' : undefined,
           result: m.role === 'assistant' ? m.content : null,
@@ -1383,6 +1525,16 @@ router.get('/agents/:id/conversation', requireAdminOrMobile, async (req, res) =>
       messages,
     });
   } catch (err) {
+    if (isAgentArchivedError(err)) {
+      const conv = await iaDb.getConversationByAgentId(req.params.id).catch(() => null);
+      return res.status(409).json({
+        ok: false,
+        error: 'O agent anterior foi encerrado. A conversa continua.',
+        agentArchived: true,
+        code: 'agent_archived',
+        conversationId: conv?.id || null,
+      });
+    }
     console.error('[dev-agent] conversation', err.message);
     return res.status(err.status || 500).json({ ok: false, error: err.message });
   }
@@ -1710,16 +1862,6 @@ router.post('/approve', requireAdminOrMobile, express.json({ limit: '20kb' }), a
       merged = await squashMergePr(owner, repo, prNumber, actor);
     }
 
-    if (agentId) {
-      try {
-        await cursorFetch(`/agents/${encodeURIComponent(agentId)}/archive`, {
-          method: 'POST',
-          body: {},
-        });
-      } catch (e) {
-        console.warn('[dev-agent] archive após merge:', e.message);
-      }
-    }
     if (conversationId) {
       await iaDb.touchConversation(conversationId, { status: 'published' });
       await iaDb.addMessage({
@@ -1756,16 +1898,6 @@ router.post('/reject', requireAdminOrMobile, express.json({ limit: '20kb' }), as
         method: 'PATCH',
         body: { state: 'closed' },
       });
-    }
-    if (agentId) {
-      try {
-        await cursorFetch(`/agents/${encodeURIComponent(agentId)}/archive`, {
-          method: 'POST',
-          body: {},
-        });
-      } catch (e) {
-        console.warn('[dev-agent] archive após reject:', e.message);
-      }
     }
     if (conversationId) {
       await iaDb.touchConversation(conversationId, { status: 'discarded' });
