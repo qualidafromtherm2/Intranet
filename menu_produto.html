@@ -23,6 +23,7 @@
   <link rel="stylesheet" href="/public/css/frete-simulador.css?v=20260804f"/>
   <link rel="stylesheet" href="/public/css/bipagem-contagem.css?v=20260814b"/>
   <link rel="stylesheet" href="/public/css/cursor-chatbot-page.css?v=20260822c"/>
+  <link rel="stylesheet" href="/public/css/chamado-ia-chat.css?v=20260822a"/>
   <!-- Anti-flicker: esconde menus até as permissões serem aplicadas -->
   <style id="boot-anti-flicker">
     /* Enquanto o app não está pronto, esconde elementos sujeitos a permissões */
@@ -8339,6 +8340,44 @@
           </div>
         </div>
 
+        <div id="chamadoIaModal" class="chamado-ia-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="chamadoIaTitulo">
+          <div class="chamado-ia-card">
+            <header class="chamado-ia-header">
+              <div class="chamado-ia-heading">
+                <span class="chamado-ia-icon" aria-hidden="true"><i class="fa-solid fa-robot"></i></span>
+                <div>
+                  <h3 id="chamadoIaTitulo">Chamado IA</h3>
+                  <p>Dúvidas no SQL e abrir chamado — sem alterar o sistema</p>
+                </div>
+              </div>
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button type="button" class="cursor-chat-btn" id="chamadoIaNova" data-no-global-spinner="1" title="Nova conversa">Nova</button>
+                <button type="button" class="chamado-ia-close" id="chamadoIaFechar" aria-label="Fechar">×</button>
+              </div>
+            </header>
+            <div class="chamado-ia-body">
+              <div class="chamado-ia-status" id="chamadoIaStatus">Pronto</div>
+              <div class="chamado-ia-messages" id="chamadoIaMessages" aria-live="polite"></div>
+              <div class="chamado-ia-composer">
+                <div class="chamado-ia-previews" id="chamadoIaPreviews"></div>
+                <div class="chamado-ia-input-shell">
+                  <textarea id="chamadoIaInput" rows="1" placeholder="Pergunte sobre registros no SQL ou peça para abrir um chamado…"></textarea>
+                  <div class="chamado-ia-toolbar">
+                    <div>
+                      <button type="button" class="chamado-ia-tool-btn" id="chamadoIaAttach" data-no-global-spinner="1" title="Anexar imagem" aria-label="Anexar">+</button>
+                    </div>
+                    <div>
+                      <button type="button" class="chamado-ia-send-btn" id="chamadoIaSend" data-no-global-spinner="1" title="Enviar" aria-label="Enviar">↑</button>
+                    </div>
+                  </div>
+                  <input type="file" id="chamadoIaFile" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+                </div>
+                <p class="chamado-ia-hint">Neste modo a IA só consulta o banco (SELECT) e pode abrir chamado. Não muda código nem configurações.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div id="chamadoSuporteModal" class="agenda-modal-overlay chamado-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="chamadoSuporteTitulo">
           <div class="agenda-modal-card chamado-modal-card">
             <header class="chamado-modal-header">
@@ -14422,8 +14461,9 @@
   <script defer src="/public/js/frete-simulador.js?v=20260804f"></script>
   <script defer src="/public/js/estoque-maquinas.js?v=20260817a"></script>
   <script defer src="/public/js/cursor-chatbot-page.js?v=20260822c"></script>
+  <script defer src="/public/js/chamado-ia-chat.js?v=20260822a"></script>
   <link rel="stylesheet" href="/public/css/nav-admin-radial.css?v=20260818b">
-  <script defer src="/public/js/nav-admin-radial.js?v=20260821a"></script>
+  <script defer src="/public/js/nav-admin-radial.js?v=20260822a"></script>
 
   <script type="module" src="./requisicoes_omie/filtro_produto.js?v=20260812-qr-contem"></script>
   <script type="module" src="./requisicoes_omie/ListarProdutos.js?v=20260812-qr-contem"></script>
