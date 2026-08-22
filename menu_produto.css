@@ -3001,20 +3001,37 @@ body.light-mode {
   border-bottom: 2px solid var(--theme-color);
 }
 
-/* badge do usuário fica imediatamente à esquerda da foto */
+/* foto em cima, nome embaixo, foto alinhada ao centro do texto */
+.header-user-identity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 0;
+  flex-shrink: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+.header-user-identity .profile-img {
+  margin: 0;
+  box-sizing: border-box;
+}
 .user-badge {
-  margin-left: 0;
+  margin: 0;
+  max-width: 100%;
 }
 .user-name {
-  display: inline-block;
-  max-width: 120px;
+  display: block;
+  max-width: 88px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  text-align: center;
   text-transform: none;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 600;
-  line-height: 1.2;
+  line-height: 1.15;
   color: var(--theme-color);
 }
 
@@ -24033,7 +24050,7 @@ html.light-mode #minhasComprasWrapper {
    Mantém a estrutura, IDs, rotas e eventos legados; altera somente a moldura.
    ======================================================================== */
 :root {
-  --shell-topbar-height: 52px;
+  --shell-topbar-height: 58px;
   --shell-sidebar-width: 60px;
   --shell-gutter: 16px;
   --shell-divider: color-mix(in srgb, var(--border-color) 82%, transparent);
@@ -24299,7 +24316,8 @@ html.light-mode #minhasComprasWrapper {
 /* Terceiro passe: uma navegaÃ§Ã£o global e uma Ãºnica barra local no piloto. */
 .header > #mainMenu { display: none; }
 .header .header-user-cluster { margin-left: auto; }
-.header .user-badge { margin-left: 4px; margin-right: -2px; flex-shrink: 0; }
+.header .header-user-identity { margin-left: 2px; }
+.header .user-badge { margin: 0; flex-shrink: 0; }
 .header .header-profile { margin-left: 8px; }
 #cart-icon {
   position: absolute !important;
