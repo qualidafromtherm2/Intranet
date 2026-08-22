@@ -16,6 +16,11 @@ const {
   buildActivationPrompt,
   buildUserPromptWithSpecialist,
 } = require('../utils/iaCursorSpecialists');
+const {
+  stripPreviousAssistantPrefix,
+  mergeAssistantStream,
+  previousAssistantContents,
+} = require('../utils/iaCursorChatText');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
 const GH_API = 'https://api.github.com';
@@ -317,13 +322,27 @@ function sqlAccessPreamble() {
   return lines.join('\n');
 }
 
-function wrapPromptForCursor(prompt) {
+function wrapPromptForCursor(prompt, { followUp = false } = {}) {
   const text = String(prompt?.text || '');
+  const followUpHint = followUp
+    ? [
+        '',
+        '[Follow-up] Responda SÓ o pedido novo abaixo.',
+        'Não repita, não cole e não reescreva a resposta anterior.',
+        'Se precisar de contexto, use uma frase curta — o histórico já está na conversa.',
+        '',
+      ].join('\n')
+    : '\n';
   const wrapped = {
     ...prompt,
-    text: `${sqlAccessPreamble()}\n---\n\n${text}`,
+    text: `${sqlAccessPreamble()}\n---\n${followUpHint}${text}`,
   };
   return wrapped;
+}
+
+function cleanAssistantContent(raw, messages, runId) {
+  const previous = previousAssistantContents(messages, { excludeRunId: runId });
+  return stripPreviousAssistantPrefix(String(raw || '').trim(), previous);
 }
 
 function sleep(ms) {
@@ -499,11 +518,12 @@ async function syncAssistantFromCursor(conversation, agentId) {
       const already = msgs.some(
         (m) => m.role === 'assistant' && m.cursor_run_id === summary.runId
       );
-      if (!already) {
+      const content = cleanAssistantContent(summary.result, msgs, summary.runId);
+      if (!already && content) {
         await iaDb.addMessage({
           conversationId: conversation.id,
           role: 'assistant',
-          content: summary.result,
+          content,
           cursorRunId: summary.runId,
         });
       }
@@ -880,7 +900,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
     try {
       data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
         method: 'POST',
-        body: { prompt: wrapPromptForCursor(prompt) },
+        body: { prompt: wrapPromptForCursor(prompt, { followUp: true }) },
       });
     } catch (runErr) {
       // Corrida: ainda busy → tenta cancelar de novo e recria 1x
@@ -888,7 +908,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         await cancelActiveRunIfBusy(agentId);
         data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
           method: 'POST',
-          body: { prompt: wrapPromptForCursor(prompt) },
+          body: { prompt: wrapPromptForCursor(prompt, { followUp: true }) },
         });
       } else {
         throw runErr;
@@ -1166,7 +1186,9 @@ router.get('/agents/:id/runs/:runId/stream', requireAdminOrMobile, async (req, r
         if (!dataLine) continue;
         try {
           const data = JSON.parse(dataLine);
-          if (event === 'assistant' && data.text) lastAssistant += data.text;
+          if (event === 'assistant' && data.text) {
+            lastAssistant = mergeAssistantStream(lastAssistant, data.text);
+          }
           if (event === 'result' && data.text) lastAssistant = data.text;
         } catch (_) {}
       }
@@ -1181,11 +1203,12 @@ router.get('/agents/:id/runs/:runId/stream', requireAdminOrMobile, async (req, r
           const already = msgs.some(
             (m) => m.role === 'assistant' && m.cursor_run_id === req.params.runId
           );
-          if (!already) {
+          const content = cleanAssistantContent(lastAssistant, msgs, req.params.runId);
+          if (!already && content) {
             await iaDb.addMessage({
               conversationId: conv.id,
               role: 'assistant',
-              content: lastAssistant.trim(),
+              content,
               cursorRunId: req.params.runId,
             });
           }

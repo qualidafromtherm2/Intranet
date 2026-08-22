@@ -31,6 +31,7 @@
     specialistId: null,
     specialistName: null,
     specialistsCache: null,
+    previousAssistantText: '',
   };
 
   function $(id) {
@@ -82,6 +83,84 @@
     if (sess.branch) state.branch = sess.branch;
     if (sess.specialistId) state.specialistId = sess.specialistId;
     if (sess.specialistName) state.specialistName = sess.specialistName;
+  }
+
+  function collapseWs(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  function stripPreviousAssistantPrefix(text, previousTexts) {
+    let out = String(text || '').trim();
+    const list = (Array.isArray(previousTexts) ? previousTexts : [previousTexts])
+      .map((t) => String(t || '').trim())
+      .filter((t) => t.length >= 32)
+      .sort((a, b) => b.length - a.length);
+    for (const prev of list) {
+      if (!out) return '';
+      if (out === prev) return '';
+      if (out.startsWith(prev)) {
+        out = out.slice(prev.length).replace(/^[\s.]+/, '').trim();
+        continue;
+      }
+      const outN = collapseWs(out);
+      const prevN = collapseWs(prev);
+      if (outN === prevN) return '';
+      if (outN.startsWith(prevN)) out = outN.slice(prevN.length).trim();
+    }
+    return out;
+  }
+
+  function mergeAssistantStream(accumulated, chunk) {
+    const acc = String(accumulated || '');
+    const next = String(chunk || '');
+    if (!next) return acc;
+    if (!acc) return next;
+    if (next === acc) return acc;
+    if (next.startsWith(acc)) return next;
+    if (acc.startsWith(next)) return acc;
+    if (acc.endsWith(next)) return acc;
+    const maxOverlap = Math.min(acc.length, next.length);
+    for (let i = maxOverlap; i >= 16; i -= 1) {
+      if (acc.endsWith(next.slice(0, i))) return acc + next.slice(i);
+    }
+    return acc + next;
+  }
+
+  function messageRunId(m) {
+    return m?.runId || m?.cursor_run_id || m?.cursorRunId || null;
+  }
+
+  function assistantForRun(messages, runId) {
+    const list = Array.isArray(messages) ? messages : [];
+    const want = String(runId || '').trim();
+    if (!want) return null;
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const m = list[i];
+      if (!m || m.role !== 'assistant') continue;
+      if (String(messageRunId(m) || '') !== want) continue;
+      if (!String(m.content || '').trim()) continue;
+      return m;
+    }
+    return null;
+  }
+
+  function rememberPreviousAssistant(text) {
+    const t = String(text || '').trim();
+    if (t) state.previousAssistantText = t;
+  }
+
+  function withoutPreviousLeak(text) {
+    return stripPreviousAssistantPrefix(text, [state.previousAssistantText]);
+  }
+
+  function lastCompletedAssistantText() {
+    const box = $('cursorChatMessages');
+    if (!box) return state.previousAssistantText || '';
+    const bubbles = [...box.querySelectorAll('.cursor-chat-bubble.assistant:not(.streaming)')];
+    const last = bubbles[bubbles.length - 1];
+    if (!last) return state.previousAssistantText || '';
+    const body = last.querySelector('.md-body');
+    return String(body?.textContent || last.textContent || '').trim() || state.previousAssistantText || '';
   }
 
   /** Markdown leve → HTML seguro (negrito, código, tabelas, listas, links). */
@@ -595,10 +674,18 @@
       state.branch = data.branch || state.branch;
       updatePublishBar();
       const msgs = data.messages || [];
-      const lastAsst = [...msgs].reverse().find((m) => m.role === 'assistant' && m.content);
+      const lastCompleted = [...msgs].reverse().find(
+        (m) =>
+          m.role === 'assistant' &&
+          m.content &&
+          (!state.runId || String(messageRunId(m) || '') !== String(state.runId))
+      );
+      if (lastCompleted?.content) rememberPreviousAssistant(lastCompleted.content);
+      // Só o texto DESTE run — senão a bolha nova nasce com pedaços da resposta antiga
+      const lastAsst = assistantForRun(msgs, state.runId);
       if (lastAsst?.content) {
         const b = ensureLiveBubble();
-        setBubbleMarkdown(b, lastAsst.content);
+        setBubbleMarkdown(b, withoutPreviousLeak(lastAsst.content));
         b.classList.add('streaming');
       }
     } catch (_) {}
@@ -699,6 +786,8 @@
 
   function renderSqlMessages(messages) {
     clearMessages();
+    const lastAsst = [...(messages || [])].reverse().find((m) => m.role === 'assistant' && m.content);
+    rememberPreviousAssistant(lastAsst?.content || '');
     if (!messages?.length) {
       appendBubble('meta', 'Nenhuma mensagem ainda. Escolha um especialista (Agentes) ou envie um comando.');
     } else {
@@ -1013,15 +1102,17 @@
       b.appendChild(body);
     }
     if (body.textContent === 'Agent trabalhando… (recebendo ao vivo)') body.textContent = '';
-    const prev = body.textContent || '';
-    let next = String(chunk);
+    const incoming = withoutPreviousLeak(String(chunk));
+    if (!incoming) return;
+    const prev = withoutPreviousLeak(body.textContent || '');
+    let next = incoming;
     // Se o chunk novo começa frase maiúscula grudada no ponto anterior, quebra parágrafo
     if (prev && /[.!?…]$/.test(prev) && /^[A-ZÀ-Ü]/.test(next) && !/^\s/.test(next)) {
       next = `\n\n${next}`;
     } else if (prev && /[.!?…]$/.test(prev) && /^\s*[A-ZÀ-Ü]/.test(next) && !/\n\s*$/.test(prev)) {
       next = next.replace(/^\s+/, '\n\n');
     }
-    body.textContent = normalizeAssistantText(prev + next);
+    body.textContent = normalizeAssistantText(mergeAssistantStream(prev, next));
     const box = $('cursorChatMessages');
     if (box) box.scrollTop = box.scrollHeight;
   }
@@ -1079,7 +1170,7 @@
       markActivity('finalizando');
       try {
         const data = JSON.parse(ev.data || '{}');
-        const text = data.text || '';
+        const text = withoutPreviousLeak(data.text || '');
         const b = ensureLiveBubble();
         if (text) setBubbleMarkdown(b, text);
         else {
@@ -1377,7 +1468,10 @@
         state.branch = data.branch || state.branch;
         // Se o SQL ainda não tem a resposta e o Cursor diz FINISHED, espera soft sync
         const msgs = data.messages || [];
-        const hasAssistant = msgs.some((m) => m.role === 'assistant' && String(m.content || '').trim());
+        const hasAssistant = Boolean(
+          assistantForRun(msgs, state.runId) ||
+            (!state.runId && msgs.some((m) => m.role === 'assistant' && String(m.content || '').trim()))
+        );
         if (!force && st === 'FINISHED' && !hasAssistant && state.busy) {
           state.finishWaitCount = (state.finishWaitCount || 0) + 1;
           markActivity('aguardando gravar resposta…');
@@ -1483,6 +1577,16 @@
       stopStream();
     }
     clearStickyError();
+    rememberPreviousAssistant(lastCompletedAssistantText());
+    if (state.liveBubble) {
+      state.liveBubble.classList.remove('streaming');
+      const stale = state.liveBubble.querySelector('.md-body');
+      const staleText = String(stale?.textContent || '').trim();
+      if (!staleText || staleText === 'Agent trabalhando… (recebendo ao vivo)') {
+        state.liveBubble.remove();
+      }
+      state.liveBubble = null;
+    }
     input.value = '';
     autoResizeChatInput();
     clearPendingImages();
@@ -1639,6 +1743,7 @@
     state.branch = null;
     state.specialistId = null;
     state.specialistName = null;
+    state.previousAssistantText = '';
     clearStickyError();
     clearCloudSession();
     updateSpecialistChip();
