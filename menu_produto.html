@@ -181,17 +181,13 @@
   data-nav-selector="#menu-registros">Registros</a>
 </nav>
 
-  <!-- Atalhos colados à esquerda do nome: crescem para a esquerda, sem barra de rolagem -->
+  <!-- Atalhos colados à esquerda dos ícones: crescem para a esquerda, sem barra de rolagem -->
   <div class="header-user-cluster">
     <div id="headerShortcutsBar" class="header-shortcuts-bar" aria-label="Atalhos">
       <button id="btnGerenciarAtalhos" type="button" class="shortcut-manage-btn" title="Gerenciar atalhos" aria-label="Gerenciar atalhos">
         <i class="fa-solid fa-sliders"></i>
       </button>
       <div id="shortcutItemsContainer" class="shortcut-items-container header-shortcuts-items"></div>
-    </div>
-
-    <div class="user-badge">
-      <span id="userNameDisplay" class="user-name">Usuário</span>
     </div>
   </div>
 
@@ -211,6 +207,9 @@
     <i id="chamado-icon" class="fa-solid fa-headset" title="Chamado de suporte" data-nav-key="top-shortcut:chamado" data-nav-pos="top" data-nav-label="Chamado de suporte"><span id="chamado-badge" class="chamado-badge" hidden>0</span></i>
     <i id="links-icon" class="fa-solid fa-link" title="Links rápidos" data-nav-key="top-shortcut:links-rapidos" data-nav-pos="top" data-nav-label="Links rápidos"></i>
     <i id="config-icon" class="fa-solid fa-rotate-right" title="Atualização disponível - clique para limpar cache e atualizar" style="cursor:pointer;display:none;"></i>
+    <div class="user-badge">
+      <span id="userNameDisplay" class="user-name">Usuário</span>
+    </div>
     <img id="profile-icon" class="profile-img"
          src="{{STORAGE_PUBLIC_BASE_URL}}/compras-anexos/profile-photos/Captura%20de%20tela%20de%202026-01-29%2015-12-33.png"
          alt="Perfil">

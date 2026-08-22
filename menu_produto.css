@@ -3001,9 +3001,20 @@ body.light-mode {
   border-bottom: 2px solid var(--theme-color);
 }
 
-/* badge do usu�rio fica ap�s o menu; margem garante respiro visual */
+/* badge do usuário fica imediatamente à esquerda da foto */
 .user-badge {
-  margin-left: 12px;
+  margin-left: 0;
+}
+.user-name {
+  display: inline-block;
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--theme-color);
 }
 
 .notify {
@@ -24287,7 +24298,7 @@ html.light-mode #minhasComprasWrapper {
 /* Terceiro passe: uma navegaÃ§Ã£o global e uma Ãºnica barra local no piloto. */
 .header > #mainMenu { display: none; }
 .header .header-user-cluster { margin-left: auto; }
-.header .user-badge { margin-left: 0; flex-shrink: 0; }
+.header .user-badge { margin-left: 4px; margin-right: -2px; flex-shrink: 0; }
 .header .header-profile { margin-left: 8px; }
 #cart-icon {
   position: absolute !important;
