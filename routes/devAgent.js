@@ -468,6 +468,55 @@ function historyContextForRelaunch(messages) {
   ].join('\n');
 }
 
+/** Histórico curto para IA grátis (reply/draft) — economia de tokens. */
+function historyContextForFree(messages, { maxMsgs = 4, maxChars = 400 } = {}) {
+  const list = Array.isArray(messages) ? messages : [];
+  // Exclui a última mensagem do usuário (já vai no prompt atual)
+  const prior = list.slice(0, -1).filter((m) => m && (m.role === 'user' || m.role === 'assistant')).slice(-maxMsgs);
+  if (!prior.length) return '';
+  const lines = prior.map((m) => {
+    const role = m.role === 'user' ? 'Usuário' : 'Assistente';
+    const text = String(m.content || '')
+      .replace(/^\[IA grátis\]\s*/i, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, maxChars);
+    return `${role}: ${text}`;
+  });
+  return ['Histórico recente da conversa:', ...lines].join('\n');
+}
+
+/** Rate limit simples em memória (por usuário/token/IP). */
+const _devAgentRateBuckets = new Map();
+function checkDevAgentRateLimit(req) {
+  const max = Math.max(1, Number(process.env.DEV_AGENT_RATE_MAX || 20) || 20);
+  const windowMs = Math.max(5000, Number(process.env.DEV_AGENT_RATE_WINDOW_MS || 60000) || 60000);
+  const userId = req.session?.user?.id;
+  const token = String(req.headers['x-dev-agent-token'] || '').trim().slice(0, 16);
+  const key = userId ? `u:${userId}` : token ? `t:${token}` : `ip:${req.ip || 'unknown'}`;
+  const now = Date.now();
+  let bucket = _devAgentRateBuckets.get(key);
+  if (!bucket || now - bucket.start >= windowMs) {
+    bucket = { start: now, count: 0 };
+    _devAgentRateBuckets.set(key, bucket);
+  }
+  bucket.count += 1;
+  if (bucket.count > max) {
+    const err = new Error(
+      `Muitos pedidos em pouco tempo. Aguarde ~${Math.ceil(windowMs / 1000)}s e tente de novo.`
+    );
+    err.status = 429;
+    err.code = 'RATE_LIMIT';
+    throw err;
+  }
+  // Evita crescimento infinito do Map
+  if (_devAgentRateBuckets.size > 5000) {
+    for (const [k, v] of _devAgentRateBuckets) {
+      if (now - v.start >= windowMs) _devAgentRateBuckets.delete(k);
+    }
+  }
+}
+
 /**
  * Quando pular o orquestrador e ir direto ao Cursor (comportamento legado).
  */
@@ -507,6 +556,14 @@ async function runOrchestration({ conv, resolved, req, userText }) {
   let lightRouting = null;
   let opsUsed = false;
   let attempts = [];
+  let conversationHistory = '';
+
+  if (planNeedsFree(plan) && conv?.id) {
+    try {
+      const msgs = await iaDb.listMessages(conv.id);
+      conversationHistory = historyContextForFree(msgs);
+    } catch (_) {}
+  }
 
   if (planNeedsOps(plan) || planNeedsFree(plan)) {
     const light = await executeLightTasks({
@@ -516,6 +573,7 @@ async function runOrchestration({ conv, resolved, req, userText }) {
       userText,
       iaDb,
       pool,
+      conversationHistory,
       cancelAgentRun: async (agentId) => {
         await cancelActiveRunIfBusy(agentId);
       },
@@ -662,8 +720,14 @@ async function launchCursorAgent({ conv, resolved, req, prompt, recoveredFromArc
 
   const { branch } = githubCfg();
   const envVars = cloudAgentEnvVars({ readOnlySql: Boolean(resolved.chamadoIa) });
+  // Preâmbulo SQL no 1º turno do agent; especialista já traz SQL na skill (exceto Chamado IA)
+  const includeSqlPreamble =
+    Boolean(resolved.chamadoIa) || !resolved.specialist;
   const body = {
-    prompt: wrapPromptForCursor(launchPrompt, { readOnlySql: Boolean(resolved.chamadoIa) }),
+    prompt: wrapPromptForCursor(launchPrompt, {
+      readOnlySql: Boolean(resolved.chamadoIa),
+      includeSqlPreamble,
+    }),
     name:
       String(req.body?.name || '').trim() ||
       (resolved.chamadoIa
@@ -707,7 +771,7 @@ async function launchCursorAgent({ conv, resolved, req, prompt, recoveredFromArc
   return { data, summary };
 }
 
-function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } = {}) {
+function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false, includeSqlPreamble = null } = {}) {
   const text = String(prompt?.text || '');
   const followUpHint = followUp
     ? [
@@ -718,9 +782,12 @@ function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } =
         '',
       ].join('\n')
     : '\n';
+  // Default: preâmbulo só no 1º turno (follow-up = agent já tem as instruções)
+  const withPreamble = includeSqlPreamble == null ? !followUp : Boolean(includeSqlPreamble);
+  const prefix = withPreamble ? `${sqlAccessPreamble({ readOnly: readOnlySql })}\n---\n` : '';
   const wrapped = {
     ...prompt,
-    text: `${sqlAccessPreamble({ readOnly: readOnlySql })}\n---\n${followUpHint}${text}`,
+    text: `${prefix}${followUpHint}${text}`,
   };
   return wrapped;
 }
@@ -1357,6 +1424,7 @@ router.delete('/conversations/:id', requireAdminOrMobile, async (req, res) => {
 /** Cria Cloud Agent + grava conversa no SQL. Reusa conversationId se a conversa já existir. */
 router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), async (req, res) => {
   try {
+    checkDevAgentRateLimit(req);
     const resolved = resolvePromptFromBody(req);
     const user = req.session?.user || {};
     const titleSeed = resolved.activateSpecialist
@@ -1464,6 +1532,7 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
 /** Follow-up em agent existente (+ SQL). Se o agent estiver archived, recria na mesma conversa. */
 router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25mb' }), async (req, res) => {
   try {
+    checkDevAgentRateLimit(req);
     const agentId = req.params.id;
     const resolved = resolvePromptFromBody(req);
 

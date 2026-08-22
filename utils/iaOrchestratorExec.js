@@ -70,10 +70,16 @@ async function freeChat({ action, prompt, context = '' }) {
   const userContent = [context ? `Contexto:\n${context}\n` : '', `Pedido:\n${prompt || ''}`]
     .filter(Boolean)
     .join('\n');
+  const isDraft = action === 'draft_html_css';
+  const preferred =
+    process.env.IA_FREE_WORKER_PROVIDER ||
+    process.env.IA_ORCHESTRATOR_PROVIDER ||
+    (process.env.GROQ_API_KEY ? 'groq' : 'openrouter');
   const result = await chatCompletion({
-    preferred: process.env.IA_FREE_WORKER_PROVIDER || process.env.IA_ORCHESTRATOR_PROVIDER || 'groq',
-    temperature: 0.3,
-    maxTokens: 2048,
+    preferred,
+    temperature: isDraft ? 0.3 : 0.2,
+    maxTokens: isDraft ? 2048 : 600,
+    light: !isDraft,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: userContent },
@@ -83,6 +89,7 @@ async function freeChat({ action, prompt, context = '' }) {
     content: result.content,
     provider: result.provider,
     model: result.model,
+    usage: result.usage || null,
     attempts: result.attempts || [],
   };
 }
@@ -107,6 +114,7 @@ async function executeLightTasks({
   iaDb,
   pool,
   cancelAgentRun,
+  conversationHistory = '',
 }) {
   const tasks = (plan?.tasks || []).filter((t) => t.assignee === 'ops' || t.assignee === 'free');
   const results = [];
@@ -116,8 +124,18 @@ async function executeLightTasks({
   const mergeAttempts = (attempts) => {
     for (const a of attempts || []) {
       const prev = allAttempts.find((x) => x.id === a.id);
-      if (!prev) allAttempts.push({ ...a });
-      else if (a.ok && !prev.ok) Object.assign(prev, a);
+      if (!prev) {
+        allAttempts.push({ ...a });
+      } else if (a.ok && !prev.ok) {
+        Object.assign(prev, a);
+      } else if (a.ok && prev.ok && a.usage?.total_tokens) {
+        prev.usage = {
+          prompt_tokens: (prev.usage?.prompt_tokens || 0) + (a.usage.prompt_tokens || 0),
+          completion_tokens: (prev.usage?.completion_tokens || 0) + (a.usage.completion_tokens || 0),
+          total_tokens: (prev.usage?.total_tokens || 0) + (a.usage.total_tokens || 0),
+        };
+        if (a.model) prev.model = a.model;
+      }
     }
   };
 
@@ -199,9 +217,12 @@ async function executeLightTasks({
       if (!sql) {
         try {
           const drafted = await chatCompletion({
-            preferred: process.env.IA_FREE_WORKER_PROVIDER || 'groq',
+            preferred:
+              process.env.IA_FREE_WORKER_PROVIDER ||
+              (process.env.GROQ_API_KEY ? 'groq' : 'openrouter'),
             temperature: 0,
             maxTokens: 400,
+            light: true,
             messages: [
               {
                 role: 'system',
@@ -237,9 +258,13 @@ async function executeLightTasks({
       };
     }
 
-    const contextBits = [...results, ...priorResults]
-      .filter((r) => r.assignee === 'free' || r.assignee === 'ops')
-      .map((r) => r.content)
+    const contextBits = [
+      conversationHistory,
+      ...[...results, ...priorResults]
+        .filter((r) => r.assignee === 'free' || r.assignee === 'ops')
+        .map((r) => r.content),
+    ]
+      .filter(Boolean)
       .join('\n\n');
     try {
       const chat = await freeChat({

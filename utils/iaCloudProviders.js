@@ -9,9 +9,11 @@ const PROVIDERS = [
     id: 'openrouter',
     envKey: 'OPENROUTER_API_KEY',
     baseUrl: 'https://openrouter.ai/api/v1',
-    defaultModel: 'openrouter/auto',
+    // openrouter/free = só modelos grátis; openrouter/auto cobra o modelo escolhido
+    defaultModel: 'openrouter/free',
     modelEnv: 'OPENROUTER_MODEL',
     kind: 'openai',
+    lightModel: 'openrouter/free',
   },
   {
     id: 'groq',
@@ -20,6 +22,7 @@ const PROVIDERS = [
     defaultModel: 'llama-3.3-70b-versatile',
     modelEnv: 'GROQ_MODEL',
     kind: 'openai',
+    lightModel: 'llama-3.1-8b-instant',
   },
   {
     id: 'gemini',
@@ -28,6 +31,7 @@ const PROVIDERS = [
     defaultModel: 'gemini-2.0-flash',
     modelEnv: 'GEMINI_MODEL',
     kind: 'gemini',
+    lightModel: 'gemini-2.0-flash',
   },
   {
     id: 'deepseek',
@@ -36,6 +40,7 @@ const PROVIDERS = [
     defaultModel: 'deepseek-chat',
     modelEnv: 'DEEPSEEK_MODEL',
     kind: 'openai',
+    lightModel: 'deepseek-chat',
   },
   {
     id: 'mistral',
@@ -44,11 +49,43 @@ const PROVIDERS = [
     defaultModel: 'mistral-small-latest',
     modelEnv: 'MISTRAL_MODEL',
     kind: 'openai',
+    lightModel: 'mistral-small-latest',
   },
 ];
 
 function env(name) {
   return String(process.env[name] || '').trim();
+}
+
+/** Extrai usage/tokens da resposta do provedor (quando existir). */
+function extractUsage(data, kind) {
+  if (!data || typeof data !== 'object') return null;
+  if (kind === 'gemini') {
+    const u = data.usageMetadata || data.usage || null;
+    if (!u) return null;
+    const prompt = Number(u.promptTokenCount || u.prompt_tokens || 0) || 0;
+    const completion = Number(u.candidatesTokenCount || u.completion_tokens || 0) || 0;
+    const total = Number(u.totalTokenCount || u.total_tokens || prompt + completion) || 0;
+    if (!prompt && !completion && !total) return null;
+    return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: total };
+  }
+  const u = data.usage || null;
+  if (!u) return null;
+  const prompt = Number(u.prompt_tokens || 0) || 0;
+  const completion = Number(u.completion_tokens || 0) || 0;
+  const total = Number(u.total_tokens || prompt + completion) || 0;
+  if (!prompt && !completion && !total) return null;
+  return { prompt_tokens: prompt, completion_tokens: completion, total_tokens: total };
+}
+
+function resolveModel(provider, { model = null, light = false } = {}) {
+  if (model) return String(model).trim();
+  if (light) {
+    const lightEnv = env(`${String(provider.modelEnv || '').replace(/_MODEL$/, '_LIGHT_MODEL')}`);
+    if (lightEnv) return lightEnv;
+    if (provider.lightModel) return provider.lightModel;
+  }
+  return env(provider.modelEnv) || provider.defaultModel;
 }
 
 function listConfiguredProviders() {
@@ -72,9 +109,9 @@ function pickProviderOrder(preferredId) {
   return [pref, ...configured.filter((p) => p.id !== preferredId)];
 }
 
-async function chatOpenAiCompatible(provider, { messages, temperature = 0.2, maxTokens = 2048 }) {
+async function chatOpenAiCompatible(provider, { messages, temperature = 0.2, maxTokens = 2048, model = null, light = false }) {
   const apiKey = env(provider.envKey);
-  const model = env(provider.modelEnv) || provider.defaultModel;
+  const resolvedModel = resolveModel(provider, { model, light });
   const url = `${provider.baseUrl.replace(/\/$/, '')}/chat/completions`;
   const headers = {
     'Content-Type': 'application/json',
@@ -89,7 +126,7 @@ async function chatOpenAiCompatible(provider, { messages, temperature = 0.2, max
     method: 'POST',
     headers,
     body: JSON.stringify({
-      model,
+      model: resolvedModel,
       messages,
       temperature,
       max_tokens: maxTokens,
@@ -117,7 +154,8 @@ async function chatOpenAiCompatible(provider, { messages, temperature = 0.2, max
   return {
     content: String(content || '').trim(),
     provider: provider.id,
-    model,
+    model: resolvedModel,
+    usage: extractUsage(data, 'openai'),
     raw: data,
   };
 }
@@ -141,15 +179,15 @@ function toGeminiContents(messages) {
   return { systemParts, contents };
 }
 
-async function chatGemini(provider, { messages, temperature = 0.2, maxTokens = 2048 }) {
+async function chatGemini(provider, { messages, temperature = 0.2, maxTokens = 2048, model = null, light = false }) {
   const apiKey = env(provider.envKey);
-  const model = env(provider.modelEnv) || provider.defaultModel;
+  const resolvedModel = resolveModel(provider, { model, light });
   const { systemParts, contents } = toGeminiContents(messages);
   if (!contents.length) {
     throw new Error('Mensagens vazias para Gemini');
   }
   const url =
-    `${provider.baseUrl.replace(/\/$/, '')}/models/${encodeURIComponent(model)}:generateContent` +
+    `${provider.baseUrl.replace(/\/$/, '')}/models/${encodeURIComponent(resolvedModel)}:generateContent` +
     `?key=${encodeURIComponent(apiKey)}`;
   const body = {
     contents,
@@ -186,14 +224,15 @@ async function chatGemini(provider, { messages, temperature = 0.2, maxTokens = 2
   return {
     content,
     provider: provider.id,
-    model,
+    model: resolvedModel,
+    usage: extractUsage(data, 'gemini'),
     raw: data,
   };
 }
 
 /**
  * Chat com failover entre provedores configurados.
- * @param {{ messages: Array<{role:string,content:string}>, preferred?: string, temperature?: number, maxTokens?: number }} opts
+ * @param {{ messages: Array<{role:string,content:string}>, preferred?: string, temperature?: number, maxTokens?: number, model?: string, light?: boolean }} opts
  */
 async function chatCompletion(opts = {}) {
   const order = pickProviderOrder(opts.preferred);
@@ -212,8 +251,13 @@ async function chatCompletion(opts = {}) {
         provider.kind === 'gemini'
           ? await chatGemini(provider, opts)
           : await chatOpenAiCompatible(provider, opts);
-      attempts.push({ id: provider.id, ok: true, error: null });
-      // provedores não tentados ficam de fora — o caller marca idle
+      attempts.push({
+        id: provider.id,
+        ok: true,
+        error: null,
+        usage: result.usage || null,
+        model: result.model || null,
+      });
       return {
         ...result,
         attempts,
@@ -237,6 +281,15 @@ async function chatCompletion(opts = {}) {
   throw err;
 }
 
+function formatUsageDetail(usage) {
+  if (!usage || !usage.total_tokens) return '';
+  const total = usage.total_tokens;
+  const prompt = usage.prompt_tokens || 0;
+  const completion = usage.completion_tokens || 0;
+  if (prompt || completion) return ` · ~${total} tok (in ${prompt}/out ${completion})`;
+  return ` · ~${total} tok`;
+}
+
 /**
  * Monta status visual de todas as IAs configuradas + Cursor.
  * status: ok | nok | idle
@@ -251,7 +304,16 @@ function buildProviderStatusBoard({
   const attemptMap = new Map((attempts || []).map((a) => [a.id, a]));
   const providers = (configured || []).map((p) => {
     const a = attemptMap.get(p.id);
-    if (a?.ok) return { id: p.id, label: p.id, status: 'ok', detail: 'utilizado / ok' };
+    if (a?.ok) {
+      return {
+        id: p.id,
+        label: p.id,
+        status: 'ok',
+        detail: `utilizado / ok${formatUsageDetail(a.usage)}`,
+        usage: a.usage || null,
+        model: a.model || p.model || null,
+      };
+    }
     if (a && a.ok === false) {
       return {
         id: p.id,
@@ -287,9 +349,15 @@ function buildProviderStatusBoard({
     },
   ];
 
+  const usageTotal = (attempts || []).reduce((acc, a) => {
+    if (!a?.ok || !a.usage?.total_tokens) return acc;
+    return acc + Number(a.usage.total_tokens || 0);
+  }, 0);
+
   return {
     engine: engine || null,
     providers: [...providers, ...extras],
+    usageTotal: usageTotal || null,
     updatedAt: new Date().toISOString(),
   };
 }

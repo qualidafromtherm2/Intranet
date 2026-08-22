@@ -43,13 +43,18 @@ Regras:
 - Se o pedido for só conversa leve → uma task free/reply.
 - Se for implementação pesada → uma task cursor/cursor_implement.`;
 
-function normalizePlan(raw, { fallbackPrompt = '' } = {}) {
+function normalizePlan(raw, { fallbackPrompt = '', preferAssignee = null } = {}) {
   const plan = raw && typeof raw === 'object' ? raw : {};
   const risk = ['low', 'medium', 'high'].includes(plan.risk) ? plan.risk : 'medium';
-  let tasks = Array.isArray(plan.tasks) ? plan.tasks : [];
-  tasks = tasks
+  const rawTasks = Array.isArray(plan.tasks) ? plan.tasks : [];
+  let hadInvalidAssignee = false;
+  let tasks = rawTasks
     .map((t, i) => {
-      const assignee = ASSIGNEES.has(t?.assignee) ? t.assignee : 'cursor';
+      let assignee = ASSIGNEES.has(t?.assignee) ? t.assignee : null;
+      if (!assignee) {
+        hadInvalidAssignee = true;
+        assignee = ASSIGNEES.has(preferAssignee) ? preferAssignee : 'cursor';
+      }
       let action = ACTIONS.has(t?.action) ? t.action : null;
       if (!action) {
         if (assignee === 'ops') action = 'list_conversations';
@@ -66,7 +71,9 @@ function normalizePlan(raw, { fallbackPrompt = '' } = {}) {
     })
     .filter(Boolean);
 
+  let usedDefaultCursorFallback = false;
   if (!tasks.length) {
+    usedDefaultCursorFallback = true;
     tasks = [
       {
         id: 't1',
@@ -81,6 +88,8 @@ function normalizePlan(raw, { fallbackPrompt = '' } = {}) {
     summary: String(plan.summary || 'Plano do orquestrador').trim().slice(0, 240),
     risk,
     tasks,
+    usedDefaultCursorFallback,
+    hadInvalidAssignee,
   };
 }
 
@@ -148,20 +157,26 @@ function planWithHeuristics(userText, { hasFree = hasAnyFreeProvider() } = {}) {
   const lower = text.toLowerCase();
 
   if (!text) {
-    return normalizePlan({
-      summary: 'Pedido vazio — Cursor',
-      risk: 'high',
-      tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Pedido vazio — Cursor',
+        risk: 'high',
+        tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
+      }),
+      confident: true,
+    };
   }
 
   // Fase 3: aplicar rascunho anterior → Cursor
   if (isApplyDraftRequest(text)) {
-    return normalizePlan({
-      summary: 'Aplicar rascunho HTML/CSS → Cursor',
-      risk: 'medium',
-      tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Aplicar rascunho HTML/CSS → Cursor',
+        risk: 'medium',
+        tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
+      }),
+      confident: true,
+    };
   }
 
   // Ops — histórico / excluir / cancelar
@@ -169,25 +184,34 @@ function planWithHeuristics(userText, { hasFree = hasAnyFreeProvider() } = {}) {
     /\b(list(a|e|ar)?|mostrar|exibir)\b.*\b(conversas?|histórico|historico)\b/i.test(lower) ||
     /\b(conversas?|histórico|historico)\b.*\b(list(a|e|ar)?|mostrar)\b/i.test(lower)
   ) {
-    return normalizePlan({
-      summary: 'Listar conversas (ops)',
-      risk: 'low',
-      tasks: [{ id: 't1', assignee: 'ops', action: 'list_conversations', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Listar conversas (ops)',
+        risk: 'low',
+        tasks: [{ id: 't1', assignee: 'ops', action: 'list_conversations', prompt: text }],
+      }),
+      confident: true,
+    };
   }
   if (/\b(apaga(r)?|exclui(r)?|deleta(r)?)\b.*\bconversa/i.test(lower)) {
-    return normalizePlan({
-      summary: 'Excluir conversa (ops)',
-      risk: 'low',
-      tasks: [{ id: 't1', assignee: 'ops', action: 'delete_conversation', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Excluir conversa (ops)',
+        risk: 'low',
+        tasks: [{ id: 't1', assignee: 'ops', action: 'delete_conversation', prompt: text }],
+      }),
+      confident: true,
+    };
   }
   if (/\b(cancela(r)?|parar|stop)\b.*\b(run|agent|agente|trabalho)\b/i.test(lower)) {
-    return normalizePlan({
-      summary: 'Cancelar run (ops)',
-      risk: 'low',
-      tasks: [{ id: 't1', assignee: 'ops', action: 'cancel_run', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Cancelar run (ops)',
+        risk: 'low',
+        tasks: [{ id: 't1', assignee: 'ops', action: 'cancel_run', prompt: text }],
+      }),
+      confident: true,
+    };
   }
 
   // Crítico → Cursor
@@ -199,84 +223,106 @@ function planWithHeuristics(userText, { hasFree = hasAnyFreeProvider() } = {}) {
     /\b(tela|front|html)\b.*\b(banco|api)\b/i.test(lower);
 
   if (critical || !hasFree) {
-    return normalizePlan({
-      summary: hasFree ? 'Tarefa crítica → Cursor' : 'Sem IA grátis — Cursor',
-      risk: critical ? 'high' : 'medium',
-      tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: hasFree ? 'Tarefa crítica → Cursor' : 'Sem IA grátis — Cursor',
+        risk: critical ? 'high' : 'medium',
+        tasks: [{ id: 't1', assignee: 'cursor', action: 'cursor_implement', prompt: text }],
+      }),
+      confident: true,
+    };
   }
 
   // SQL SELECT explícito
   const sqlMatch = text.match(/\b(select\b[\s\S]+)/i);
   if (sqlMatch && isReadOnlySelectSql(sqlMatch[1])) {
-    return normalizePlan({
-      summary: 'Consulta SQL (free)',
-      risk: 'low',
-      tasks: [
-        {
-          id: 't1',
-          assignee: 'free',
-          action: 'sql_select',
-          prompt: text,
-          sql: sqlMatch[1].replace(/;+\s*$/, '').trim(),
-        },
-      ],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Consulta SQL (free)',
+        risk: 'low',
+        tasks: [
+          {
+            id: 't1',
+            assignee: 'free',
+            action: 'sql_select',
+            prompt: text,
+            sql: sqlMatch[1].replace(/;+\s*$/, '').trim(),
+          },
+        ],
+      }),
+      confident: true,
+    };
   }
   if (/\b(consulta|buscar|localizar|quantos?|liste)\b.*\b(sql|banco|tabela|chamado)/i.test(lower)) {
-    return normalizePlan({
-      summary: 'Localizar no SQL (free)',
-      risk: 'low',
-      tasks: [
-        {
-          id: 't1',
-          assignee: 'free',
-          action: 'sql_select',
-          prompt: text,
-        },
-        {
-          id: 't2',
-          assignee: 'free',
-          action: 'reply',
-          prompt: `Com base no resultado SQL (se houver), responda em português simples: ${text}`,
-        },
-      ],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Localizar no SQL (free)',
+        risk: 'low',
+        tasks: [
+          {
+            id: 't1',
+            assignee: 'free',
+            action: 'sql_select',
+            prompt: text,
+          },
+          {
+            id: 't2',
+            assignee: 'free',
+            action: 'reply',
+            prompt: `Com base no resultado SQL (se houver), responda em português simples: ${text}`,
+          },
+        ],
+      }),
+      confident: true,
+    };
   }
 
   // HTML/CSS rascunho
   if (/\b(html|css|label|botão|botao|cor|estilo|texto do botão)\b/i.test(lower) &&
       /\b(muda(r)?|altera(r)?|troca(r)?|ajusta(r)?|rascunh)/i.test(lower) &&
       !/\b(rota|schema|banco|deploy)\b/i.test(lower)) {
-    return normalizePlan({
-      summary: 'Rascunho HTML/CSS (free)',
-      risk: 'low',
-      tasks: [{ id: 't1', assignee: 'free', action: 'draft_html_css', prompt: text }],
-    });
+    return {
+      ...normalizePlan({
+        summary: 'Rascunho HTML/CSS (free)',
+        risk: 'low',
+        tasks: [{ id: 't1', assignee: 'free', action: 'draft_html_css', prompt: text }],
+      }),
+      confident: true,
+    };
   }
 
   // Chamado / dúvida leve
   if (/\b(chamado|dúvida|duvida|explica|o que é|como faço|como funciona)\b/i.test(lower)) {
-    return normalizePlan({
+    return {
+      ...normalizePlan({
+        summary: 'Resposta leve (free)',
+        risk: 'low',
+        tasks: [{ id: 't1', assignee: 'free', action: 'reply', prompt: text }],
+      }),
+      confident: true,
+    };
+  }
+
+  // Default ambíguo: free reply, mas LLM pode refinar (confident: false)
+  return {
+    ...normalizePlan({
       summary: 'Resposta leve (free)',
       risk: 'low',
       tasks: [{ id: 't1', assignee: 'free', action: 'reply', prompt: text }],
-    });
-  }
-
-  // Default com free: reply; senão cursor
-  return normalizePlan({
-    summary: 'Resposta leve (free)',
-    risk: 'low',
-    tasks: [{ id: 't1', assignee: 'free', action: 'reply', prompt: text }],
-  });
+    }),
+    confident: false,
+  };
 }
 
 async function planWithLlm(userText, { context = '' } = {}) {
+  const preferred =
+    process.env.IA_ORCHESTRATOR_PROVIDER ||
+    (process.env.GROQ_API_KEY ? 'groq' : process.env.GEMINI_API_KEY ? 'gemini' : 'openrouter');
   const result = await chatCompletion({
-    preferred: process.env.IA_ORCHESTRATOR_PROVIDER || 'openrouter',
+    preferred,
     temperature: 0.1,
-    maxTokens: 900,
+    maxTokens: 500,
+    light: true,
     messages: [
       { role: 'system', content: PLANNER_SYSTEM },
       {
@@ -297,11 +343,12 @@ async function planWithLlm(userText, { context = '' } = {}) {
   const plan = normalizePlan(parsed, { fallbackPrompt: userText });
   plan.plannerProvider = result.provider;
   plan.plannerModel = result.model;
+  plan.plannerUsage = result.usage || null;
   return plan;
 }
 
 /**
- * Monta o plano. Heurística sempre; LLM refina se houver chave e IA_ORCHESTRATOR_LLM!=0.
+ * Monta o plano. Heurística sempre; LLM refina só em pedidos ambíguos.
  */
 async function buildPlan(userText, opts = {}) {
   const hasFree = hasAnyFreeProvider();
@@ -312,20 +359,15 @@ async function buildPlan(userText, opts = {}) {
     String(process.env.IA_ORCHESTRATOR_LLM || '1').trim() !== '0' &&
     opts.useLlm !== false;
 
-  // Pedidos ops óbvios: não gasta LLM
   const onlyOps = heuristic.tasks.every((t) => t.assignee === 'ops');
-  if (onlyOps || !useLlm) {
-    return { ...heuristic, source: 'heuristic' };
-  }
-
-  // Já crítico → Cursor direto
-  if (heuristic.risk === 'high' && heuristic.tasks.every((t) => t.assignee === 'cursor')) {
+  const onlyCursor = heuristic.tasks.every((t) => t.assignee === 'cursor');
+  // Padrões inequívocos: não gasta LLM no plano
+  if (onlyOps || onlyCursor || heuristic.confident || !useLlm) {
     return { ...heuristic, source: 'heuristic' };
   }
 
   try {
     const llmPlan = await planWithLlm(userText, { context: opts.context || '' });
-    // Sem free configurado no meio do caminho — força cursor
     if (!hasFree) {
       return {
         ...normalizePlan({
@@ -336,7 +378,18 @@ async function buildPlan(userText, opts = {}) {
         source: 'fallback-cursor',
       };
     }
-    // Se LLM mandou free mas não há provider, sobe para cursor
+    // LLM vazio / assignee inválido → mantém heurística (evita Cursor caro à toa)
+    if (llmPlan.usedDefaultCursorFallback || llmPlan.hadInvalidAssignee) {
+      return {
+        ...heuristic,
+        source: 'heuristic-fallback',
+        plannerError: llmPlan.usedDefaultCursorFallback
+          ? 'Planner sem tasks válidas'
+          : 'Planner com assignee inválido',
+        plannerProvider: llmPlan.plannerProvider,
+        plannerModel: llmPlan.plannerModel,
+      };
+    }
     const adjusted = {
       ...llmPlan,
       tasks: llmPlan.tasks.map((t) => {
