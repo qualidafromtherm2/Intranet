@@ -102,24 +102,47 @@
   }
 
   function stripPreviousAssistantPrefix(text, previousTexts) {
-    let out = String(text || '').trim();
+    let out = String(text || '');
+    if (!out) return out;
+    let stripped = false;
     const list = (Array.isArray(previousTexts) ? previousTexts : [previousTexts])
       .map((t) => String(t || '').trim())
       .filter((t) => t.length >= 32)
       .sort((a, b) => b.length - a.length);
     for (const prev of list) {
-      if (!out) return '';
-      if (out === prev) return '';
-      if (out.startsWith(prev)) {
-        out = out.slice(prev.length).replace(/^[\s.]+/, '').trim();
+      const candidate = out.replace(/^\s+/, '');
+      if (!candidate) return '';
+      if (candidate === prev) return '';
+      if (candidate.startsWith(prev)) {
+        out = candidate.slice(prev.length).replace(/^[\s.]+/, '');
+        stripped = true;
         continue;
       }
-      const outN = collapseWs(out);
+      const outN = collapseWs(candidate);
       const prevN = collapseWs(prev);
       if (outN === prevN) return '';
-      if (outN.startsWith(prevN)) out = outN.slice(prevN.length).trim();
+      if (outN.startsWith(prevN)) {
+        out = outN.slice(prevN.length).replace(/^\s+/, '');
+        stripped = true;
+      }
     }
-    return out;
+    return stripped ? out.trim() : out;
+  }
+
+  function needsSpaceBetween(left, right) {
+    if (!left || !right) return false;
+    if (/\s$/.test(left) || /^\s/.test(right)) return false;
+    if (/[.!?…,:;)\]}`"'»]$/.test(left) && /^[\p{L}\p{N}`"'«“(\[]/u.test(right)) return true;
+    if (/\p{L}$/u.test(left) && /^\p{Lu}/u.test(right)) return true;
+    if (/[\p{L}\p{N}]$/u.test(left) && /^`/.test(right)) return true;
+    return false;
+  }
+
+  function joinStreamParts(left, right) {
+    if (needsSpaceBetween(left, right)) {
+      return `${left} ${String(right).replace(/^\s+/, '')}`;
+    }
+    return left + right;
   }
 
   function mergeAssistantStream(accumulated, chunk) {
@@ -132,10 +155,10 @@
     if (acc.startsWith(next)) return acc;
     if (acc.endsWith(next)) return acc;
     const maxOverlap = Math.min(acc.length, next.length);
-    for (let i = maxOverlap; i >= 16; i -= 1) {
-      if (acc.endsWith(next.slice(0, i))) return acc + next.slice(i);
+    for (let i = maxOverlap; i >= 8; i -= 1) {
+      if (acc.endsWith(next.slice(0, i))) return joinStreamParts(acc, next.slice(i));
     }
-    return acc + next;
+    return joinStreamParts(acc, next);
   }
 
   function messageRunId(m) {
@@ -179,13 +202,23 @@
   function normalizeAssistantText(src) {
     let s = String(src || '').replace(/\r\n/g, '\n');
     // Frases grudadas do stream: "modal.O modal" → nova linha
-    s = s.replace(/([.!?…])([A-ZÀ-Ü])/g, '$1\n$2');
-    // Após pontuação final + espaços → próxima frase na linha de baixo
-    s = s.replace(/([.!?…])[ \t]+(?=[A-ZÀ-Ü"“'(\[])/g, '$1\n');
-    // Minúscula/número colado em maiúscula: "códigoVou" / "UINo"
-    s = s.replace(/([a-zà-ü0-9`])([A-ZÀ-Ü])/g, '$1 $2');
+    s = s.replace(/([.!?…])(\p{Lu})/gu, '$1\n$2');
+    s = s.replace(/([.!?…])[ \t]+(?=[\p{Lu}"“'(\[])/gu, '$1\n');
+    // )Vou  `x`Agora
+    s = s.replace(/([)\]}…])(\p{L})/gu, '$1 $2');
+    s = s.replace(/(`[^`]+`)(\p{L})/gu, '$1 $2');
+    // Minúscula/número colado em maiúscula: "códigoVou"
+    s = s.replace(/([\p{Ll}\p{N}`])(\p{Lu})/gu, '$1 $2');
+    // "sessãodevolve"
+    s = s.replace(/(ção|são|ssão|agem|dade|mente)(?=\p{Ll}{3,})/giu, '$1 ');
+    s = s.replace(
+      /\b(em|na|no|ao|à)(?=(paralelo|seguida|frente|baixo|cima|conjunto|contato))/giu,
+      '$1 '
+    );
+    s = s.replace(/,\s*em(?=\p{Ll}{4,})/giu, ', em ');
     s = s.replace(/[ \t]+\n/g, '\n');
     s = s.replace(/\n{3,}/g, '\n\n');
+    s = s.replace(/[ \t]{2,}/g, ' ');
     return s;
   }
 
@@ -1424,7 +1457,11 @@
       body.className = 'md-body';
       b.appendChild(body);
     }
-    if (body.textContent === 'Agent trabalhando… (recebendo ao vivo)') body.textContent = '';
+    const cur = String(body.textContent || '');
+    // Placeholder: limpa mesmo se espaços/pontuação variarem
+    if (/^Agent trabalhando/i.test(cur) && /\(recebendo ao vivo\)/i.test(cur)) {
+      body.textContent = '';
+    }
     const incoming = withoutPreviousLeak(String(chunk));
     if (!incoming) return;
     const prev = withoutPreviousLeak(body.textContent || '');
@@ -2053,16 +2090,75 @@
       state.runId = runId;
       saveCloudSession();
       appendBubble('user', text || '(imagem anexada)', { images });
+
+      const orchUi = data.orchestrator?.ui || '';
+      if (orchUi) {
+        appendBubble('meta', orchUi);
+      }
+
+      // Resposta imediata da IA grátis / ops (sem stream do Cursor)
+      if (data.assistantMessage && !runId) {
+        appendBubble('assistant', data.assistantMessage, {
+          messageId: data.assistantMessageId || null,
+        });
+        stopWorkWatchers();
+        setBusy(false);
+        const eng = data.engine || 'free';
+        setStatus(
+          eng === 'ops'
+            ? 'Concluído (ops)'
+            : eng === 'free'
+              ? 'Concluído (IA grátis)'
+              : 'Concluído',
+          'ok'
+        );
+        updatePublishBar();
+        if (data.deletedConversationId || (data.engine === 'ops' && /exclu/i.test(data.assistantMessage || ''))) {
+          // conversa atual pode ter sido apagada
+          if (Number(data.deletedConversationId) === Number(state.conversationId)) {
+            state.conversationId = null;
+            state.agentId = null;
+            saveCloudSession({ conversationId: null, agentId: null });
+          }
+        }
+        await refreshAgentList();
+        if (data.hasDraft) {
+          const bar = el('div', 'cursor-chat-bubble meta', null);
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'cursor-chat-btn';
+          btn.textContent = 'Aplicar com Cursor';
+          btn.title = 'Envia o rascunho HTML/CSS para o Cursor aplicar no código';
+          btn.addEventListener('click', () => {
+            const inputEl = $('cursorChatInput');
+            if (inputEl) {
+              inputEl.value = 'aplicar';
+              autoResizeChatInput();
+            }
+            void sendMessage();
+          });
+          bar.appendChild(btn);
+          const box = $('cursorChatMessages');
+          if (box) box.appendChild(bar);
+        }
+        return;
+      }
+
       state.liveBubble = appendBubble('assistant', 'Agent trabalhando… (recebendo ao vivo)', {
         streaming: true,
       });
       const st = document.createElement('div');
       st.className = 'cursor-chat-work-status';
-      st.textContent = 'Trabalhando…';
+      st.textContent = orchUi ? 'Cursor (plano do orquestrador)…' : 'Trabalhando…';
       state.liveBubble.appendChild(st);
       if (state.runId) startStream(state.agentId, state.runId);
       startPoll();
       await refreshAgentList();
+      if (data.engine === 'mixed') {
+        setStatus('Orquestrador → Free + Cursor', 'warn');
+      } else if (data.orchestrator?.ui) {
+        setStatus(data.orchestrator.ui.slice(0, 80), 'warn');
+      }
     } catch (e) {
       stopWorkWatchers();
       setBusy(false);

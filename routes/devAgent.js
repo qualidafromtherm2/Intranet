@@ -20,6 +20,7 @@ const {
 const {
   stripPreviousAssistantPrefix,
   mergeAssistantStream,
+  normalizeAssistantText,
   previousAssistantContents,
 } = require('../utils/iaCursorChatText');
 const {
@@ -28,6 +29,18 @@ const {
   CONFLICT_FOLLOWUP_PROMPT,
 } = require('../utils/iaCursorSafeMerge');
 const { isAgentArchivedError } = require('../utils/iaCursorAgentErrors');
+const {
+  buildPlan,
+  planNeedsCursor,
+  planNeedsFree,
+  planNeedsOps,
+  summarizePlanForUi,
+  buildCursorPromptFromPlan,
+  isApplyDraftRequest,
+  findLastDraftContent,
+} = require('../utils/iaOrchestrator');
+const { listConfiguredProviders } = require('../utils/iaCloudProviders');
+const { executeLightTasks } = require('../utils/iaOrchestratorExec');
 
 const CURSOR_API = 'https://api.cursor.com/v1';
 const GH_API = 'https://api.github.com';
@@ -455,6 +468,142 @@ function historyContextForRelaunch(messages) {
   ].join('\n');
 }
 
+/**
+ * Quando pular o orquestrador e ir direto ao Cursor (comportamento legado).
+ */
+function shouldSkipOrchestrator(req, resolved) {
+  if (req.body?.forceCursor === true || req.body?.forceCursor === '1') return true;
+  if (String(req.body?.engine || '').toLowerCase() === 'cursor') return true;
+  if (resolved?.activateSpecialist) return true;
+  if (Array.isArray(resolved?.images) && resolved.images.length) return true;
+  return false;
+}
+
+function engineFromPlan(plan, launchedCursor) {
+  const hasC = planNeedsCursor(plan);
+  const hasF = planNeedsFree(plan);
+  const hasO = planNeedsOps(plan);
+  if (launchedCursor && (hasF || hasO)) return 'mixed';
+  if (launchedCursor) return 'cursor';
+  if (hasF && hasO) return 'mixed';
+  if (hasF) return 'free';
+  if (hasO) return 'ops';
+  return 'cursor';
+}
+
+/**
+ * Orquestra ops/free; se precisar de Cursor, devolve prompt enriquecido.
+ * Retorna { handled: true, response } se já respondeu sem Cursor,
+ * ou { handled: false, plan, freeResults, cursorPromptText }.
+ */
+async function runOrchestration({ conv, resolved, req, userText }) {
+  const plan = await buildPlan(userText, {
+    context: resolved?.chamadoIa ? 'Modo Chamado IA: só consulta SQL + abrir chamado.' : '',
+  });
+
+  let freeResults = [];
+  let assistantMessage = '';
+  let hasDraft = false;
+
+  if (planNeedsOps(plan) || planNeedsFree(plan)) {
+    const light = await executeLightTasks({
+      plan,
+      conv,
+      req,
+      userText,
+      iaDb,
+      pool,
+      cancelAgentRun: async (agentId) => {
+        await cancelActiveRunIfBusy(agentId);
+      },
+    });
+    freeResults = light.results || [];
+    assistantMessage = light.assistantMessage || '';
+    hasDraft = Boolean(light.hasDraft);
+  }
+
+  // Fase 3: "aplicar" → busca último rascunho da conversa para o Cursor
+  if (planNeedsCursor(plan) && isApplyDraftRequest(userText) && !freeResults.length && conv?.id) {
+    try {
+      const msgs = await iaDb.listMessages(conv.id);
+      const draft = findLastDraftContent(msgs);
+      if (draft) {
+        freeResults = [{ taskId: 'draft', action: 'draft_html_css', content: draft }];
+      }
+    } catch (_) {}
+  }
+
+  const needsCursor = planNeedsCursor(plan);
+
+  if (assistantMessage && !needsCursor) {
+    const deletedConversationId =
+      freeResults.find((r) => r.deletedConversationId)?.deletedConversationId || null;
+    let asst = null;
+    if (!deletedConversationId) {
+      asst = await iaDb.addMessage({
+        conversationId: conv.id,
+        role: 'assistant',
+        content: assistantMessage,
+        cursorRunId: null,
+        specialistId: resolved?.specialistId || null,
+      });
+      await iaDb.touchConversation(conv.id, { status: 'FINISHED' });
+    }
+    return {
+      handled: true,
+      plan,
+      freeResults,
+      response: {
+        ok: true,
+        conversationId: deletedConversationId ? null : conv.id,
+        agentId: deletedConversationId ? null : conv.cursor_agent_id || null,
+        runId: null,
+        run: null,
+        engine: engineFromPlan(plan, false),
+        deletedConversationId,
+        hasDraft,
+        orchestrator: {
+          summary: plan.summary,
+          risk: plan.risk,
+          source: plan.source,
+          ui: summarizePlanForUi(plan),
+          tasks: plan.tasks,
+          providers: listConfiguredProviders(),
+        },
+        assistantMessage,
+        assistantMessageId: asst?.id || null,
+        specialistId: resolved?.specialistId || null,
+        specialistName: resolved?.specialist?.name || null,
+        chamadoIa: Boolean(resolved?.chamadoIa),
+      },
+    };
+  }
+
+  const cursorPromptText = needsCursor
+    ? buildCursorPromptFromPlan(userText, plan, freeResults)
+    : userText;
+
+  if (assistantMessage && needsCursor) {
+    try {
+      await iaDb.addMessage({
+        conversationId: conv.id,
+        role: 'assistant',
+        content: `[IA grátis]\n${assistantMessage}`,
+        specialistId: resolved?.specialistId || null,
+      });
+    } catch (_) {}
+  }
+
+  return {
+    handled: false,
+    plan,
+    freeResults,
+    assistantMessage,
+    cursorPromptText,
+    hasDraft,
+  };
+}
+
 async function launchCursorAgent({ conv, resolved, req, prompt, recoveredFromArchive = false }) {
   let launchPrompt = prompt;
   if (recoveredFromArchive && conv?.id) {
@@ -535,7 +684,8 @@ function wrapPromptForCursor(prompt, { followUp = false, readOnlySql = false } =
 
 function cleanAssistantContent(raw, messages, runId) {
   const previous = previousAssistantContents(messages, { excludeRunId: runId });
-  return stripPreviousAssistantPrefix(String(raw || '').trim(), previous);
+  const cleaned = stripPreviousAssistantPrefix(String(raw || ''), previous);
+  return normalizeAssistantText(cleaned).trim();
 }
 
 function sleep(ms) {
@@ -768,6 +918,7 @@ async function syncAssistantFromCursor(conversation, agentId) {
 
 router.get('/status', requireAdminOrMobile, (req, res) => {
   const envVars = cloudAgentEnvVars();
+  const freeProviders = listConfiguredProviders();
   res.json({
     ok: true,
     cursorConfigured: Boolean(cursorKey()),
@@ -784,6 +935,11 @@ router.get('/status', requireAdminOrMobile, (req, res) => {
     renderApiConfigured: Boolean(String(process.env.RENDER_API_KEY || '').trim()),
     previewHint:
       'Render: Previews → Pull Request Previews = Manual. Modo teste usa a label render-preview.',
+    orchestrator: {
+      freeProviders,
+      freeConfigured: freeProviders.length > 0,
+      llmPlanner: String(process.env.IA_ORCHESTRATOR_LLM || '1').trim() !== '0',
+    },
   });
 });
 
@@ -1199,11 +1355,33 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       await iaDb.touchConversation(conv.id, { specialist_id: resolved.specialistId });
     }
 
+    let orchPlan = null;
+    let launchPrompt = prompt;
+    if (!shouldSkipOrchestrator(req, resolved)) {
+      const orch = await runOrchestration({
+        conv,
+        resolved,
+        req,
+        userText: resolved.displayText || resolved.cursorText || '',
+      });
+      if (orch.handled) {
+        return res.json({
+          ...orch.response,
+          recoveredFromArchive: reused,
+          attachments,
+        });
+      }
+      orchPlan = orch.plan;
+      if (orch.cursorPromptText) {
+        launchPrompt = { ...prompt, text: orch.cursorPromptText };
+      }
+    }
+
     const { data, summary } = await launchCursorAgent({
       conv,
       resolved,
       req,
-      prompt,
+      prompt: launchPrompt,
       recoveredFromArchive: reused,
     });
 
@@ -1214,6 +1392,17 @@ router.post('/agents', requireAdminOrMobile, express.json({ limit: '25mb' }), as
       specialistName: resolved.specialist?.name || null,
       chamadoIa: Boolean(resolved.chamadoIa),
       recoveredFromArchive: reused,
+      engine: orchPlan ? engineFromPlan(orchPlan, true) : 'cursor',
+      orchestrator: orchPlan
+        ? {
+            summary: orchPlan.summary,
+            risk: orchPlan.risk,
+            source: orchPlan.source,
+            ui: summarizePlanForUi(orchPlan),
+            tasks: orchPlan.tasks,
+            providers: listConfiguredProviders(),
+          }
+        : null,
       ...summary,
       attachments,
       raw: data,
@@ -1298,13 +1487,38 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       });
     }
 
+    let orchPlan = null;
+    let launchPrompt = prompt;
+    if (!shouldSkipOrchestrator(req, resolved)) {
+      const orch = await runOrchestration({
+        conv,
+        resolved: { ...resolved, chamadoIa },
+        req,
+        userText: resolved.displayText || resolved.cursorText || '',
+      });
+      if (orch.handled) {
+        return res.json({
+          ...orch.response,
+          recoveredFromArchive,
+          cancelledBusy,
+          attachments,
+        });
+      }
+      orchPlan = orch.plan;
+      if (orch.cursorPromptText) {
+        launchPrompt = { ...prompt, text: orch.cursorPromptText };
+      }
+    }
+
     let data;
     let summary = null;
     if (!recoveredFromArchive) {
       try {
         data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
           method: 'POST',
-          body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
+          body: {
+            prompt: wrapPromptForCursor(launchPrompt, { followUp: true, readOnlySql: chamadoIa }),
+          },
         });
       } catch (runErr) {
         if (isAgentArchivedError(runErr)) {
@@ -1313,7 +1527,9 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
           await cancelActiveRunIfBusy(agentId);
           data = await cursorFetch(`/agents/${encodeURIComponent(agentId)}/runs`, {
             method: 'POST',
-            body: { prompt: wrapPromptForCursor(prompt, { followUp: true, readOnlySql: chamadoIa }) },
+            body: {
+              prompt: wrapPromptForCursor(launchPrompt, { followUp: true, readOnlySql: chamadoIa }),
+            },
           });
         } else {
           throw runErr;
@@ -1326,7 +1542,7 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
         conv,
         resolved,
         req,
-        prompt,
+        prompt: launchPrompt,
         recoveredFromArchive: true,
       });
       data = launched.data;
@@ -1348,6 +1564,17 @@ router.post('/agents/:id/runs', requireAdminOrMobile, express.json({ limit: '25m
       specialistName: resolved.specialist?.name || (chamadoIa ? 'Chamado IA' : null),
       chamadoIa,
       recoveredFromArchive,
+      engine: orchPlan ? engineFromPlan(orchPlan, true) : 'cursor',
+      orchestrator: orchPlan
+        ? {
+            summary: orchPlan.summary,
+            risk: orchPlan.risk,
+            source: orchPlan.source,
+            ui: summarizePlanForUi(orchPlan),
+            tasks: orchPlan.tasks,
+            providers: listConfiguredProviders(),
+          }
+        : null,
       run,
       runId: run?.id || summary?.runId || null,
       cancelledBusy,
